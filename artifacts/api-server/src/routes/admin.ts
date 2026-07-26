@@ -2202,6 +2202,26 @@ router.post("/sportscore-map", adminMiddleware, async (req: AdminRequest, res) =
   }
 });
 
+// Removes a mapping — needed to clear a stale/wrong entry an earlier,
+// looser auto-matching pass may have cached (e.g. before the matching
+// logic was tightened), which would otherwise keep short-circuiting the
+// lookup forever since a cached row is always trusted first.
+router.delete("/sportscore-map/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "id inválido" });
+      return;
+    }
+    await db.delete(sportscoreMatchMapTable).where(eq(sportscoreMatchMapTable.id, id));
+    logger.info({ id, admin: req.admin!.username }, "Admin deleted SportScore match mapping");
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, "DELETE /api/admin/sportscore-map/:id error");
+    res.status(500).json({ error: "Erro ao remover mapeamento do SportScore" });
+  }
+});
+
 // Diagnostic: runs the exact same automatic-matching logic used live, but
 // returns every step it tried (fetched URL, HTTP status, why it accepted
 // or rejected each candidate) instead of just null — so a failure can be

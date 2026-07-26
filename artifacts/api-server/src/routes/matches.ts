@@ -19768,10 +19768,29 @@ function slugifyTeamName(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+// Statpal team names often carry club-type suffixes/prefixes ("Levante UD",
+// "FC Barcelona") that SportScore's own slugs frequently drop ("levante",
+// "barcelona"). Strip these before slugifying as an extra candidate — the
+// guessed slug is otherwise a plain 404 even when the fixture genuinely
+// exists on SportScore under the shorter name.
+// Only strips generic legal-entity-type tokens, never words that are part
+// of a club's actual identity (e.g. never "real", "united", "city",
+// "atlético" — those distinguish Real Madrid from Real Betis, Manchester
+// United from Manchester City, etc.; stripping them would cause wrong
+// matches, not just missed ones).
+const CLUB_TOKEN_RE = /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|f\.c\.)\b/gi;
+function slugifyTeamNameStripped(name: string): string {
+  const stripped = name.replace(CLUB_TOKEN_RE, " ").replace(/\s+/g, " ").trim();
+  return slugifyTeamName(stripped || name);
+}
+
 // Negative-result cache so a fixture that isn't found isn't re-searched
-// against sportscore.com on every request for the same match.
+// against sportscore.com on every request for the same match. Kept short —
+// long enough to avoid hammering SportScore on rapid re-renders, short
+// enough that a fixture appearing on their side (or a fixed guess) doesn't
+// stay silently blocked for the rest of the match.
 const sportscoreLookupFailCache = new Map<string, number>();
-const SPORTSCORE_LOOKUP_FAIL_TTL_MS = 30 * 60 * 1000;
+const SPORTSCORE_LOOKUP_FAIL_TTL_MS = 3 * 60 * 1000;
 
 type SportscoreFixture = { id: string; slug: string };
 
@@ -19825,10 +19844,20 @@ export type SportscoreDiagStep = {
   detail: string;
 };
 
+// Tolerant name match: accepts either the plain normalization or the
+// suffix-stripped one, so "Levante UD" (ours) matches "Levante" (theirs)
+// or vice versa, without loosening things enough to confuse distinct clubs
+// that share a generic word (handled by keeping identity-bearing words like
+// "Real"/"United"/"City" out of the strip list).
+function namesMatch(a: string, b: string): boolean {
+  if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
+  return slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b);
+}
+
 async function findInLiveFixturesList(
   sport: string,
-  wantedH: string,
-  wantedA: string,
+  homeTeam: string,
+  awayTeam: string,
   diag: SportscoreDiagStep[],
 ): Promise<SportscoreFixture | null> {
   const url = `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`;
@@ -19847,17 +19876,18 @@ async function findInLiveFixturesList(
       const mHome = pickTeamName(m, "home");
       const mAway = pickTeamName(m, "away");
       if (!mHome || !mAway) continue;
-      const sH = slugifyTeamName(mHome);
-      const sA = slugifyTeamName(mAway);
-      const straight = sH === wantedH && sA === wantedA;
-      const swapped = sH === wantedA && sA === wantedH;
+      const straight = namesMatch(mHome, homeTeam) && namesMatch(mAway, awayTeam);
+      const swapped = namesMatch(mHome, awayTeam) && namesMatch(mAway, homeTeam);
       if (!straight && !swapped) continue;
 
       const id = pickStr(m, ["id", "matchId", "match_id"]);
       const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
       if (!id && !slug) continue;
-      diag.push({ step: "live-list", url, ok: true, status: resp.status, detail: `found in ${matches.length} fixtures` });
-      return { id: id ?? "", slug: slug ?? (straight ? `${sH}-vs-${sA}` : `${sA}-vs-${sH}`) };
+      diag.push({ step: "live-list", url, ok: true, status: resp.status, detail: `found in ${matches.length} fixtures ("${mHome}" vs "${mAway}")` });
+      return {
+        id: id ?? "",
+        slug: slug ?? `${slugifyTeamName(mHome)}-vs-${slugifyTeamName(mAway)}`,
+      };
     }
     diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `not found among ${matches.length} live/recent fixtures` });
     return null;
@@ -19870,17 +19900,34 @@ async function findInLiveFixturesList(
 // The live+recent list is capped at 50 results with no pagination, so a
 // lower-profile fixture can be live on SportScore but still miss the list
 // (buried behind 50 more prominent matches worldwide). Fall back to
-// guessing the slug from our team names and confirming it for real against
-// the single-match REST endpoint (which also gives us the numeric id) —
-// this is a genuine verification against real match data, not a blind
-// HTTP-status check against the HTML embed page.
+// guessing the slug from our team names — trying both the plain name and
+// the suffix-stripped name ("Levante UD" → also try "levante"), since
+// SportScore's own slugs frequently drop club-type suffixes — and
+// confirming each guess for real against the single-match REST endpoint
+// (which also gives us the numeric id). This is a genuine verification
+// against real match data, not a blind HTTP-status check against the HTML
+// embed page.
 async function findByGuessedSlug(
   sport: string,
-  wantedH: string,
-  wantedA: string,
+  homeTeam: string,
+  awayTeam: string,
   diag: SportscoreDiagStep[],
 ): Promise<SportscoreFixture | null> {
-  const candidates = [`${wantedH}-vs-${wantedA}`, `${wantedA}-vs-${wantedH}`];
+  const h = slugifyTeamName(homeTeam);
+  const a = slugifyTeamName(awayTeam);
+  const hStripped = slugifyTeamNameStripped(homeTeam);
+  const aStripped = slugifyTeamNameStripped(awayTeam);
+  const candidates = Array.from(
+    new Set(
+      [
+        `${h}-vs-${a}`,
+        `${a}-vs-${h}`,
+        `${hStripped}-vs-${aStripped}`,
+        `${aStripped}-vs-${hStripped}`,
+      ].filter((s) => !s.startsWith("-vs-") && !s.endsWith("-vs-")),
+    ),
+  );
+
   for (const slug of candidates) {
     const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
     try {
@@ -19897,19 +19944,18 @@ async function findByGuessedSlug(
         diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `slug "${slug}" resolved but no team names in response` });
         continue;
       }
-      const sH = slugifyTeamName(mHome);
-      const sA = slugifyTeamName(mAway);
       // Confirm the returned match actually is the fixture we asked for —
       // a guessed slug that 404s or resolves to an unrelated match must
       // not be trusted just because the request succeeded.
       const confirmed =
-        (sH === wantedH && sA === wantedA) || (sH === wantedA && sA === wantedH);
+        (namesMatch(mHome, homeTeam) && namesMatch(mAway, awayTeam)) ||
+        (namesMatch(mHome, awayTeam) && namesMatch(mAway, homeTeam));
       if (!confirmed) {
         diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `slug "${slug}" resolved to a different match: "${mHome}" vs "${mAway}"` });
         continue;
       }
       const id = pickStr(m, ["id", "matchId", "match_id"]);
-      diag.push({ step: "guess-slug", url, ok: true, status: resp.status, detail: `confirmed slug "${slug}"` });
+      diag.push({ step: "guess-slug", url, ok: true, status: resp.status, detail: `confirmed slug "${slug}" ("${mHome}" vs "${mAway}")` });
       return { id: id ?? "", slug };
     } catch (err) {
       diag.push({ step: "guess-slug", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
@@ -19925,17 +19971,15 @@ export async function findSportscoreFixture(
   awayTeam: string,
   diag: SportscoreDiagStep[] = [],
 ): Promise<SportscoreFixture | null> {
-  const wantedH = slugifyTeamName(homeTeam);
-  const wantedA = slugifyTeamName(awayTeam);
-  if (!wantedH || !wantedA) {
-    diag.push({ step: "normalize", url: "", ok: false, detail: "empty team name after normalization" });
+  if (!homeTeam.trim() || !awayTeam.trim()) {
+    diag.push({ step: "normalize", url: "", ok: false, detail: "empty team name" });
     return null;
   }
 
-  const fromList = await findInLiveFixturesList(sport, wantedH, wantedA, diag);
+  const fromList = await findInLiveFixturesList(sport, homeTeam, awayTeam, diag);
   if (fromList) return fromList;
 
-  return findByGuessedSlug(sport, wantedH, wantedA, diag);
+  return findByGuessedSlug(sport, homeTeam, awayTeam, diag);
 }
 
 router.get(
