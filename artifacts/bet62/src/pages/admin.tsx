@@ -728,6 +728,19 @@ export default function AdminPage() {
     matchDate: "",
   });
   const [sportscoreSaving, setSportscoreSaving] = useState(false);
+  const [sportscoreTesting, setSportscoreTesting] = useState(false);
+  const [sportscoreTestResult, setSportscoreTestResult] = useState<{
+    result?: { id: string; slug: string } | null;
+    steps?: Array<{
+      step: string;
+      url: string;
+      ok: boolean;
+      status?: number;
+      detail: string;
+    }>;
+    error?: string;
+    detail?: string;
+  } | null>(null);
   const [competitionSportFilter, setCompetitionSportFilter] = useState("all");
   const [competitionLiveFilter, setCompetitionLiveFilter] = useState("all");
   const [competitionSearch, setCompetitionSearch] = useState("");
@@ -1109,6 +1122,39 @@ export default function AdminPage() {
       toast.error("Erro ao salvar mapeamento");
     } finally {
       setSportscoreSaving(false);
+    }
+  };
+
+  const handleTestSportscoreMatch = async () => {
+    const sport = sportscoreForm.sport.trim().toLowerCase();
+    const homeTeam = sportscoreForm.homeTeam.trim();
+    const awayTeam = sportscoreForm.awayTeam.trim();
+    if (!homeTeam || !awayTeam) {
+      toast.error("Preencha Casa e Fora pra testar o casamento automático");
+      return;
+    }
+    setSportscoreTesting(true);
+    setSportscoreTestResult(null);
+    try {
+      const res = await fetch("/api/admin/sportscore-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ sport, homeTeam, awayTeam }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        setSportscoreTestResult(data);
+      } else {
+        toast.error(data?.error || "Erro ao testar");
+        setSportscoreTestResult(data ?? { error: "Erro ao testar" });
+      }
+    } catch (err) {
+      toast.error("Erro ao testar — verifique a conexão com o servidor");
+      setSportscoreTestResult({
+        error: err instanceof Error ? err.message : "Erro desconhecido",
+      });
+    } finally {
+      setSportscoreTesting(false);
     }
   };
 
@@ -5341,7 +5387,68 @@ export default function AdminPage() {
                         "Salvar mapeamento"
                       )}
                     </Button>
+                    <Button
+                      onClick={handleTestSportscoreMatch}
+                      disabled={sportscoreTesting}
+                      variant="outline"
+                      className="h-9 border-zinc-700 text-zinc-300"
+                    >
+                      {sportscoreTesting ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        "Testar casamento automático"
+                      )}
+                    </Button>
                   </div>
+
+                  {sportscoreTestResult && (
+                    <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50">
+                      <div className="flex items-center gap-2 mb-3">
+                        {sportscoreTestResult.result ? (
+                          <>
+                            <CheckCircle size={15} className="text-emerald-400" />
+                            <span className="text-sm font-bold text-emerald-400">
+                              Encontrado: slug "{sportscoreTestResult.result.slug}"
+                              {sportscoreTestResult.result.id
+                                ? ` · trackerId ${sportscoreTestResult.result.id}`
+                                : ""}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle size={15} className="text-red-400" />
+                            <span className="text-sm font-bold text-red-400">
+                              {sportscoreTestResult.error || "Não encontrado"}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {sportscoreTestResult.detail && (
+                        <div className="text-xs text-zinc-500 mb-2 font-mono">
+                          {sportscoreTestResult.detail}
+                        </div>
+                      )}
+                      {sportscoreTestResult.steps && sportscoreTestResult.steps.length > 0 && (
+                        <div className="space-y-1.5">
+                          {sportscoreTestResult.steps.map((s, i) => (
+                            <div
+                              key={i}
+                              className={`text-xs px-2.5 py-1.5 rounded border ${s.ok ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-zinc-800 bg-zinc-900 text-zinc-400"}`}
+                            >
+                              <span className="font-bold uppercase mr-2">{s.step}</span>
+                              {s.status != null && (
+                                <span className="font-mono mr-2">HTTP {s.status}</span>
+                              )}
+                              {s.detail}
+                              <div className="text-zinc-600 font-mono mt-0.5 break-all">
+                                {s.url}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {sportscoreMappingsLoading ? (
                     <div className="p-8 flex justify-center">
