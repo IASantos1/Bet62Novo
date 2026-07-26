@@ -711,12 +711,17 @@ export default function AdminPage() {
       sport: string;
       statpalMatchId: string;
       sportscoreId: string;
+      trackerId: string | null;
       homeTeam: string | null;
       awayTeam: string | null;
       matchDate: string | null;
+      source: string;
       updatedAt: string;
     }>
   >([]);
+  const [sportscoreDeletingId, setSportscoreDeletingId] = useState<
+    number | null
+  >(null);
   const [sportscoreMappingsLoading, setSportscoreMappingsLoading] =
     useState(false);
   const [sportscoreForm, setSportscoreForm] = useState({
@@ -1155,6 +1160,27 @@ export default function AdminPage() {
       });
     } finally {
       setSportscoreTesting(false);
+    }
+  };
+
+  const handleDeleteSportscoreMapping = async (id: number) => {
+    setSportscoreDeletingId(id);
+    try {
+      const res = await fetch(`/api/admin/sportscore-map/${id}`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      if (res.ok) {
+        toast.success("Mapeamento removido");
+        await fetchSportscoreMappings();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "Erro ao remover mapeamento");
+      }
+    } catch {
+      toast.error("Erro ao remover mapeamento");
+    } finally {
+      setSportscoreDeletingId(null);
     }
   };
 
@@ -5472,6 +5498,11 @@ export default function AdminPage() {
                           key={m.id}
                           className="px-5 py-3 flex items-center gap-3 flex-wrap"
                         >
+                          <span
+                            className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${m.source === "manual" ? "bg-blue-900/50 text-blue-300" : "bg-emerald-900/50 text-emerald-300"}`}
+                          >
+                            {m.source === "manual" ? "manual" : "auto"}
+                          </span>
                           <span className="text-xs font-bold text-zinc-400 uppercase">
                             {SPORT_LABEL[m.sport] || m.sport}
                           </span>
@@ -5484,11 +5515,28 @@ export default function AdminPage() {
                             statpal:{m.statpalMatchId}
                           </span>
                           <span className="text-xs text-blue-400 font-mono">
-                            sportscore:{m.sportscoreId}
+                            slug:{m.sportscoreId}
                           </span>
-                          <span className="text-xs text-zinc-700 ml-auto">
+                          {m.trackerId && (
+                            <span className="text-xs text-purple-400 font-mono">
+                              trackerId:{m.trackerId}
+                            </span>
+                          )}
+                          <span className="text-xs text-zinc-700">
                             {fmtDate(m.updatedAt)}
                           </span>
+                          <Button
+                            onClick={() => handleDeleteSportscoreMapping(m.id)}
+                            disabled={sportscoreDeletingId === m.id}
+                            size="sm"
+                            className="ml-auto h-7 bg-red-900/60 hover:bg-red-800 text-red-200"
+                          >
+                            {sportscoreDeletingId === m.id ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={12} />
+                            )}
+                          </Button>
                         </div>
                       ))}
                     </div>
