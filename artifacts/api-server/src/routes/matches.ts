@@ -19985,6 +19985,7 @@ router.get(
     const matchId = String(req.params["matchId"] ?? "");
     const homeTeam = String(req.query["homeTeam"] ?? "").trim();
     const awayTeam = String(req.query["awayTeam"] ?? "").trim();
+    const debug = String(req.query["debug"] ?? "") === "1";
     if (!sport || !matchId) {
       res.json({ sportscoreId: null, trackerId: null });
       return;
@@ -19994,6 +19995,7 @@ router.get(
         .select({
           sportscoreId: sportscoreMatchMapTable.sportscoreId,
           trackerId: sportscoreMatchMapTable.trackerId,
+          source: sportscoreMatchMapTable.source,
         })
         .from(sportscoreMatchMapTable)
         .where(
@@ -20008,6 +20010,18 @@ router.get(
         res.json({
           sportscoreId: rows[0].sportscoreId,
           trackerId: rows[0].trackerId ?? null,
+          ...(debug
+            ? {
+                steps: [
+                  {
+                    step: "db-cache",
+                    url: "",
+                    ok: true,
+                    detail: `served from cached row (source: ${rows[0].source})`,
+                  },
+                ],
+              }
+            : {}),
         });
         return;
       }
@@ -20017,9 +20031,14 @@ router.get(
         return;
       }
 
-      const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam);
+      const diag: SportscoreDiagStep[] = [];
+      const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
       if (!fixture) {
-        res.json({ sportscoreId: null, trackerId: null });
+        res.json({
+          sportscoreId: null,
+          trackerId: null,
+          ...(debug ? { steps: diag } : {}),
+        });
         return;
       }
 
@@ -20048,10 +20067,29 @@ router.get(
           },
         });
 
-      res.json({ sportscoreId: fixture.slug, trackerId: fixture.id || null });
+      res.json({
+        sportscoreId: fixture.slug,
+        trackerId: fixture.id || null,
+        ...(debug ? { steps: diag } : {}),
+      });
     } catch (err) {
       logger.error({ err }, "GET /api/matches/sportscore-id error");
-      res.json({ sportscoreId: null, trackerId: null });
+      res.json({
+        sportscoreId: null,
+        trackerId: null,
+        ...(debug
+          ? {
+              steps: [
+                {
+                  step: "exception",
+                  url: "",
+                  ok: false,
+                  detail: err instanceof Error ? err.message : String(err),
+                },
+              ],
+            }
+          : {}),
+      });
     }
   },
 );

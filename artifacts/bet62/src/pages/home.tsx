@@ -5639,15 +5639,20 @@ export default function Home({
   const [sportscoreTrackerId, setSportscoreTrackerId] = useState<
     string | null
   >(null);
+  const [sportscoreDebugSteps, setSportscoreDebugSteps] = useState<
+    Array<{ step: string; url: string; ok: boolean; status?: number; detail: string }>
+  >([]);
   useEffect(() => {
     setSportscoreId(undefined);
     setSportscoreTrackerId(null);
+    setSportscoreDebugSteps([]);
     if (!expandedMatch?.id) return;
     const sport = expandedMatch.sport || "football";
     const matchId = expandedMatch.id;
     const qs = new URLSearchParams();
     if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
     if (expandedMatch.away) qs.set("awayTeam", expandedMatch.away);
+    qs.set("debug", "1");
     let cancelled = false;
     fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}?${qs.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -5655,12 +5660,14 @@ export default function Home({
         if (!cancelled) {
           setSportscoreId(data?.sportscoreId ?? null);
           setSportscoreTrackerId(data?.trackerId ?? null);
+          setSportscoreDebugSteps(Array.isArray(data?.steps) ? data.steps : []);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSportscoreId(null);
           setSportscoreTrackerId(null);
+          setSportscoreDebugSteps([]);
         }
       });
     return () => {
@@ -17876,6 +17883,24 @@ export default function Home({
                                 ? "Buscando tracker da SportScore..."
                                 : `Tracker: não encontrado — "${expandedMatch.home}" vs "${expandedMatch.away}" (${expandedMatch.sport || "football"}, id ${expandedMatch.id})`}
                             </div>
+                            {sportscoreId === null && sportscoreDebugSteps.length > 0 && (
+                              <div className="mt-1.5 space-y-1 px-2">
+                                {sportscoreDebugSteps.map((s, i) => (
+                                  <div
+                                    key={i}
+                                    className="text-[9px] font-mono px-2 py-1 rounded break-all"
+                                    style={{
+                                      background: s.ok ? "#052e21" : "#27272a",
+                                      color: s.ok ? "#6ee7b7" : "#a1a1aa",
+                                    }}
+                                  >
+                                    <span className="font-bold uppercase mr-1">{s.step}</span>
+                                    {s.status != null && <span className="mr-1">HTTP {s.status}</span>}
+                                    {s.detail}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </>
                         )}
                       </div>
