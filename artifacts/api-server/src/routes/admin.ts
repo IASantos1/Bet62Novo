@@ -24,6 +24,7 @@ import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
+import { findSportscoreFixture, type SportscoreDiagStep } from "./matches.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2198,6 +2199,31 @@ router.post("/sportscore-map", adminMiddleware, async (req: AdminRequest, res) =
   } catch (err) {
     logger.error({ err }, "POST /api/admin/sportscore-map error");
     res.status(500).json({ error: "Erro ao salvar mapeamento do SportScore" });
+  }
+});
+
+// Diagnostic: runs the exact same automatic-matching logic used live, but
+// returns every step it tried (fetched URL, HTTP status, why it accepted
+// or rejected each candidate) instead of just null — so a failure can be
+// explained from the admin panel without needing server log access.
+router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const sport = String(req.body?.sport ?? "").trim().toLowerCase();
+    const homeTeam = String(req.body?.homeTeam ?? "").trim();
+    const awayTeam = String(req.body?.awayTeam ?? "").trim();
+    if (!sport || !homeTeam || !awayTeam) {
+      res.status(400).json({ error: "sport, homeTeam e awayTeam são obrigatórios" });
+      return;
+    }
+    const diag: SportscoreDiagStep[] = [];
+    const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
+    res.json({ result: fixture, steps: diag });
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/sportscore-test error");
+    res.status(500).json({
+      error: "Erro ao testar casamento com a SportScore",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 });
 

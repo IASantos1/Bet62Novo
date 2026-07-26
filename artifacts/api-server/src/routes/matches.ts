@@ -19811,17 +19811,33 @@ function pickTeamName(
   return null;
 }
 
+// Diagnostic trail captured alongside every lookup attempt, so a failure
+// can be explained (network/DNS error reaching sportscore.com, non-2xx
+// status, empty fixtures list, names present but not matching, etc.)
+// instead of just silently returning null — this is surfaced in the admin
+// diagnostic endpoint below so it can be inspected without server log
+// access.
+export type SportscoreDiagStep = {
+  step: string;
+  url: string;
+  ok: boolean;
+  status?: number;
+  detail: string;
+};
+
 async function findInLiveFixturesList(
   sport: string,
   wantedH: string,
   wantedA: string,
+  diag: SportscoreDiagStep[],
 ): Promise<SportscoreFixture | null> {
+  const url = `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`;
   try {
-    const resp = await fetch(
-      `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`,
-      { signal: AbortSignal.timeout(6000) },
-    );
-    if (!resp.ok) return null;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) {
+      diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
+      return null;
+    }
     const data = (await resp.json()) as Record<string, unknown>;
     const matches = Array.isArray(data["matches"])
       ? (data["matches"] as Record<string, unknown>[])
@@ -19840,10 +19856,13 @@ async function findInLiveFixturesList(
       const id = pickStr(m, ["id", "matchId", "match_id"]);
       const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
       if (!id && !slug) continue;
+      diag.push({ step: "live-list", url, ok: true, status: resp.status, detail: `found in ${matches.length} fixtures` });
       return { id: id ?? "", slug: slug ?? (straight ? `${sH}-vs-${sA}` : `${sA}-vs-${sH}`) };
     }
+    diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `not found among ${matches.length} live/recent fixtures` });
     return null;
-  } catch {
+  } catch (err) {
+    diag.push({ step: "live-list", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
     return null;
   }
 }
@@ -19859,20 +19878,25 @@ async function findByGuessedSlug(
   sport: string,
   wantedH: string,
   wantedA: string,
+  diag: SportscoreDiagStep[],
 ): Promise<SportscoreFixture | null> {
   const candidates = [`${wantedH}-vs-${wantedA}`, `${wantedA}-vs-${wantedH}`];
   for (const slug of candidates) {
+    const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
     try {
-      const resp = await fetch(
-        `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`,
-        { signal: AbortSignal.timeout(6000) },
-      );
-      if (!resp.ok) continue;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) {
+        diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `HTTP ${resp.status} for slug "${slug}"` });
+        continue;
+      }
       const data = (await resp.json()) as Record<string, unknown>;
       const m = (data["match"] ?? data) as Record<string, unknown>;
       const mHome = pickTeamName(m, "home");
       const mAway = pickTeamName(m, "away");
-      if (!mHome || !mAway) continue;
+      if (!mHome || !mAway) {
+        diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `slug "${slug}" resolved but no team names in response` });
+        continue;
+      }
       const sH = slugifyTeamName(mHome);
       const sA = slugifyTeamName(mAway);
       // Confirm the returned match actually is the fixture we asked for —
@@ -19880,29 +19904,38 @@ async function findByGuessedSlug(
       // not be trusted just because the request succeeded.
       const confirmed =
         (sH === wantedH && sA === wantedA) || (sH === wantedA && sA === wantedH);
-      if (!confirmed) continue;
+      if (!confirmed) {
+        diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `slug "${slug}" resolved to a different match: "${mHome}" vs "${mAway}"` });
+        continue;
+      }
       const id = pickStr(m, ["id", "matchId", "match_id"]);
+      diag.push({ step: "guess-slug", url, ok: true, status: resp.status, detail: `confirmed slug "${slug}"` });
       return { id: id ?? "", slug };
-    } catch {
+    } catch (err) {
+      diag.push({ step: "guess-slug", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
       continue;
     }
   }
   return null;
 }
 
-async function findSportscoreFixture(
+export async function findSportscoreFixture(
   sport: string,
   homeTeam: string,
   awayTeam: string,
+  diag: SportscoreDiagStep[] = [],
 ): Promise<SportscoreFixture | null> {
   const wantedH = slugifyTeamName(homeTeam);
   const wantedA = slugifyTeamName(awayTeam);
-  if (!wantedH || !wantedA) return null;
+  if (!wantedH || !wantedA) {
+    diag.push({ step: "normalize", url: "", ok: false, detail: "empty team name after normalization" });
+    return null;
+  }
 
-  const fromList = await findInLiveFixturesList(sport, wantedH, wantedA);
+  const fromList = await findInLiveFixturesList(sport, wantedH, wantedA, diag);
   if (fromList) return fromList;
 
-  return findByGuessedSlug(sport, wantedH, wantedA);
+  return findByGuessedSlug(sport, wantedH, wantedA, diag);
 }
 
 router.get(
