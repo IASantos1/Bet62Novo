@@ -17813,21 +17813,23 @@ export default function Home({
                         {sportscoreId ? (() => {
                           // The embed's own layout is: header (title + "LIVE ·
                           // ..."), then the field/court graphic, then more
-                          // stuff below (score recap, an events timeline, its
-                          // own "Live tracker by sportscore.com" link) — we
-                          // only want the graphic itself. Measured from real
-                          // screenshots per sport (header height and the
-                          // court/pitch graphic's own height differ a lot
-                          // between e.g. football's short trapezoid pitch and
-                          // tennis's taller court). The iframe keeps its
-                          // natural 320x420 size so its internal layout never
-                          // reflows/distorts; a negative top margin inside an
-                          // overflow:hidden window of the sport's court
-                          // height just slides the visible slice down past
-                          // the header and stops before everything below.
+                          // stuff below (a score recap row, an events
+                          // timeline, its own "Live tracker by
+                          // sportscore.com" link) that we don't want.
+                          // Football's header ("LIVE · HT" etc.) should stay
+                          // visible, so only the bottom gets trimmed there.
+                          // Tennis's header ("... vs ... LIVE · Set N") is
+                          // the part to drop, keeping just the court
+                          // centered — its header is shorter but the court
+                          // graphic itself is much taller than football's
+                          // pitch. The iframe keeps its natural 320x420 size
+                          // so its internal layout never reflows/distorts; a
+                          // negative top margin inside an overflow:hidden
+                          // window just slides the visible slice down and
+                          // stops it before everything unwanted.
                           const isTennisSport = expandedMatch.sport === "tennis";
-                          const topOffset = isTennisSport ? 55 : 128;
-                          const courtHeight = isTennisSport ? 125 : 60;
+                          const topOffset = isTennisSport ? 70 : 0;
+                          const courtHeight = isTennisSport ? 115 : 190;
                           return (
                             <div className="flex flex-col items-center">
                               <div
