@@ -20041,6 +20041,91 @@ async function findByGuessedSlug(
   return null;
 }
 
+// The live+recent list (findInLiveFixturesList) is capped at 50 results
+// globally per sport, so lower-profile leagues (a national second division,
+// a smaller country's top flight) can be live on SportScore and still miss
+// it whenever 50+ more prominent matches are live at the same time — no
+// amount of name-matching fixes that, since the match is simply absent from
+// the list. This tier instead looks up each team's OWN schedule
+// (/api/widget/team/, which isn't capped the same way) and searches it for
+// today's fixture against the other side — a much smaller, team-scoped list
+// that a lower-profile match won't get crowded out of.
+async function findViaTeamSchedule(
+  sport: string,
+  homeTeam: string,
+  awayTeam: string,
+  diag: SportscoreDiagStep[],
+): Promise<SportscoreFixture | null> {
+  const teamSlugCandidates = Array.from(
+    new Set(
+      [
+        slugifyTeamNameStripped(homeTeam),
+        slugifyTeamNameExpanded(homeTeam),
+        slugifyTeamName(homeTeam),
+        slugifyTeamNameStripped(awayTeam),
+        slugifyTeamNameExpanded(awayTeam),
+        slugifyTeamName(awayTeam),
+      ].filter(Boolean),
+    ),
+  );
+
+  for (const teamSlug of teamSlugCandidates) {
+    const url = `https://sportscore.com/api/widget/team/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(teamSlug)}&limit=10&src=bet62.com`;
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) {
+        diag.push({ step: "team-schedule", url, ok: false, status: resp.status, detail: `HTTP ${resp.status} for team slug "${teamSlug}"` });
+        continue;
+      }
+      const data = (await resp.json()) as Record<string, unknown>;
+      const fixtures = (Array.isArray(data["matches"])
+        ? data["matches"]
+        : Array.isArray(data["fixtures"])
+          ? data["fixtures"]
+          : []) as Record<string, unknown>[];
+
+      let matchedInThisTeam = false;
+      for (const m of fixtures) {
+        const mHome = pickTeamName(m, "home");
+        const mAway = pickTeamName(m, "away");
+        if (!mHome || !mAway) continue;
+        const confirmed =
+          (namesMatch(mHome, homeTeam) && namesMatch(mAway, awayTeam)) ||
+          (namesMatch(mHome, awayTeam) && namesMatch(mAway, homeTeam));
+        if (!confirmed) continue;
+        const id = pickStr(m, ["id", "matchId", "match_id"]);
+        const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
+        if (!id && !slug) continue;
+        matchedInThisTeam = true;
+        diag.push({
+          step: "team-schedule",
+          url,
+          ok: true,
+          status: resp.status,
+          detail: `found via team slug "${teamSlug}" ("${mHome}" vs "${mAway}")`,
+        });
+        return {
+          id: id ?? "",
+          slug: slug ?? `${slugifyTeamName(mHome)}-vs-${slugifyTeamName(mAway)}`,
+        };
+      }
+      if (!matchedInThisTeam) {
+        diag.push({
+          step: "team-schedule",
+          url,
+          ok: false,
+          status: resp.status,
+          detail: `team slug "${teamSlug}" resolved but no fixture in its list matched the other side`,
+        });
+      }
+    } catch (err) {
+      diag.push({ step: "team-schedule", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function findSportscoreFixture(
   sport: string,
   homeTeam: string,
@@ -20055,7 +20140,10 @@ export async function findSportscoreFixture(
   const fromList = await findInLiveFixturesList(sport, homeTeam, awayTeam, diag);
   if (fromList) return fromList;
 
-  return findByGuessedSlug(sport, homeTeam, awayTeam, diag);
+  const fromGuess = await findByGuessedSlug(sport, homeTeam, awayTeam, diag);
+  if (fromGuess) return fromGuess;
+
+  return findViaTeamSchedule(sport, homeTeam, awayTeam, diag);
 }
 
 router.get(
