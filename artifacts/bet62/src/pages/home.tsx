@@ -164,7 +164,6 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
-import MiniFieldView from "@/components/MiniFieldView";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -17811,64 +17810,53 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        {sportscoreId ? (
-                          <div className="flex flex-col items-center">
-                            {/* The embed's own layout is header + field + score,
-                                then (below that) an events timeline and its own
-                                "Live tracker by sportscore.com" link — we only
-                                want the field/score part. The iframe keeps its
-                                natural height so its internal layout doesn't
-                                reflow/distort; the shorter wrapper just clips
-                                the extra timeline+link area below it. Our own
-                                small attribution link (kept below, unclipped)
-                                takes over since the iframe's own is cropped
-                                away. */}
-                            <div className="w-full max-w-[320px] h-[262px] overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-950">
-                              <iframe
-                                key={sportscoreId}
-                                src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
-                                title="Match Tracker"
-                                width={320}
-                                height={420}
-                                className="block w-[320px] max-w-none"
-                                loading="lazy"
-                                referrerPolicy="no-referrer-when-downgrade"
-                              />
+                        {sportscoreId ? (() => {
+                          // The embed's own layout is: header (title + "LIVE ·
+                          // ..."), then the field/court graphic, then more
+                          // stuff below (score recap, an events timeline, its
+                          // own "Live tracker by sportscore.com" link) — we
+                          // only want the graphic itself. Measured from real
+                          // screenshots per sport (header height and the
+                          // court/pitch graphic's own height differ a lot
+                          // between e.g. football's short trapezoid pitch and
+                          // tennis's taller court). The iframe keeps its
+                          // natural 320x420 size so its internal layout never
+                          // reflows/distorts; a negative top margin inside an
+                          // overflow:hidden window of the sport's court
+                          // height just slides the visible slice down past
+                          // the header and stops before everything below.
+                          const isTennisSport = expandedMatch.sport === "tennis";
+                          const topOffset = isTennisSport ? 55 : 128;
+                          const courtHeight = isTennisSport ? 125 : 60;
+                          return (
+                            <div className="flex flex-col items-center">
+                              <div
+                                className="w-full max-w-[320px] overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-950"
+                                style={{ height: courtHeight }}
+                              >
+                                <iframe
+                                  key={sportscoreId}
+                                  src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
+                                  title="Match Tracker"
+                                  width={320}
+                                  height={420}
+                                  className="block w-[320px] max-w-none"
+                                  style={{ marginTop: -topOffset }}
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer-when-downgrade"
+                                />
+                              </div>
+                              <a
+                                href="https://sportscore.com/football/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-1 text-[9px] text-zinc-600 hover:text-zinc-500 transition-colors"
+                              >
+                                tracker by sportscore.com
+                              </a>
                             </div>
-                            <a
-                              href="https://sportscore.com/football/"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-1 text-[9px] text-zinc-600 hover:text-zinc-500 transition-colors"
-                            >
-                              tracker by sportscore.com
-                            </a>
-                          </div>
-                        ) : (
-                          <MiniFieldView
-                            sport={expandedMatch.sport}
-                            homeTeam={teamNamePt(expandedMatch.home)}
-                            awayTeam={teamNamePt(expandedMatch.away)}
-                            liveClockLabel={
-                              expandedMatch.isLive
-                                ? (() => {
-                                    const m = getDisplayMinute(expandedMatch);
-                                    const isFootballClock =
-                                      !expandedMatch.sport || expandedMatch.sport === "football";
-                                    const tag = isFootballClock
-                                      ? getFootballPhaseTag(expandedMatch, m)
-                                      : null;
-                                    if (m <= 0) return "AO VIVO";
-                                    if (tag === "HT") return "HT";
-                                    if (tag && isFootballClock)
-                                      return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                                    if (tag) return `${m}' · ${tag}`;
-                                    return `${m}'`;
-                                  })()
-                                : null
-                            }
-                          />
-                        )}
+                          );
+                        })() : null}
                       </div>
                     ) : (
                       <>
