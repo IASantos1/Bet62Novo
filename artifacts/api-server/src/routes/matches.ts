@@ -14,7 +14,7 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import { db, matchResultsTable } from "@workspace/db";
+import { db, matchResultsTable, sportscoreMatchMapTable } from "@workspace/db";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
@@ -570,6 +570,12 @@ export type LiveMatchState = {
     shotsTotalAway?: number;
     shotsOnTargetHome?: number;
     shotsOnTargetAway?: number;
+    shotsOffTargetHome?: number;
+    shotsOffTargetAway?: number;
+    shotsBlockedHome?: number;
+    shotsBlockedAway?: number;
+    woodworkHome?: number;
+    woodworkAway?: number;
     foulsHome?: number;
     foulsAway?: number;
     yellowCardsHome?: number;
@@ -5932,6 +5938,34 @@ async function fetchFootballExtras(
       ["team_stats", "away", "shots", "on_target"],
       ["team_stats", "away", "shots_on_target"],
     ]);
+    const shotsOffTargetHome = getNum([
+      ["team_stats", "home", "shots", "offtarget"],
+      ["team_stats", "home", "shots", "off_target"],
+      ["team_stats", "home", "shots_off_target"],
+    ]);
+    const shotsOffTargetAway = getNum([
+      ["team_stats", "away", "shots", "offtarget"],
+      ["team_stats", "away", "shots", "off_target"],
+      ["team_stats", "away", "shots_off_target"],
+    ]);
+    const shotsBlockedHome = getNum([
+      ["team_stats", "home", "shots", "blocked"],
+      ["team_stats", "home", "shots_blocked"],
+    ]);
+    const shotsBlockedAway = getNum([
+      ["team_stats", "away", "shots", "blocked"],
+      ["team_stats", "away", "shots_blocked"],
+    ]);
+    const woodworkHome = getNum([
+      ["team_stats", "home", "shots", "woodwork"],
+      ["team_stats", "home", "hit_woodwork"],
+      ["team_stats", "home", "shots_woodwork"],
+    ]);
+    const woodworkAway = getNum([
+      ["team_stats", "away", "shots", "woodwork"],
+      ["team_stats", "away", "hit_woodwork"],
+      ["team_stats", "away", "shots_woodwork"],
+    ]);
 
     // Fouls
     const foulsHome = getNum([
@@ -6203,6 +6237,12 @@ async function fetchFootballExtras(
       shotsTotalAway: maybeNum(shotsTotalAway),
       shotsOnTargetHome: maybeNum(shotsOnTargetHome),
       shotsOnTargetAway: maybeNum(shotsOnTargetAway),
+      shotsOffTargetHome: maybeNum(shotsOffTargetHome),
+      shotsOffTargetAway: maybeNum(shotsOffTargetAway),
+      shotsBlockedHome: maybeNum(shotsBlockedHome),
+      shotsBlockedAway: maybeNum(shotsBlockedAway),
+      woodworkHome: maybeNum(woodworkHome),
+      woodworkAway: maybeNum(woodworkAway),
       foulsHome: maybeNum(foulsHome),
       foulsAway: maybeNum(foulsAway),
       yellowCardsHome: maybeNum(yellowCardsHome),
@@ -6331,6 +6371,40 @@ async function fetchStatpalMatchStats(
       ["team_stats", "away", "shots_on_target"],
       ["statistics", "away", "shots_on_target"],
     ]);
+    const shotsOffTargetHome = getNum([
+      ["team_stats", "home", "shots", "offtarget"],
+      ["team_stats", "home", "shots", "off_target"],
+      ["team_stats", "home", "shots_off_target"],
+      ["statistics", "home", "shots_off_target"],
+    ]);
+    const shotsOffTargetAway = getNum([
+      ["team_stats", "away", "shots", "offtarget"],
+      ["team_stats", "away", "shots", "off_target"],
+      ["team_stats", "away", "shots_off_target"],
+      ["statistics", "away", "shots_off_target"],
+    ]);
+    const shotsBlockedHome = getNum([
+      ["team_stats", "home", "shots", "blocked"],
+      ["team_stats", "home", "shots_blocked"],
+      ["statistics", "home", "shots_blocked"],
+    ]);
+    const shotsBlockedAway = getNum([
+      ["team_stats", "away", "shots", "blocked"],
+      ["team_stats", "away", "shots_blocked"],
+      ["statistics", "away", "shots_blocked"],
+    ]);
+    const woodworkHome = getNum([
+      ["team_stats", "home", "shots", "woodwork"],
+      ["team_stats", "home", "hit_woodwork"],
+      ["team_stats", "home", "shots_woodwork"],
+      ["statistics", "home", "shots_woodwork"],
+    ]);
+    const woodworkAway = getNum([
+      ["team_stats", "away", "shots", "woodwork"],
+      ["team_stats", "away", "hit_woodwork"],
+      ["team_stats", "away", "shots_woodwork"],
+      ["statistics", "away", "shots_woodwork"],
+    ]);
     const foulsHome = getNum([
       ["team_stats", "home", "fouls", "committed"],
       ["team_stats", "home", "fouls", "total"],
@@ -6439,6 +6513,12 @@ async function fetchStatpalMatchStats(
       shotsTotalAway: maybeNum(shotsTotalAway),
       shotsOnTargetHome: maybeNum(shotsOnTargetHome),
       shotsOnTargetAway: maybeNum(shotsOnTargetAway),
+      shotsOffTargetHome: maybeNum(shotsOffTargetHome),
+      shotsOffTargetAway: maybeNum(shotsOffTargetAway),
+      shotsBlockedHome: maybeNum(shotsBlockedHome),
+      shotsBlockedAway: maybeNum(shotsBlockedAway),
+      woodworkHome: maybeNum(woodworkHome),
+      woodworkAway: maybeNum(woodworkAway),
       foulsHome: maybeNum(foulsHome),
       foulsAway: maybeNum(foulsAway),
       yellowCardsHome: yellowCardsHome > 0 ? yellowCardsHome : undefined,
@@ -7224,6 +7304,12 @@ type FootballExtras = {
   passesAway?: number;
   passAccuracyHome?: number;
   passAccuracyAway?: number;
+  shotsOffTargetHome?: number;
+  shotsOffTargetAway?: number;
+  shotsBlockedHome?: number;
+  shotsBlockedAway?: number;
+  woodworkHome?: number;
+  woodworkAway?: number;
   football?: {
     goals?: Array<{
       team: "home" | "away";
@@ -15556,6 +15642,12 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             setIfDef("shotsTotalAway", extras.shotsTotalAway);
             setIfDef("shotsOnTargetHome", extras.shotsOnTargetHome);
             setIfDef("shotsOnTargetAway", extras.shotsOnTargetAway);
+            setIfDef("shotsOffTargetHome", extras.shotsOffTargetHome);
+            setIfDef("shotsOffTargetAway", extras.shotsOffTargetAway);
+            setIfDef("shotsBlockedHome", extras.shotsBlockedHome);
+            setIfDef("shotsBlockedAway", extras.shotsBlockedAway);
+            setIfDef("woodworkHome", extras.woodworkHome);
+            setIfDef("woodworkAway", extras.woodworkAway);
             setIfDef("foulsHome", extras.foulsHome);
             setIfDef("foulsAway", extras.foulsAway);
             setIfDef("yellowCardsHome", extras.yellowCardsHome);
@@ -16813,7 +16905,9 @@ async function buildFootballLiveV2(
         if (val !== undefined) (statsOverlay as Record<string, unknown>)[key] = val;
       };
       (["possessionHome","possessionAway","shotsTotalHome","shotsTotalAway",
-        "shotsOnTargetHome","shotsOnTargetAway","foulsHome","foulsAway",
+        "shotsOnTargetHome","shotsOnTargetAway","shotsOffTargetHome","shotsOffTargetAway",
+        "shotsBlockedHome","shotsBlockedAway","woodworkHome","woodworkAway",
+        "foulsHome","foulsAway",
         "yellowCardsHome","yellowCardsAway","redCardsHomeCount","redCardsAwayCount",
         "cornersTotal","cardsTotal","dangerousAttacksHome","dangerousAttacksAway",
         "attacksHome","attacksAway","xgHome","xgAway"] as const).forEach(mergeStatNum);
@@ -19671,6 +19765,355 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     });
   }
 });
+
+// SportScore Match Tracker — resolves the SportScore match identifiers
+// mapped to a Statpal match (see sportscoreMatchMapTable). Statpal stays
+// the source for games/odds/stats/events/settlement; SportScore only
+// supplies live position/animation data for the mini campo, via its free
+// REST API (no key, open CORS, ~10k req/day/IP): https://sportscore.com/developers/
+//   GET /api/widget/matches/?sport={sport}&limit=50 — live+recent fixtures
+//   GET /api/widget/tracker/?sport={sport}&id={trackerId} — position data
+//
+// Automatic matching fetches the real fixtures list and compares team
+// names (normalized, tried in both home/away orders since providers don't
+// always agree on which side is "home") — no more blind slug-guessing.
+// Falls back to nothing found (manual mapping via admin) when the fixture
+// isn't in the current live+recent window or the names don't line up
+// (e.g. reserve/youth teams with divergent spellings between providers).
+function slugifyTeamName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Mn}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Statpal team names often carry club-type suffixes/prefixes ("Levante UD",
+// "FC Barcelona") that SportScore's own slugs frequently drop ("levante",
+// "barcelona"). Strip these before slugifying as an extra candidate — the
+// guessed slug is otherwise a plain 404 even when the fixture genuinely
+// exists on SportScore under the shorter name.
+// Only strips generic legal-entity-type tokens, never words that are part
+// of a club's actual identity (e.g. never "real", "united", "city",
+// "atlético" — those distinguish Real Madrid from Real Betis, Manchester
+// United from Manchester City, etc.; stripping them would cause wrong
+// matches, not just missed ones).
+const CLUB_TOKEN_RE = /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|f\.c\.)\b/gi;
+function slugifyTeamNameStripped(name: string): string {
+  const stripped = name.replace(CLUB_TOKEN_RE, " ").replace(/\s+/g, " ").trim();
+  return slugifyTeamName(stripped || name);
+}
+
+type SportscoreFixture = { id: string; slug: string };
+
+function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v) return v;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return null;
+}
+
+function pickTeamName(
+  obj: Record<string, unknown>,
+  side: "home" | "away",
+): string | null {
+  const direct = pickStr(obj, [
+    side,
+    `${side}Team`,
+    `${side}_team`,
+    `${side}Name`,
+    `${side}_name`,
+  ]);
+  if (direct) return direct;
+  const nested = obj["teams"] ?? obj["team"];
+  if (nested && typeof nested === "object") {
+    const sideObj = (nested as Record<string, unknown>)[side];
+    if (sideObj && typeof sideObj === "object") {
+      return pickStr(sideObj as Record<string, unknown>, ["name", "title"]);
+    }
+    if (typeof sideObj === "string") return sideObj;
+  }
+  const sideObjTop = obj[side];
+  if (sideObjTop && typeof sideObjTop === "object") {
+    return pickStr(sideObjTop as Record<string, unknown>, ["name", "title"]);
+  }
+  return null;
+}
+
+// Diagnostic trail captured alongside every lookup attempt, so a failure
+// can be explained (network/DNS error reaching sportscore.com, non-2xx
+// status, empty fixtures list, names present but not matching, etc.)
+// instead of just silently returning null — this is surfaced in the admin
+// diagnostic endpoint below so it can be inspected without server log
+// access.
+export type SportscoreDiagStep = {
+  step: string;
+  url: string;
+  ok: boolean;
+  status?: number;
+  detail: string;
+};
+
+// Tolerant name match: accepts either the plain normalization or the
+// suffix-stripped one, so "Levante UD" (ours) matches "Levante" (theirs)
+// or vice versa, without loosening things enough to confuse distinct clubs
+// that share a generic word (handled by keeping identity-bearing words like
+// "Real"/"United"/"City" out of the strip list).
+function namesMatch(a: string, b: string): boolean {
+  if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
+  return slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b);
+}
+
+async function findInLiveFixturesList(
+  sport: string,
+  homeTeam: string,
+  awayTeam: string,
+  diag: SportscoreDiagStep[],
+): Promise<SportscoreFixture | null> {
+  const url = `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) {
+      diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
+      return null;
+    }
+    const data = (await resp.json()) as Record<string, unknown>;
+    const matches = Array.isArray(data["matches"])
+      ? (data["matches"] as Record<string, unknown>[])
+      : [];
+
+    for (const m of matches) {
+      const mHome = pickTeamName(m, "home");
+      const mAway = pickTeamName(m, "away");
+      if (!mHome || !mAway) continue;
+      const straight = namesMatch(mHome, homeTeam) && namesMatch(mAway, awayTeam);
+      const swapped = namesMatch(mHome, awayTeam) && namesMatch(mAway, homeTeam);
+      if (!straight && !swapped) continue;
+
+      const id = pickStr(m, ["id", "matchId", "match_id"]);
+      const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
+      if (!id && !slug) continue;
+      diag.push({ step: "live-list", url, ok: true, status: resp.status, detail: `found in ${matches.length} fixtures ("${mHome}" vs "${mAway}")` });
+      return {
+        id: id ?? "",
+        slug: slug ?? `${slugifyTeamName(mHome)}-vs-${slugifyTeamName(mAway)}`,
+      };
+    }
+    diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `not found among ${matches.length} live/recent fixtures` });
+    return null;
+  } catch (err) {
+    diag.push({ step: "live-list", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
+    return null;
+  }
+}
+
+// The live+recent list is capped at 50 results with no pagination, so a
+// lower-profile fixture can be live on SportScore but still miss the list
+// (buried behind 50 more prominent matches worldwide). Fall back to
+// guessing the slug from our team names — trying both the plain name and
+// the suffix-stripped name ("Levante UD" → also try "levante"), since
+// SportScore's own slugs frequently drop club-type suffixes — and
+// confirming each guess for real against the single-match REST endpoint
+// (which also gives us the numeric id). This is a genuine verification
+// against real match data, not a blind HTTP-status check against the HTML
+// embed page.
+async function findByGuessedSlug(
+  sport: string,
+  homeTeam: string,
+  awayTeam: string,
+  diag: SportscoreDiagStep[],
+): Promise<SportscoreFixture | null> {
+  const h = slugifyTeamName(homeTeam);
+  const a = slugifyTeamName(awayTeam);
+  const hStripped = slugifyTeamNameStripped(homeTeam);
+  const aStripped = slugifyTeamNameStripped(awayTeam);
+  const candidates = Array.from(
+    new Set(
+      [
+        `${h}-vs-${a}`,
+        `${a}-vs-${h}`,
+        `${hStripped}-vs-${aStripped}`,
+        `${aStripped}-vs-${hStripped}`,
+      ].filter((s) => !s.startsWith("-vs-") && !s.endsWith("-vs-")),
+    ),
+  );
+
+  for (const slug of candidates) {
+    const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) {
+        diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `HTTP ${resp.status} for slug "${slug}"` });
+        continue;
+      }
+      const data = (await resp.json()) as Record<string, unknown>;
+      const m = (data["match"] ?? data) as Record<string, unknown>;
+      const mHome = pickTeamName(m, "home");
+      const mAway = pickTeamName(m, "away");
+      if (!mHome || !mAway) {
+        diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `slug "${slug}" resolved but no team names in response` });
+        continue;
+      }
+      // Confirm the returned match actually is the fixture we asked for —
+      // a guessed slug that 404s or resolves to an unrelated match must
+      // not be trusted just because the request succeeded.
+      const confirmed =
+        (namesMatch(mHome, homeTeam) && namesMatch(mAway, awayTeam)) ||
+        (namesMatch(mHome, awayTeam) && namesMatch(mAway, homeTeam));
+      if (!confirmed) {
+        diag.push({ step: "guess-slug", url, ok: false, status: resp.status, detail: `slug "${slug}" resolved to a different match: "${mHome}" vs "${mAway}"` });
+        continue;
+      }
+      const id = pickStr(m, ["id", "matchId", "match_id"]);
+      diag.push({ step: "guess-slug", url, ok: true, status: resp.status, detail: `confirmed slug "${slug}" ("${mHome}" vs "${mAway}")` });
+      return { id: id ?? "", slug };
+    } catch (err) {
+      diag.push({ step: "guess-slug", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
+      continue;
+    }
+  }
+  return null;
+}
+
+export async function findSportscoreFixture(
+  sport: string,
+  homeTeam: string,
+  awayTeam: string,
+  diag: SportscoreDiagStep[] = [],
+): Promise<SportscoreFixture | null> {
+  if (!homeTeam.trim() || !awayTeam.trim()) {
+    diag.push({ step: "normalize", url: "", ok: false, detail: "empty team name" });
+    return null;
+  }
+
+  const fromList = await findInLiveFixturesList(sport, homeTeam, awayTeam, diag);
+  if (fromList) return fromList;
+
+  return findByGuessedSlug(sport, homeTeam, awayTeam, diag);
+}
+
+router.get(
+  "/sportscore-id/:sport/:matchId",
+  async (req: Request, res: Response) => {
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0",
+    );
+    const sport = String(req.params["sport"] ?? "");
+    const matchId = String(req.params["matchId"] ?? "");
+    const homeTeam = String(req.query["homeTeam"] ?? "").trim();
+    const awayTeam = String(req.query["awayTeam"] ?? "").trim();
+    const debug = String(req.query["debug"] ?? "") === "1";
+    if (!sport || !matchId) {
+      res.json({ sportscoreId: null, trackerId: null });
+      return;
+    }
+    try {
+      const rows = await db
+        .select({
+          sportscoreId: sportscoreMatchMapTable.sportscoreId,
+          trackerId: sportscoreMatchMapTable.trackerId,
+          source: sportscoreMatchMapTable.source,
+        })
+        .from(sportscoreMatchMapTable)
+        .where(
+          and(
+            eq(sportscoreMatchMapTable.sport, sport),
+            eq(sportscoreMatchMapTable.statpalMatchId, matchId),
+          ),
+        )
+        .limit(1);
+
+      if (rows[0]?.sportscoreId) {
+        res.json({
+          sportscoreId: rows[0].sportscoreId,
+          trackerId: rows[0].trackerId ?? null,
+          ...(debug
+            ? {
+                steps: [
+                  {
+                    step: "db-cache",
+                    url: "",
+                    ok: true,
+                    detail: `served from cached row (source: ${rows[0].source})`,
+                  },
+                ],
+              }
+            : {}),
+        });
+        return;
+      }
+
+      if (!homeTeam || !awayTeam) {
+        res.json({ sportscoreId: null, trackerId: null });
+        return;
+      }
+
+      const diag: SportscoreDiagStep[] = [];
+      const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
+      if (!fixture) {
+        res.json({
+          sportscoreId: null,
+          trackerId: null,
+          ...(debug ? { steps: diag } : {}),
+        });
+        return;
+      }
+
+      await db
+        .insert(sportscoreMatchMapTable)
+        .values({
+          sport,
+          statpalMatchId: matchId,
+          sportscoreId: fixture.slug,
+          trackerId: fixture.id || null,
+          homeTeam,
+          awayTeam,
+          source: "auto",
+        })
+        .onConflictDoUpdate({
+          target: [
+            sportscoreMatchMapTable.sport,
+            sportscoreMatchMapTable.statpalMatchId,
+          ],
+          set: {
+            sportscoreId: fixture.slug,
+            trackerId: fixture.id || null,
+            homeTeam,
+            awayTeam,
+            updatedAt: new Date(),
+          },
+        });
+
+      res.json({
+        sportscoreId: fixture.slug,
+        trackerId: fixture.id || null,
+        ...(debug ? { steps: diag } : {}),
+      });
+    } catch (err) {
+      logger.error({ err }, "GET /api/matches/sportscore-id error");
+      res.json({
+        sportscoreId: null,
+        trackerId: null,
+        ...(debug
+          ? {
+              steps: [
+                {
+                  step: "exception",
+                  url: "",
+                  ok: false,
+                  detail: err instanceof Error ? err.message : String(err),
+                },
+              ],
+            }
+          : {}),
+      });
+    }
+  },
+);
 
 router.get("/feed-status", (_req: Request, res: Response) => {
   res.setHeader(

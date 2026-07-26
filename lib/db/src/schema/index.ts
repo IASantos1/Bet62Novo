@@ -38,3 +38,4 @@ export * from "./eventAdminOverrides";
 export * from "./settlementIdempotency";
 export * from "./manualReviewQueue";
 export * from "./settlementReplayLog";
+export * from "./sportscoreMatchMap";

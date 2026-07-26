@@ -705,6 +705,47 @@ export default function AdminPage() {
     [],
   );
   const [competitionsLoading, setCompetitionsLoading] = useState(false);
+  const [sportscoreMappings, setSportscoreMappings] = useState<
+    Array<{
+      id: number;
+      sport: string;
+      statpalMatchId: string;
+      sportscoreId: string;
+      trackerId: string | null;
+      homeTeam: string | null;
+      awayTeam: string | null;
+      matchDate: string | null;
+      source: string;
+      updatedAt: string;
+    }>
+  >([]);
+  const [sportscoreDeletingId, setSportscoreDeletingId] = useState<
+    number | null
+  >(null);
+  const [sportscoreMappingsLoading, setSportscoreMappingsLoading] =
+    useState(false);
+  const [sportscoreForm, setSportscoreForm] = useState({
+    sport: "football",
+    statpalMatchId: "",
+    sportscoreId: "",
+    homeTeam: "",
+    awayTeam: "",
+    matchDate: "",
+  });
+  const [sportscoreSaving, setSportscoreSaving] = useState(false);
+  const [sportscoreTesting, setSportscoreTesting] = useState(false);
+  const [sportscoreTestResult, setSportscoreTestResult] = useState<{
+    result?: { id: string; slug: string } | null;
+    steps?: Array<{
+      step: string;
+      url: string;
+      ok: boolean;
+      status?: number;
+      detail: string;
+    }>;
+    error?: string;
+    detail?: string;
+  } | null>(null);
   const [competitionSportFilter, setCompetitionSportFilter] = useState("all");
   const [competitionLiveFilter, setCompetitionLiveFilter] = useState("all");
   const [competitionSearch, setCompetitionSearch] = useState("");
@@ -1025,6 +1066,124 @@ export default function AdminPage() {
     }
   }, [token, competitionSportFilter, competitionLiveFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchSportscoreMappings = useCallback(async () => {
+    if (!token) return;
+    setSportscoreMappingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/sportscore-map", {
+        headers: authHeader,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSportscoreMappings(
+          Array.isArray(data.mappings) ? data.mappings : [],
+        );
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setSportscoreMappingsLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSaveSportscoreMapping = async () => {
+    const sport = sportscoreForm.sport.trim().toLowerCase();
+    const statpalMatchId = sportscoreForm.statpalMatchId.trim();
+    const sportscoreId = sportscoreForm.sportscoreId.trim();
+    if (!sport || !statpalMatchId || !sportscoreId) {
+      toast.error("Esporte, ID Statpal e slug SportScore são obrigatórios");
+      return;
+    }
+    setSportscoreSaving(true);
+    try {
+      const res = await fetch("/api/admin/sportscore-map", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          sport,
+          statpalMatchId,
+          sportscoreId,
+          homeTeam: sportscoreForm.homeTeam.trim() || undefined,
+          awayTeam: sportscoreForm.awayTeam.trim() || undefined,
+          matchDate: sportscoreForm.matchDate.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        toast.success("Mapeamento salvo");
+        setSportscoreForm({
+          sport: "football",
+          statpalMatchId: "",
+          sportscoreId: "",
+          homeTeam: "",
+          awayTeam: "",
+          matchDate: "",
+        });
+        await fetchSportscoreMappings();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "Erro ao salvar mapeamento");
+      }
+    } catch {
+      toast.error("Erro ao salvar mapeamento");
+    } finally {
+      setSportscoreSaving(false);
+    }
+  };
+
+  const handleTestSportscoreMatch = async () => {
+    const sport = sportscoreForm.sport.trim().toLowerCase();
+    const homeTeam = sportscoreForm.homeTeam.trim();
+    const awayTeam = sportscoreForm.awayTeam.trim();
+    if (!homeTeam || !awayTeam) {
+      toast.error("Preencha Casa e Fora pra testar o casamento automático");
+      return;
+    }
+    setSportscoreTesting(true);
+    setSportscoreTestResult(null);
+    try {
+      const res = await fetch("/api/admin/sportscore-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ sport, homeTeam, awayTeam }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        setSportscoreTestResult(data);
+      } else {
+        toast.error(data?.error || "Erro ao testar");
+        setSportscoreTestResult(data ?? { error: "Erro ao testar" });
+      }
+    } catch (err) {
+      toast.error("Erro ao testar — verifique a conexão com o servidor");
+      setSportscoreTestResult({
+        error: err instanceof Error ? err.message : "Erro desconhecido",
+      });
+    } finally {
+      setSportscoreTesting(false);
+    }
+  };
+
+  const handleDeleteSportscoreMapping = async (id: number) => {
+    setSportscoreDeletingId(id);
+    try {
+      const res = await fetch(`/api/admin/sportscore-map/${id}`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      if (res.ok) {
+        toast.success("Mapeamento removido");
+        await fetchSportscoreMappings();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "Erro ao remover mapeamento");
+      }
+    } catch {
+      toast.error("Erro ao remover mapeamento");
+    } finally {
+      setSportscoreDeletingId(null);
+    }
+  };
+
   const fetchEventRuntime = useCallback(async () => {
     if (!token) return;
     setRuntimeLoading(true);
@@ -1077,8 +1236,9 @@ export default function AdminPage() {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
+      fetchSportscoreMappings();
     }
-  }, [token, activeTab, fetchEventRuntime, fetchCompetitions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, activeTab, fetchEventRuntime, fetchCompetitions, fetchSportscoreMappings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openUserDetail = async (user: AdminUser) => {
     setDetailLoading(true);
@@ -1804,6 +1964,7 @@ export default function AdminPage() {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
+      fetchSportscoreMappings();
     }
   };
 
@@ -5154,6 +5315,228 @@ export default function AdminPage() {
                               </span>
                             </div>
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* SportScore Match Tracker — mapeamento de IDs */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                    <Activity size={16} className="text-blue-400" />
+                    <span className="font-bold text-sm text-zinc-300">
+                      Match Tracker (SportScore)
+                    </span>
+                    <span className="text-xs text-zinc-600">
+                      liga o ID da partida da Statpal ao slug do jogo na SportScore (ex: time-casa-vs-time-fora) para exibir o widget do tracker
+                    </span>
+                    <Button
+                      onClick={fetchSportscoreMappings}
+                      variant="outline"
+                      size="sm"
+                      className="ml-auto h-8 border-zinc-700 text-zinc-300"
+                    >
+                      <RefreshCw
+                        size={13}
+                        className={sportscoreMappingsLoading ? "animate-spin" : ""}
+                      />
+                    </Button>
+                  </div>
+
+                  <div className="p-5 border-b border-zinc-800 grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <select
+                      value={sportscoreForm.sport}
+                      onChange={(e) =>
+                        setSportscoreForm((f) => ({ ...f, sport: e.target.value }))
+                      }
+                      className="h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                    >
+                      {Object.entries(SPORT_LABEL).map(([k, v]) => (
+                        <option key={k} value={k}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      placeholder="ID Statpal da partida"
+                      value={sportscoreForm.statpalMatchId}
+                      onChange={(e) =>
+                        setSportscoreForm((f) => ({
+                          ...f,
+                          statpalMatchId: e.target.value,
+                        }))
+                      }
+                      className="bg-zinc-800 border-zinc-700 text-white h-9"
+                    />
+                    <Input
+                      placeholder="Slug SportScore (ex: toronto-fc-ii-vs-inter-miami-b)"
+                      value={sportscoreForm.sportscoreId}
+                      onChange={(e) =>
+                        setSportscoreForm((f) => ({
+                          ...f,
+                          sportscoreId: e.target.value,
+                        }))
+                      }
+                      className="bg-zinc-800 border-zinc-700 text-white h-9"
+                    />
+                    <Input
+                      placeholder="Casa (opcional, só referência)"
+                      value={sportscoreForm.homeTeam}
+                      onChange={(e) =>
+                        setSportscoreForm((f) => ({
+                          ...f,
+                          homeTeam: e.target.value,
+                        }))
+                      }
+                      className="bg-zinc-800 border-zinc-700 text-white h-9"
+                    />
+                    <Input
+                      placeholder="Fora (opcional, só referência)"
+                      value={sportscoreForm.awayTeam}
+                      onChange={(e) =>
+                        setSportscoreForm((f) => ({
+                          ...f,
+                          awayTeam: e.target.value,
+                        }))
+                      }
+                      className="bg-zinc-800 border-zinc-700 text-white h-9"
+                    />
+                    <Button
+                      onClick={handleSaveSportscoreMapping}
+                      disabled={sportscoreSaving}
+                      className="h-9 bg-blue-600 hover:bg-blue-500"
+                    >
+                      {sportscoreSaving ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        "Salvar mapeamento"
+                      )}
+                    </Button>
+                    <Button
+                      onClick={handleTestSportscoreMatch}
+                      disabled={sportscoreTesting}
+                      className="h-9 bg-zinc-700 hover:bg-zinc-600 text-white"
+                    >
+                      {sportscoreTesting ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        "Testar casamento automático"
+                      )}
+                    </Button>
+                  </div>
+
+                  {sportscoreTestResult && (
+                    <div
+                      className="px-5 py-4"
+                      style={{ background: "#18181b", borderBottom: "1px solid #27272a" }}
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        {sportscoreTestResult.result ? (
+                          <>
+                            <CheckCircle size={15} style={{ color: "#34d399" }} />
+                            <span className="text-sm font-bold" style={{ color: "#34d399" }}>
+                              Encontrado: slug "{sportscoreTestResult.result.slug}"
+                              {sportscoreTestResult.result.id
+                                ? ` · trackerId ${sportscoreTestResult.result.id}`
+                                : ""}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle size={15} style={{ color: "#f87171" }} />
+                            <span className="text-sm font-bold" style={{ color: "#f87171" }}>
+                              {sportscoreTestResult.error || "Não encontrado"}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {sportscoreTestResult.detail && (
+                        <div className="text-xs mb-2 font-mono" style={{ color: "#a1a1aa" }}>
+                          {sportscoreTestResult.detail}
+                        </div>
+                      )}
+                      {sportscoreTestResult.steps && sportscoreTestResult.steps.length > 0 && (
+                        <div className="space-y-1.5">
+                          {sportscoreTestResult.steps.map((s, i) => (
+                            <div
+                              key={i}
+                              className="text-xs px-2.5 py-1.5 rounded"
+                              style={{
+                                background: s.ok ? "#052e21" : "#27272a",
+                                color: s.ok ? "#6ee7b7" : "#d4d4d8",
+                                border: `1px solid ${s.ok ? "#065f46" : "#3f3f46"}`,
+                              }}
+                            >
+                              <span className="font-bold uppercase mr-2">{s.step}</span>
+                              {s.status != null && (
+                                <span className="font-mono mr-2">HTTP {s.status}</span>
+                              )}
+                              {s.detail}
+                              <div className="font-mono mt-0.5 break-all" style={{ color: "#71717a" }}>
+                                {s.url}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {sportscoreMappingsLoading ? (
+                    <div className="p-8 flex justify-center">
+                      <Loader2 size={20} className="animate-spin text-zinc-500" />
+                    </div>
+                  ) : sportscoreMappings.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-zinc-600">
+                      Nenhum mapeamento cadastrado ainda.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800">
+                      {sportscoreMappings.map((m) => (
+                        <div
+                          key={m.id}
+                          className="px-5 py-3 flex items-center gap-3 flex-wrap"
+                        >
+                          <span
+                            className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${m.source === "manual" ? "bg-blue-900/50 text-blue-300" : "bg-emerald-900/50 text-emerald-300"}`}
+                          >
+                            {m.source === "manual" ? "manual" : "auto"}
+                          </span>
+                          <span className="text-xs font-bold text-zinc-400 uppercase">
+                            {SPORT_LABEL[m.sport] || m.sport}
+                          </span>
+                          <span className="text-sm text-zinc-300">
+                            {m.homeTeam && m.awayTeam
+                              ? `${m.homeTeam} vs ${m.awayTeam}`
+                              : "—"}
+                          </span>
+                          <span className="text-xs text-zinc-600 font-mono">
+                            statpal:{m.statpalMatchId}
+                          </span>
+                          <span className="text-xs text-blue-400 font-mono">
+                            slug:{m.sportscoreId}
+                          </span>
+                          {m.trackerId && (
+                            <span className="text-xs text-purple-400 font-mono">
+                              trackerId:{m.trackerId}
+                            </span>
+                          )}
+                          <span className="text-xs text-zinc-700">
+                            {fmtDate(m.updatedAt)}
+                          </span>
+                          <Button
+                            onClick={() => handleDeleteSportscoreMapping(m.id)}
+                            disabled={sportscoreDeletingId === m.id}
+                            size="sm"
+                            className="ml-auto h-7 bg-red-900/60 hover:bg-red-800 text-red-200"
+                          >
+                            {sportscoreDeletingId === m.id ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={12} />
+                            )}
+                          </Button>
                         </div>
                       ))}
                     </div>

@@ -122,6 +122,55 @@ const liveCases: LiveSettlementCase[] = [
     },
     expected: "won",
   },
+  // Regression: a legacy "current set" exact-score bet (ses-H-A) placed on
+  // set 1 must settle off set 1 once it's finished, even after the match
+  // has moved on to set 3 — it must not silently start checking whatever
+  // set is live *now* (tennisSets[tennisSets.length - 1]).
+  {
+    name: "live legacy ses- exact set score wins off set 1 even once the match has moved to set 3",
+    selection: makeSelection("ses-6-4"),
+    score: {
+      home: 1,
+      away: 1,
+      status: "live",
+      tennisSets: [
+        [6, 4],
+        [4, 6],
+        [6, 2],
+      ],
+    },
+    expected: "won",
+  },
+  {
+    name: "live legacy ses- exact set score stays pending while later sets are still unresolved",
+    selection: makeSelection("ses-6-4"),
+    score: {
+      home: 1,
+      away: 0,
+      status: "live",
+      tennisSets: [
+        [6, 3],
+        [4, 6],
+        [3, 2],
+      ],
+    },
+    expected: null,
+  },
+  {
+    name: "live legacy ses- exact set score loses once every set played is finished without a match",
+    selection: makeSelection("ses-6-4"),
+    score: {
+      home: 1,
+      away: 1,
+      status: "live",
+      tennisSets: [
+        [6, 3],
+        [4, 6],
+        [6, 2],
+      ],
+    },
+    expected: "lost",
+  },
 ];
 
 for (const tc of liveCases) {

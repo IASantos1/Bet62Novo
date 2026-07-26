@@ -2127,11 +2127,71 @@ function tennisSetFinished(setScore: [number, number]): boolean {
     return false;
   }
 
-  const maxGames = Math.max(homeGames, awayGames);
-  const diff = Math.abs(homeGames - awayGames);
-  const isFinished = maxGames >= 7 || (maxGames >= 6 && diff >= 2);
+  return isValidFinishedTennisSetScore(homeGames, awayGames);
+}
 
-  return isFinished;
+/**
+ * Validates a game score against the actual rules of a tennis set, rather
+ * than a loose "looks finished" heuristic. A provider glitch or transient
+ * bad frame can hand us a score like 7-4 or 8-1 — those satisfy a naive
+ * "maxGames >= 7" check but can never occur in a real set, since past 6-6
+ * the set is only won by a 2-game margin or, at exactly 7-6, a tiebreak.
+ * Treating those as a genuine finished result would settle bets against
+ * data that was never real.
+ *
+ *   6-0 .. 6-4  (and reverse)  — standard set, won by 2+
+ *   7-5         (and reverse)  — went past 6-6, won by 2
+ *   7-6         (and reverse)  — tiebreak set (score is always 7-6 on the
+ *                                game count regardless of the tiebreak's
+ *                                own point margin)
+ *   8-6, 9-7, … (and reverse)  — extended no-tiebreak advantage set, still
+ *                                used for some deciding sets; always a
+ *                                clean 2-game margin once past 7-5
+ */
+function isValidFinishedTennisSetScore(home: number, away: number): boolean {
+  const max = Math.max(home, away);
+  const min = Math.min(home, away);
+  const diff = max - min;
+
+  if (max === 6) return diff >= 2;
+  if (max === 7) return diff === 1 || diff === 2;
+  if (max >= 8) return diff === 2;
+  return false;
+}
+
+/**
+ * True only for game counts that can never occur in a tennis set, in any
+ * format and at any point (finished or still in progress) — a stricter,
+ * "definitely corrupt" cousin of isValidFinishedTennisSetScore. That
+ * function also rejects scores that are simply *not finished yet*, which
+ * covers the overwhelming majority of "invalid" scores during a live set
+ * (e.g. 4-3) — those are fine, just not over. This one only flags margins
+ * that are physically impossible.
+ *
+ * Below 6 games any gap is fine (a set can finish 6-0 through 6-4, so a
+ * wide margin alone means nothing — 6-2 is a perfectly normal score).
+ * Once the leader is past 6 games though, that's only reachable if the
+ * trailing player was already at 5 or 6 (a set ends the instant someone
+ * both reaches 6 and leads by 2, so 7+ games for the leader implies the
+ * trailer kept pace to at least 5). And from that point on the gap can
+ * never exceed 2, in either the tiebreak or advantage-set format — the
+ * set always ends the moment either side goes 2 games clear. A state
+ * that violates either of those (e.g. 7-4, 8-1) can only be a provider
+ * glitch, so it's safe to treat as corrupt data unconditionally.
+ */
+function isImpossibleTennisGameState(home: number, away: number): boolean {
+  if (
+    !Number.isFinite(home) ||
+    !Number.isFinite(away) ||
+    home < 0 ||
+    away < 0
+  ) {
+    return true;
+  }
+  const max = Math.max(home, away);
+  const min = Math.min(home, away);
+  if (max <= 6) return false;
+  return min < 5 || max - min > 2;
 }
 
 function calculateTotalGamesFromSets(sets: Array<[number, number]>): number {
@@ -2252,6 +2312,22 @@ export function scoreOutcomeForSel(
 
   let winning: boolean | null = null;
   let voided = false;
+
+  // ── Corrupt tennis set data → void, don't wait on it ────────────────────
+  // Only checked here, against the *final* result (never the live path):
+  // a bad live frame is usually transient and self-corrects on the next
+  // poll, so voiding mid-match on a single glitch would be too eager. Once
+  // the match has an official final result, a game count that's impossible
+  // in any tennis format (e.g. 7-4, 8-1 — more than a 2-game margin past 6)
+  // is a genuine provider error, not just a still-unsettled leg, and every
+  // market touching that set should void immediately instead of sitting
+  // pending until the 72h no-result timeout.
+  if (inferSelectionSport(sel.selection) === "tennis") {
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.some(([h, a]) => isImpossibleTennisGameState(h, a))) {
+      return "void";
+    }
+  }
 
   // ── Corners O/U (requires stats) ──────────────────────────────────────────
   if (/^[ou]c\d+$/.test(s)) {
@@ -2463,6 +2539,28 @@ export function scoreOutcomeForSel(
     const setScore = getTennisSetsFromExtras(extra?.extras)[setIndex] ?? null;
     if (!setScore || !tennisSetFinished(setScore)) return null;
     winning = setScore[0] === wantHome && setScore[1] === wantAway;
+  }
+  // ── Legacy "current set" exact score (ses-H-A) ─────────────────────────────
+  // Placed while a specific set was live, but the key doesn't record *which*
+  // set that was — unlike sc1-/sc2-/sc3- above. Only the in-play settlement
+  // path (liveDefinitiveOutcomeForSel) can resolve this precisely (it knows
+  // which set was current at evaluation time); once the match has moved on
+  // this final-result path can only check whether the score occurred in any
+  // completed set, and only call it lost once every set is finished.
+  else if (/^ses-(\d+)-(\d+)$/.test(s)) {
+    const m = s.match(/^ses-(\d+)-(\d+)$/)!;
+    const wantHome = Number(m[1]!);
+    const wantAway = Number(m[2]!);
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const finishedSets = sets.filter(tennisSetFinished);
+    if (finishedSets.length === 0) return null;
+    const won = finishedSets.some(
+      ([h, a]) => h === wantHome && a === wantAway,
+    );
+    if (won) return "won";
+    if (finishedSets.length < sets.length) return null;
+    return "lost";
   }
   // ── Total sets O/U (tennis) ───────────────────────────────────────────────
   else if (/^([ou])sets(35|25)?$/.test(s)) {
@@ -3755,15 +3853,34 @@ function liveDefinitiveOutcomeForSel(
         : "lost";
   }
 
-  if (/^sc([123])-(\d-\d)$/.test(s) || /^ses-(\d-\d)$/.test(s)) {
-    const match = s.match(/^sc([123])-(\d-\d)$/) || s.match(/^ses-(\d-\d)$/);
-    const setNum = s.startsWith("sc")
-      ? Number(match?.[1] ?? 0)
-      : tennisSets.length;
-    const wanted = s.startsWith("sc") ? match?.[2] : match?.[1];
+  if (/^sc([123])-(\d-\d)$/.test(s)) {
+    const match = s.match(/^sc([123])-(\d-\d)$/)!;
+    const setNum = Number(match[1]!);
+    const wanted = match[2]!;
     const setScore = tennisSets[setNum - 1] ?? null;
-    if (!wanted || !setScore || !tennisSetFinished(setScore)) return null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
     return `${setScore[0]}-${setScore[1]}` === wanted ? "won" : "lost";
+  }
+
+  if (/^ses-(\d-\d)$/.test(s)) {
+    // Legacy "current set" exact-score format — the key never recorded
+    // *which* set the bet was actually about (unlike sc1-/sc2-/sc3-
+    // above), so indexing into tennisSets[tennisSets.length - 1] here
+    // silently drifted to whatever set is live *right now* instead of
+    // the one the bet was placed against — a bet made on set 1 would
+    // start getting graded against set 3 once the match moved on. Same
+    // safe interpretation as the final-result resolver: does the backed
+    // score occur in any set that's actually finished, won as soon as
+    // one matches, and only call it lost once every set played so far
+    // has finished without a match.
+    const match = s.match(/^ses-(\d-\d)$/)!;
+    const wanted = match[1]!;
+    if (tennisSets.length === 0) return null;
+    const finishedSets = tennisSets.filter(tennisSetFinished);
+    if (finishedSets.length === 0) return null;
+    const won = finishedSets.some(([h, a]) => `${h}-${a}` === wanted);
+    if (won) return "won";
+    return finishedSets.length === tennisSets.length ? "lost" : null;
   }
 
   const qWinner = s.match(/^q([1234])-(home|away)$/);

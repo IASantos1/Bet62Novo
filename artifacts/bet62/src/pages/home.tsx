@@ -58,6 +58,8 @@ import {
   CalendarDays,
   ListOrdered,
   Search,
+  LayoutGrid,
+  ArrowLeft,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -162,6 +164,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import MiniFieldView from "@/components/MiniFieldView";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -3732,6 +3735,8 @@ type StoredSelection = {
   settlementNote?: string;
   /** Per-selection extras stored at settlement (set scores etc.) for rich result display. */
   selExtras?: { tennis?: { sets: [number, number][] } };
+  /** Groups legs of a same-event combo (Bet Builder "builder-…" / prediction "pred-…"). */
+  comboTag?: string;
 };
 
 type OpenBetSelectionState = {
@@ -5617,6 +5622,58 @@ export default function Home({
     | "lineups"
     | "confrontos"
   >("markets");
+  // Match header ↔ mini 2D field toggle
+  const [showFieldView, setShowFieldView] = useState(false);
+  useEffect(() => {
+    setShowFieldView(false);
+  }, [expandedMatch?.id]);
+
+  // SportScore Match Tracker widget — resolves lazily per match since it
+  // needs a separate ID lookup (Statpal and SportScore use unrelated ID
+  // spaces). null = looked up, no mapping yet; undefined = not looked up.
+  // sportscoreId = match slug (embed widget / API); trackerId = numeric id
+  // used specifically by the raw position-data tracker endpoint.
+  const [sportscoreId, setSportscoreId] = useState<string | null | undefined>(
+    undefined,
+  );
+  const [sportscoreTrackerId, setSportscoreTrackerId] = useState<
+    string | null
+  >(null);
+  const [sportscoreDebugSteps, setSportscoreDebugSteps] = useState<
+    Array<{ step: string; url: string; ok: boolean; status?: number; detail: string }>
+  >([]);
+  useEffect(() => {
+    setSportscoreId(undefined);
+    setSportscoreTrackerId(null);
+    setSportscoreDebugSteps([]);
+    if (!expandedMatch?.id) return;
+    const sport = expandedMatch.sport || "football";
+    const matchId = expandedMatch.id;
+    const qs = new URLSearchParams();
+    if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
+    if (expandedMatch.away) qs.set("awayTeam", expandedMatch.away);
+    qs.set("debug", "1");
+    let cancelled = false;
+    fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) {
+          setSportscoreId(data?.sportscoreId ?? null);
+          setSportscoreTrackerId(data?.trackerId ?? null);
+          setSportscoreDebugSteps(Array.isArray(data?.steps) ? data.steps : []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSportscoreId(null);
+          setSportscoreTrackerId(null);
+          setSportscoreDebugSteps([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedMatch?.id, expandedMatch?.sport, expandedMatch?.home, expandedMatch?.away]);
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);
@@ -14067,7 +14124,7 @@ export default function Home({
                             ? renderExactSetColumns(
                                 `${cur}º Set — Resultado Correto`,
                                 liveSetExactScore,
-                                "ses",
+                                `sc${cur}`,
                                 "sets",
                                 "setExactScore",
                               )
@@ -16914,8 +16971,25 @@ export default function Home({
       if (/^ses-/.test(rawSel)) {
         const sesM = rawSel.match(/^ses-(\d+)-(\d+)$/);
         if (sesM && (Number(sesM[1]) > 3 || Number(sesM[2]) > 3)) {
-          // Game-score format (e.g. ses-6-3): show the most recent set's game score
-          // (the set being played when this bet was placed, or the last completed set)
+          // Game-score format (e.g. ses-6-3): the key itself never recorded
+          // which set this was about, so showing "whatever set is live
+          // right now" silently drifts away from the set the bet was
+          // placed on (a 1st-set bet starts showing 3rd-set scores once
+          // the match moves on). Prefer, in order: (1) the set number the
+          // stored label still remembers ("1º Set" / "4-6 · 1º Set"),
+          // (2) a finished set that actually matches the backed score,
+          // (3) the live/most recent set, only as a last resort.
+          const lbl = String(sel.label ?? "");
+          const setNumM = lbl.match(/(\d+)º\s*Set/i);
+          const wanted = `${sesM[1]}-${sesM[2]}`;
+          if (setNumM) {
+            const sv = sets[Number(setNumM[1]) - 1];
+            if (sv) return `${sv[0]}-${sv[1]}`;
+          }
+          const matchingSet = sets.find(
+            ([sh, sa]) => `${sh}-${sa}` === wanted,
+          );
+          if (matchingSet) return `${matchingSet[0]}-${matchingSet[1]}`;
           const sv = sets.length > 0 ? sets[sets.length - 1] : undefined;
           return sv ? `${sv[0]}-${sv[1]}` : "0-0";
         }
@@ -17064,8 +17138,37 @@ export default function Home({
     const fs = sel.finalScore;
     const sets = (sel.selExtras as { tennis?: { sets: [number, number][] } } | undefined)?.tennis?.sets;
 
-    // Exact set-score / current-set markets — label is already self-explanatory
-    if (/^(sc[1-5]-|ses-)/.test(raw)) return null;
+    // Exact set-score markets (sc{N}-H-A): show the actual score of the
+    // specific set that was bet on, not the match's sets-won tally.
+    const scResM = raw.match(/^sc([1-5])-(\d+)-(\d+)$/);
+    if (scResM) {
+      const idx = Number(scResM[1]) - 1;
+      const sv = sets?.[idx];
+      if (sv) return `${sv[0]} - ${sv[1]}`;
+      return `${scResM[2]} - ${scResM[3]}`;
+    }
+    // Legacy "current set" exact-score markets (ses-H-A): the key itself
+    // never recorded which set this was about, so prefer, in order:
+    // (1) the set number the stored label still remembers ("Nº Set"),
+    // (2) a finished set that actually matches the backed score,
+    // (3) the last set played, only as a last resort.
+    const sesResM = raw.match(/^ses-(\d+)-(\d+)$/);
+    if (sesResM) {
+      const lbl = String(sel.label ?? "");
+      const setNumM = lbl.match(/(\d+)º\s*Set/i);
+      if (setNumM) {
+        const sv = sets?.[Number(setNumM[1]) - 1];
+        if (sv) return `${sv[0]} - ${sv[1]}`;
+      }
+      const wanted = `${sesResM[1]}-${sesResM[2]}`;
+      const matchingSet = sets?.find(([sh, sa]) => `${sh}-${sa}` === wanted);
+      if (matchingSet) return `${matchingSet[0]} - ${matchingSet[1]}`;
+      if (sets && sets.length > 0) {
+        const sv = sets[sets.length - 1]!;
+        return `${sv[0]} - ${sv[1]}`;
+      }
+      return `${sesResM[1]} - ${sesResM[2]}`;
+    }
 
     // Match winner (h, a, home, away and variants)
     if (/^(h|a|home|away|1|2|draw|homeOrDraw|awayOrDraw|homeOrAway)$/.test(raw)) {
@@ -17724,6 +17827,85 @@ export default function Home({
                 <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
+                    {showFieldView ? (
+                      <div className="mb-3">
+                        {sportscoreId ? (
+                          <div className="flex flex-col items-center">
+                            <iframe
+                              key={sportscoreId}
+                              src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
+                              title="Match Tracker"
+                              width={320}
+                              height={420}
+                              className="border border-zinc-800/60 rounded-lg block max-w-full"
+                              loading="lazy"
+                              referrerPolicy="no-referrer-when-downgrade"
+                            />
+                            <div className="text-[11px] text-zinc-500 text-center py-1.5">
+                              Football live match tracker by{" "}
+                              <a
+                                href="https://sportscore.com/football/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-400 font-semibold hover:underline"
+                              >
+                                SportScore
+                              </a>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <MiniFieldView
+                              sport={expandedMatch.sport}
+                              homeTeam={teamNamePt(expandedMatch.home)}
+                              awayTeam={teamNamePt(expandedMatch.away)}
+                              liveClockLabel={
+                                expandedMatch.isLive
+                                  ? (() => {
+                                      const m = getDisplayMinute(expandedMatch);
+                                      const isFootballClock =
+                                        !expandedMatch.sport || expandedMatch.sport === "football";
+                                      const tag = isFootballClock
+                                        ? getFootballPhaseTag(expandedMatch, m)
+                                        : null;
+                                      if (m <= 0) return "AO VIVO";
+                                      if (tag === "HT") return "HT";
+                                      if (tag && isFootballClock)
+                                        return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                                      if (tag) return `${m}' · ${tag}`;
+                                      return `${m}'`;
+                                    })()
+                                  : null
+                              }
+                            />
+                            <div className="mt-2 text-center text-[10px] text-zinc-600 font-mono break-all px-2">
+                              {sportscoreId === undefined
+                                ? "Buscando tracker da SportScore..."
+                                : `Tracker: não encontrado — "${expandedMatch.home}" vs "${expandedMatch.away}" (${expandedMatch.sport || "football"}, id ${expandedMatch.id})`}
+                            </div>
+                            {sportscoreId === null && sportscoreDebugSteps.length > 0 && (
+                              <div className="mt-1.5 space-y-1 px-2">
+                                {sportscoreDebugSteps.map((s, i) => (
+                                  <div
+                                    key={i}
+                                    className="text-[9px] font-mono px-2 py-1 rounded break-all"
+                                    style={{
+                                      background: s.ok ? "#052e21" : "#27272a",
+                                      color: s.ok ? "#6ee7b7" : "#a1a1aa",
+                                    }}
+                                  >
+                                    <span className="font-bold uppercase mr-1">{s.step}</span>
+                                    {s.status != null && <span className="mr-1">HTTP {s.status}</span>}
+                                    {s.detail}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <>
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="min-w-0 flex items-center gap-2">
                         <span className="text-sm leading-none shrink-0">
@@ -17867,7 +18049,23 @@ export default function Home({
                         );
                       })()}
                     </div>
+                      </>
+                    )}
 
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => setShowFieldView((v) => !v)}
+                        className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md active:scale-95 transition-transform"
+                        aria-label={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
+                        title={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
+                      >
+                        {showFieldView ? (
+                          <ArrowLeft size={14} className="text-white" />
+                        ) : (
+                          <LayoutGrid size={14} className="text-white" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -17898,6 +18096,8 @@ export default function Home({
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
                     liveExtra={(expandedMatch as any)._liveExtra}
+                    homeScore={expandedMatch.homeScore}
+                    awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
                   />
                 )}
@@ -24499,118 +24699,156 @@ export default function Home({
                             : null;
 
                           const isActivePending = isPending;
-                          // Card & text colours
-                          const cardBg = isLost ? "bg-[#7b1111]" : "bg-white";
-                          const selsBg = isLost ? "bg-[#8f1616]" : "bg-white";
-                          const divider = isLost
-                            ? "divide-[#a02020]/50"
-                            : "divide-gray-100";
-                          const txtMain = isLost
-                            ? "text-white"
-                            : "text-gray-900";
-                          const txtSub = isLost
-                            ? "text-red-200"
-                            : "text-gray-500";
-                          const summBg = isLost
-                            ? "bg-[#6b0f0f]/60 border-[#a02020]/40"
-                            : "bg-gray-50 border-gray-100";
-                          const summDiv = isLost
-                            ? "divide-[#a02020]/30"
-                            : "divide-gray-100";
-                          const summTxt = isLost
-                            ? "text-red-100"
-                            : "text-gray-600";
+                          // Card & text colours — same dark card in every status
+                          // (like the big-house reference), status communicated
+                          // via the badge + accent glow + per-leg icons rather
+                          // than the whole card flipping to white once resolved.
+                          // Follows the app-wide isDarkTheme pattern so it also
+                          // has a proper light-mode variant.
+                          const cardBg = isDarkTheme ? "bg-zinc-900" : "bg-white";
+                          const cardBorder = isDarkTheme
+                            ? "border-zinc-800/80"
+                            : "border-zinc-200";
+                          const selsBg = cardBg;
+                          const divider = isDarkTheme
+                            ? "divide-zinc-800"
+                            : "divide-zinc-100";
+                          const txtMain = isDarkTheme ? "text-white" : "text-zinc-900";
+                          const txtSub = isDarkTheme ? "text-zinc-400" : "text-zinc-500";
+                          const summDiv = isDarkTheme
+                            ? "divide-zinc-800/80"
+                            : "divide-zinc-100";
+                          const summTxt = isDarkTheme ? "text-zinc-400" : "text-zinc-500";
+                          const boxBorder = isDarkTheme
+                            ? "border-zinc-800"
+                            : "border-zinc-200";
+                          const boxBg = isDarkTheme ? "bg-zinc-900" : "bg-white";
+                          const footerBorder = isDarkTheme
+                            ? "border-zinc-800/70"
+                            : "border-zinc-100";
+                          // Amount colours used in the summary rows below —
+                          // the dark-theme shades (400/300) are too pale to
+                          // read on a white card, so light theme gets a
+                          // darker step of the same hue.
+                          const posAmountCls = isDarkTheme ? "text-green-400" : "text-green-600";
+                          const negAmountCls = isDarkTheme ? "text-red-400" : "text-red-600";
+                          const lostAmountCls = isDarkTheme ? "text-red-300" : "text-red-500";
+                          const cashoutAmountCls = isDarkTheme ? "text-yellow-400" : "text-yellow-600";
+                          const voidAmountCls = isDarkTheme ? "text-blue-300" : "text-blue-600";
+                          const tagWinCls = isDarkTheme ? "text-green-400" : "text-green-600";
+                          const tagLoseCls = isDarkTheme ? "text-red-400" : "text-red-600";
+                          const tagVoidCls = isDarkTheme ? "text-zinc-400" : "text-zinc-500";
+                          const liveLabelCls = isDarkTheme ? "text-red-400" : "text-red-600";
+                          const statusGlow = isWon
+                            ? "0 8px 28px rgba(16,185,129,0.28)"
+                            : isLost
+                              ? "0 8px 28px rgba(220,38,38,0.28)"
+                              : isCashedOut
+                                ? "0 8px 28px rgba(234,179,8,0.28)"
+                                : isDarkTheme
+                                  ? "0 4px 20px rgba(0,0,0,0.5)"
+                                  : "0 4px 16px rgba(0,0,0,0.1)";
+                          const statusBadge = isWon
+                            ? { label: "Ganha", cls: "bg-emerald-500 text-white" }
+                            : isLost
+                              ? { label: "Perdida", cls: "bg-[#5c0f0f] text-white border border-red-900/60" }
+                              : isCashedOut
+                                ? { label: "Cash Out", cls: "bg-yellow-400 text-yellow-950" }
+                                : isVoided
+                                  ? { label: "Anulada", cls: "bg-zinc-600 text-white" }
+                                  : {
+                                      label: "Pendente",
+                                      cls: isDarkTheme
+                                        ? "bg-white/15 text-white border border-white/30"
+                                        : "bg-zinc-100 text-zinc-700 border border-zinc-300",
+                                    };
+                          // Compact per-leg status dots for multiples — mirrors the
+                          // little icon row the reference shows next to "Múltipla (N)".
+                          const legIcons = isMultiple
+                            ? sels.map((sel) => getSelOutcome(sel, bet.status))
+                            : [];
 
                           return (
                             <div
                               key={bet.id}
-                              className={`rounded-2xl overflow-hidden shadow-xl ${cardBg}`}
-                              style={{
-                                boxShadow: isLost
-                                  ? "0 8px 32px rgba(120,0,0,0.5)"
-                                  : "0 4px 20px rgba(0,0,0,0.35)",
-                              }}
+                              className={`relative rounded-2xl overflow-hidden border ${cardBorder} ${cardBg}`}
+                              style={{ boxShadow: statusGlow }}
                             >
-                              {/* ── HEADER ── */}
-                              <div className="bg-red-700 px-5 py-4 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="bg-white/20 rounded-xl p-2 shrink-0">
-                                    <ListOrdered
-                                      size={20}
-                                      className="text-white"
-                                    />
+                              {/* ── HEADER — plain dark bg, no colour band ── */}
+                              <div className="px-5 pt-5 pb-1 flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="font-black text-white text-[19px] leading-tight">
+                                    {isMultiple ? `Múltipla (${sels.length})` : "Simples"}
                                   </div>
-                                  <div>
-                                    <div className="font-black text-white text-[17px] leading-tight italic">
-                                      Boletim de Aposta
+                                  {/* Per-leg status dots — same idea as the reference's
+                                      icon row next to "Múltipla (N)" */}
+                                  {isMultiple && (
+                                    <div className="flex items-center gap-1 mt-2 flex-wrap">
+                                      {legIcons.map((oc, li) => (
+                                        <span
+                                          key={li}
+                                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                                            oc === "green" || oc === "live-win"
+                                              ? "bg-emerald-500"
+                                              : oc === "red" || oc === "live-lose"
+                                                ? "bg-red-950 border border-red-800/70"
+                                                : oc === "void"
+                                                  ? "bg-zinc-700"
+                                                  : oc === "cashout"
+                                                    ? "bg-yellow-400"
+                                                    : "bg-red-600/70 animate-pulse"
+                                          }`}
+                                        >
+                                          {(oc === "green" || oc === "live-win") && (
+                                            <Check size={11} className="text-white" strokeWidth={3.5} />
+                                          )}
+                                          {(oc === "red" || oc === "live-lose") && (
+                                            <X size={11} className="text-white" strokeWidth={3.5} />
+                                          )}
+                                          {oc === "void" && (
+                                            <span className="text-white text-[9px] font-black leading-none">—</span>
+                                          )}
+                                        </span>
+                                      ))}
                                     </div>
-                                    <div className="flex items-center gap-1.5 text-red-200 text-[11px] font-medium mt-0.5">
-                                      <CalendarDays size={11} />
-                                      {dateStr} • {timeStr}
-                                    </div>
-                                    {!isPending && settledAt && (
-                                      <div className="text-red-100 text-[11px] font-medium mt-0.5">
-                                        Liquidada: {settledDateStr} •{" "}
-                                        {settledTimeStr}
-                                        {settlementMins !== null
-                                          ? ` (${settlementMins} min)`
-                                          : ""}
-                                      </div>
-                                    )}
-                                  </div>
+                                  )}
                                 </div>
-                                {isActivePending && (
-                                  <div className="w-9 h-9 bg-white/25 border-2 border-white/60 rounded-full flex items-center justify-center shrink-0">
-                                    <Check
-                                      size={18}
-                                      className="text-white"
-                                      strokeWidth={3}
-                                    />
-                                  </div>
-                                )}
-                                {isWon && (
-                                  <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center shrink-0 shadow-lg">
-                                    <Check
-                                      size={18}
-                                      className="text-red-600"
-                                      strokeWidth={3}
-                                    />
-                                  </div>
-                                )}
-                                {isLost && (
-                                  <div className="w-9 h-9 bg-white/20 border-2 border-white/40 rounded-full flex items-center justify-center shrink-0">
-                                    <X
-                                      size={18}
-                                      className="text-white"
-                                      strokeWidth={3}
-                                    />
-                                  </div>
-                                )}
-                                {isCashedOut && (
-                                  <div className="w-9 h-9 bg-yellow-400 rounded-full flex items-center justify-center shrink-0 shadow-lg">
-                                    <CircleDollarSign
-                                      size={18}
-                                      className="text-yellow-900"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* ── SELECTIONS HEADER ── */}
-                              <div
-                                className={`px-5 pt-4 pb-2 flex items-center gap-2 ${isLost ? "bg-[#8f1616]" : "bg-gray-50 border-b border-gray-100"}`}
-                              >
-                                <ListOrdered size={13} className={txtSub} />
                                 <span
-                                  className={`text-[11px] font-black uppercase tracking-widest ${txtSub}`}
+                                  className={`shrink-0 text-[11px] font-black uppercase tracking-wide px-3 py-1.5 rounded-full ${statusBadge.cls}`}
                                 >
-                                  Seleções
+                                  {statusBadge.label}
                                 </span>
                               </div>
 
                               {/* ── SELECTIONS LIST ── */}
-                              <div className={`${selsBg} divide-y ${divider}`}>
+                              <div className={`${selsBg} divide-y ${divider} mt-3`}>
                                 {sels.map((sel, i) => {
+                                  // Bet Builder same-game combos store the whole
+                                  // combined odd on their first leg and a 1.00
+                                  // placeholder on every other leg (so the ticket's
+                                  // total math still works) — those placeholders
+                                  // have no meaning on their own and shouldn't be
+                                  // shown; a connector bar down the left margin
+                                  // shows the legs belong to one combo instead.
+                                  const builderTag = (s: StoredSelection) =>
+                                    typeof s.comboTag === "string" &&
+                                    s.comboTag.startsWith("builder-")
+                                      ? s.comboTag
+                                      : null;
+                                  const comboTag = builderTag(sel);
+                                  const isComboMember = comboTag !== null;
+                                  const isFirstInGroup =
+                                    isComboMember &&
+                                    (i === 0 || builderTag(sels[i - 1]!) !== comboTag);
+                                  const isLastInGroup =
+                                    isComboMember &&
+                                    (i === sels.length - 1 ||
+                                      builderTag(sels[i + 1]!) !== comboTag);
+                                  const showComboConnector =
+                                    isComboMember && !(isFirstInGroup && isLastInGroup);
+                                  const hideOddPill =
+                                    isComboMember && Number(sel.odd) <= 1.001;
+
                                   const outcome = getSelOutcome(
                                     sel,
                                     bet.status,
@@ -24640,134 +24878,95 @@ export default function Home({
                                         : `${lm.minute ?? 0}'`
                                     : null;
 
-                                  // Per-selection left icon
+                                  // Per-selection left icon — driven purely by
+                                  // the leg's own outcome so it reads correctly
+                                  // in both light and dark theme.
                                   let leftIcon: ReactNode;
-                                  if (isLost) {
-                                    leftIcon =
-                                      outcome === "void" ? (
-                                        <div className="w-6 h-6 rounded-full bg-zinc-700/40 border border-white/20 flex items-center justify-center shrink-0">
-                                          <span className="text-white text-[11px] font-black leading-none">
-                                            —
-                                          </span>
-                                        </div>
-                                      ) : outcome === "green" ? (
-                                        <div className="w-6 h-6 rounded-full bg-white/30 flex items-center justify-center shrink-0">
-                                          <Check
-                                            size={13}
-                                            className="text-white"
-                                            strokeWidth={3}
-                                          />
-                                        </div>
-                                      ) : outcome === "red" ? (
-                                        <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0">
-                                          <X
-                                            size={13}
-                                            className="text-white"
-                                            strokeWidth={2.5}
-                                          />
-                                        </div>
-                                      ) : (
-                                        <div className="w-6 h-6 rounded-full bg-zinc-800/60 border border-white/20 flex items-center justify-center shrink-0">
-                                          <Clock
-                                            size={13}
-                                            className="text-white"
-                                          />
-                                        </div>
-                                      );
-                                  } else if (isWon) {
-                                    leftIcon =
-                                      outcome === "void" ? (
-                                        <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0">
-                                          <span className="text-zinc-600 text-[11px] font-black leading-none">
-                                            —
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                                          <Check
-                                            size={13}
-                                            className="text-white"
-                                            strokeWidth={3}
-                                          />
-                                        </div>
-                                      );
-                                  } else if (isCashedOut) {
+                                  if (outcome === "cashout") {
                                     leftIcon = (
-                                      <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0">
+                                      <div className="w-6 h-6 rounded-full bg-yellow-500/80 flex items-center justify-center shrink-0">
                                         <CircleDollarSign
                                           size={11}
                                           className="text-white"
                                         />
                                       </div>
                                     );
-                                  } else {
-                                    if (outcome === "live-win") {
-                                      leftIcon = (
-                                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                                          <Check
-                                            size={13}
-                                            className="text-white"
-                                            strokeWidth={3}
-                                          />
-                                        </div>
-                                      );
-                                    } else if (outcome === "live-lose") {
-                                      leftIcon = (
-                                        <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0">
-                                          <X
-                                            size={13}
-                                            className="text-white"
-                                            strokeWidth={2.5}
-                                          />
-                                        </div>
-                                      );
-                                    } else if (outcome === "void") {
-                                      leftIcon = (
-                                        <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0">
-                                          <span className="text-zinc-600 text-[11px] font-black leading-none">
-                                            —
-                                          </span>
-                                        </div>
-                                      );
-                                    } else {
-                                      const storedSport = String(
-                                        sel.sport ?? "",
-                                      )
-                                        .trim()
-                                        .toLowerCase();
-                                      const mkt = String(
-                                        sel.market ?? "",
-                                      ).trim();
-                                      const mt = (
-                                        sel.matchTitle ?? ""
-                                      ).toLowerCase();
-                                      const ticketSport =
-                                        storedSport ||
-                                        (mkt === "quartos" ||
-                                        (mkt === "totais" && mt.includes("nba"))
-                                          ? "basketball"
-                                          : mkt === "periodos" ||
-                                              mkt === "puckLine" ||
-                                              mt.includes("nhl")
-                                            ? "hockey"
-                                            : mkt === "innings" ||
-                                                mt.includes("mlb")
-                                              ? "baseball"
-                                              : mkt === "sets" ||
-                                                  mt.includes("volei") ||
-                                                  mt.includes("volley")
-                                                ? "volleyball"
-                                                : mkt === "jogos" ||
-                                                    mt.includes("tennis") ||
-                                                    mt.includes("tênis")
-                                                  ? "tennis"
-                                                  : "football");
-                                      leftIcon = (
-                                        <span className="text-xl shrink-0 leading-none">
-                                          {sportEmoji(ticketSport)}
+                                  } else if (
+                                    outcome === "green" ||
+                                    outcome === "live-win"
+                                  ) {
+                                    leftIcon = (
+                                      <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                                        <Check
+                                          size={13}
+                                          className="text-white"
+                                          strokeWidth={3}
+                                        />
+                                      </div>
+                                    );
+                                  } else if (
+                                    outcome === "red" ||
+                                    outcome === "live-lose"
+                                  ) {
+                                    leftIcon = (
+                                      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0">
+                                        <X
+                                          size={13}
+                                          className="text-white"
+                                          strokeWidth={2.5}
+                                        />
+                                      </div>
+                                    );
+                                  } else if (outcome === "void") {
+                                    leftIcon = (
+                                      <div
+                                        className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${isDarkTheme ? "bg-zinc-700/50 border-zinc-600" : "bg-zinc-200 border-zinc-300"}`}
+                                      >
+                                        <span
+                                          className={`text-[11px] font-black leading-none ${isDarkTheme ? "text-zinc-300" : "text-zinc-600"}`}
+                                        >
+                                          —
                                         </span>
-                                      );
-                                    }
+                                      </div>
+                                    );
+                                  } else {
+                                    const storedSport = String(
+                                      sel.sport ?? "",
+                                    )
+                                      .trim()
+                                      .toLowerCase();
+                                    const mkt = String(
+                                      sel.market ?? "",
+                                    ).trim();
+                                    const mt = (
+                                      sel.matchTitle ?? ""
+                                    ).toLowerCase();
+                                    const ticketSport =
+                                      storedSport ||
+                                      (mkt === "quartos" ||
+                                      (mkt === "totais" && mt.includes("nba"))
+                                        ? "basketball"
+                                        : mkt === "periodos" ||
+                                            mkt === "puckLine" ||
+                                            mt.includes("nhl")
+                                          ? "hockey"
+                                          : mkt === "innings" ||
+                                              mt.includes("mlb")
+                                            ? "baseball"
+                                            : mkt === "sets" ||
+                                                mt.includes("volei") ||
+                                                mt.includes("volley")
+                                              ? "volleyball"
+                                              : mkt === "jogos" ||
+                                                  mt.includes("tennis") ||
+                                                  mt.includes("tênis")
+                                                ? "tennis"
+                                                : "football");
+                                    leftIcon = (
+                                      <span className="text-xl shrink-0 leading-none">
+                                        {sportEmoji(ticketSport)}
+                                      </span>
+                                    );
                                   }
 
                                   // Final score for resolved bets
@@ -24782,162 +24981,177 @@ export default function Home({
                                     (!isActivePending
                                       ? finishedMatchScores.current.get(fsKey)
                                       : null);
+                                  const isTennisSel =
+                                    sel.sport === "tennis" ||
+                                    inferSelectionSport(sel.selection ?? "") === "tennis";
+                                  const tennisResultLabel = isTennisSel
+                                    ? getTennisResultDisplay(sel)
+                                    : null;
+                                  const boxTopLabel = isSelectionLive
+                                    ? null
+                                    : lm
+                                      ? (formatMatchWhen(lm) ?? lm.scheduledTime ?? lm.time ?? "Em breve")
+                                      : (() => {
+                                          const d = (sel as any).scheduledDate ?? (sel as any).date;
+                                          const t = (sel as any).scheduledTime ?? (sel as any).time;
+                                          const when = d && t ? `${d} • ${t}` : t || d || null;
+                                          return when ?? ((sel as any).league as string | undefined) ?? null;
+                                        })();
+                                  const boxBodyLine = isSelectionLive
+                                    ? getContextualBetScore(sel, lm)
+                                    : tennisResultLabel
+                                      ? tennisResultLabel
+                                      : fs
+                                        ? `${fs.home} - ${fs.away}`
+                                        : lm
+                                          ? "Por começar"
+                                          : "Aguardando resultado";
 
+                                  const comboLineCls = isDarkTheme
+                                    ? "bg-red-600/40"
+                                    : "bg-red-300";
                                   return (
-                                    <div
-                                      key={i}
-                                      className="px-5 py-3.5 flex items-start gap-3"
-                                    >
-                                      {leftIcon}
-                                      <div className="flex-1 min-w-0">
-                                        <div
-                                          className={`font-bold text-[13px] leading-snug ${txtMain}`}
-                                        >
-                                          {i + 1}. {sel.matchTitle}
-                                        </div>
-                                        <div
-                                          className={`text-[11px] mt-0.5 ${txtSub}`}
-                                        >
-                                          {getSelLabel(sel)}
-                                        </div>
-                                        {(() => {
-                                          const when = (() => {
-                                            const d =
-                                              (sel as any).scheduledDate ??
-                                              (sel as any).date;
-                                            const t =
-                                              (sel as any).scheduledTime ??
-                                              (sel as any).time;
-                                            if (d && t) return `${d} • ${t}`;
-                                            return t || d || null;
-                                          })();
-                                          const lg = (sel as any).league as
-                                            | string
-                                            | undefined;
-                                          if (!lg && !when) return null;
-                                          return (
+                                    <div key={i} className="relative px-5 py-4">
+                                      {showComboConnector && (
+                                        <>
+                                          {/* Vertical spine — "[" bracket, not a plain line */}
+                                          <div
+                                            className={`absolute left-5 w-0.5 ${comboLineCls} ${
+                                              isFirstInGroup
+                                                ? "top-7 bottom-0"
+                                                : isLastInGroup
+                                                  ? "top-0 h-7"
+                                                  : "top-0 bottom-0"
+                                            }`}
+                                          />
+                                          {/* Top cap of the bracket, pointing at the first leg's icon */}
+                                          {isFirstInGroup && (
                                             <div
-                                              className={`text-[10px] mt-0.5 ${txtSub} truncate`}
+                                              className={`absolute left-5 top-7 w-2.5 h-0.5 ${comboLineCls}`}
+                                            />
+                                          )}
+                                          {/* Bottom cap of the bracket, pointing at the last leg's icon */}
+                                          {isLastInGroup && (
+                                            <div
+                                              className={`absolute left-5 top-7 w-2.5 h-0.5 ${comboLineCls}`}
+                                            />
+                                          )}
+                                        </>
+                                      )}
+                                      {/* Market heading */}
+                                      <div className="flex items-start justify-between gap-3 mb-3">
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          {leftIcon}
+                                          <div className="min-w-0">
+                                            <div
+                                              className={`font-black text-[14px] leading-tight truncate ${txtMain}`}
                                             >
-                                              {[lg, when]
-                                                .filter(Boolean)
-                                                .join(" • ")}
+                                              {getSelLabel(sel)}
                                             </div>
-                                          );
-                                        })()}
-                                        {/* Live / upcoming badge */}
-                                        {isSelectionLive && (
-                                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                                            <span className="flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
-                                              Ao vivo{" "}
-                                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse ml-0.5" />
-                                            </span>
-                                            <span className="text-[11px] font-black text-gray-700 tabular-nums">
-                                              {displayMin} • {getContextualBetScore(sel, lm)}
-                                            </span>
-                                            {liveOdd !== null &&
-                                              Math.abs(liveOdd - sel.odd) >
-                                                0.01 && (
-                                                <span
-                                                  className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-500" : "text-red-500"}`}
-                                                >
-                                                  {liveOdd < sel.odd
-                                                    ? "▼"
-                                                    : "▲"}{" "}
-                                                  {liveOdd.toFixed(2)}
-                                                </span>
-                                              )}
+                                            <div
+                                              className={`text-[11px] mt-0.5 truncate ${txtSub}`}
+                                            >
+                                              {sel.matchTitle}
+                                            </div>
                                           </div>
-                                        )}
-                                        {lm && !isSelectionLive && (
-                                          <div className="flex items-center gap-2 mt-1.5">
-                                            <span className="flex items-center gap-1 bg-zinc-700 text-zinc-200 text-[10px] font-black px-2 py-0.5 rounded-full">
-                                              <Clock size={9} />
-                                              {formatMatchWhen(lm) ??
-                                                lm.scheduledTime ??
-                                                lm.time ??
-                                                "Em breve"}
-                                            </span>
-                                          </div>
-                                        )}
-                                        {/* Market-specific result display for settled bets */}
-                                        {(() => {
-                                          const isTennis =
-                                            sel.sport === "tennis" ||
-                                            inferSelectionSport(sel.selection ?? "") === "tennis";
-                                          if (isTennis) {
-                                            const label = getTennisResultDisplay(sel);
-                                            if (!label) return null;
-                                            return (
-                                              <div className={`text-[11px] mt-1 font-semibold ${txtSub}`}>
-                                                {label}
-                                              </div>
-                                            );
-                                          }
-                                          if (fs && !(/^sc[123]-|^ses-/.test(sel.selection ?? ""))) {
-                                            return (
-                                              <div className={`text-[11px] mt-1 font-semibold ${txtSub}`}>
-                                                Resultado: {fs.home} - {fs.away}
-                                              </div>
-                                            );
-                                          }
-                                          return null;
-                                        })()}
-                                        {sel.settlementNote && (
-                                          <div className="mt-1.5 inline-flex max-w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold leading-snug text-amber-700">
-                                            {sel.settlementNote}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="flex flex-col items-end gap-1 shrink-0">
-                                        <div className="bg-red-600 text-white font-black text-[13px] px-3 py-1 rounded-lg tabular-nums">
-                                          {Number.isFinite(displayedSelOdd)
-                                            ? displayedSelOdd.toFixed(2)
-                                            : "1.00"}
                                         </div>
-                                        {isWon && (
-                                          <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">
-                                            {sportEmoji(sel.sport)} VENCIDO
-                                          </span>
-                                        )}
-                                        {isActivePending &&
-                                          outcome === "live-win" && (
-                                            <span className="text-[10px] font-black text-green-600">
-                                              VENCIDO
-                                            </span>
-                                          )}
-                                        {isActivePending &&
-                                          outcome === "live-lose" && (
-                                            <span className="text-[10px] font-black text-red-600">
-                                              PERDIDO
-                                            </span>
-                                          )}
-                                        {outcome === "void" && (
-                                          <span className="text-[10px] font-black text-zinc-500">
-                                            ANULADA
-                                          </span>
+                                        {!hideOddPill && (
+                                          <div className="bg-red-600 text-white font-black text-[13px] px-3 py-1 rounded-lg tabular-nums shrink-0">
+                                            {Number.isFinite(displayedSelOdd)
+                                              ? displayedSelOdd.toFixed(2)
+                                              : "1.00"}
+                                          </div>
                                         )}
                                       </div>
+
+                                      {/* Match / score box */}
+                                      <div
+                                        className={`relative rounded-xl border px-3 pt-4 pb-2.5 ${
+                                          isSelectionLive
+                                            ? "border-red-600/70"
+                                            : boxBorder
+                                        }`}
+                                      >
+                                        <div
+                                          className={`absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 flex items-center gap-1 max-w-[85%] ${boxBg}`}
+                                        >
+                                          {isSelectionLive ? (
+                                            <>
+                                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                                              <span className={`text-[10px] font-black uppercase tracking-wide truncate ${liveLabelCls}`}>
+                                                {displayMin}
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <span className={`text-[10px] font-bold truncate ${txtSub}`}>
+                                              {boxTopLabel ?? "—"}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div
+                                          className={`text-[13px] font-bold text-center ${txtMain}`}
+                                        >
+                                          {boxBodyLine}
+                                        </div>
+                                        {liveOdd !== null &&
+                                          Math.abs(liveOdd - sel.odd) > 0.01 && (
+                                            <div
+                                              className={`text-[10px] font-bold text-center mt-1 ${liveOdd < sel.odd ? tagWinCls : tagLoseCls}`}
+                                            >
+                                              {liveOdd < sel.odd ? "▼" : "▲"}{" "}
+                                              {liveOdd.toFixed(2)}
+                                            </div>
+                                          )}
+                                      </div>
+
+                                      {sel.settlementNote && (
+                                        <div
+                                          className={`mt-2 inline-flex max-w-full rounded-lg border px-2.5 py-1.5 text-[10px] font-bold leading-snug ${
+                                            isDarkTheme
+                                              ? "border-amber-800/50 bg-amber-950/40 text-amber-300"
+                                              : "border-amber-200 bg-amber-50 text-amber-700"
+                                          }`}
+                                        >
+                                          {sel.settlementNote}
+                                        </div>
+                                      )}
+
+                                      {isWon && (
+                                        <span className={`mt-2 inline-block text-[10px] font-black ${tagWinCls}`}>
+                                          VENCIDO
+                                        </span>
+                                      )}
+                                      {isActivePending && outcome === "live-win" && (
+                                        <span className={`mt-2 inline-block text-[10px] font-black ${tagWinCls}`}>
+                                          VENCIDO
+                                        </span>
+                                      )}
+                                      {isActivePending && outcome === "live-lose" && (
+                                        <span className={`mt-2 inline-block text-[10px] font-black ${tagLoseCls}`}>
+                                          PERDIDO
+                                        </span>
+                                      )}
+                                      {outcome === "void" && (
+                                        <span className={`mt-2 inline-block text-[10px] font-black ${tagVoidCls}`}>
+                                          ANULADA
+                                        </span>
+                                      )}
                                     </div>
                                   );
                                 })}
                               </div>
 
-                              {/* ── SUMMARY BOX ── */}
-                              <div
-                                className={`mx-4 my-4 rounded-xl border divide-y ${summBg} ${summDiv}`}
-                              >
+                              {/* ── COTA TOTAL — flat row with the amber pill, like the reference ── */}
+                              <div className="mx-5 mt-1 mb-3 flex items-center justify-between">
+                                <span className={`text-sm ${summTxt}`}>Cota total</span>
+                                <span className="bg-yellow-400 text-yellow-950 font-black text-base px-3 py-1 rounded-lg tabular-nums">
+                                  {parseFloat(bet.totalOdds).toFixed(2)}
+                                </span>
+                              </div>
+
+                              {/* ── SUMMARY ── flat rows, no boxed border ── */}
+                              <div className={`mx-5 mb-4 divide-y ${summDiv}`}>
                                 {[
-                                  {
-                                    label: "Tipo de aposta:",
-                                    value: isMultiple ? "Múltipla" : "Simples",
-                                    valueCls: "text-red-500 font-bold",
-                                  },
-                                  {
-                                    label: "Total de odds:",
-                                    value: parseFloat(bet.totalOdds).toFixed(2),
-                                    valueCls: `font-semibold ${txtMain}`,
-                                  },
                                   {
                                     label: "Valor apostado:",
                                     value: `€${parseFloat(bet.stake).toFixed(2)}`,
@@ -24961,13 +25175,13 @@ export default function Home({
                                           ? `€${parseFloat(bet.cashoutValue).toFixed(2)}`
                                           : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
                                     valueCls: isWon
-                                      ? "font-black text-green-600 text-base"
+                                      ? `font-black ${posAmountCls} text-base`
                                       : isCashedOut
-                                        ? "font-black text-yellow-600 text-base"
+                                        ? `font-black ${cashoutAmountCls} text-base`
                                         : isLost
-                                          ? "font-bold text-red-100"
+                                          ? `font-bold ${lostAmountCls}`
                                           : isVoided
-                                            ? "font-black text-blue-300 text-base"
+                                            ? `font-black ${voidAmountCls} text-base`
                                             : `font-black ${txtMain}`,
                                   },
                                   ...(!isPending
@@ -24982,13 +25196,13 @@ export default function Home({
                                         if (net === null) return [];
                                         const cls =
                                           net > 0
-                                            ? "font-black text-green-600 text-base"
+                                            ? `font-black ${posAmountCls} text-base`
                                             : net < 0
                                               ? isLost
-                                                ? "font-black text-red-100 text-base"
-                                                : "font-black text-red-600 text-base"
+                                                ? `font-black ${lostAmountCls} text-base`
+                                                : `font-black ${negAmountCls} text-base`
                                               : isVoided
-                                                ? "font-black text-blue-300 text-base"
+                                                ? `font-black ${voidAmountCls} text-base`
                                                 : `font-black ${txtMain}`;
                                         const sign = net > 0 ? "+" : "";
                                         return [
@@ -25003,7 +25217,7 @@ export default function Home({
                                 ].map(({ label, value, valueCls }, ri) => (
                                   <div
                                     key={ri}
-                                    className={`flex items-center justify-between px-4 py-3 text-sm ${summTxt}`}
+                                    className={`flex items-center justify-between py-2.5 text-sm ${summTxt}`}
                                   >
                                     <span>{label}</span>
                                     <span className={valueCls}>{value}</span>
@@ -25065,7 +25279,9 @@ export default function Home({
                                     </button>
                                   )
                                 ) : bet.cashoutStatus === "suspended" ? (
-                                  <div className="mx-4 mb-4 bg-gray-100 text-gray-500 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <div
+                                    className={`mx-4 mb-4 border font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none ${isDarkTheme ? "bg-zinc-800/70 border-zinc-700/60 text-zinc-400" : "bg-zinc-100 border-zinc-200 text-zinc-500"}`}
+                                  >
                                     <Lock size={15} />
                                     Cash Out suspenso
                                     {bet.cashoutReason
@@ -25073,18 +25289,24 @@ export default function Home({
                                       : ""}
                                   </div>
                                 ) : (
-                                  <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <div
+                                    className={`mx-4 mb-4 border font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none ${isDarkTheme ? "bg-zinc-800/70 border-zinc-700/60 text-zinc-500" : "bg-zinc-100 border-zinc-200 text-zinc-400"}`}
+                                  >
                                     <Lock size={15} />
                                     Cash Out indisponível
                                   </div>
                                 )
                               ) : isCashedOut || isWon ? (
-                                <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                <div
+                                  className={`mx-4 mb-4 border font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none ${isDarkTheme ? "bg-zinc-800/70 border-zinc-700/60 text-zinc-500" : "bg-zinc-100 border-zinc-200 text-zinc-400"}`}
+                                >
                                   <Lock size={15} />
                                   Cash Out encerrado
                                 </div>
                               ) : isLost ? (
-                                <div className="mx-4 mb-4 bg-[#6b0f0f]/60 border border-[#a02020]/50 text-red-300/70 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                <div
+                                  className={`mx-4 mb-4 border font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none ${isDarkTheme ? "bg-[#6b0f0f]/60 border-[#a02020]/50 text-red-300/70" : "bg-red-50 border-red-200 text-red-500"}`}
+                                >
                                   <RefreshCw size={15} className="opacity-40" />
                                   Cash Out indisponível
                                   <Lock
@@ -25094,55 +25316,61 @@ export default function Home({
                                 </div>
                               ) : null}
 
-                              {/* ── FOOTER ── */}
-                              <div
-                                className={`flex items-center justify-between px-5 py-3.5 ${isLost ? "bg-[#6b0f0f]" : "bg-red-700"}`}
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  <Ticket
-                                    size={16}
-                                    className="text-white/60 shrink-0"
-                                  />
-                                  <div>
-                                    <span className="text-[9px] text-white/50 block leading-none font-medium uppercase tracking-wide">
-                                      Código do bilhete:
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(
-                                          ticketCode,
-                                        );
-                                        toast.success("Código copiado!");
-                                      }}
-                                      className="text-[13px] font-black text-white font-mono hover:text-red-200 transition-colors"
-                                    >
-                                      {ticketCode}
-                                    </button>
+                              {/* ── FOOTER — plain muted strip, ref code + timestamps ── */}
+                              <div className={`border-t ${footerBorder} px-5 py-3.5`}>
+                                <div className="flex items-center justify-between gap-3">
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(ticketCode);
+                                      toast.success("Código copiado!");
+                                    }}
+                                    className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 text-[10px] font-bold font-mono transition-colors"
+                                  >
+                                    <Ticket size={12} className="shrink-0" />
+                                    Ref {ticketCode}
+                                  </button>
+                                  <span className="text-[10px] text-zinc-600 shrink-0">
+                                    {dateStr} • {timeStr}
+                                  </span>
+                                </div>
+                                {!isPending && settledAt && (
+                                  <div className="text-[10px] text-zinc-600 mt-0.5">
+                                    Liquidada: {settledDateStr} • {settledTimeStr}
+                                    {settlementMins !== null
+                                      ? ` (${settlementMins} min)`
+                                      : ""}
                                   </div>
-                                </div>
-                                <div>
-                                  {isActivePending && (
-                                    <div className="flex items-center gap-1.5 bg-white/20 text-white text-[11px] font-bold px-3 py-1.5 rounded-full">
-                                      <ShieldCheck size={13} /> Aposta
-                                      confirmada
-                                    </div>
-                                  )}
-                                  {isWon && (
-                                    <div className="flex items-center gap-1.5 bg-white/25 text-white text-[11px] font-bold px-3 py-1.5 rounded-full">
-                                      <Trophy size={13} /> Bilhete vencedor
-                                    </div>
-                                  )}
-                                  {isLost && (
-                                    <div className="flex items-center gap-1.5 bg-red-950/60 border border-white/20 text-white/80 text-[11px] font-bold px-3 py-1.5 rounded-full">
-                                      <X size={13} /> Bilhete perdido
-                                    </div>
-                                  )}
-                                  {isCashedOut && (
-                                    <div className="flex items-center gap-1.5 bg-yellow-400 text-yellow-900 text-[11px] font-bold px-3 py-1.5 rounded-full">
-                                      <CircleDollarSign size={13} /> Cash Out
-                                    </div>
-                                  )}
-                                </div>
+                                )}
+                                {(isActivePending || isWon || isLost || isCashedOut) && (
+                                  <div className="mt-2.5">
+                                    {isActivePending && (
+                                      <div
+                                        className={`inline-flex items-center gap-1.5 border text-[11px] font-bold px-3 py-1.5 rounded-full ${isDarkTheme ? "bg-red-950/40 border-red-900/50 text-red-300" : "bg-red-50 border-red-200 text-red-600"}`}
+                                      >
+                                        <ShieldCheck size={13} /> Aposta confirmada
+                                      </div>
+                                    )}
+                                    {isWon && (
+                                      <div
+                                        className={`inline-flex items-center gap-1.5 border text-[11px] font-bold px-3 py-1.5 rounded-full ${isDarkTheme ? "bg-emerald-950/40 border-emerald-800/50 text-emerald-300" : "bg-emerald-50 border-emerald-200 text-emerald-700"}`}
+                                      >
+                                        <Trophy size={13} /> Bilhete vencedor
+                                      </div>
+                                    )}
+                                    {isLost && (
+                                      <div
+                                        className={`inline-flex items-center gap-1.5 border text-[11px] font-bold px-3 py-1.5 rounded-full ${isDarkTheme ? "bg-red-950/40 border-red-900/50 text-red-300" : "bg-red-50 border-red-200 text-red-600"}`}
+                                      >
+                                        <X size={13} /> Bilhete perdido
+                                      </div>
+                                    )}
+                                    {isCashedOut && (
+                                      <div className="inline-flex items-center gap-1.5 bg-yellow-400 text-yellow-950 text-[11px] font-bold px-3 py-1.5 rounded-full">
+                                        <CircleDollarSign size={13} /> Cash Out
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );

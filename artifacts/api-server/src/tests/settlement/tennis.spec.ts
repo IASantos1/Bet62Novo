@@ -471,6 +471,98 @@ const tennisCases: FinishedSettlementCase[] = [
     },
     expected: "lost",
   },
+  // Regression: a set score that superficially "looks finished" (reaches 7+
+  // games) but is not a combination a real tennis set can ever produce —
+  // e.g. a provider glitch handing us 7-4 — must not be read as a genuine
+  // result. Only 6-0..6-4, 7-5, 7-6 (tiebreak) and extended advantage sets
+  // (8-6, 9-7, ...) are valid finished scores.
+  {
+    name: "tennis correct set score stays pending on an impossible 7-4 game count",
+    selection: makeSelection("sc1-7-6"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[7, 4]],
+        },
+      },
+    },
+    expected: null,
+  },
+  {
+    name: "tennis correct set score stays pending on an impossible 8-1 game count",
+    selection: makeSelection("sc1-6-3"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[8, 1]],
+        },
+      },
+    },
+    expected: null,
+  },
+  {
+    name: "tennis correct set score settles as won on a valid extended advantage set",
+    selection: makeSelection("sc1-9-7"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[9, 7]],
+        },
+      },
+    },
+    expected: "won",
+  },
+  // Regression: an impossible set score anywhere in the match (a wider
+  // margin than tennis allows once past 6 games) voids the ticket instead
+  // of leaving it stuck pending until the 72h no-result timeout.
+  {
+    name: "tennis exact set score voids when a later set in the match is corrupt",
+    selection: makeSelection("sc1-6-3"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [7, 4], // impossible — can never occur in a real set
+          ],
+        },
+      },
+    },
+    expected: "void",
+  },
+  {
+    name: "tennis exact set score voids on an impossible 8-1 game count",
+    selection: makeSelection("sc1-6-3"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[8, 1]],
+        },
+      },
+    },
+    expected: "void",
+  },
+  // A wide margin below 6 games is completely normal (6-0, 6-1, 6-2 are
+  // all real scores) — must not be confused with the "past 6, gap > 2"
+  // corruption check above.
+  {
+    name: "tennis exact set score settles normally on a clean 6-2 finish",
+    selection: makeSelection("sc1-6-2"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[6, 2]],
+        },
+      },
+    },
+    expected: "won",
+  },
 ];
 
 for (const tc of tennisCases) {
