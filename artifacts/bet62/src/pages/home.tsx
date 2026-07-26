@@ -5637,6 +5637,10 @@ export default function Home({
     setSportscoreId(undefined);
     if (!expandedMatch?.id) return;
     const sport = expandedMatch.sport || "football";
+    // SportScore only covers football, basketball, cricket and tennis —
+    // hockey/volleyball/baseball are never going to resolve, so skip the
+    // request entirely instead of always failing.
+    if (!["football", "basketball", "cricket", "tennis"].includes(sport)) return;
     const matchId = expandedMatch.id;
     const qs = new URLSearchParams();
     if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
