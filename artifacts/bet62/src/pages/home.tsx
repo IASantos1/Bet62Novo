@@ -5628,52 +5628,6 @@ export default function Home({
     setShowFieldView(false);
   }, [expandedMatch?.id]);
 
-  // SportScore Match Tracker widget — resolves lazily per match since it
-  // needs a separate ID lookup (Statpal and SportScore use unrelated ID
-  // spaces). null = looked up, no mapping yet; undefined = not looked up.
-  // sportscoreId = match slug (embed widget / API); trackerId = numeric id
-  // used specifically by the raw position-data tracker endpoint.
-  const [sportscoreId, setSportscoreId] = useState<string | null | undefined>(
-    undefined,
-  );
-  const [sportscoreTrackerId, setSportscoreTrackerId] = useState<
-    string | null
-  >(null);
-  const [sportscoreDebugSteps, setSportscoreDebugSteps] = useState<
-    Array<{ step: string; url: string; ok: boolean; status?: number; detail: string }>
-  >([]);
-  useEffect(() => {
-    setSportscoreId(undefined);
-    setSportscoreTrackerId(null);
-    setSportscoreDebugSteps([]);
-    if (!expandedMatch?.id) return;
-    const sport = expandedMatch.sport || "football";
-    const matchId = expandedMatch.id;
-    const qs = new URLSearchParams();
-    if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
-    if (expandedMatch.away) qs.set("awayTeam", expandedMatch.away);
-    qs.set("debug", "1");
-    let cancelled = false;
-    fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}?${qs.toString()}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) {
-          setSportscoreId(data?.sportscoreId ?? null);
-          setSportscoreTrackerId(data?.trackerId ?? null);
-          setSportscoreDebugSteps(Array.isArray(data?.steps) ? data.steps : []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSportscoreId(null);
-          setSportscoreTrackerId(null);
-          setSportscoreDebugSteps([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expandedMatch?.id, expandedMatch?.sport, expandedMatch?.home, expandedMatch?.away]);
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);
@@ -17829,80 +17783,36 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        {sportscoreId ? (
-                          <div className="flex flex-col items-center">
-                            <iframe
-                              key={sportscoreId}
-                              src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
-                              title="Match Tracker"
-                              width={320}
-                              height={420}
-                              className="border border-zinc-800/60 rounded-lg block max-w-full"
-                              loading="lazy"
-                              referrerPolicy="no-referrer-when-downgrade"
-                            />
-                            <div className="text-[11px] text-zinc-500 text-center py-1.5">
-                              Football live match tracker by{" "}
-                              <a
-                                href="https://sportscore.com/football/"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-400 font-semibold hover:underline"
-                              >
-                                SportScore
-                              </a>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <MiniFieldView
-                              sport={expandedMatch.sport}
-                              homeTeam={teamNamePt(expandedMatch.home)}
-                              awayTeam={teamNamePt(expandedMatch.away)}
-                              liveClockLabel={
-                                expandedMatch.isLive
-                                  ? (() => {
-                                      const m = getDisplayMinute(expandedMatch);
-                                      const isFootballClock =
-                                        !expandedMatch.sport || expandedMatch.sport === "football";
-                                      const tag = isFootballClock
-                                        ? getFootballPhaseTag(expandedMatch, m)
-                                        : null;
-                                      if (m <= 0) return "AO VIVO";
-                                      if (tag === "HT") return "HT";
-                                      if (tag && isFootballClock)
-                                        return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                                      if (tag) return `${m}' · ${tag}`;
-                                      return `${m}'`;
-                                    })()
-                                  : null
-                              }
-                            />
-                            <div className="mt-2 text-center text-[10px] text-zinc-600 font-mono break-all px-2">
-                              {sportscoreId === undefined
-                                ? "Buscando tracker da SportScore..."
-                                : `Tracker: não encontrado — "${expandedMatch.home}" vs "${expandedMatch.away}" (${expandedMatch.sport || "football"}, id ${expandedMatch.id})`}
-                            </div>
-                            {sportscoreId === null && sportscoreDebugSteps.length > 0 && (
-                              <div className="mt-1.5 space-y-1 px-2">
-                                {sportscoreDebugSteps.map((s, i) => (
-                                  <div
-                                    key={i}
-                                    className="text-[9px] font-mono px-2 py-1 rounded break-all"
-                                    style={{
-                                      background: s.ok ? "#052e21" : "#27272a",
-                                      color: s.ok ? "#6ee7b7" : "#a1a1aa",
-                                    }}
-                                  >
-                                    <span className="font-bold uppercase mr-1">{s.step}</span>
-                                    {s.status != null && <span className="mr-1">HTTP {s.status}</span>}
-                                    {s.detail}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        )}
+                        {/* Always our own field/court model — never SportScore's
+                            embedded iframe widget (their branding, their 3D
+                            renderer). The sportscore_match_map bridge table
+                            still exists for a future real ball/event overlay
+                            fed into this same component, but until that's
+                            built, the static per-sport SVG below is all that
+                            should render. */}
+                        <MiniFieldView
+                          sport={expandedMatch.sport}
+                          homeTeam={teamNamePt(expandedMatch.home)}
+                          awayTeam={teamNamePt(expandedMatch.away)}
+                          liveClockLabel={
+                            expandedMatch.isLive
+                              ? (() => {
+                                  const m = getDisplayMinute(expandedMatch);
+                                  const isFootballClock =
+                                    !expandedMatch.sport || expandedMatch.sport === "football";
+                                  const tag = isFootballClock
+                                    ? getFootballPhaseTag(expandedMatch, m)
+                                    : null;
+                                  if (m <= 0) return "AO VIVO";
+                                  if (tag === "HT") return "HT";
+                                  if (tag && isFootballClock)
+                                    return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                                  if (tag) return `${m}' · ${tag}`;
+                                  return `${m}'`;
+                                })()
+                              : null
+                          }
+                        />
                       </div>
                     ) : (
                       <>
