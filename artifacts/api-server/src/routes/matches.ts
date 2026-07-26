@@ -5459,6 +5459,7 @@ function makeVolleyballMarketsFromTeams(
   away: string,
   realHomeOdds?: number,
   realAwayOdds?: number,
+  realOverUnder?: { line: string; over: number; under: number },
 ): AdvancedMarkets {
   const sr = seededRng(`vball-mkt:${home}:${away}`);
   let pSetH: number;
@@ -5505,11 +5506,31 @@ function makeVolleyballMarketsFromTeams(
     ],
     1.06,
   );
-  const meanPts = mc(52 + (sr(5) - 0.5) * 8, 46, 60);
-  const sdPts = mc(6 + sr(6) * 2, 4, 10);
-  const ptsLine = Math.round(meanPts / 2) * 2;
-  const pPtsOver = mc(1 - normalCdf((ptsLine - meanPts) / sdPts), 0.05, 0.95);
-  const [oPts, uPts] = probsToDecimalOdds([pPtsOver, 1 - pPtsOver], 1.06);
+  let oPts: number;
+  let uPts: number;
+  let ptsLine: number;
+  const realLine = realOverUnder ? Number.parseFloat(realOverUnder.line) : NaN;
+  if (
+    realOverUnder &&
+    realOverUnder.over > 1 &&
+    realOverUnder.under > 1 &&
+    Number.isFinite(realLine)
+  ) {
+    // Real bookmaker total-points line/odds from Statpal — use directly
+    // instead of the synthetic normal-distribution estimate below.
+    oPts = realOverUnder.over;
+    uPts = realOverUnder.under;
+    ptsLine = realLine;
+  } else {
+    const meanPts = mc(52 + (sr(5) - 0.5) * 8, 46, 60);
+    const sdPts = mc(6 + sr(6) * 2, 4, 10);
+    ptsLine = Math.round(meanPts / 2) * 2;
+    const pPtsOver = mc(1 - normalCdf((ptsLine - meanPts) / sdPts), 0.05, 0.95);
+    [oPts, uPts] = probsToDecimalOdds([pPtsOver, 1 - pPtsOver], 1.06) as [
+      number,
+      number,
+    ];
+  }
   const ptsDiffMean = mc((pSetH - 0.5) * 14, -10, 10);
   const ptsDiffLine =
     Math.round(Math.abs(ptsDiffMean) * 0.5 + 1.5) * (ptsDiffMean >= 0 ? -1 : 1);
@@ -20420,6 +20441,7 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
           e.awayTeam.name,
           e.homeOdds,
           e.awayOdds,
+          e.overUnder ?? undefined,
         ),
       });
     }
