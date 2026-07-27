@@ -19033,20 +19033,21 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   );
   const formula1Live = sportWithFallback("formula1", formula1Fresh);
 
-  // ── Live feed order: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
+  // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
+  // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
   // mergeStickyLive: re-injects any match seen in the last 5 min that the API
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
   const livePart = mergeStickyLive([
     ...footballLive,
     ...tennisLive,
-    ...hockeyLive,
     ...basketballLive,
-    ...volleyballLiveItems,
+    ...hockeyLive,
     ...baseballLive,
-    ...boxingLive,
-    ...cricketLive,
+    ...volleyballLiveItems,
     ...handballLive,
+    ...cricketLive,
+    ...boxingLive,
     ...formula1Live,
     ...startedUpcomingTennisPart,
   ]);
