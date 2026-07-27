@@ -10961,6 +10961,7 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
     "Suspended",
   ]);
   const result: LiveMatchState[] = [];
+  const nowMlb = Date.now();
 
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
@@ -11102,8 +11103,53 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
       const realH = baseOdds.home > 1 ? baseOdds.home : undefined;
       const realA = baseOdds.away > 1 ? baseOdds.away : undefined;
 
-      result.push({
-        id: `mlb-${m.id}`,
+      // ── Market suspension: this is the Statpal-native pipeline, which the
+      // merge in buildLivePayload prefers over buildBaseballLiveV2 whenever
+      // Statpal has inning detail — i.e. almost always. That other function
+      // does compute BASEBALL_SUSP_KEYS suspension on run/inning changes,
+      // but since its output gets thrown away here for any match Statpal
+      // already covers, its suspension logic never actually applied in
+      // practice. Same bug class as tennis's buildTennisLiveV1 (fixed
+      // earlier): this function also never called liveMatchState.set() at
+      // all, so bet placement's own suspension check never even saw these
+      // matches as live.
+      const id = `mlb-${m.id}`;
+      const existingMlb = liveMatchState.get(id);
+      let mlbSuspension: Record<string, number> | undefined =
+        existingMlb?.marketSuspension
+          ? Object.fromEntries(
+              Object.entries(existingMlb.marketSuspension).filter(
+                ([, ts]) => ts > nowMlb,
+              ),
+            )
+          : undefined;
+      if (mlbSuspension && Object.keys(mlbSuspension).length === 0) {
+        mlbSuspension = undefined;
+      }
+      let mlbSuspensionReason = mlbSuspension
+        ? existingMlb?._suspensionReason
+        : undefined;
+      const runScored =
+        existingMlb != null &&
+        (existingMlb.homeScore !== homeScore ||
+          existingMlb.awayScore !== awayScore);
+      const inningChangedMlb =
+        existingMlb != null &&
+        (existingMlb._liveExtra?.innings?.length ?? 0) !== innings.length;
+      if (runScored) {
+        mlbSuspension = Object.fromEntries(
+          BASEBALL_SUSP_KEYS.map((k) => [k, nowMlb + 12_000]),
+        );
+        mlbSuspensionReason = "RUN";
+      } else if (inningChangedMlb) {
+        mlbSuspension = Object.fromEntries(
+          BASEBALL_SUSP_KEYS.map((k) => [k, nowMlb + 10_000]),
+        );
+        mlbSuspensionReason = "TROCA DE INNING";
+      }
+
+      const mlbState: LiveMatchState = {
+        id,
         home: m.home.name,
         away: m.away.name,
         league: t.league || "USA: MLB",
@@ -11122,6 +11168,9 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
           realA,
         ),
         events: [],
+        marketSuspension: mlbSuspension,
+        _suspensionReason: mlbSuspensionReason,
+        _firstSeenAt: existingMlb?._firstSeenAt ?? nowMlb,
         _liveExtra:
           innings.length > 0
             ? {
@@ -11144,7 +11193,9 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
                     : undefined,
               }
             : undefined,
-      });
+      };
+      liveMatchState.set(id, mlbState);
+      result.push(mlbState);
     }
   }
 
@@ -11166,6 +11217,18 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
     } else if (!currentIds.has(id)) {
       result.push(match); // API dropped it temporarily — keep showing last known state
     }
+  }
+
+  // Garbage collect liveMatchState entries no longer in the final result
+  // (fresh + sticky-reinjected) — the sticky map above already smooths over
+  // transient blips, so anything missing here has genuinely left the feed
+  // for the full 4-minute sticky window and can be finalized immediately.
+  const finalIds = new Set(result.map((m) => String(m.id)));
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("mlb-")) continue;
+    if (finalIds.has(id)) continue;
+    void finalizeStaleLiveMatch(state);
+    liveMatchState.delete(id);
   }
 
   return result;
