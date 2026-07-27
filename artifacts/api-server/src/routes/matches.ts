@@ -19873,6 +19873,28 @@ function slugifyTeamNameExpanded(name: string): string {
   return slugifyTeamName(expandAbbreviations(name));
 }
 
+// Some clubs get renamed/rebranded and the two providers don't necessarily
+// pick it up on the same day — Statpal calling a club "FC Rapid Bucuresti"
+// while SportScore already shows its new official name "FC Rapid 1923" is a
+// real identity change, not a typo or abbreviation, so nothing above catches
+// it (the two names don't even share a fuzzy-similarity floor: verified
+// "rapid-bucuresti" vs "rapid-1923" scores well under the 0.82 bar). Add
+// pairs here as they're found — keyed by the post-strip slug so it lines up
+// with slugifyTeamNameStripped's output. Each group's first entry is treated
+// as the canonical form; every member of a group is considered the same club.
+const TEAM_ALIAS_GROUPS: string[][] = [
+  ["rapid-bucuresti", "rapid-1923"], // FC Rapid (Romania) rebranded to FC Rapid 1923
+];
+const TEAM_ALIAS_CANONICAL = new Map<string, string>();
+for (const group of TEAM_ALIAS_GROUPS) {
+  const canonical = group[0]!;
+  for (const alias of group) TEAM_ALIAS_CANONICAL.set(alias, canonical);
+}
+function slugifyTeamNameAliased(name: string): string {
+  const stripped = slugifyTeamNameStripped(name);
+  return TEAM_ALIAS_CANONICAL.get(stripped) ?? stripped;
+}
+
 type SportscoreFixture = { id: string; slug: string };
 
 function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
@@ -19962,7 +19984,8 @@ function nameSimilarity(a: string, b: string): number {
 
 // Tolerant name match: accepts the plain normalization, the suffix-stripped
 // one ("Levante UD" ↔ "Levante"), the abbreviation-expanded one ("Atl.
-// Tucuman" ↔ "Atletico Tucuman"), or — as a last, careful resort — a high
+// Tucuman" ↔ "Atletico Tucuman"), the known-rename alias list ("Rapid
+// Bucuresti" ↔ "Rapid 1923"), or — as a last, careful resort — a high
 // (>=0.82) fuzzy-similarity match on the stripped names, which catches
 // whatever spelling/abbreviation variety isn't covered by the explicit
 // rules above without loosening things enough to confuse distinct clubs
@@ -19974,6 +19997,7 @@ function namesMatch(a: string, b: string): boolean {
   if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
   if (slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b)) return true;
   if (slugifyTeamNameExpanded(a) === slugifyTeamNameExpanded(b)) return true;
+  if (slugifyTeamNameAliased(a) === slugifyTeamNameAliased(b)) return true;
   return nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82;
 }
 
@@ -20042,6 +20066,8 @@ async function findByGuessedSlug(
   const aStripped = slugifyTeamNameStripped(awayTeam);
   const hExpanded = slugifyTeamNameExpanded(homeTeam);
   const aExpanded = slugifyTeamNameExpanded(awayTeam);
+  const hAliased = slugifyTeamNameAliased(homeTeam);
+  const aAliased = slugifyTeamNameAliased(awayTeam);
   const candidates = Array.from(
     new Set(
       [
@@ -20051,6 +20077,8 @@ async function findByGuessedSlug(
         `${aStripped}-vs-${hStripped}`,
         `${hExpanded}-vs-${aExpanded}`,
         `${aExpanded}-vs-${hExpanded}`,
+        `${hAliased}-vs-${aAliased}`,
+        `${aAliased}-vs-${hAliased}`,
       ].filter((s) => !s.startsWith("-vs-") && !s.endsWith("-vs-")),
     ),
   );
@@ -20112,9 +20140,11 @@ async function findViaTeamSchedule(
       [
         slugifyTeamNameStripped(homeTeam),
         slugifyTeamNameExpanded(homeTeam),
+        slugifyTeamNameAliased(homeTeam),
         slugifyTeamName(homeTeam),
         slugifyTeamNameStripped(awayTeam),
         slugifyTeamNameExpanded(awayTeam),
+        slugifyTeamNameAliased(awayTeam),
         slugifyTeamName(awayTeam),
       ].filter(Boolean),
     ),
