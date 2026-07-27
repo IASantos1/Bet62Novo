@@ -19967,6 +19967,18 @@ function slugifyTeamNameAliased(name: string): string {
   return TEAM_ALIAS_CANONICAL.get(stripped) ?? stripped;
 }
 
+// Providers disagree on word order for East Asian player names — Statpal
+// gives "Juncheng Shang" (given name first, Western convention) where
+// SportScore gives "Shang Juncheng" (family name first). Same two words,
+// different order, so none of the checks above (which all preserve word
+// order) catch it. Sorting tokens alphabetically before comparing is safe
+// precisely because it requires the exact same multiset of words — unlike
+// the fuzzy check, it can't be fooled by similar-but-different names, only
+// by a genuine permutation of the identical words.
+function slugifyTeamNameSorted(name: string): string {
+  return slugifyTeamNameStripped(name).split("-").filter(Boolean).sort().join("-");
+}
+
 type SportscoreFixture = { id: string; slug: string };
 
 function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
@@ -20057,19 +20069,22 @@ function nameSimilarity(a: string, b: string): number {
 // Tolerant name match: accepts the plain normalization, the suffix-stripped
 // one ("Levante UD" ↔ "Levante"), the abbreviation-expanded one ("Atl.
 // Tucuman" ↔ "Atletico Tucuman"), the known-rename alias list ("Rapid
-// Bucuresti" ↔ "Rapid 1923"), or — as a last, careful resort — a high
-// (>=0.82) fuzzy-similarity match on the stripped names, which catches
-// whatever spelling/abbreviation variety isn't covered by the explicit
-// rules above without loosening things enough to confuse distinct clubs
-// that share a word (verified against a battery of real near-miss pairs —
-// e.g. "Deportivo Cali" vs "Deportivo Pasto" scores 0.73, safely below the
-// 0.82 bar — including keeping identity-bearing words like "Real"/
-// "United"/"City" out of the strip list in the first place).
+// Bucuresti" ↔ "Rapid 1923"), the same-words-different-order check ("Shang
+// Juncheng" ↔ "Juncheng Shang" — East Asian player names, surname-first vs
+// given-name-first), or — as a last, careful resort — a high (>=0.82)
+// fuzzy-similarity match on the stripped names, which catches whatever
+// spelling/abbreviation variety isn't covered by the explicit rules above
+// without loosening things enough to confuse distinct clubs that share a
+// word (verified against a battery of real near-miss pairs — e.g.
+// "Deportivo Cali" vs "Deportivo Pasto" scores 0.73, safely below the 0.82
+// bar — including keeping identity-bearing words like "Real"/"United"/
+// "City" out of the strip list in the first place).
 function namesMatch(a: string, b: string): boolean {
   if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
   if (slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b)) return true;
   if (slugifyTeamNameExpanded(a) === slugifyTeamNameExpanded(b)) return true;
   if (slugifyTeamNameAliased(a) === slugifyTeamNameAliased(b)) return true;
+  if (slugifyTeamNameSorted(a) === slugifyTeamNameSorted(b)) return true;
   return nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82;
 }
 
