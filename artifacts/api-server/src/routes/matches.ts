@@ -18279,11 +18279,17 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     result.push(state);
   }
 
-  // Garbage collect tennis states no longer in the feed.
+  // Garbage collect tennis-v2 states no longer in the feed.
   // Grace period of 45 s: transient feed gaps (Tyler/Challenger matches that briefly
   // disappear between polls) don't cause the match to vanish from the UI.
+  // Scoped to tennis-v2- only: currentIds above is built purely from this
+  // function's own v2-shaped input, so it can never contain a tennis-v1- id —
+  // including that prefix here would treat every genuinely-live V1 match as
+  // permanently "missing" and, after 45s, wrongly finalize + settle it via
+  // rememberFinishedTennisState. buildTennisLiveV1 now does its own GC scoped
+  // to its own currentIds instead (see below its liveMatchState.set call).
   for (const id of liveMatchState.keys()) {
-    if (!id.startsWith("tennis-v2-") && !id.startsWith("tennis-v1-")) continue;
+    if (!id.startsWith("tennis-v2-")) continue;
     const cached = liveMatchState.get(id);
     if (!cached) {
       _tennisMissingFrom.delete(id);
@@ -20506,6 +20512,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
     refreshTennisServing(liveIds);
     refreshTennisLiveOdds(liveIds);
     const primary: Array<{ r: number; m: LiveMatchState }> = [];
+    const currentIds = new Set<string>();
     for (const g of games) {
       if (g.statusGroup === 2 || isTennisV1GameFinished(g)) continue;
       const home = g.homeCompetitor?.name?.trim() ?? "";
@@ -20582,8 +20589,55 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       );
       const liveOdds = liveOddsState.odds;
       const setNum = homeScore + awayScore + 1;
+
+      // ── Market suspension: this is the pipeline that actually feeds live
+      // tennis in production (buildTennisLiveV2 above is a dormant fallback
+      // for a v2 tennis live endpoint that doesn't exist yet — see the
+      // comment at its call site). It never computed marketSuspension at
+      // all, so tennis markets never suspended after a point regardless of
+      // the timing guard fixed there. Only called once per ~1s poll
+      // (buildTennisLiveV1Cached's own TTL/in-flight guard), so — unlike
+      // the v2 builder — there's no same-tick double-call to guard against.
+      const id = `tennis-v1-${g.id}`;
+      const existingV1 = liveMatchState.get(id);
+      const prevPointsV1 = existingV1?._liveExtra?.currentPoints;
+      const prevSetsV1 = existingV1?._liveExtra?.sets;
+      const pointPlayedV1 =
+        prevPointsV1 !== undefined &&
+        (JSON.stringify(prevPointsV1) !== JSON.stringify(currentPoints) ||
+          JSON.stringify(prevSetsV1) !== JSON.stringify(sets));
+      let marketSuspensionV1: Record<string, number> | undefined =
+        existingV1?.marketSuspension
+          ? Object.fromEntries(
+              Object.entries(existingV1.marketSuspension).filter(
+                ([, ts]) => ts > Date.now(),
+              ),
+            )
+          : undefined;
+      if (marketSuspensionV1 && Object.keys(marketSuspensionV1).length === 0) {
+        marketSuspensionV1 = undefined;
+      }
+      let suspensionReasonV1 = marketSuspensionV1
+        ? existingV1?._suspensionReason
+        : undefined;
+      if (pointPlayedV1) {
+        const suspMs = tennisSuspensionMs(
+          currentPoints,
+          sets,
+          homeScore,
+          awayScore,
+        );
+        if (suspMs > 0) {
+          const now2 = Date.now();
+          marketSuspensionV1 = Object.fromEntries(
+            TENNIS_SUSP_KEYS.map((k) => [k, now2 + suspMs]),
+          );
+          suspensionReasonV1 = "PONTO EM JOGO";
+        }
+      }
+
       const item: LiveMatchState = {
-        id: `tennis-v1-${g.id}`,
+        id,
         home,
         away,
         league: enrichedLiveLeague,
@@ -20595,6 +20649,8 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         status: ws?.status ?? g.statusText ?? "Em Jogo",
         hasRealOdds: liveOddsState.hasRealOdds,
         odds: liveOdds,
+        ...(marketSuspensionV1 ? { marketSuspension: marketSuspensionV1 } : {}),
+        ...(suspensionReasonV1 ? { _suspensionReason: suspensionReasonV1 } : {}),
         markets: (() => {
           const adjH = liveOdds.home > 1 ? 1 / liveOdds.home : 0.5;
           const adjA = liveOdds.away > 1 ? 1 / liveOdds.away : 0.5;
@@ -20632,6 +20688,16 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
           })(),
         },
       };
+      // Persist so the NEXT poll (~1s later, via buildTennisLiveV1Cached's
+      // own TTL) has a previous currentPoints/sets to diff against above —
+      // without this, liveMatchState never held an entry for tennis-v1-*
+      // matches at all, so pointPlayedV1 could never be true, AND bet
+      // placement's own suspension check (bets.ts reads liveMatchState.get)
+      // silently never saw tennis matches as live, skipping suspension
+      // enforcement server-side regardless of what the /live payload
+      // told the frontend to lock.
+      liveMatchState.set(id, item);
+      currentIds.add(id);
       const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
       primary.push({ r: rank, m: item });
     }
@@ -20641,6 +20707,33 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         a.m.league.localeCompare(b.m.league) ||
         a.m.home.localeCompare(b.m.home),
     );
+
+    // Garbage collect tennis-v1 states no longer in the feed — mirrors the
+    // tennis-v2 sweep in buildTennisLiveV2, scoped to this function's own
+    // currentIds so a genuinely-live match is never mistaken for a finished
+    // one just because a different tennis pipeline doesn't know about it.
+    // Same 45s grace period for transient feed blips.
+    const nowGc = Date.now();
+    for (const id of liveMatchState.keys()) {
+      if (!id.startsWith("tennis-v1-")) continue;
+      if (currentIds.has(id)) {
+        _tennisMissingFrom.delete(id);
+        continue;
+      }
+      const cached = liveMatchState.get(id);
+      if (!cached) {
+        _tennisMissingFrom.delete(id);
+        continue;
+      }
+      const firstMissing = _tennisMissingFrom.get(id) ?? nowGc;
+      _tennisMissingFrom.set(id, firstMissing);
+      if (nowGc - firstMissing > 45_000) {
+        rememberFinishedTennisState(id, cached, nowGc);
+        liveMatchState.delete(id);
+        _tennisMissingFrom.delete(id);
+      }
+    }
+
     return primary.map((x) => x.m);
   } catch {
     return [];
