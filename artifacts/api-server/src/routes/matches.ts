@@ -14959,8 +14959,11 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           const recentMin = Math.max(1, minute - 2);
           const V1_SUSP_TOKENS = [
             "penalty", "var", "bigchance", "big_chance", "suspension", "expelled",
-            "video", "review", "offsidecheck",
+            "video", "review", "offsidecheck", "redcard", "card",
           ];
+          // "redcard" must be listed (and checked) before the generic "card" —
+          // Object.keys(...).find() below returns the FIRST matching key, and
+          // "yellowcard"/"redcard" both contain "card", so red needs to win.
           const V1_SUSP_LABELS: Record<string, string> = {
             penalty: "PENÁLTI",
             var: "REVISÃO AO VAR",
@@ -14968,6 +14971,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             big_chance: "GRANDE CHANCE",
             suspension: "SUSPENSO",
             expelled: "SUSPENSO",
+            redcard: "CARTÃO VERMELHO",
+            card: "CARTÃO AMARELO",
           };
           const dangerEv = rawEvts.find((e: unknown) => {
             const ev = e as Record<string, unknown>;
@@ -18112,13 +18117,18 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     // ── Market suspension: detect point played and compute duration ─────────────
     // A point is played when currentPoints or sets changes compared to last tick.
-    // Guard: buildTennisLiveV2 is called TWICE per request (live feed + todayStarted).
-    // The 2nd call sees state just saved by the 1st and would falsely detect a point.
-    // Only treat a change as a real point if the state was saved > 1.5 s ago (= previous poll).
+    // Guard: buildTennisLiveV2 is called TWICE per request (live feed + todayStarted),
+    // synchronously back-to-back with no await between them — the 2nd call sees
+    // state just saved by the 1st (microseconds earlier) and would falsely detect
+    // a point. That's the only thing this guard needs to catch: real polls happen
+    // every ~1s (CONFIG.LIVE_UPDATE_INTERVAL), so a 1.5s threshold was rejecting
+    // genuine point changes too — tennis effectively never suspended in
+    // production. 200ms comfortably separates "same synchronous call" from "next
+    // poll" without reopening the intra-request double-count bug.
     const prevPoints = existing?._liveExtra?.currentPoints;
     const prevSets = existing?._liveExtra?.sets;
     const lastTennisUpdate = existing?._oddsUpdatedAt ?? 0;
-    const isDifferentPollCycle = now - lastTennisUpdate > 1500;
+    const isDifferentPollCycle = now - lastTennisUpdate > 200;
     const pointPlayed =
       isDifferentPollCycle &&
       prevPoints !== undefined &&
