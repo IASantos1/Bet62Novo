@@ -19847,6 +19847,20 @@ function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
+// SportScore's list endpoints (/api/widget/matches/, /api/widget/team/)
+// never actually include an "id"/"slug" field on each fixture — only a
+// "url" like "/football/match/vipers-vs-gor-mahia/". Without this, every
+// entry from those endpoints was silently dropped (no id, no slug, nothing
+// to build the tracker embed URL from), so name-matching against them was
+// dead code no matter how good the match was — only the guess-slug tier
+// (which never touches this field) could ever produce a result.
+function slugFromMatchUrl(obj: Record<string, unknown>): string | null {
+  const url = pickStr(obj, ["url"]);
+  if (!url) return null;
+  const m = url.match(/\/match\/([^/]+)\/?$/);
+  return m?.[1] ?? null;
+}
+
 function pickTeamName(
   obj: Record<string, unknown>,
   side: "home" | "away",
@@ -19953,7 +19967,7 @@ async function findInLiveFixturesList(
       if (!straight && !swapped) continue;
 
       const id = pickStr(m, ["id", "matchId", "match_id"]);
-      const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
+      const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]) ?? slugFromMatchUrl(m);
       if (!id && !slug) continue;
       diag.push({ step: "live-list", url, ok: true, status: resp.status, detail: `found in ${matches.length} fixtures ("${mHome}" vs "${mAway}")` });
       return {
@@ -20094,7 +20108,7 @@ async function findViaTeamSchedule(
           (namesMatch(mHome, awayTeam) && namesMatch(mAway, homeTeam));
         if (!confirmed) continue;
         const id = pickStr(m, ["id", "matchId", "match_id"]);
-        const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
+        const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]) ?? slugFromMatchUrl(m);
         if (!id && !slug) continue;
         matchedInThisTeam = true;
         diag.push({
