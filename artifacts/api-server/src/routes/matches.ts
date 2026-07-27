@@ -16544,19 +16544,17 @@ async function buildFootballLiveV2(
     chosenIds.add(entry.ev.id);
   }
 
-  const prefetchRedCards = new Map<number, V2RedCards>();
-
-  const firstSeenMatchIds = chosen
-    .filter((ev) => !liveMatchState.has(`football-v2-${ev.id}`))
-    .map((ev) => ev.id);
-
-  // Fire-and-forget background pre-fetcher for newly seen matches
-  if (firstSeenMatchIds.length > 0) {
-    (async () => {
-      for (const id of firstSeenMatchIds) {
-        getFootballV2RedCards(id).catch(() => {});
-      }
-    })().catch(() => {});
+  // Fire-and-forget background pre-fetcher — refetches for EVERY currently-live
+  // match, not just newly-seen ones. getFootballV2RedCards has its own 45s
+  // internal cache TTL, so this doesn't add upstream load beyond that; but
+  // limiting the fetch to "first seen" meant a red card happening mid-match
+  // (well after kickoff, when a match is already tracked) never updated
+  // rcHome/rcAway again for the rest of the game — the count silently froze
+  // at whatever it was the moment the match was first noticed (almost always
+  // 0). That in turn meant the redCardsHome/Away increase check below could
+  // never fire for a real card.
+  for (const ev of chosen) {
+    getFootballV2RedCards(ev.id).catch(() => {});
   }
 
   for (const ev of chosen) {
@@ -17015,8 +17013,20 @@ async function buildFootballLiveV2(
 
         // isVARStatus already computed above
 
-        // If VAR is active: ensure suspension is set and override reason label
-        if (isVARStatus) {
+        // A red card increases the count vs. what was last stored — comparing
+        // against existing.redCardsHome/Away (not just "rcHome > 0") so this
+        // fires exactly once, on the actual increase, not on every tick for
+        // the rest of the match. rcHome/rcAway now refresh continuously for
+        // every live match above (previously only fetched once, on first
+        // sight — see the pre-fetch loop — so a card happening mid-match was
+        // never picked up at all).
+        const newRedCard =
+          rcHome > (existing.redCardsHome ?? 0) ||
+          rcAway > (existing.redCardsAway ?? 0);
+
+        // If VAR is active or a new red card just came in: ensure suspension
+        // is set and set the reason label (VAR takes priority if both apply).
+        if (isVARStatus || newRedCard) {
           if (!susp || Object.keys(susp).length === 0) {
             susp = Object.fromEntries(
               FOOTBALL_SUSP_KEYS.map((k) => [
@@ -17025,7 +17035,7 @@ async function buildFootballLiveV2(
               ]),
             ) as Record<string, number>;
           }
-          // Always override the reason label with VAR (covers "GOLO!" → "REVISÃO AO VAR")
+          // Always override the reason label (covers "GOLO!" → "REVISÃO AO VAR"/"CARTÃO VERMELHO")
           const updated: LiveMatchState = {
             ...existing,
             country: meta?.countryRaw ?? existing.country,
@@ -17038,7 +17048,7 @@ async function buildFootballLiveV2(
             _baseOdds: baseOdds,
             _baseMarkets: filteredBase,
             marketSuspension: susp,
-            _suspensionReason: "REVISÃO AO VAR",
+            _suspensionReason: isVARStatus ? "REVISÃO AO VAR" : "CARTÃO VERMELHO",
             _liveExtra: liveExtra,
             _lastSeenAt: now,
             _missingSinceAt: undefined,
