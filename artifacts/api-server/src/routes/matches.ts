@@ -13629,10 +13629,18 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
   }
 }
 
-// Tennis is point-by-point, so keep the V1 live cache close to 1s.
+// Tennis is point-by-point, so keep the V1 live cache tight.
 // The SSE/broadcast layer already smooths fan-out; this TTL must stay tight
 // enough that our scoreboard does not trail the large books by several seconds.
-const TENNIS_LIVE_V1_TTL = 1000;
+// This same constant gates TWO independent, stacked caching layers — the raw
+// getTennisLiveV1() fetch (_tennisLiveV1Cache) AND the state-building wrapper
+// on top of it (buildTennisLiveV1Cached's _tennisLiveV1StateCache) — so the
+// worst case is roughly double this value before a point change is even
+// picked up, before the live-payload cache (1.5s) and SSE broadcast (1s) add
+// their own delay on top. Lowered from 1000ms after a reported ~5s lag
+// suspending at 40/Advantage — this halves the two-layer contribution to
+// that stacked delay.
+const TENNIS_LIVE_V1_TTL = 500;
 let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null =
   null;
 let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
