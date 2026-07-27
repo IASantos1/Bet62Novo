@@ -15,7 +15,7 @@ import {
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
 import { db, matchResultsTable, sportscoreMatchMapTable } from "@workspace/db";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, sql, inArray } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
 
@@ -20279,6 +20279,111 @@ router.get(
     }
   },
 );
+
+// Statpal doesn't always carry every live incident (VAR reviews, cards) for
+// lower-profile matches — meanwhile the mini-campo already reflects
+// SportScore's own incident feed for those exact events in real time. When
+// Statpal misses one, betting stays open on stale pre-incident odds until
+// Statpal eventually catches up (if it ever does for that match). This
+// polls SportScore's incident feed as a *supplementary* suspension signal —
+// Statpal remains the sole source for odds/settlement, this only ever
+// widens the existing marketSuspension window, never narrows or replaces it.
+//
+// Only checks matches that already have a resolved sportscoreId mapping
+// (i.e. someone has opened the mini-campo for it at least once) — this
+// never triggers new SportScore lookups of its own, so it can't push us
+// over their ~10k req/day/IP budget on its own; worst case is (live football
+// matches with a mapping, capped at 30) requests every 20s.
+const _sportscoreIncidentsSeen = new Map<string, number>();
+setInterval(async () => {
+  const liveFootballIds = [...liveMatchState.entries()]
+    .filter(([, st]) => st.sport === "football")
+    .map(([id]) => id)
+    .slice(0, 30);
+  if (liveFootballIds.length === 0) return;
+
+  let rows: { statpalMatchId: string; sportscoreId: string | null }[];
+  try {
+    rows = await db
+      .select({
+        statpalMatchId: sportscoreMatchMapTable.statpalMatchId,
+        sportscoreId: sportscoreMatchMapTable.sportscoreId,
+      })
+      .from(sportscoreMatchMapTable)
+      .where(
+        and(
+          eq(sportscoreMatchMapTable.sport, "football"),
+          inArray(sportscoreMatchMapTable.statpalMatchId, liveFootballIds),
+        ),
+      );
+  } catch {
+    return;
+  }
+
+  await Promise.all(
+    rows.map(async (row) => {
+      if (!row.sportscoreId) return;
+      const url = `https://sportscore.com/api/widget/match/?sport=football&slug=${encodeURIComponent(row.sportscoreId)}&src=bet62.com`;
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as Record<string, unknown>;
+        const match = (data["match"] ?? data) as Record<string, unknown>;
+        const incidents = Array.isArray(match["incidents"])
+          ? (match["incidents"] as Record<string, unknown>[])
+          : [];
+        const statusText = String(match["status_text"] ?? "").toLowerCase();
+
+        const prevCount =
+          _sportscoreIncidentsSeen.get(row.statpalMatchId) ?? incidents.length;
+        const newIncidents = incidents.slice(prevCount);
+        _sportscoreIncidentsSeen.set(row.statpalMatchId, incidents.length);
+
+        let reason: string | null = null;
+        for (const inc of newIncidents) {
+          const t = String(inc["type"] ?? "").toLowerCase();
+          if (t.includes("red card")) { reason = "CARTÃO VERMELHO"; break; }
+          if (t.includes("penalty")) { reason = "PÊNALTI"; break; }
+          if (t.includes("var")) { reason = "REVISÃO AO VAR"; break; }
+          if (t.includes("yellow card")) reason = reason ?? "CARTÃO AMARELO";
+        }
+        if (!reason && /\bvar\b|review|revision/.test(statusText)) {
+          reason = "REVISÃO AO VAR";
+        }
+        if (!reason) return;
+
+        const existing = liveMatchState.get(row.statpalMatchId);
+        if (!existing) return;
+        const now = Date.now();
+        const nextSuspension = Object.fromEntries(
+          FOOTBALL_SUSP_KEYS.map((k) => [
+            k,
+            Math.max(
+              existing.marketSuspension?.[k] ?? 0,
+              now + footballSuspensionDelayMs("var", k),
+            ),
+          ]),
+        ) as Record<string, number>;
+        liveMatchState.set(row.statpalMatchId, {
+          ...existing,
+          marketSuspension: nextSuspension,
+          _suspensionReason: existing._suspensionReason ?? reason,
+        });
+        logger.info(
+          { matchId: row.statpalMatchId, reason },
+          "[sportscore-incident] suspending markets — Statpal hadn't reported this incident yet",
+        );
+      } catch {
+        // fail-open: a SportScore hiccup must never block Statpal-driven betting
+      }
+    }),
+  );
+
+  if (_sportscoreIncidentsSeen.size > 500) {
+    const keys = [..._sportscoreIncidentsSeen.keys()];
+    for (const k of keys.slice(0, 100)) _sportscoreIncidentsSeen.delete(k);
+  }
+}, 20_000);
 
 router.get("/feed-status", (_req: Request, res: Response) => {
   res.setHeader(
