@@ -19361,7 +19361,11 @@ let livePayloadFallbackCache: {
   payload: { matches: LiveMatchState[] };
   builtAt: number;
 } | null = null;
-const LIVE_PAYLOAD_CACHE_TTL_MS = 1_500;
+// Matches CONFIG.LIVE_UPDATE_INTERVAL (the broadcastLive() tick itself) —
+// this cache used to outlive the tick that reads it (1.5s cache vs 1s tick),
+// so every other broadcast could serve payload up to 500ms stale on top of
+// the tick's own 1s cadence. Aligning it removes that extra lag layer.
+const LIVE_PAYLOAD_CACHE_TTL_MS = 1_000;
 let livePayloadCache: {
   payload: { matches: LiveMatchState[] };
   builtAt: number;
