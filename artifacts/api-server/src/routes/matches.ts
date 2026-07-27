@@ -17890,13 +17890,15 @@ function rememberFinishedTennisState(
 /**
  * Returns the appropriate market suspension duration (ms) for a tennis point.
  * Based on real sportsbook behaviour: longer suspension at high-pressure moments.
- *   - Match point               → 25 s
- *   - Set point + break point   → 18 s
- *   - Set point alone           → 15 s
- *   - Break point (0/15/30-40)  → 12 s
- *   - Deuce / Advantage         → 10 s
- *   - Tie-break point           → 12 s
- *   - Normal point              →  5 s
+ * Only suspends once the point itself reaches 40 or Advantage (or during a
+ * tiebreak, where every point is high-pressure by nature) — routine points at
+ * 0/15/30 no longer suspend on their own, even in a set/match-point game.
+ *   - Match point               → 30 s
+ *   - Set point + break point   → 22 s
+ *   - Set point alone           → 18 s
+ *   - Break point (0/15/30-40)  → 15 s
+ *   - Deuce / Advantage         → 13 s
+ *   - Tie-break point           → 15 s
  */
 function tennisSuspensionMs(
   pts: [number | string, number | string],
@@ -17920,6 +17922,12 @@ function tennisSuspensionMs(
   const currentSet = sets[sets.length - 1] ?? [0, 0];
   const isTiebreak = currentSet[0] === 6 && currentSet[1] === 6;
 
+  // Gate: only suspend at 40/Advantage (covers deuce, break point, and plain
+  // game point) or during a tiebreak — a routine 0/15/30 point never
+  // suspends, even inside a set-point or match-point game.
+  const isFortyOrAdv = h === "40" || a === "40" || isAdv;
+  if (!isFortyOrAdv && !isTiebreak) return 0;
+
   // Set point: one player is at 5 or 6 games and ahead of the other
   // (crude heuristic — good enough for suspension timing)
   const isSetPoint =
@@ -17933,14 +17941,17 @@ function tennisSuspensionMs(
   const oneSetAway = homeSets === setsNeeded - 1 || awaySets === setsNeeded - 1;
   const isMatchPoint = oneSetAway && (isSetPoint || isTiebreak);
 
-  if (isMatchPoint && (isBreakPoint || isAdv)) return 25_000;
-  if (isMatchPoint) return 20_000;
-  if (isSetPoint && isBreakPoint) return 18_000;
-  if (isSetPoint) return 15_000;
-  if (isBreakPoint) return 12_000;
-  if (isTiebreak) return 12_000;
-  if (isAdv || isDeuce) return 10_000;
-  return 5_000;
+  if (isMatchPoint && (isBreakPoint || isAdv)) return 30_000;
+  if (isMatchPoint) return 25_000;
+  if (isSetPoint && isBreakPoint) return 22_000;
+  if (isSetPoint) return 18_000;
+  if (isBreakPoint) return 15_000;
+  if (isTiebreak) return 15_000;
+  if (isAdv || isDeuce) return 13_000;
+  // Unreachable in practice — the gate above only lets isFortyOrAdv or
+  // isTiebreak through, both of which are already covered above — kept as a
+  // safe fallback in case of an unexpected point-label value.
+  return 13_000;
 }
 
 // Tennis market keys to suspend after each point (flat keys used by frontend)
