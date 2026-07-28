@@ -3547,8 +3547,31 @@ type AdvancedMarkets = {
       u15: number;
       o25: number;
       u25: number;
+      o35: number;
+      u35: number;
+      o45: number;
+      u45: number;
     };
     nextGoal: { home: number; away: number }; // which team scores next in ET
+    firstHalfResult: { home: number; draw: number; away: number };
+    secondHalfResult: { home: number; draw: number; away: number };
+    corners: {
+      o15: number;
+      u15: number;
+      o25: number;
+      u25: number;
+      o35: number;
+      u35: number;
+    };
+    cards: {
+      o05: number;
+      u05: number;
+      o15: number;
+      u15: number;
+      o25: number;
+      u25: number;
+    };
+    exactScore: Record<string, number>;
   };
   // Football penalty-shootout markets
   penExtra?: {
@@ -12680,6 +12703,42 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {m.etExtra.totalGoals.o35 > 0 && (
+                      <MarketGroup title="Golos na Prorrogação — 3.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-o35"
+                          odd={m.etExtra.totalGoals.o35}
+                          market="prolongamento"
+                          label="Mais de 3.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-u35"
+                          odd={m.etExtra.totalGoals.u35}
+                          market="prolongamento"
+                          label="Menos de 3.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.totalGoals.o45 > 0 && (
+                      <MarketGroup title="Golos na Prorrogação — 4.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-o45"
+                          odd={m.etExtra.totalGoals.o45}
+                          market="prolongamento"
+                          label="Mais de 4.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-u45"
+                          odd={m.etExtra.totalGoals.u45}
+                          market="prolongamento"
+                          label="Menos de 4.5"
+                        />
+                      </MarketGroup>
+                    )}
                     <MarketGroup title="Resultado da Prorrogação">
                       <MarketOddsBtn
                         match={match}
@@ -12719,6 +12778,187 @@ export default function Home({
                         label={`Gol 2 — ${match.away}`}
                       />
                     </MarketGroup>
+                    {m.etExtra.firstHalfResult.home > 0 && (
+                      <MarketGroup title="1º Tempo da Prorrogação">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-1t-home"
+                          odd={m.etExtra.firstHalfResult.home}
+                          market="prolongamento"
+                          label={match.home}
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-1t-draw"
+                          odd={m.etExtra.firstHalfResult.draw}
+                          market="prolongamento"
+                          label="Empate"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-1t-away"
+                          odd={m.etExtra.firstHalfResult.away}
+                          market="prolongamento"
+                          label={match.away}
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.secondHalfResult.home > 0 && (
+                      <MarketGroup title="2º Tempo da Prorrogação">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-2t-home"
+                          odd={m.etExtra.secondHalfResult.home}
+                          market="prolongamento"
+                          label={match.home}
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-2t-draw"
+                          odd={m.etExtra.secondHalfResult.draw}
+                          market="prolongamento"
+                          label="Empate"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-2t-away"
+                          odd={m.etExtra.secondHalfResult.away}
+                          market="prolongamento"
+                          label={match.away}
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.corners.o15 > 0 && (
+                      <MarketGroup title="Cantos na Prorrogação — 1.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-c15"
+                          odd={m.etExtra.corners.o15}
+                          market="prolongamento"
+                          label="Mais de 1.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cu15"
+                          odd={m.etExtra.corners.u15}
+                          market="prolongamento"
+                          label="Menos de 1.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.corners.o25 > 0 && (
+                      <MarketGroup title="Cantos na Prorrogação — 2.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-c25"
+                          odd={m.etExtra.corners.o25}
+                          market="prolongamento"
+                          label="Mais de 2.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cu25"
+                          odd={m.etExtra.corners.u25}
+                          market="prolongamento"
+                          label="Menos de 2.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.corners.o35 > 0 && (
+                      <MarketGroup title="Cantos na Prorrogação — 3.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-c35"
+                          odd={m.etExtra.corners.o35}
+                          market="prolongamento"
+                          label="Mais de 3.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cu35"
+                          odd={m.etExtra.corners.u35}
+                          market="prolongamento"
+                          label="Menos de 3.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.cards.o05 > 0 && (
+                      <MarketGroup title="Cartões na Prorrogação — 0.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cd05"
+                          odd={m.etExtra.cards.o05}
+                          market="prolongamento"
+                          label="Mais de 0.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cdu05"
+                          odd={m.etExtra.cards.u05}
+                          market="prolongamento"
+                          label="Menos de 0.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.cards.o15 > 0 && (
+                      <MarketGroup title="Cartões na Prorrogação — 1.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cd15"
+                          odd={m.etExtra.cards.o15}
+                          market="prolongamento"
+                          label="Mais de 1.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cdu15"
+                          odd={m.etExtra.cards.u15}
+                          market="prolongamento"
+                          label="Menos de 1.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.cards.o25 > 0 && (
+                      <MarketGroup title="Cartões na Prorrogação — 2.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cd25"
+                          odd={m.etExtra.cards.o25}
+                          market="prolongamento"
+                          label="Mais de 2.5"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="et-cdu25"
+                          odd={m.etExtra.cards.u25}
+                          market="prolongamento"
+                          label="Menos de 2.5"
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.etExtra.exactScore &&
+                      Object.keys(m.etExtra.exactScore).length > 0 && (
+                        <MarketAccordionSection
+                          title="Placar Exato da Prorrogação"
+                          defaultOpen={false}
+                          count={Object.keys(m.etExtra.exactScore).length}
+                        >
+                          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            {Object.entries(m.etExtra.exactScore).map(
+                              ([score, odd]) => (
+                                <MarketOddsBtn
+                                  key={score}
+                                  match={match}
+                                  sel={`et-cs-${score}`}
+                                  odd={odd}
+                                  market="prolongamento"
+                                  label={score === "outro" ? "Outro" : score}
+                                />
+                              ),
+                            )}
+                          </div>
+                        </MarketAccordionSection>
+                      )}
                   </div>
                 )}
 
