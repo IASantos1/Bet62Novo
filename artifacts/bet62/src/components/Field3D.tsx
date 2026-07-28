@@ -71,6 +71,7 @@ export default function Field3D({
   // animation frame — putting it in useState would re-render on every tick.
   const ballTargetRef = useRef<Vec2>(CENTER);
   const ballCurrentRef = useRef<Vec2>(CENTER);
+  const ballSpinRef = useRef(0); // radians — advances with distance travelled, for the panel pattern
   const eventColorRef = useRef<string>("#f97316");
 
   const prevHomeScore = useRef(homeScore);
@@ -198,16 +199,21 @@ export default function Field3D({
       // render cycle, so it stays smooth regardless of prop update cadence.
       const b = ballCurrentRef.current;
       const bt = ballTargetRef.current;
+      const prevBx = b.x, prevBz = b.z;
       b.x += (bt.x - b.x) * 0.05;
       b.z += (bt.z - b.z) * 0.05;
+      // Spin the ball's panel pattern proportionally to how far it just
+      // rolled, so it looks like it's actually rolling rather than sliding.
+      const moved = Math.hypot(b.x - prevBx, b.z - prevBz);
+      ballSpinRef.current += moved * 4;
 
       // ── Camera ──────────────────────────────────────────────────
       const CAM_Y = 56;
       const CAM_Z = 74;
       const FOCAL = Math.min(W, H) * 0.84;
       const CX = W / 2;
-      // Shift field upward to leave room for near-side stands below
-      const CY = H * 0.38;
+      // Centered — no near-side stand to leave room for anymore.
+      const CY = H * 0.56;
 
       const camAngle = Math.atan2(CAM_Y, CAM_Z);
       const cosA = Math.cos(camAngle);
@@ -411,7 +417,7 @@ export default function Field3D({
 
       // ── 7. Field markings ───────────────────────────────────────
       const LC = "#ffffff";
-      const LW = 1.8 * dpr;
+      const LW = 1.1 * dpr;
 
       function grect(x1: number, z1: number, x2: number, z2: number) {
         const pts: Array<[number, number, number]> = [
@@ -487,32 +493,11 @@ export default function Field3D({
       garc(FL, FW, 1, Math.PI, Math.PI * 1.5);
       garc(-FL, FW, 1, Math.PI * 1.5, Math.PI * 2);
 
-      // ── 8. Near board (on top of markings) ──────────────────────
-      board(-FL, FW + BO, FL, FW + BO, 0, BOARD_D);
-
-      // ── 9. Near stands (closest to camera, below field on screen) ──
-      {
-        const SX = FL + 18;
-        const NUM = 6;
-        const T_D = 5;
-        const T_H = 3.2;
-        const z0 = FW + BO + BOARD_D;
-        for (let i = 0; i < NUM; i++) {
-          const z_inner = z0 + i * T_D;
-          const z_outer = z_inner + T_D;
-          const y_lo = i * T_H;
-          const y_hi = y_lo + T_H;
-          const lum = 10 + i * 2;
-          poly([
-            proj(-SX, y_lo, z_inner), proj(SX, y_lo, z_inner),
-            proj(SX, y_lo, z_outer), proj(-SX, y_lo, z_outer),
-          ], `hsl(225,35%,${lum}%)`);
-          poly([
-            proj(-SX, y_lo, z_outer), proj(SX, y_lo, z_outer),
-            proj(SX, y_hi, z_outer), proj(-SX, y_hi, z_outer),
-          ], `hsl(225,32%,${lum - 4}%)`);
-        }
-      }
+      // Near board + near stands (closest to camera, below the field on
+      // screen) were removed on purpose — they only ever showed as a dead
+      // dark slab at the bottom of the widget at this crop. Keeping only
+      // the stands "behind the goal and above" (left/right + far) per the
+      // user's request.
 
       // ── 10. Goals ───────────────────────────────────────────────
       function goal(sign: number) {
@@ -596,17 +581,55 @@ export default function Field3D({
             ctx.arc(bx2, by2, r * 3.2, 0, Math.PI * 2);
             ctx.fill();
           }
-          const ballShade = ctx.createRadialGradient(
+          // Official-looking ball: white base + black pentagon panels
+          // (classic truncated-icosahedron pattern, simplified), clipped to
+          // the ball's circle, shaded for a bit of roundness.
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(bx2, by2, r, 0, Math.PI * 2);
+          ctx.clip();
+
+          ctx.fillStyle = "#f4f4f5";
+          ctx.fillRect(bx2 - r, by2 - r, r * 2, r * 2);
+
+          const drawPentagon = (cx: number, cy: number, pr: number, rot: number) => {
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+              const a = rot + (i / 5) * Math.PI * 2;
+              const px = cx + pr * Math.cos(a);
+              const py = cy + pr * Math.sin(a);
+              i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fillStyle = "#18181b";
+            ctx.fill();
+          };
+
+          const spin = ballSpinRef.current;
+          drawPentagon(bx2, by2, r * 0.46, spin - Math.PI / 2);
+          for (let i = 0; i < 5; i++) {
+            const a = spin - Math.PI / 2 + (i / 5) * Math.PI * 2;
+            drawPentagon(
+              bx2 + r * 1.02 * Math.cos(a),
+              by2 + r * 1.02 * Math.sin(a),
+              r * 0.4,
+              a + Math.PI / 5,
+            );
+          }
+
+          // Shading on top so the panel pattern still reads as a round ball
+          const shade = ctx.createRadialGradient(
             bx2 - r * 0.3, by2 - r * 0.35, r * 0.1,
             bx2, by2, r,
           );
-          ballShade.addColorStop(0, "#ffffff");
-          ballShade.addColorStop(0.6, "#d4d4d8");
-          ballShade.addColorStop(1, "#71717a");
-          ctx.fillStyle = ballShade;
+          shade.addColorStop(0, "rgba(255,255,255,0.55)");
+          shade.addColorStop(0.55, "rgba(255,255,255,0)");
+          shade.addColorStop(1, "rgba(0,0,0,0.4)");
+          ctx.fillStyle = shade;
           ctx.beginPath();
           ctx.arc(bx2, by2, r, 0, Math.PI * 2);
           ctx.fill();
+          ctx.restore();
         }
       }
 
@@ -632,7 +655,7 @@ export default function Field3D({
     <div className="flex flex-col items-center">
       <div
         className="relative w-full max-w-[320px] rounded-xl overflow-hidden border border-zinc-800/70"
-        style={{ height: 210 }}
+        style={{ height: 168 }}
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
         {/* Small scoreboard, tucked in the corner above the far stand */}
