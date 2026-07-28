@@ -560,6 +560,7 @@ export type LiveMatchState = {
     // Football extras from Statpal v2
     htScore?: [number, number]; // football: half-time score [homeHT, awayHT]
     etScore?: [number, number]; // football: extra-time score [homeET, awayET]
+    etBaseScore?: [number, number]; // football: cumulative score at start of ET (to compute ET-only goals)
     penScore?: [number, number]; // football: penalty shootout [homePen, awayPen]
     penBaseScore?: [number, number]; // football: score at start of penalty phase (to compute pen goals)
     secondHalfKickoffSec?: number;
@@ -17125,13 +17126,35 @@ async function buildFootballLiveV2(
             Math.max(0, awayScore - penBase[1]),
           ]
         : [0, 0];
+      // ET (extra-time) score tracking: same pattern as penalties above — track
+      // the cumulative score at the moment ET started, then derive ET-only
+      // goals from the delta on every subsequent tick.
+      const prevEtBase = existing._liveExtra?.etBaseScore;
+      const wasInET = /extra/i.test(String(existing.status ?? ""));
+      const etBase: [number, number] = isET
+        ? wasInET
+          ? (prevEtBase ?? [homeScore, awayScore])
+          : [homeScore, awayScore] // just transitioned — current score IS the ET-start baseline
+        : [0, 0];
+      const etGoals: [number, number] = isET
+        ? [
+            Math.max(0, homeScore - etBase[0]),
+            Math.max(0, awayScore - etBase[1]),
+          ]
+        : [0, 0];
       const penLiveExtra: LiveMatchState["_liveExtra"] = isPen
         ? {
             ...(existing._liveExtra ?? {}),
             penBaseScore: penBase,
             penScore: penGoals,
           }
-        : existing._liveExtra;
+        : isET
+          ? {
+              ...(existing._liveExtra ?? {}),
+              etBaseScore: etBase,
+              etScore: etGoals,
+            }
+          : existing._liveExtra;
       const shKickoffSec =
         newStatus === "2nd half"
           ? existing.status !== "2nd half"
@@ -17196,14 +17219,29 @@ async function buildFootballLiveV2(
         ...statsOverlay,
       };
 
-      // Helper: patch penExtra with real penalty odds into markets
+      // Helper: patch penExtra/etExtra with real odds into markets. Recomputed
+      // every tick from the current score, so both refresh immediately on
+      // every goal (penalty shootout goal or extra-time goal).
       const withPen = (mkts: typeof existing.markets) =>
         isPen
           ? {
               ...mkts,
+              // A match reaching penalties has necessarily finished ET —
+              // clear etExtra so the frontend doesn't show both tabs at once.
+              etExtra: undefined,
               penExtra: makePenMarketsFromScore(penGoals[0], penGoals[1]),
             }
-          : mkts;
+          : isET
+            ? {
+                ...mkts,
+                etExtra: makeETMarketsFromScore(
+                  etGoals[0],
+                  etGoals[1],
+                  homeScore,
+                  awayScore,
+                ),
+              }
+            : mkts;
 
       if (scored) {
         // Goal detected — filter settled markets, set goal suspension.
@@ -17368,10 +17406,17 @@ async function buildFootballLiveV2(
         awayScore,
         newStatus,
       );
-      // First time seen in penalties — store current score as base (0-0 penalties so far)
+      // First time seen already in penalties/ET — store current score as the
+      // baseline (0 goals scored in that phase so far, since we can't know
+      // how many happened before we started tracking this match).
       const markets = isPen
         ? { ...baseMarkets, penExtra: makePenMarketsFromScore(0, 0) }
-        : baseMarkets;
+        : isET
+          ? {
+              ...baseMarkets,
+              etExtra: makeETMarketsFromScore(0, 0, homeScore, awayScore),
+            }
+          : baseMarkets;
       const shKickoffSec =
         statusStr === "2nd half"
           ? Math.floor(now / 1000) - Math.max(0, minute - 46) * 60
@@ -17406,7 +17451,12 @@ async function buildFootballLiveV2(
                 penBaseScore: [homeScore, awayScore] as [number, number],
                 penScore: [0, 0] as [number, number],
               }
-            : {}),
+            : isET
+              ? {
+                  etBaseScore: [homeScore, awayScore] as [number, number],
+                  etScore: [0, 0] as [number, number],
+                }
+              : {}),
           ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
           kickoffSec: resolvedKickoffSec,
           ...(baseSec !== null
