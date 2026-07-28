@@ -164,6 +164,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import Mini3DField from "@/components/Mini3DField";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -5646,47 +5647,12 @@ export default function Home({
     | "lineups"
     | "confrontos"
   >("markets");
-  // Match header ↔ mini 2D field toggle
+  // Match header ↔ mini 3D field toggle. The field is our own — see
+  // Mini3DField — replacing the old SportScore iframe tracker entirely.
   const [showFieldView, setShowFieldView] = useState(false);
   useEffect(() => {
     setShowFieldView(false);
   }, [expandedMatch?.id]);
-
-  // SportScore Match Tracker widget — resolves lazily per match since it
-  // needs a separate ID lookup (Statpal and SportScore use unrelated ID
-  // spaces). null = looked up, no mapping yet; undefined = not looked up.
-  const [sportscoreId, setSportscoreId] = useState<string | null | undefined>(
-    undefined,
-  );
-  useEffect(() => {
-    setSportscoreId(undefined);
-    if (!expandedMatch?.id) return;
-    const sport = expandedMatch.sport || "football";
-    // SportScore only covers football, basketball, cricket and tennis —
-    // hockey/volleyball/baseball are never going to resolve, so skip the
-    // request entirely instead of always failing.
-    if (!["football", "basketball", "cricket", "tennis"].includes(sport)) return;
-    // Tier 4 football (minimal market depth — leagues nobody bets big on)
-    // skips the Match Tracker too, saving SportScore quota for leagues that
-    // actually matter.
-    if (sport === "football" && expandedMatch.matchTier === 4) return;
-    const matchId = expandedMatch.id;
-    const qs = new URLSearchParams();
-    if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
-    if (expandedMatch.away) qs.set("awayTeam", expandedMatch.away);
-    let cancelled = false;
-    fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}?${qs.toString()}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setSportscoreId(data?.sportscoreId ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setSportscoreId(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expandedMatch?.id, expandedMatch?.sport, expandedMatch?.home, expandedMatch?.away]);
 
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
@@ -18060,55 +18026,17 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        {sportscoreId ? (() => {
-                          // The embed's own layout is: header (title + "LIVE ·
-                          // ..."), then the field/court graphic, then more
-                          // stuff below (a score recap row, an events
-                          // timeline, its own "Live tracker by
-                          // sportscore.com" link) that we don't want.
-                          // Football's header ("LIVE · HT" etc.) should stay
-                          // visible, so only the bottom gets trimmed there.
-                          // Tennis's header ("... vs ... LIVE · Set N") is
-                          // the part to drop, keeping just the court
-                          // centered — its header is shorter but the court
-                          // graphic itself is much taller than football's
-                          // pitch. The iframe keeps its natural 320x420 size
-                          // so its internal layout never reflows/distorts; a
-                          // negative top margin inside an overflow:hidden
-                          // window just slides the visible slice down and
-                          // stops it before everything unwanted.
-                          const isTennisSport = expandedMatch.sport === "tennis";
-                          const topOffset = isTennisSport ? 70 : 0;
-                          const courtHeight = isTennisSport ? 165 : 225;
-                          return (
-                            <div className="flex flex-col items-center">
-                              <div
-                                className="w-full max-w-[320px] overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-950"
-                                style={{ height: courtHeight }}
-                              >
-                                <iframe
-                                  key={sportscoreId}
-                                  src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
-                                  title="Match Tracker"
-                                  width={320}
-                                  height={420}
-                                  className="block w-[320px] max-w-none"
-                                  style={{ marginTop: -topOffset }}
-                                  loading="lazy"
-                                  referrerPolicy="no-referrer-when-downgrade"
-                                />
-                              </div>
-                              <a
-                                href="https://sportscore.com/football/"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-1 text-[9px] text-zinc-600 hover:text-zinc-500 transition-colors"
-                              >
-                                tracker by sportscore.com
-                              </a>
-                            </div>
-                          );
-                        })() : null}
+                        <Mini3DField
+                          homeScore={expandedMatch.homeScore ?? 0}
+                          awayScore={expandedMatch.awayScore ?? 0}
+                          cornersTotal={expandedMatch._liveExtra?.cornersTotal}
+                          yellowCardsHome={expandedMatch._liveExtra?.yellowCardsHome}
+                          yellowCardsAway={expandedMatch._liveExtra?.yellowCardsAway}
+                          redCardsHome={expandedMatch._liveExtra?.redCardsHomeCount}
+                          redCardsAway={expandedMatch._liveExtra?.redCardsAwayCount}
+                          homeTeam={teamNamePt(expandedMatch.home)}
+                          awayTeam={teamNamePt(expandedMatch.away)}
+                        />
                       </div>
                     ) : (
                       <>
@@ -18258,10 +18186,7 @@ export default function Home({
                       </>
                     )}
 
-                    {!(
-                      expandedMatch.sport === "football" &&
-                      expandedMatch.matchTier === 4
-                    ) && (
+                    {(expandedMatch.sport ?? "football") === "football" && (
                       <div className="flex items-center">
                         <button
                           onClick={() => setShowFieldView((v) => !v)}
