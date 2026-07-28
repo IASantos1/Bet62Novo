@@ -12074,6 +12074,20 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
           footballLiveV2Cache = statpal.events;
           footballLiveV2FetchedAt = now;
           liveFeedUpdatedTs = statpal.updatedTs;
+          // Diagnostic: our own polling is sub-second (LIVE_CACHE_TTL/broadcast
+          // tick), so a scoreboard lag reported by users almost always traces
+          // back to Statpal's own upstream refresh cadence, not ours. Log when
+          // their self-reported updated_ts is already stale on arrival so this
+          // is provable from logs instead of guessed at.
+          if (liveFeedUpdatedTs > 0) {
+            const feedAgeMs = now - liveFeedUpdatedTs * 1000;
+            if (feedAgeMs > 5_000) {
+              logger.warn(
+                { feedAgeMs, updatedTs: liveFeedUpdatedTs },
+                "[statpal-football-live] upstream feed already stale on arrival",
+              );
+            }
+          }
           return footballLiveV2Cache;
         }
         // Statpal returned 0 events — fall through to SportsAPI Pro
@@ -14850,8 +14864,11 @@ function ouLinesFromCount(
   minutesRemaining: number | undefined,
 ): Record<string, number> {
   const marg = 0.07;
+  // Capped at 12 (not 200) — a two-outcome market never realistically prices
+  // one side that high; anything beyond this is effectively "impossible" and
+  // should have been pruned/settled instead of shown as a giant number.
   const price = (p: number) =>
-    mr(mc((1 / Math.max(0.01, p)) * (1 + marg), 1.01, 200));
+    mr(mc((1 / Math.max(0.01, p)) * (1 + marg), 1.01, 12));
   const out: Record<string, number> = {};
   const timeIsShort = minutesRemaining !== undefined && minutesRemaining <= 10;
   for (const line of lines) {
@@ -14972,8 +14989,13 @@ function makeETMarketsFromScore(
   // Total goals (Poisson model for remaining ET time), lines up to 4.5.
   // Settled/too-distant lines are pruned inside ouLinesFromCount — see there
   // for the "last 10 minutes" narrowing and re-opening logic.
+  // Baseline raised from 0.65 → 1.1: over lines were pricing too high (odds
+  // implying a low chance of a goal even at 0-0), which reads wrong for a
+  // "low/likely over, more evenly-matched under" line. 1.1 puts Over 0.5 at
+  // ~1.6-1.7 and Under 0.5 at ~2.3-2.5 pre-margin instead of ~1.9/2.0 either
+  // way — under stays betable, not lopsided the other direction.
   const totalGoalsET = etHome + etAway;
-  const goalsLambda = Math.max(0.05, 0.65 - totalGoalsET * 0.22);
+  const goalsLambda = Math.max(0.1, 1.1 - totalGoalsET * 0.3);
   const goalLines = ouLinesFromCount(
     totalGoalsET,
     goalsLambda,
