@@ -433,8 +433,34 @@ type AdvancedMarkets = {
       u15: number;
       o25: number;
       u25: number;
+      o35: number;
+      u35: number;
+      o45: number;
+      u45: number;
     };
     nextGoal: { home: number; away: number }; // which team scores next in ET
+    // 1st/2nd ET-half result — all-zero (hidden) until that half's goals are
+    // known, or if the feed doesn't distinguish ET halves for this match.
+    firstHalfResult: { home: number; draw: number; away: number };
+    secondHalfResult: { home: number; draw: number; away: number };
+    corners: {
+      o15: number;
+      u15: number;
+      o25: number;
+      u25: number;
+      o35: number;
+      u35: number;
+    };
+    cards: {
+      o05: number;
+      u05: number;
+      o15: number;
+      u15: number;
+      o25: number;
+      u25: number;
+    };
+    // Exact score of the ET period only, e.g. "0-0", "1-0", ... "outro" (any other combo)
+    exactScore: Record<string, number>;
   };
   // Football penalty-shootout markets (shown when m.penalties exists during live)
   penExtra?: {
@@ -561,6 +587,13 @@ export type LiveMatchState = {
     htScore?: [number, number]; // football: half-time score [homeHT, awayHT]
     etScore?: [number, number]; // football: extra-time score [homeET, awayET]
     etBaseScore?: [number, number]; // football: cumulative score at start of ET (to compute ET-only goals)
+    et2BaseScore?: [number, number]; // football: cumulative score at start of ET's 2nd half
+    et1FinalGoals?: [number, number]; // football: ET 1st-half goals (live during 1st half, frozen after)
+    etHalf?: 1 | 2; // football: which ET half we're currently in, when the feed distinguishes them
+    etKickoffSec?: number; // football: wall-clock time ET started (minute is frozen during ET, see buildFootballLiveV2)
+    et2KickoffSec?: number; // football: wall-clock time ET's 2nd half started
+    etBaseCorners?: number; // football: match-wide corner count at start of ET (to compute ET-only corners)
+    etBaseCards?: number; // football: match-wide card count at start of ET (to compute ET-only cards)
     penScore?: [number, number]; // football: penalty shootout [homePen, awayPen]
     penBaseScore?: [number, number]; // football: score at start of penalty phase (to compute pen goals)
     secondHalfKickoffSec?: number;
@@ -14770,17 +14803,103 @@ function buildVolleyballLiveMatches(
 
 // ─── ET / Penalty market helpers ────────────────────────────────────────────────
 
+// Shared 1X2 probability table for a single scoring period (whole ET, or one
+// ET half), keyed by that period's own goal difference. Reused for etResult,
+// firstHalfResult and secondHalfResult so the three markets stay consistent.
+function periodResultOddsFromDiff(
+  diff: number,
+): { home: number; draw: number; away: number } {
+  const marg = 0.07;
+  const price = (p: number) =>
+    mr(mc((1 / Math.max(0.01, p)) * (1 + marg), 1.01, 200));
+  let pH: number, pD: number, pA: number;
+  if (diff === 0) {
+    pH = 0.37;
+    pD = 0.28;
+    pA = 0.35;
+  } else if (diff === 1) {
+    pH = 0.72;
+    pD = 0.18;
+    pA = 0.1;
+  } else if (diff === -1) {
+    pH = 0.1;
+    pD = 0.18;
+    pA = 0.72;
+  } else if (diff >= 2) {
+    pH = 0.92;
+    pD = 0.05;
+    pA = 0.03;
+  } else {
+    pH = 0.03;
+    pD = 0.05;
+    pA = 0.92;
+  }
+  return { home: price(pH), draw: price(pD), away: price(pA) };
+}
+
+// Over/under lines for a Poisson-distributed count (goals/corners/cards) in a
+// fixed remaining window, pruned as time runs out. `alreadyHappened` settles
+// (hides — real books pull it, no more betting value) any line already
+// exceeded. When `minutesRemaining` is low, lines far above the current tally
+// are hidden too (unrealistic to reach); they reappear on their own once the
+// tally rises close enough — this function is recomputed fresh every tick.
+function ouLinesFromCount(
+  count: number,
+  lambda: number,
+  lines: number[],
+  minutesRemaining: number | undefined,
+): Record<string, number> {
+  const marg = 0.07;
+  const price = (p: number) =>
+    mr(mc((1 / Math.max(0.01, p)) * (1 + marg), 1.01, 200));
+  const out: Record<string, number> = {};
+  const timeIsShort = minutesRemaining !== undefined && minutesRemaining <= 10;
+  for (const line of lines) {
+    const key = String(Math.round(line * 10));
+    const settled = count > line; // over already guaranteed — no betting value left
+    const pruned = timeIsShort && line > count + 1.5 + 1e-9;
+    if (settled || pruned) {
+      out[`o${key}`] = 0;
+      out[`u${key}`] = 0;
+      continue;
+    }
+    // Number of additional events needed to pass this line, from current count
+    const need = Math.max(0, Math.floor(line - count));
+    // Recompute cumulative P(additional events <= need) via Poisson terms
+    let cdf = Math.exp(-lambda);
+    let term = cdf;
+    for (let k = 1; k <= need; k++) {
+      term *= lambda / k;
+      cdf += term;
+    }
+    const pOver = mc(1 - cdf, 0.01, 0.98);
+    out[`o${key}`] = price(pOver);
+    out[`u${key}`] = price(1 - pOver);
+  }
+  return out;
+}
+
 function makeETMarketsFromScore(
   etHome: number,
   etAway: number,
   totalHome: number,
   totalAway: number,
+  extra?: {
+    firstHalfGoals?: [number, number]; // frozen once 2nd ET half starts; live during 1st half
+    secondHalfGoals?: [number, number]; // only once 2nd ET half has started
+    corners?: number; // ET-only corners so far (combined, not split by team)
+    cards?: number; // ET-only cards so far (combined)
+    minutesRemaining?: number; // minutes left in the whole ET period; undefined = unknown (no pruning)
+  },
 ): NonNullable<AdvancedMarkets["etExtra"]> {
   const marg = 0.07;
   const price = (p: number) =>
     mr(mc((1 / Math.max(0.01, p)) * (1 + marg), 1.01, 200));
 
-  // ET period result (1X2 — draw in ET means match goes to penalties)
+  // ET period result (1X2 — draw in ET means match goes to penalties). Raw
+  // probabilities are needed (not priced odds) since tieWinner below blends
+  // with them directly — periodResultOddsFromDiff is used for the
+  // firstHalfResult/secondHalfResult markets further down instead.
   const etDiff = etHome - etAway;
   let pH: number, pD: number, pA: number;
   if (etDiff === 0) {
@@ -14850,28 +14969,109 @@ function makeETMarketsFromScore(
     pNG_A = 0.5;
   }
 
-  // Total goals (Poisson model for remaining ET time)
+  // Total goals (Poisson model for remaining ET time), lines up to 4.5.
+  // Settled/too-distant lines are pruned inside ouLinesFromCount — see there
+  // for the "last 10 minutes" narrowing and re-opening logic.
   const totalGoalsET = etHome + etAway;
-  const λ = Math.max(0.05, 0.65 - totalGoalsET * 0.22);
-  const p0 = Math.exp(-λ);
-  const p1 = λ * p0;
-  const p2 = ((λ * λ) / 2) * p0;
-  const pO05 = Math.max(0.02, 1 - p0);
-  const pO15 = Math.max(0.01, 1 - p0 - p1);
-  const pO25 = Math.max(0.005, 1 - p0 - p1 - p2);
+  const goalsLambda = Math.max(0.05, 0.65 - totalGoalsET * 0.22);
+  const goalLines = ouLinesFromCount(
+    totalGoalsET,
+    goalsLambda,
+    [0.5, 1.5, 2.5, 3.5, 4.5],
+    extra?.minutesRemaining,
+  );
+
+  // Corners/cards during ET only — synthetic model (Statpal doesn't provide
+  // real bookmaker odds for these), same pruning behaviour as goals.
+  const etCorners = extra?.corners ?? 0;
+  const cornersLambda = Math.max(0.15, 1.8 - etCorners * 0.35);
+  const cornerLines = ouLinesFromCount(
+    etCorners,
+    cornersLambda,
+    [1.5, 2.5, 3.5],
+    extra?.minutesRemaining,
+  );
+  const etCards = extra?.cards ?? 0;
+  const cardsLambda = Math.max(0.1, 1.1 - etCards * 0.4);
+  const cardLines = ouLinesFromCount(
+    etCards,
+    cardsLambda,
+    [0.5, 1.5, 2.5],
+    extra?.minutesRemaining,
+  );
+
+  // 1st/2nd ET-half result — only populated once that half's goals are known
+  // (firstHalfGoals is live during half 1, frozen once half 2 starts;
+  // secondHalfGoals only exists once half 2 has actually started). All-zero
+  // (hidden, per the existing "zero odds = market unavailable" convention)
+  // when the API doesn't distinguish ET halves for this match.
+  const firstHalfResult = extra?.firstHalfGoals
+    ? periodResultOddsFromDiff(
+        extra.firstHalfGoals[0] - extra.firstHalfGoals[1],
+      )
+    : { home: 0, draw: 0, away: 0 };
+  const secondHalfResult = extra?.secondHalfGoals
+    ? periodResultOddsFromDiff(
+        extra.secondHalfGoals[0] - extra.secondHalfGoals[1],
+      )
+    : { home: 0, draw: 0, away: 0 };
+
+  // Exact score in ET — small combo grid, split goal expectancy toward
+  // whichever side is currently trailing (same asymmetry as nextGoal above).
+  const λHome = goalsLambda * (pNG_H / 0.5) * 0.55;
+  const λAway = goalsLambda * (pNG_A / 0.5) * 0.55;
+  const poissonP = (λ: number, k: number): number => {
+    let f = 1;
+    for (let i = 2; i <= k; i++) f *= i;
+    return (Math.exp(-λ) * Math.pow(λ, k)) / f;
+  };
+  const scoreCombos: Array<[number, number]> = [
+    [0, 0], [1, 0], [0, 1], [1, 1], [2, 0], [0, 2], [2, 1], [1, 2], [2, 2],
+  ];
+  const exactScore: Record<string, number> = {};
+  let othersP = 1;
+  for (const [h, a] of scoreCombos) {
+    const p = mc(poissonP(λHome, h) * poissonP(λAway, a), 0.002, 0.9);
+    exactScore[`${h}-${a}`] = price(p);
+    othersP -= p;
+  }
+  exactScore["outro"] = price(mc(othersP, 0.01, 0.95));
 
   return {
     tieWinner: { home: price(pTH), away: price(pTA) },
     etResult: { home: price(pH), draw: price(pD), away: price(pA) },
     totalGoals: {
-      o05: price(pO05),
-      u05: price(1 - pO05),
-      o15: price(pO15),
-      u15: price(1 - pO15),
-      o25: price(pO25),
-      u25: price(1 - pO25),
+      o05: goalLines.o5 ?? 0,
+      u05: goalLines.u5 ?? 0,
+      o15: goalLines.o15 ?? 0,
+      u15: goalLines.u15 ?? 0,
+      o25: goalLines.o25 ?? 0,
+      u25: goalLines.u25 ?? 0,
+      o35: goalLines.o35 ?? 0,
+      u35: goalLines.u35 ?? 0,
+      o45: goalLines.o45 ?? 0,
+      u45: goalLines.u45 ?? 0,
     },
     nextGoal: { home: price(pNG_H), away: price(pNG_A) },
+    firstHalfResult,
+    secondHalfResult,
+    corners: {
+      o15: cornerLines.o15 ?? 0,
+      u15: cornerLines.u15 ?? 0,
+      o25: cornerLines.o25 ?? 0,
+      u25: cornerLines.u25 ?? 0,
+      o35: cornerLines.o35 ?? 0,
+      u35: cornerLines.u35 ?? 0,
+    },
+    cards: {
+      o05: cardLines.o5 ?? 0,
+      u05: cardLines.u5 ?? 0,
+      o15: cardLines.o15 ?? 0,
+      u15: cardLines.u15 ?? 0,
+      o25: cardLines.o25 ?? 0,
+      u25: cardLines.u25 ?? 0,
+    },
+    exactScore,
   };
 }
 
@@ -16850,6 +17050,14 @@ async function buildFootballLiveV2(
     const isPen = statusStr === "Penalties";
     const isET =
       !isPen && (statusStr.includes("extra") || statusStr === "Extra Time");
+    // Some Statpal feeds distinguish the two ET halves in the status text
+    // (e.g. "1st Extra Time"/"2nd Extra Time" — see isFootballV2LiveStatus).
+    // When they don't, isET1/isET2 both stay false and the half-specific
+    // markets below simply stay hidden (all-zero) — only the whole-ET
+    // markets (tieWinner, etResult, totalGoals, ...) are shown, same as before.
+    const normalizedStatusForET = normalizeLiveStatus(statusStr);
+    const isET1 = isET && normalizedStatusForET.includes("1st extra");
+    const isET2 = isET && normalizedStatusForET.includes("2nd extra");
     const isBreak = statusStr === "Break Time" || statusStr === "Pause";
     const existingStatus = String(existing?.status ?? "");
     let resolvedKickoffSec: number | undefined =
@@ -17128,13 +17336,14 @@ async function buildFootballLiveV2(
         : [0, 0];
       // ET (extra-time) score tracking: same pattern as penalties above — track
       // the cumulative score at the moment ET started, then derive ET-only
-      // goals from the delta on every subsequent tick.
+      // goals from the delta on every subsequent tick. NOTE: newStatus
+      // collapses to the generic string "ET" once persisted (see below), so
+      // "already tracking" must be detected from a stored baseline field, not
+      // from re-parsing existing.status (which no longer carries the "extra"
+      // substring after the first tick).
       const prevEtBase = existing._liveExtra?.etBaseScore;
-      const wasInET = /extra/i.test(String(existing.status ?? ""));
       const etBase: [number, number] = isET
-        ? wasInET
-          ? (prevEtBase ?? [homeScore, awayScore])
-          : [homeScore, awayScore] // just transitioned — current score IS the ET-start baseline
+        ? (prevEtBase ?? [homeScore, awayScore]) // first ET tick — current score IS the ET-start baseline
         : [0, 0];
       const etGoals: [number, number] = isET
         ? [
@@ -17142,6 +17351,78 @@ async function buildFootballLiveV2(
             Math.max(0, awayScore - etBase[1]),
           ]
         : [0, 0];
+
+      // 2nd ET-half score tracking, only when the feed distinguishes halves
+      // (isET1/isET2). Freezes the 1st-half goal count the moment the 2nd
+      // half starts, so firstHalfResult keeps showing that half's final
+      // result instead of drifting once ET2 begins.
+      const prevEt2Base = existing._liveExtra?.et2BaseScore;
+      const prevEtHalf = existing._liveExtra?.etHalf;
+      const et2Base: [number, number] | undefined = isET2
+        ? (prevEt2Base ?? [homeScore, awayScore])
+        : undefined;
+      const et2Goals: [number, number] | undefined = isET2 && et2Base
+        ? [
+            Math.max(0, homeScore - et2Base[0]),
+            Math.max(0, awayScore - et2Base[1]),
+          ]
+        : undefined;
+      const et1FinalGoals: [number, number] | undefined =
+        isET2 && prevEtHalf !== 2 && et2Base
+          ? [
+              Math.max(0, et2Base[0] - etBase[0]),
+              Math.max(0, et2Base[1] - etBase[1]),
+            ] // just transitioned into ET2 — freeze what ET1 ended at
+          : isET2
+            ? existing._liveExtra?.et1FinalGoals
+            : isET1
+              ? etGoals // still in ET1 — "final" keeps live-updating until half ends
+              : existing._liveExtra?.et1FinalGoals;
+      const newEtHalf: 1 | 2 | undefined = isET2 ? 2 : isET1 ? 1 : existing._liveExtra?.etHalf;
+
+      // Real-time ET clock — Statpal's `minute` field is frozen at a fixed
+      // value throughout ET (see below), so elapsed/remaining time has to be
+      // tracked independently from wall-clock timestamps, same approach as
+      // secondHalfKickoffSec for the regular 2nd half.
+      const ET_HALF_MIN = 15;
+      const etKickoffSec = isET
+        ? (existing._liveExtra?.etKickoffSec ?? Math.floor(now / 1000))
+        : existing._liveExtra?.etKickoffSec;
+      const et2KickoffSec = isET2
+        ? (existing._liveExtra?.et2KickoffSec ?? Math.floor(now / 1000))
+        : existing._liveExtra?.et2KickoffSec;
+      let etMinutesRemaining: number | undefined;
+      if (isET2 && et2KickoffSec) {
+        etMinutesRemaining = Math.max(
+          0,
+          ET_HALF_MIN - (now / 1000 - et2KickoffSec) / 60,
+        );
+      } else if (isET1 && etKickoffSec) {
+        etMinutesRemaining =
+          Math.max(0, ET_HALF_MIN - (now / 1000 - etKickoffSec) / 60) +
+          ET_HALF_MIN;
+      } else if (isET && etKickoffSec) {
+        // Feed doesn't distinguish halves — estimate from whole-ET start.
+        etMinutesRemaining = Math.max(
+          0,
+          ET_HALF_MIN * 2 - (now / 1000 - etKickoffSec) / 60,
+        );
+      }
+
+      // ET-only corners/cards: same baseline-delta pattern as goals, reusing
+      // whichever match-wide totals are already being tracked/refreshed
+      // elsewhere in this tick (see statsOverlay below).
+      const prevEtBaseCorners = existing._liveExtra?.etBaseCorners;
+      const prevEtBaseCards = existing._liveExtra?.etBaseCards;
+      const priorCornersTotal = existing._liveExtra?.cornersTotal ?? 0;
+      const priorCardsTotal = existing._liveExtra?.cardsTotal ?? 0;
+      const etBaseCorners = isET
+        ? (prevEtBaseCorners ?? priorCornersTotal)
+        : undefined;
+      const etBaseCards = isET
+        ? (prevEtBaseCards ?? priorCardsTotal)
+        : undefined;
+
       const penLiveExtra: LiveMatchState["_liveExtra"] = isPen
         ? {
             ...(existing._liveExtra ?? {}),
@@ -17153,6 +17434,13 @@ async function buildFootballLiveV2(
               ...(existing._liveExtra ?? {}),
               etBaseScore: etBase,
               etScore: etGoals,
+              ...(et2Base ? { et2BaseScore: et2Base } : {}),
+              ...(et1FinalGoals ? { et1FinalGoals } : {}),
+              ...(newEtHalf ? { etHalf: newEtHalf } : {}),
+              ...(etKickoffSec ? { etKickoffSec } : {}),
+              ...(et2KickoffSec ? { et2KickoffSec } : {}),
+              ...(etBaseCorners !== undefined ? { etBaseCorners } : {}),
+              ...(etBaseCards !== undefined ? { etBaseCards } : {}),
             }
           : existing._liveExtra;
       const shKickoffSec =
@@ -17239,6 +17527,27 @@ async function buildFootballLiveV2(
                   etGoals[1],
                   homeScore,
                   awayScore,
+                  {
+                    firstHalfGoals: et1FinalGoals,
+                    secondHalfGoals: et2Goals,
+                    corners:
+                      etBaseCorners !== undefined
+                        ? Math.max(
+                            0,
+                            (statsOverlay.cornersTotal ?? priorCornersTotal) -
+                              etBaseCorners,
+                          )
+                        : 0,
+                    cards:
+                      etBaseCards !== undefined
+                        ? Math.max(
+                            0,
+                            (statsOverlay.cardsTotal ?? priorCardsTotal) -
+                              etBaseCards,
+                          )
+                        : 0,
+                    minutesRemaining: etMinutesRemaining,
+                  },
                 ),
               }
             : mkts;
@@ -17414,7 +17723,17 @@ async function buildFootballLiveV2(
         : isET
           ? {
               ...baseMarkets,
-              etExtra: makeETMarketsFromScore(0, 0, homeScore, awayScore),
+              etExtra: makeETMarketsFromScore(0, 0, homeScore, awayScore, {
+                firstHalfGoals: isET1 ? [0, 0] : undefined,
+                secondHalfGoals: isET2 ? [0, 0] : undefined,
+                corners: 0,
+                cards: 0,
+                // Just started tracking this instant — assume a fresh
+                // half/whole ET window from now (unavoidably approximate if
+                // the match was actually discovered mid-ET, e.g. after a
+                // server restart).
+                minutesRemaining: isET2 ? 15 : 30,
+              }),
             }
           : baseMarkets;
       const shKickoffSec =
@@ -17455,6 +17774,20 @@ async function buildFootballLiveV2(
               ? {
                   etBaseScore: [homeScore, awayScore] as [number, number],
                   etScore: [0, 0] as [number, number],
+                  etKickoffSec: Math.floor(now / 1000),
+                  etHalf: (isET2 ? 2 : isET1 ? 1 : undefined) as 1 | 2 | undefined,
+                  et1FinalGoals: [0, 0] as [number, number],
+                  etBaseCorners: 0,
+                  etBaseCards: 0,
+                  ...(isET2
+                    ? {
+                        et2KickoffSec: Math.floor(now / 1000),
+                        et2BaseScore: [homeScore, awayScore] as [
+                          number,
+                          number,
+                        ],
+                      }
+                    : {}),
                 }
               : {}),
           ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
