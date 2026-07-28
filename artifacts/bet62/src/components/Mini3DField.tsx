@@ -272,7 +272,7 @@ export default function Mini3DField({
         />
 
         {/* Perspective wrapper */}
-        <div className="absolute inset-0" style={{ perspective: 380 }}>
+        <div className="absolute inset-0" style={{ perspective: 900 }}>
           {/* Centers the pitch in plain 2D first — translateX must happen
               BEFORE rotateX, in a separate element, otherwise it moves along
               the already-rotated 3D axis instead of the screen's horizontal
@@ -280,9 +280,9 @@ export default function Mini3DField({
           <div
             className="absolute left-1/2"
             style={{
-              bottom: 6,
-              width: "90%",
-              height: "84%",
+              bottom: 10,
+              width: "92%",
+              height: "78%",
               transform: "translateX(-50%)",
               // Without this, the parent's `perspective` doesn't reach the
               // rotateX() child below — it gets flattened to 2D at this
@@ -291,14 +291,15 @@ export default function Mini3DField({
               transformStyle: "preserve-3d",
             }}
           >
-            {/* Tilted pitch — bottom-anchored so the near edge stays full
-                width and the far edge recedes, matching a behind-the-goal
-                broadcast angle. Field runs left↔right, so grass stripes run
-                vertically (perpendicular to the goal-to-goal axis). */}
+            {/* Tilted pitch — a shallow tilt (not the deep behind-the-goal
+                trapezoid) so the green surface reads as a clear horizontal
+                rectangle, goals on the sides, viewed mostly from above.
+                Field runs left↔right, so grass stripes run vertically
+                (perpendicular to the goal-to-goal axis). */}
             <div
               className="absolute inset-0"
               style={{
-                transform: "rotateX(56deg)",
+                transform: "rotateX(22deg)",
                 transformOrigin: "50% 100%",
                 background:
                   "repeating-linear-gradient(90deg, #1e6b34 0px, #1e6b34 8%, #227a3b 8%, #227a3b 16%)",
