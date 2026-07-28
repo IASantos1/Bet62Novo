@@ -164,7 +164,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
-import Mini3DField from "@/components/Mini3DField";
+import Field3D from "@/components/Field3D";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -5648,7 +5648,7 @@ export default function Home({
     | "confrontos"
   >("markets");
   // Match header ↔ mini 3D field toggle. The field is our own — see
-  // Mini3DField — replacing the old SportScore iframe tracker entirely.
+  // Field3D — replacing the old SportScore iframe tracker entirely.
   const [showFieldView, setShowFieldView] = useState(false);
   useEffect(() => {
     setShowFieldView(false);
@@ -18026,7 +18026,7 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        <Mini3DField
+                        <Field3D
                           homeScore={expandedMatch.homeScore ?? 0}
                           awayScore={expandedMatch.awayScore ?? 0}
                           cornersTotal={expandedMatch._liveExtra?.cornersTotal}
