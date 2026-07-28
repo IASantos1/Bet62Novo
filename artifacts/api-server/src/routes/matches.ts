@@ -487,6 +487,9 @@ export type LiveMatchState = {
   league: string;
   country: string;
   sport: string;
+  // Football only — market-depth/staking tier (1 = full, 4 = minimal). See
+  // footballMarketTier()/filterFootballMarketsByTier() further down.
+  matchTier?: FootballMarketTier;
   homeScore: number;
   awayScore: number;
   minute: number;
@@ -1966,6 +1969,127 @@ function getFootballLiveDisappearGraceMs(
   return isCatalogPriorityLeague(prio)
     ? PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS
     : DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS;
+}
+
+// ─── Market tier: how much market depth / staking headroom a league gets ──────
+// Distinct from leaguePriority()'s display-order ranking (though it reuses the
+// same DOMESTIC_PRIORITY numbers) — this drives which markets are shown and
+// how big a live stake is allowed, mirroring how Bet365/Betano vary coverage
+// by competition. Tier 1 = full market set, Tier 4 = 1x2 + basic over/under
+// only. Confirmed with the user before building this.
+export type FootballMarketTier = 1 | 2 | 3 | 4;
+
+const FRIENDLY_INTL_NAMES = new Set([
+  "international friendly",
+  "international friendlies",
+  "amistosos internacionais",
+  "club friendly",
+  "amistoso de clubes",
+  "amistosos de clubes",
+  "club friendlies",
+]);
+
+export function footballMarketTier(
+  leagueDisplayName: string,
+  countryRaw: string,
+): FootballMarketTier {
+  const base = String(leagueDisplayName ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .split(" - ")[0]
+    .trim();
+  if (FRIENDLY_INTL_NAMES.has(base)) return 3; // friendlies: low real market depth in practice
+  if (isIntlTournamentName(leagueDisplayName)) return 1; // Champions/Europa/World Cup/Euros/Copa América/Libertadores…
+
+  const countryKey = normalizeCountryKey(countryRaw);
+  const key = `${countryKey}: ${leagueDisplayName}`.toLowerCase();
+  const prio = leaguePriority(key, countryKey);
+  if (prio < 10) return 1; // Tier 1 domestic
+  if (prio < 20) return 2; // Tier 2 domestic
+  if (prio < 40) return 3; // Tier 3 domestic
+  if (prio < 60) return 2; // domestic cups — near-Tier-2 market depth
+  return 4; // Tier 4 and anything else that still gets shown
+}
+
+const ZERO_TOTAL_GOALS: AdvancedMarkets["totalGoals"] = {
+  over05: 0,
+  under05: 0,
+  over15: 0,
+  under15: 0,
+  over25: 0,
+  under25: 0,
+  over35: 0,
+  under35: 0,
+  over45: 0,
+  under45: 0,
+  over55: 0,
+  under55: 0,
+  over65: 0,
+  under65: 0,
+};
+
+/**
+ * Narrows an already-computed AdvancedMarkets object down to what a given
+ * market tier should expose. Zeroes out (rather than deletes) the required
+ * base fields — the frontend already treats all-zero odds as "market not
+ * available" (see the `firstGoal` settled-market comment elsewhere in this
+ * file) — and deletes the optional extended-market fields outright.
+ */
+export function filterFootballMarketsByTier(
+  markets: AdvancedMarkets,
+  tier: FootballMarketTier,
+): AdvancedMarkets {
+  if (tier === 1) return markets;
+
+  const out: AdvancedMarkets = { ...markets };
+  // Tier 2/3/4 all drop the more "exotic" extended markets.
+  delete out.correctScore;
+  delete out.htft;
+  delete out.asianTotals;
+  delete out.corners;
+  delete out.cards;
+  delete out.secondHalf;
+
+  if (tier === 2) return out;
+
+  // Tier 3: core markets only — 1x2 (separate from `markets`), over/under
+  // (all lines), both teams to score, double chance.
+  delete out.drawNoBet;
+  delete out.asianHandicap;
+  out.handicap = {
+    homeMinusOne: 0,
+    awayPlusOne: 0,
+    homeMinusOneHalf: 0,
+    awayPlusOneHalf: 0,
+  };
+  out.halfTime = { home: 0, draw: 0, away: 0 };
+  out.firstGoal = { home: 0, noGoal: 0, away: 0 };
+
+  if (tier === 3) return out;
+
+  // Tier 4: minimal — 1x2 + basic over/under 2.5 only.
+  out.totalGoals = { ...ZERO_TOTAL_GOALS, over25: markets.totalGoals.over25, under25: markets.totalGoals.under25 };
+  out.doubleChance = { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 };
+  out.bothTeamsScore = { yes: 0, no: 0 };
+  return out;
+}
+
+// Stake headroom by market tier — a multiplier applied on top of the admin's
+// global max stake (never above it). Tier 4 caps exposure on leagues nobody
+// is really betting big on; Tier 1 gets the full admin-configured ceiling.
+const MARKET_TIER_STAKE_MULTIPLIER: Record<FootballMarketTier, number> = {
+  1: 1,
+  2: 0.75,
+  3: 0.5,
+  4: 0.25,
+};
+
+export function footballMarketTierMaxStake(
+  tier: FootballMarketTier,
+  globalMaxStake: number,
+): number {
+  return Math.round(globalMaxStake * MARKET_TIER_STAKE_MULTIPLIER[tier] * 100) / 100;
 }
 
 // ─── League name normalisation ─────────────────────────────────────────────────
@@ -17360,7 +17484,18 @@ async function buildFootballLiveV2(
     }
   }
 
-  return result;
+  // Apply market-tier depth/staking gating to the OUTPUT only — never mutate
+  // the objects stored in liveMatchState, since drift/suspension logic further
+  // up reads `existing.markets`/`existing._baseMarkets` and needs the full,
+  // untrimmed data to keep working correctly for every tier.
+  return result.map((m) => {
+    const tier = footballMarketTier(m.league, m.country);
+    return tier === 1
+      ? m.matchTier === tier
+        ? m
+        : { ...m, matchTier: tier }
+      : { ...m, matchTier: tier, markets: filterFootballMarketsByTier(m.markets, tier) };
+  });
 }
 
 const BBALL_SUSP_KEYS = [
@@ -32003,6 +32138,38 @@ type FootballOddsEntry = {
  * Averages bookmaker prices across all active (non-stopped) bookmakers for each
  * outcome in each market.  Unknown markets are silently skipped.
  */
+// Diagnostic capture of market names Statpal's /odds/prematch feed returns
+// that we don't currently parse (see the loop's final `else` branch below).
+// Statpal aggregates prices across ~80 bookmakers per league and offers many
+// more market types than the handful we handle — this map lets us see the
+// real names in production (e.g. any anytime-goalscorer/assist markets)
+// instead of guessing blind. Exposed read-only via GET /api/admin/unknown-markets.
+export const unknownStatpalMarkets = new Map<
+  string,
+  { count: number; lastSeen: number; sampleOutcomeNames: string[] }
+>();
+const UNKNOWN_MARKET_CAP = 300;
+
+function recordUnknownStatpalMarket(rawName: string, bms: FootballOddsBookmakerRaw[]): void {
+  const name = String(rawName ?? "").trim();
+  if (!name) return;
+  const existing = unknownStatpalMarkets.get(name);
+  if (existing) {
+    existing.count += 1;
+    existing.lastSeen = Date.now();
+  } else {
+    if (unknownStatpalMarkets.size >= UNKNOWN_MARKET_CAP) return; // cap memory use
+    const sampleOutcomeNames = statpalList(bms[0]?.odd ?? [])
+      .slice(0, 8)
+      .map((o) => o.name);
+    unknownStatpalMarkets.set(name, {
+      count: 1,
+      lastSeen: Date.now(),
+      sampleOutcomeNames,
+    });
+  }
+}
+
 function parseStatpalPrematchMarkets(
   marketEntries: FootballOddsMarketRaw[],
   baseMarkets: AdvancedMarkets,
@@ -32166,6 +32333,11 @@ function parseStatpalPrematchMarkets(
       if (home > 0 || away > 0) {
         markets.firstGoal = { home, noGoal: noGoal || 0, away };
       }
+    }
+
+    // ── Unknown market — diagnostic capture only, not surfaced to bettors ──
+    else {
+      recordUnknownStatpalMarket(mkt.name, bms);
     }
   }
 

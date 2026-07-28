@@ -3580,6 +3580,8 @@ type Match = {
   time?: string;
   date?: string;
   sport?: string;
+  // Football only — market-depth/staking tier (1 = full, 4 = minimal).
+  matchTier?: 1 | 2 | 3 | 4;
   hasRealOdds?: boolean;
   isWomens?: boolean;
   odds: Odds;
@@ -5641,6 +5643,10 @@ export default function Home({
     // hockey/volleyball/baseball are never going to resolve, so skip the
     // request entirely instead of always failing.
     if (!["football", "basketball", "cricket", "tennis"].includes(sport)) return;
+    // Tier 4 football (minimal market depth — leagues nobody bets big on)
+    // skips the Match Tracker too, saving SportScore quota for leagues that
+    // actually matter.
+    if (sport === "football" && expandedMatch.matchTier === 4) return;
     const matchId = expandedMatch.id;
     const qs = new URLSearchParams();
     if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
@@ -18012,20 +18018,25 @@ export default function Home({
                       </>
                     )}
 
-                    <div className="flex items-center">
-                      <button
-                        onClick={() => setShowFieldView((v) => !v)}
-                        className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md active:scale-95 transition-transform"
-                        aria-label={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
-                        title={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
-                      >
-                        {showFieldView ? (
-                          <ArrowLeft size={14} className="text-white" />
-                        ) : (
-                          <LayoutGrid size={14} className="text-white" />
-                        )}
-                      </button>
-                    </div>
+                    {!(
+                      expandedMatch.sport === "football" &&
+                      expandedMatch.matchTier === 4
+                    ) && (
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => setShowFieldView((v) => !v)}
+                          className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md active:scale-95 transition-transform"
+                          aria-label={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
+                          title={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
+                        >
+                          {showFieldView ? (
+                            <ArrowLeft size={14} className="text-white" />
+                          ) : (
+                            <LayoutGrid size={14} className="text-white" />
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 

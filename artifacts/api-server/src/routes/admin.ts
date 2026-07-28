@@ -24,7 +24,11 @@ import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
-import { findSportscoreFixture, type SportscoreDiagStep } from "./matches.js";
+import {
+  findSportscoreFixture,
+  type SportscoreDiagStep,
+  unknownStatpalMarkets,
+} from "./matches.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2245,6 +2249,19 @@ router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) 
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+});
+
+// Read-only diagnostic: market names Statpal's /odds/prematch feed returns
+// that we don't currently parse into AdvancedMarkets (see matches.ts —
+// parseStatpalPrematchMarkets). Fills up as real production traffic hits the
+// football odds endpoints; used to discover what market depth Statpal
+// actually offers (including any player props like anytime goalscorer or
+// assist) without guessing blind.
+router.get("/unknown-markets", adminMiddleware, async (_req: AdminRequest, res) => {
+  const entries = Array.from(unknownStatpalMarkets.entries())
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.count - a.count);
+  res.json({ count: entries.length, markets: entries });
 });
 
 export default router;
