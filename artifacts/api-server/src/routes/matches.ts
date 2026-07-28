@@ -487,6 +487,9 @@ export type LiveMatchState = {
   league: string;
   country: string;
   sport: string;
+  // Football only — market-depth/staking tier (1 = full, 4 = minimal). See
+  // footballMarketTier()/filterFootballMarketsByTier() further down.
+  matchTier?: FootballMarketTier;
   homeScore: number;
   awayScore: number;
   minute: number;
@@ -1365,23 +1368,38 @@ function isIntlTournamentName(leagueName: string): boolean {
 
 // DOMESTIC_PRIORITY: [pattern, priority]
 // priority < 100 → shown; ≥ 100 → filtered out
+//
+// Bands mirror how the big sportsbooks (Bet365, Betano, Pinnacle…) tier
+// competitions — a lower number here always means higher priority (shown
+// first, sorted first, longer live-disappear grace via
+// isCatalogPriorityLeague). International tournaments (Champions League,
+// World Cup, ...) are ranked separately by list position in INTL_TOURNAMENTS
+// above and always outrank every domestic entry below.
+//
+//   Tier 1  ( 1– 9): the handful of leagues with the highest betting volume/liquidity
+//   Tier 2  (10–19): strong secondary leagues — still heavily bet on
+//   Tier 3  (20–39): domestic 2nd divisions of Tier 1/2 countries + solid 1st divisions elsewhere
+//   Cups    (40–59): domestic cups & super cups (all countries)
+//   Tier 4  (60–98): remaining 1st divisions, smaller confederations, minor 2nd divisions
+//   999: filtered out entirely (youth/women/reserve/amateur, or a specific
+//        league excluded on purpose — see the block below)
 const DOMESTIC_PRIORITY: Array<[string, number]> = [
-  // ── BIG LEAGUES — 1st division ─────────────────────────────────────────────
+  // ── TIER 1 — highest volume/liquidity ──────────────────────────────────────
   // ⚠ More-specific patterns FIRST within each country — see ordering rules above
   ["england: premier league", 1],
-  ["spain: laliga2", 11], // ⚠ BEFORE "laliga" ("laliga2" ⊃ "laliga")
+  ["spain: laliga2", 31], // ⚠ BEFORE "laliga" ("laliga2" ⊃ "laliga")
   ["spain: laliga", 2],
   ["germany: 3. liga", 999], // ⚠ BEFORE "bundesliga"
-  ["germany: 2. bundesliga", 12], // ⚠ BEFORE "bundesliga"
+  ["germany: 2. bundesliga", 32], // ⚠ BEFORE "bundesliga"
   ["germany: bundesliga", 3],
   ["italy: serie a", 4],
   ["france: ligue 1", 5],
-  ["brazil: série b", 15], // ⚠ BEFORE "brasileiro" catch-all
-  ["brazil: serie b", 15],
-  ["brazil: brasileirão série b", 15],
-  ["brazil: brasileirao serie b", 15],
-  ["brazil: betano - série b", 15], // Statpal with Betano sponsor
-  ["brazil: betano - serie b", 15],
+  ["brazil: série b", 35], // ⚠ BEFORE "brasileiro" catch-all
+  ["brazil: serie b", 35],
+  ["brazil: brasileirão série b", 35],
+  ["brazil: brasileirao serie b", 35],
+  ["brazil: betano - série b", 35], // Statpal with Betano sponsor
+  ["brazil: betano - serie b", 35],
   ["brazil: série a", 6],
   ["brazil: serie a", 6],
   ["brazil: brasileirão série a", 6],
@@ -1393,160 +1411,183 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["argentina: liga profesional", 7],
   ["argentina: primera división", 7],
   ["argentina: primera division", 7],
-
-  // ── BIG LEAGUES — 2nd division ─────────────────────────────────────────────
-  ["england: championship", 10],
-  ["spain: segunda división", 11],
-  ["spain: segunda division", 11],
-  ["italy: serie b", 13],
-  ["france: ligue 2", 14],
-  ["argentina: primera nacional", 16],
-
-  // ── BIG LEAGUES — Cups & Super Cups ───────────────────────────────────────
-  ["england: fa cup", 20],
-  ["england: carabao cup", 21],
-  ["england: efl cup", 21],
-  ["england: league cup", 21],
-  ["england: community shield", 22],
-  ["spain: copa del rey", 23],
-  ["spain: supercopa", 24],
-  ["germany: dfb-pokal", 25],
-  ["germany: dfb pokal", 25],
-  ["germany: supercup", 26],
-  ["italy: coppa italia", 27],
-  ["italy: supercoppa", 28],
-  ["france: coupe de france", 29],
-  ["france: trophée des champions", 30],
-  ["france: trophee des champions", 30],
-  ["brazil: copa do brasil", 31],
-  ["brazil: supercopa", 32],
-  ["brazil: paulist", 33], // Paulistão / Paulista
-  ["brazil: carioca", 34],
-  ["brazil: mineiro", 35],
-  ["brazil: gaúcho", 36],
-  ["brazil: gaucho", 36],
-  ["argentina: copa argentina", 37],
-  ["argentina: supercopa", 38],
-
-  // ── MEDIUM LEAGUES — 1st division ─────────────────────────────────────────
   ["portugal: liga portugal 2", 50], // ⚠ BEFORE "liga portugal" ("liga portugal 2" ⊃ "liga portugal")
   ["portugal: segunda liga", 50],
-  ["portugal: liga portugal", 40],
-  ["portugal: primeira liga", 40],
-  ["portugal: liga bwin", 40],
-  ["netherlands: eredivisie", 41],
-  ["belgium: pro league", 42],
-  ["belgium: jupiler", 42],
-  ["turkey: süper lig", 43],
-  ["turkey: super lig", 43],
-  ["mexico: liga mx", 44],
-  ["usa: mls", 45],
-  ["usa: major league soccer", 45],
-  ["japan: j1 league", 46],
-  ["japan: j.league", 46],
-  ["south korea: k league 1", 47],
-  ["korea: k league 1", 47],
-  ["australia: a league", 48],
-  ["australia: a-league", 48],
-  ["australia: isuzu ute a league", 48],
+  ["portugal: liga portugal", 8], // promoted to Tier 1 per BET62 tiering
+  ["portugal: primeira liga", 8],
+  ["portugal: liga bwin", 8],
 
-  // ── MEDIUM LEAGUES — 2nd division ─────────────────────────────────────────
-  ["netherlands: eerste divisie", 51],
-  ["netherlands: keuken", 51],
-  ["belgium: challenger", 52],
-  ["turkey: 1. lig", 53],
-  ["turkey: tff 1. lig", 53],
-  ["mexico: liga de expansión", 54],
-  ["mexico: liga de expansion", 54],
-  ["mexico: ascenso", 54],
-  ["usa: usl championship", 55],
-  ["japan: j2 league", 56],
-  ["south korea: k league 2", 57],
-  ["korea: k league 2", 57],
+  // ── TIER 2 — strong secondary leagues ──────────────────────────────────────
+  ["netherlands: eredivisie", 10],
+  ["belgium: pro league", 11],
+  ["belgium: jupiler", 11],
+  ["usa: mls", 12],
+  ["usa: major league soccer", 12],
+  ["mexico: liga mx", 13],
+  ["saudi arabia: saudi pro league", 14],
+  ["saudi arabia: pro league", 14],
 
-  // ── MEDIUM LEAGUES — Cups & Super Cups ────────────────────────────────────
-  ["portugal: taça de portugal", 60],
-  ["portugal: taca de portugal", 60],
-  ["portugal: supertaça", 61],
-  ["portugal: supertaca", 61],
+  // ── TIER 3 — 2nd divisions of Tier 1/2 countries + other strong 1st divisions ──
+  ["england: championship", 20],
+  ["italy: serie b", 21],
+  ["france: ligue 2", 22],
+  ["argentina: primera nacional", 23],
+  ["turkey: süper lig", 24],
+  ["turkey: super lig", 24],
+  ["japan: j1 league", 25],
+  ["japan: j.league", 25],
+  ["south korea: k league 1", 26],
+  ["korea: k league 1", 26],
+  ["sweden: allsvenskan", 27],
+  ["norway: eliteserien", 28],
+  ["australia: a league", 29],
+  ["australia: a-league", 29],
+  ["australia: isuzu ute a league", 29],
+  // Spain's "segunda división", Germany's "2. bundesliga" and Brazil's
+  // "série b" (all priority 31/32/35) are declared up in the Tier 1 block
+  // above — they must precede their parent-league patterns for .includes().
+  ["spain: segunda division", 31],
+
+  // ── CUPS & SUPER CUPS (all countries) ──────────────────────────────────────
+  ["england: fa cup", 40],
+  ["england: carabao cup", 41],
+  ["england: efl cup", 41],
+  ["england: league cup", 41],
+  ["england: community shield", 42],
+  ["spain: copa del rey", 43],
+  ["spain: supercopa", 44],
+  ["germany: dfb-pokal", 45],
+  ["germany: dfb pokal", 45],
+  ["germany: supercup", 46],
+  ["italy: coppa italia", 47],
+  ["italy: supercoppa", 48],
+  ["france: coupe de france", 49],
+  ["france: trophée des champions", 50],
+  ["france: trophee des champions", 50],
+  ["brazil: copa do brasil", 51],
+  ["brazil: supercopa", 52],
+  ["brazil: paulist", 53], // Paulistão / Paulista
+  ["brazil: carioca", 54],
+  ["brazil: mineiro", 55],
+  ["brazil: gaúcho", 56],
+  ["brazil: gaucho", 56],
+  ["argentina: copa argentina", 57],
+  ["argentina: supercopa", 58],
+  ["portugal: taça de portugal", 59],
+  ["portugal: taca de portugal", 59],
+
+  // ── TIER 4 — remaining 1st divisions, smaller confederations, minor 2nd divisions ──
+  ["portugal: supertaça", 60],
+  ["portugal: supertaca", 60],
+  ["netherlands: eerste divisie", 61],
+  ["netherlands: keuken", 61],
   ["netherlands: knvb", 62],
   ["netherlands: johan cruyff", 63],
   ["netherlands: super cup", 63],
+  ["belgium: challenger", 64],
   ["belgium: belgian cup", 64],
   ["belgium: super cup", 65],
-  ["turkey: turkish cup", 66],
-  ["turkey: türkiye kupası", 66],
-  ["turkey: super cup", 67],
-  ["mexico: copa mx", 68],
-  ["mexico: campeón de campeones", 69],
-  ["mexico: campeon de campeones", 69],
-  ["usa: u.s. open cup", 70],
-  ["usa: us open cup", 70],
-  ["usa: open cup", 70],
-  ["japan: emperor", 71], // Emperor's Cup
-  ["japan: super cup", 72],
-  ["south korea: korean fa cup", 73],
-  ["south korea: fa cup", 73],
-  ["korea: korean fa cup", 73],
-  ["korea: fa cup", 73],
-
-  // ── SMALL LEAGUES — 1st division only ─────────────────────────────────────
-  ["croatia: hnl", 75],
-  ["croatia: supersport", 75],
-  ["serbia: superliga", 76],
-  ["sweden: allsvenskan", 77],
-  ["norway: eliteserien", 78],
-  ["denmark: superliga", 79],
-  ["chile: primera división", 80],
-  ["chile: primera division", 80],
-  ["colombia: categoría primera a", 81],
-  ["colombia: categoria primera a", 81],
-  ["colombia: primera a", 81],
+  ["turkey: 1. lig", 66],
+  ["turkey: tff 1. lig", 66],
+  ["turkey: turkish cup", 67],
+  ["turkey: türkiye kupası", 67],
+  ["turkey: super cup", 68],
+  ["mexico: liga de expansión", 69],
+  ["mexico: liga de expansion", 69],
+  ["mexico: ascenso", 69],
+  ["mexico: copa mx", 70],
+  ["mexico: campeón de campeones", 71],
+  ["mexico: campeon de campeones", 71],
+  ["usa: usl championship", 72],
+  ["usa: u.s. open cup", 73],
+  ["usa: us open cup", 73],
+  ["usa: open cup", 73],
+  ["japan: j2 league", 74],
+  ["japan: emperor", 75], // Emperor's Cup
+  ["japan: super cup", 76],
+  ["south korea: k league 2", 77],
+  ["korea: k league 2", 77],
+  ["south korea: korean fa cup", 78],
+  ["south korea: fa cup", 78],
+  ["korea: korean fa cup", 78],
+  ["korea: fa cup", 78],
+  ["croatia: hnl", 80],
+  ["croatia: supersport", 80],
+  ["serbia: superliga", 81],
+  ["denmark: superliga", 82],
+  ["chile: primera división", 83],
+  ["chile: primera division", 83],
+  ["colombia: categoría primera a", 84],
+  ["colombia: categoria primera a", 84],
+  ["colombia: primera a", 84],
   ["colombia: categoría primera b", 96], // 2nd division
   ["colombia: categoria primera b", 96],
   ["colombia: primera b", 96],
-  ["ecuador: liga pro", 82],
-  ["ecuador: liga betcris", 82],
+  ["ecuador: liga pro", 85],
+  ["ecuador: liga betcris", 85],
   ["ecuador: segunda categoría", 999], // 2nd div — skip
   ["ecuador: segunda categoria", 999],
-  ["ecuador: copa", 83],
+  ["ecuador: copa", 86],
   ["bolivia: división de honor", 93],
   ["bolivia: division de honor", 93],
   ["bolivia: división profesional", 93],
   ["bolivia: division profesional", 93],
   ["bolivia: liga boliviana", 93],
-  ["peru: liga 1", 91],
-  ["peru: primera liga", 91],
-  ["peru: apertura", 91],
+  ["peru: liga 1", 87],
+  ["peru: primera liga", 87],
+  ["peru: apertura", 87],
   ["peru: copa", 92],
-  ["uruguay: primera división", 92],
-  ["uruguay: primera division", 92],
-  ["uruguay: serie a", 92],
-  ["uruguay: apertura", 92],
+  ["uruguay: primera división", 88],
+  ["uruguay: primera division", 88],
+  ["uruguay: serie a", 88],
+  ["uruguay: apertura", 88],
   ["uruguay: copa", 93],
-  ["paraguay: primera división", 94],
-  ["paraguay: primera division", 94],
-  ["paraguay: apertura", 94],
+  ["paraguay: primera división", 89],
+  ["paraguay: primera division", 89],
+  ["paraguay: apertura", 89],
   ["venezuela: liga futve", 95],
   ["venezuela: primera división", 95],
   ["venezuela: primera division", 95],
   ["venezuela: apertura", 95],
-  ["saudi arabia: saudi pro league", 82],
-  ["saudi arabia: pro league", 82],
-  ["thailand: thai league 1", 83],
-  ["thailand: thai league", 83],
-  ["india: indian super league", 84],
-  ["india: isl", 84],
-
-  // ── Other notable European leagues (still shown) ──────────────────────────
-  ["scotland: premiership", 85],
-  ["russia: premier league", 86],
-  ["ukraine: premier league", 87],
-  ["greece: super league", 88],
-  ["austria: bundesliga", 89], // ⚠ before generic "bundesliga" — safe (prefixed by "austria:")
-  ["switzerland: super league", 90],
-  ["poland: ekstraklasa", 91],
-  ["romania: superliga", 92],
+  ["thailand: thai league 1", 90],
+  ["thailand: thai league", 90],
+  ["india: indian super league", 91],
+  ["india: isl", 91],
+  ["scotland: premiership", 92],
+  ["scotland: championship", 97],
+  ["russia: premier league", 93],
+  ["ukraine: premier league", 94],
+  ["greece: super league", 95],
+  ["austria: bundesliga", 96], // ⚠ before generic "bundesliga" — safe (prefixed by "austria:")
+  ["switzerland: super league", 96],
+  ["poland: ekstraklasa", 97],
+  ["romania: superliga", 97],
+  // Newly added per BET62 tiering request — patterns are best-effort guesses
+  // at Statpal's exact league-name strings and have not been verified against
+  // live data yet; report back if any of these still don't show up.
+  ["hungary: nb i", 96],
+  ["hungary: nemzeti bajnoksag i", 96],
+  ["hungary: otp bank liga", 96],
+  ["bulgaria: first league", 96],
+  ["bulgaria: parva liga", 96],
+  ["bulgaria: efbet liga", 96],
+  ["slovakia: super liga", 97],
+  ["slovakia: nike liga", 97],
+  ["slovenia: prvaliga", 97],
+  ["slovenia: prva liga", 97],
+  ["egypt: premier league", 92],
+  ["egypt: egyptian premier league", 92],
+  ["morocco: botola", 93],
+  ["south africa: premiership", 92],
+  ["south africa: dstv premiership", 92],
+  ["south africa: psl", 92],
+  ["tunisia: ligue professionnelle 1", 94],
+  ["tunisia: ligue 1", 94],
+  ["uae: pro league", 93],
+  ["uae: arabian gulf league", 93],
+  ["uae: adnoc pro league", 93],
+  ["qatar: stars league", 93],
+  ["qatar: qsl", 93],
 
   // ── Block lower divisions / amateur / regional ─────────────────────────────
   ["spain: primera rfef", 999],
@@ -1560,6 +1601,8 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["italy: serie d", 999],
   ["france: national", 999],
   ["germany: bundesliga women", 999],
+  // China's top flight stays blocked as before — this was a deliberate
+  // earlier exclusion, not an oversight; ask before adding it to the tiers.
   ["china: super league", 999],
   ["china: chinese super league", 999],
   ["indonesia: liga 1", 999],
@@ -1618,6 +1661,8 @@ const ALL_DOMESTIC_COUNTRIES = new Set([
   "armenia",
   "azerbaijan",
   "faroe islands",
+  "slovakia",
+  "slovenia",
   // Americas
   "brazil",
   "argentina",
@@ -1638,6 +1683,12 @@ const ALL_DOMESTIC_COUNTRIES = new Set([
   "saudi arabia",
   "thailand",
   "india",
+  "egypt",
+  "morocco",
+  "south africa",
+  "tunisia",
+  "uae",
+  "qatar",
 ]);
 
 function normalizeCountryKey(country?: string): string {
@@ -1692,6 +1743,14 @@ function normalizeCountryKey(country?: string): string {
     return "south korea";
   if (raw === "th") return "thailand";
   if (raw === "in") return "india";
+  if (raw === "sk") return "slovakia";
+  if (raw === "si") return "slovenia";
+  if (raw === "eg") return "egypt";
+  if (raw === "ma") return "morocco";
+  if (raw === "za" || raw === "rsa") return "south africa";
+  if (raw === "tn") return "tunisia";
+  if (raw === "ae" || raw === "united arab emirates") return "uae";
+  if (raw === "qa") return "qatar";
   return raw;
 }
 
@@ -1734,6 +1793,14 @@ const LIVE_FOOTBALL_COUNTRY_ALLOW = new Set([
   "thailand",
   "india",
   "australia",
+  "slovakia",
+  "slovenia",
+  "egypt",
+  "morocco",
+  "south africa",
+  "tunisia",
+  "uae",
+  "qatar",
 ]);
 
 const LIVE_FOOTBALL_FIRST_DIV_ONLY = new Set([
@@ -1902,6 +1969,127 @@ function getFootballLiveDisappearGraceMs(
   return isCatalogPriorityLeague(prio)
     ? PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS
     : DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS;
+}
+
+// ─── Market tier: how much market depth / staking headroom a league gets ──────
+// Distinct from leaguePriority()'s display-order ranking (though it reuses the
+// same DOMESTIC_PRIORITY numbers) — this drives which markets are shown and
+// how big a live stake is allowed, mirroring how Bet365/Betano vary coverage
+// by competition. Tier 1 = full market set, Tier 4 = 1x2 + basic over/under
+// only. Confirmed with the user before building this.
+export type FootballMarketTier = 1 | 2 | 3 | 4;
+
+const FRIENDLY_INTL_NAMES = new Set([
+  "international friendly",
+  "international friendlies",
+  "amistosos internacionais",
+  "club friendly",
+  "amistoso de clubes",
+  "amistosos de clubes",
+  "club friendlies",
+]);
+
+export function footballMarketTier(
+  leagueDisplayName: string,
+  countryRaw: string,
+): FootballMarketTier {
+  const base = String(leagueDisplayName ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .split(" - ")[0]
+    .trim();
+  if (FRIENDLY_INTL_NAMES.has(base)) return 3; // friendlies: low real market depth in practice
+  if (isIntlTournamentName(leagueDisplayName)) return 1; // Champions/Europa/World Cup/Euros/Copa América/Libertadores…
+
+  const countryKey = normalizeCountryKey(countryRaw);
+  const key = `${countryKey}: ${leagueDisplayName}`.toLowerCase();
+  const prio = leaguePriority(key, countryKey);
+  if (prio < 10) return 1; // Tier 1 domestic
+  if (prio < 20) return 2; // Tier 2 domestic
+  if (prio < 40) return 3; // Tier 3 domestic
+  if (prio < 60) return 2; // domestic cups — near-Tier-2 market depth
+  return 4; // Tier 4 and anything else that still gets shown
+}
+
+const ZERO_TOTAL_GOALS: AdvancedMarkets["totalGoals"] = {
+  over05: 0,
+  under05: 0,
+  over15: 0,
+  under15: 0,
+  over25: 0,
+  under25: 0,
+  over35: 0,
+  under35: 0,
+  over45: 0,
+  under45: 0,
+  over55: 0,
+  under55: 0,
+  over65: 0,
+  under65: 0,
+};
+
+/**
+ * Narrows an already-computed AdvancedMarkets object down to what a given
+ * market tier should expose. Zeroes out (rather than deletes) the required
+ * base fields — the frontend already treats all-zero odds as "market not
+ * available" (see the `firstGoal` settled-market comment elsewhere in this
+ * file) — and deletes the optional extended-market fields outright.
+ */
+export function filterFootballMarketsByTier(
+  markets: AdvancedMarkets,
+  tier: FootballMarketTier,
+): AdvancedMarkets {
+  if (tier === 1) return markets;
+
+  const out: AdvancedMarkets = { ...markets };
+  // Tier 2/3/4 all drop the more "exotic" extended markets.
+  delete out.correctScore;
+  delete out.htft;
+  delete out.asianTotals;
+  delete out.corners;
+  delete out.cards;
+  delete out.secondHalf;
+
+  if (tier === 2) return out;
+
+  // Tier 3: core markets only — 1x2 (separate from `markets`), over/under
+  // (all lines), both teams to score, double chance.
+  delete out.drawNoBet;
+  delete out.asianHandicap;
+  out.handicap = {
+    homeMinusOne: 0,
+    awayPlusOne: 0,
+    homeMinusOneHalf: 0,
+    awayPlusOneHalf: 0,
+  };
+  out.halfTime = { home: 0, draw: 0, away: 0 };
+  out.firstGoal = { home: 0, noGoal: 0, away: 0 };
+
+  if (tier === 3) return out;
+
+  // Tier 4: minimal — 1x2 + basic over/under 2.5 only.
+  out.totalGoals = { ...ZERO_TOTAL_GOALS, over25: markets.totalGoals.over25, under25: markets.totalGoals.under25 };
+  out.doubleChance = { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 };
+  out.bothTeamsScore = { yes: 0, no: 0 };
+  return out;
+}
+
+// Stake headroom by market tier — a multiplier applied on top of the admin's
+// global max stake (never above it). Tier 4 caps exposure on leagues nobody
+// is really betting big on; Tier 1 gets the full admin-configured ceiling.
+const MARKET_TIER_STAKE_MULTIPLIER: Record<FootballMarketTier, number> = {
+  1: 1,
+  2: 0.75,
+  3: 0.5,
+  4: 0.25,
+};
+
+export function footballMarketTierMaxStake(
+  tier: FootballMarketTier,
+  globalMaxStake: number,
+): number {
+  return Math.round(globalMaxStake * MARKET_TIER_STAKE_MULTIPLIER[tier] * 100) / 100;
 }
 
 // ─── League name normalisation ─────────────────────────────────────────────────
@@ -17296,7 +17484,18 @@ async function buildFootballLiveV2(
     }
   }
 
-  return result;
+  // Apply market-tier depth/staking gating to the OUTPUT only — never mutate
+  // the objects stored in liveMatchState, since drift/suspension logic further
+  // up reads `existing.markets`/`existing._baseMarkets` and needs the full,
+  // untrimmed data to keep working correctly for every tier.
+  return result.map((m) => {
+    const tier = footballMarketTier(m.league, m.country);
+    return tier === 1
+      ? m.matchTier === tier
+        ? m
+        : { ...m, matchTier: tier }
+      : { ...m, matchTier: tier, markets: filterFootballMarketsByTier(m.markets, tier) };
+  });
 }
 
 const BBALL_SUSP_KEYS = [
@@ -31939,6 +32138,38 @@ type FootballOddsEntry = {
  * Averages bookmaker prices across all active (non-stopped) bookmakers for each
  * outcome in each market.  Unknown markets are silently skipped.
  */
+// Diagnostic capture of market names Statpal's /odds/prematch feed returns
+// that we don't currently parse (see the loop's final `else` branch below).
+// Statpal aggregates prices across ~80 bookmakers per league and offers many
+// more market types than the handful we handle — this map lets us see the
+// real names in production (e.g. any anytime-goalscorer/assist markets)
+// instead of guessing blind. Exposed read-only via GET /api/admin/unknown-markets.
+export const unknownStatpalMarkets = new Map<
+  string,
+  { count: number; lastSeen: number; sampleOutcomeNames: string[] }
+>();
+const UNKNOWN_MARKET_CAP = 300;
+
+function recordUnknownStatpalMarket(rawName: string, bms: FootballOddsBookmakerRaw[]): void {
+  const name = String(rawName ?? "").trim();
+  if (!name) return;
+  const existing = unknownStatpalMarkets.get(name);
+  if (existing) {
+    existing.count += 1;
+    existing.lastSeen = Date.now();
+  } else {
+    if (unknownStatpalMarkets.size >= UNKNOWN_MARKET_CAP) return; // cap memory use
+    const sampleOutcomeNames = statpalList(bms[0]?.odd ?? [])
+      .slice(0, 8)
+      .map((o) => o.name);
+    unknownStatpalMarkets.set(name, {
+      count: 1,
+      lastSeen: Date.now(),
+      sampleOutcomeNames,
+    });
+  }
+}
+
 function parseStatpalPrematchMarkets(
   marketEntries: FootballOddsMarketRaw[],
   baseMarkets: AdvancedMarkets,
@@ -32102,6 +32333,11 @@ function parseStatpalPrematchMarkets(
       if (home > 0 || away > 0) {
         markets.firstGoal = { home, noGoal: noGoal || 0, away };
       }
+    }
+
+    // ── Unknown market — diagnostic capture only, not surfaced to bettors ──
+    else {
+      recordUnknownStatpalMarket(mkt.name, bms);
     }
   }
 

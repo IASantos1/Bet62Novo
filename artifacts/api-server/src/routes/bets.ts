@@ -19,6 +19,8 @@ import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
 import {
   liveMatchState,
   finishedMatchResults,
+  footballMarketTier,
+  footballMarketTierMaxStake,
   type LiveMatchState,
 } from "./matches.js";
 import {
@@ -1785,12 +1787,28 @@ router.post(
       return;
     }
 
+    // Football league market-tier caps live stake below the admin's global max
+    // for lower-tier leagues (Tier 1 = full ceiling, Tier 4 = 25% of it). Only
+    // applies to matches we're actively tracking live — pre-match bets and
+    // other sports keep the plain global limit, unchanged from before.
+    let effectiveMaxStake = betLimits.maxStake;
+    if (typeof matchId === "string" && matchId.startsWith("football-v2-")) {
+      const liveState = liveMatchState.get(matchId);
+      if (liveState) {
+        const tier = footballMarketTier(liveState.league, liveState.country);
+        effectiveMaxStake = Math.min(
+          betLimits.maxStake,
+          footballMarketTierMaxStake(tier, betLimits.maxStake),
+        );
+      }
+    }
+
     if (
       betLimits.enabled &&
-      (betStake < betLimits.minStake || betStake > betLimits.maxStake)
+      (betStake < betLimits.minStake || betStake > effectiveMaxStake)
     ) {
       res.status(400).json({
-        error: `Valor de aposta inválido. Mínimo €${betLimits.minStake.toFixed(2)}, máximo €${betLimits.maxStake.toFixed(2)}.`,
+        error: `Valor de aposta inválido. Mínimo €${betLimits.minStake.toFixed(2)}, máximo €${effectiveMaxStake.toFixed(2)}.`,
       });
       return;
     }
