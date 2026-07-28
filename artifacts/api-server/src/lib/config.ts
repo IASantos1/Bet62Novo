@@ -48,7 +48,13 @@ export const CONFIG = {
   MAX_ODDS_DRIFT: 0.40,
   CACHE_TTL_MS: 86_400_000,
 
-  LIVE_CACHE_TTL: 1000,
+  // Kept below LIVE_UPDATE_INTERVAL (the SSE broadcastLive() tick) on
+  // purpose: broadcastLive() forces a fresh payload rebuild every tick, but
+  // that rebuild reads these same per-sport caches — if this TTL matched or
+  // exceeded the tick interval, the two timers could drift out of phase and
+  // serve up to ~2x LIVE_UPDATE_INTERVAL-stale data at some ticks instead of
+  // the ~1s the broadcast cadence implies.
+  LIVE_CACHE_TTL: 700,
   DAILY_CACHE_TTL: 300_000,
   TOMORROW_CACHE_TTL: 1_800_000,
   ODDS_CACHE_TTL: 300_000,
