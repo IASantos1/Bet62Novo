@@ -48,6 +48,8 @@ export interface Field3DProps {
   redCardsAway?: number;
   homeTeam: string;
   awayTeam: string;
+  /** e.g. "45'", "HT", "2T · 67'", "AO VIVO" — shown next to the scoreboard */
+  minuteLabel?: string;
 }
 
 export default function Field3D({
@@ -60,6 +62,7 @@ export default function Field3D({
   redCardsAway,
   homeTeam,
   awayTeam,
+  minuteLabel,
 }: Field3DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [event, setEvent] = useState<{
@@ -677,6 +680,18 @@ export default function Field3D({
             <span className="text-zinc-400 uppercase tracking-wide">
               {awayTeam.slice(0, 3)}
             </span>
+            {minuteLabel && (
+              <>
+                <span className="w-px h-3 bg-white/15 mx-0.5" />
+                <span className="flex items-center gap-1 text-red-400 normal-case tracking-normal">
+                  <span className="relative flex h-1 w-1">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1 w-1 bg-red-500" />
+                  </span>
+                  {minuteLabel}
+                </span>
+              </>
+            )}
           </div>
         </div>
         {event && (

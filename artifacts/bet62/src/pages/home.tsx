@@ -18036,6 +18036,22 @@ export default function Home({
                           redCardsAway={expandedMatch._liveExtra?.redCardsAwayCount}
                           homeTeam={teamNamePt(expandedMatch.home)}
                           awayTeam={teamNamePt(expandedMatch.away)}
+                          minuteLabel={(() => {
+                            if (!expandedMatch.isLive) return undefined;
+                            const m = getDisplayMinute(expandedMatch);
+                            const isFootball =
+                              !expandedMatch.sport ||
+                              expandedMatch.sport === "football";
+                            const tag = isFootball
+                              ? getFootballPhaseTag(expandedMatch, m)
+                              : null;
+                            if (m <= 0) return "AO VIVO";
+                            if (tag === "HT") return "HT";
+                            if (tag && isFootball)
+                              return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                            if (tag) return `${m}' · ${tag}`;
+                            return `${m}'`;
+                          })()}
                         />
                       </div>
                     ) : (
