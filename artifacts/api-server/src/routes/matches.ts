@@ -7942,12 +7942,6 @@ let tourListCache: ActiveTournament[] | null = null;
 let tourListFetchedAt = 0;
 const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-// Timestamp of when this server process started — used to implement a cold-start
-// grace period so that live matches already in progress on a fresh deploy are not
-// silently discarded by the "never-seen-before + >20 min old" gate.
-const SERVER_BOOT_AT = Date.now();
-const COLD_START_GRACE_MS = 5 * 60 * 1000; // 5 minutes
-
 // IDs of matches confirmed live via the Statpal /v2/soccer/odds/live endpoint.
 // Bookmakers only price live odds for matches actually in progress, so any ID
 // that has ever appeared in this feed is guaranteed to be a real live match —
@@ -16566,11 +16560,17 @@ async function buildFootballLiveV2(
     // Gate: block a match appearing for the first time if it's already more than
     // 20 minutes old. Prevents games from suddenly entering the live section
     // already mid-game (e.g. at 60'). fromUpcoming matches bypass this because
-    // they were pre-announced as upcoming. Cold-start grace period (first 5 min
-    // after process boot) also bypasses this gate so that a fresh deploy (e.g.
-    // on Railway) immediately surfaces all currently-live matches rather than
-    // waiting up to 20 minutes for them to appear.
-    const isColdStart = Date.now() - SERVER_BOOT_AT < COLD_START_GRACE_MS;
+    // they were pre-announced as upcoming.
+    //
+    // Deliberately NOT bypassed during cold start (first minutes after process
+    // boot) anymore: this repo redeploys very frequently (every merge restarts
+    // the server), which wipes the in-memory liveMatchState map. The old
+    // cold-start bypass then let EVERY currently-live match — no matter how
+    // far into the game — flood into the live feed right after each restart,
+    // which is exactly what showed up as matches "starting" already at 50-60
+    // minutes. Losing already-shown matches across a restart is the accepted
+    // tradeoff; isConfirmedOddsLive below still rescues the ones bookmakers
+    // are actively pricing live.
     // oddsLiveKnownIds: IDs confirmed live via /v2/soccer/odds/live — bookmakers only
     // price live odds on matches in progress, so these bypass the "never seen + >20min"
     // gate that exists to block Statpal pre-match fixtures faking a live status.
@@ -16579,7 +16579,6 @@ async function buildFootballLiveV2(
       !liveMatchState.has(`football-v2-${ev.id}`) &&
       evAgeSeconds > 20 * 60 &&
       !fromUpcoming &&
-      !isColdStart &&
       !isConfirmedOddsLive
     )
       continue;
