@@ -386,12 +386,20 @@ export default function Field3D({
           ctx.translate(sx, sy);
           ctx.rotate(dir);
           ctx.font = `900 ${fs}px "Rajdhani","Barlow Condensed",system-ui`;
-          ctx.fillStyle = "#00ff87";
-          ctx.textAlign = "center";
+          ctx.textAlign = "left";
           ctx.textBaseline = "middle";
-          ctx.shadowColor = "#00ff8740";
-          ctx.shadowBlur = fs * 0.28;
-          ctx.fillText("BET62", 0, 0);
+          // Two-tone "BET" (red) + "62" (white) — the real brand colors,
+          // not the neon green from the reference script.
+          const betW = ctx.measureText("BET").width;
+          const w62 = ctx.measureText("62").width;
+          const startX = -(betW + w62) / 2;
+          ctx.shadowBlur = fs * 0.24;
+          ctx.shadowColor = "rgba(220,38,38,0.5)";
+          ctx.fillStyle = "#dc2626";
+          ctx.fillText("BET", startX, 0);
+          ctx.shadowColor = "rgba(255,255,255,0.4)";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText("62", startX + betW, 0);
           ctx.shadowBlur = 0;
           ctx.restore();
         }
@@ -627,6 +635,27 @@ export default function Field3D({
         style={{ height: 210 }}
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+        {/* Small scoreboard, tucked in the corner above the far stand */}
+        <div className="absolute top-1.5 left-1.5 pointer-events-none">
+          <div
+            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-black tabular-nums"
+            style={{
+              backgroundColor: "rgba(9,9,11,0.75)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              color: "#fff",
+            }}
+          >
+            <span className="text-zinc-400 uppercase tracking-wide">
+              {homeTeam.slice(0, 3)}
+            </span>
+            <span>{homeScore}</span>
+            <span className="text-zinc-500">-</span>
+            <span>{awayScore}</span>
+            <span className="text-zinc-400 uppercase tracking-wide">
+              {awayTeam.slice(0, 3)}
+            </span>
+          </div>
+        </div>
         {event && (
           <div className="absolute inset-x-0 top-2 flex justify-center pointer-events-none">
             <span
