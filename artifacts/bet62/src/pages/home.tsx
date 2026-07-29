@@ -18029,7 +18029,15 @@ export default function Home({
                       <div className="mb-3">
                         {(expandedMatch.sport ?? "football") === "tennis" ? (
                           <div className="relative w-full max-w-[320px] mx-auto rounded-xl overflow-hidden border border-zinc-800/70 bg-zinc-950" style={{ height: 90 }}>
-                            <Court3D />
+                            <Court3D
+                              homeTeam={teamNamePt(expandedMatch.home)}
+                              awayTeam={teamNamePt(expandedMatch.away)}
+                              homeScore={expandedMatch.homeScore ?? 0}
+                              awayScore={expandedMatch.awayScore ?? 0}
+                              sets={expandedMatch._liveExtra?.sets}
+                              currentPoints={expandedMatch._liveExtra?.currentPoints}
+                              serving={expandedMatch._liveExtra?.serving}
+                            />
                           </div>
                         ) : (
                           <Field3D
