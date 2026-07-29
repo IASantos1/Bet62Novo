@@ -173,8 +173,16 @@ export default function Court3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPoints]);
 
+  const prevServeKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!currentPoints) return;
+    // Guard against false replays: the parent may hand us a brand-new
+    // [h, a] tuple every poll tick even when the score itself hasn't
+    // moved, which would otherwise replay the serve swing/flight forever
+    // regardless of any real event.
+    const key = `${currentPoints[0]}-${currentPoints[1]}`;
+    if (prevServeKeyRef.current === key) return;
+    prevServeKeyRef.current = key;
     setServeAnimId((v) => v + 1);
   }, [currentPoints]);
 
@@ -185,14 +193,18 @@ export default function Court3D({
     };
   }, []);
 
-  const rkRot = [0, -30, 30, 10, 0];
-  const rkT   = [0, 0.1, 0.35, 0.6, 1];
+  // One-shot swing keyframes for whichever racket is actually serving —
+  // no more ambient always-on swinging. Timed to start together with the
+  // ball's flight (both keyed off serveAnimId) so the racket reads as
+  // striking the ball at that exact instant, not swinging at random.
+  const swingRot = [0, -12, 38, 8, 0];
+  const swingX = [0, -4, 11, 3, 0];
+  const swingTimes = [0, 0.15, 0.45, 0.75, 1];
+  const restPose = { rotate: 0, x: 0 };
 
-  // Who's serving decides which racket swings first (serve) vs second
-  // (return) — defaults to home when no real serve data is known yet.
+  // Who's serving decides which racket swings — defaults to home when no
+  // real serve data is known yet.
   const homeServing = serving ? serving[0] : true;
-  const leftDelay = homeServing ? 0 : 1.5;
-  const rightDelay = homeServing ? 1.5 : 0;
   const ballSide: "home" | "away" = homeServing ? "home" : "away";
   const serveSide = computeServeSide(currentPoints);
   // Serve is always struck cross-court into the diagonally opposite
@@ -298,11 +310,15 @@ export default function Court3D({
           </AnimatePresence>
         </svg>
 
-        {/* ── Rackets ── flat 2D, just rotate/scaleX — no perspective needed */}
+        {/* ── Rackets ── flat 2D, just rotate/scaleX — no perspective needed.
+            Only the server's racket swings, once, timed with the ball's
+            flight below (both keyed off serveAnimId). */}
         <motion.div
+          key={`home-racket-${serveAnimId}`}
           style={{ position: "absolute", left: "5%", top: "45%", transformOrigin: "50% 88%", zIndex: 30 }}
-          animate={{ rotate: rkRot, x: [0, -8, 12, 4, 0] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: leftDelay }}
+          initial={restPose}
+          animate={ballSide === "home" ? { rotate: swingRot, x: swingX } : restPose}
+          transition={{ duration: 0.5, ease: "easeOut", times: swingTimes }}
         >
           <svg width="30" height="66" viewBox="0 0 36 80" fill="none">
             <ellipse cx="18" cy="20" rx="15" ry="18"
@@ -341,10 +357,16 @@ export default function Court3D({
         </motion.div>
 
         <motion.div
+          key={`away-racket-${serveAnimId}`}
           style={{ position: "absolute", left: "95%", top: "45%", transformOrigin: "50% 88%", zIndex: 30,
             transform: "scaleX(-1)" }}
-          animate={{ rotate: rkRot.map(r => -r), x: [0, 8, -12, -4, 0] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: rightDelay }}
+          initial={restPose}
+          animate={
+            ballSide === "away"
+              ? { rotate: swingRot.map((r) => -r), x: swingX.map((x) => -x) }
+              : restPose
+          }
+          transition={{ duration: 0.5, ease: "easeOut", times: swingTimes }}
         >
           <svg width="30" height="66" viewBox="0 0 36 80" fill="none">
             <ellipse cx="18" cy="20" rx="15" ry="18"
