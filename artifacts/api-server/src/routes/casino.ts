@@ -135,10 +135,13 @@ router.post(
           Authorization: `Bearer ${CONFIG.SILENTAPI_AUTH_TOKEN}`,
         },
         body: JSON.stringify({
+          // GetGameUrl has no currency parameter (confirmed against
+          // SilentAPI's docs) — the account's operating currency is fixed
+          // on their side, not selectable per-request. Do not add a
+          // currency field back here; it's silently ignored.
           member_account: memberAccountForUser(userId),
           game_uid: gameUid,
           balance: Number(user.balance),
-          currency: "EUR",
           home_url: homeUrl,
         }),
         signal: AbortSignal.timeout(15_000),

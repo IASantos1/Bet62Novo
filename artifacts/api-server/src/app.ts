@@ -135,6 +135,7 @@ app.post(
       bet_amount?: string;
       game_uid?: string;
       game_round?: string;
+      currency?: string;
     };
     try {
       payload = JSON.parse(rawBody.toString("utf8"));
@@ -153,6 +154,24 @@ app.post(
     if (userId === null) {
       logger.warn({ memberAccount }, "[casino-callback] unknown member_account format");
       res.status(400).json({ code: 1, msg: "Unknown member_account" });
+      return;
+    }
+
+    // GetGameUrl has no currency parameter at all (confirmed against
+    // SilentAPI's docs) — the wallet's operating currency is fixed on their
+    // side by account/game configuration, not by anything we send. This
+    // ledger is EUR-only (see lib/ledger.ts), so if a round settles in
+    // anything else we must NOT apply win_amount/bet_amount as if they were
+    // EUR — reject instead of silently misbooking real money, and rely on
+    // SilentAPI's retry-on-failure behavior to redeliver once the account is
+    // fixed to operate in EUR.
+    const currency = String(payload.currency ?? "").trim().toUpperCase();
+    if (currency && currency !== "EUR") {
+      logger.error(
+        { currency, memberAccount, serialNumber },
+        "[casino-callback] non-EUR currency — SilentAPI account is not configured for EUR, rejecting to avoid misbooking",
+      );
+      res.status(400).json({ code: 1, msg: "Unsupported currency, account must be configured for EUR" });
       return;
     }
 
