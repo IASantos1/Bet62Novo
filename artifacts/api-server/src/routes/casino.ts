@@ -138,6 +138,7 @@ router.post(
           member_account: memberAccountForUser(userId),
           game_uid: gameUid,
           balance: Number(user.balance),
+          currency: "EUR",
           home_url: homeUrl,
         }),
         signal: AbortSignal.timeout(15_000),
