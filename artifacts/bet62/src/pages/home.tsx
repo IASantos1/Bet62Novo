@@ -60,6 +60,7 @@ import {
   Search,
   LayoutGrid,
   ArrowLeft,
+  Dices,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -479,7 +480,7 @@ const TEAM_BANNERS: Record<string, string> = {
   "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
-type MainTab = "sports" | "live" | "promos" | "mybets" | "wallet" | "profile";
+type MainTab = "sports" | "live" | "casino" | "promos" | "mybets" | "wallet" | "profile";
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -489,6 +490,7 @@ function normalizeMainTabPath(path: string): string {
 
 function getPathForMainTab(tab: MainTab): string {
   if (tab === "live") return "/ao-vivo";
+  if (tab === "casino") return "/casino";
   if (tab === "promos") return "/promocoes";
   if (tab === "wallet") return "/carteira";
   if (tab === "mybets") return "/minhas-apostas";
@@ -4498,6 +4500,8 @@ export default function Home({
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showWCPanel, setShowWCPanel] = useState(false);
+  const [casinoLaunchUrl, setCasinoLaunchUrl] = useState<string | null>(null);
+  const [casinoLoadingGame, setCasinoLoadingGame] = useState<string | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -8715,6 +8719,40 @@ export default function Home({
       /* non-critical */
     }
   }, [auth.user]);
+
+  const launchCasinoGame = useCallback(
+    async (gameUid: string) => {
+      if (!auth.user) {
+        setAuthMode("login");
+        setAuthModalOpen(true);
+        return;
+      }
+      setCasinoLoadingGame(gameUid);
+      try {
+        const res = await fetch("/api/casino/launch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({ gameUid }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.url) {
+          if (!handleInvalidTokenError(res.status, data.error)) {
+            toast.error(data.error || "Não foi possível iniciar o jogo.");
+          }
+          return;
+        }
+        setCasinoLaunchUrl(data.url);
+      } catch {
+        toast.error("Não foi possível iniciar o jogo.");
+      } finally {
+        setCasinoLoadingGame(null);
+      }
+    },
+    [auth.user, auth.token],
+  );
 
   const handleInvalidTokenError = (status?: number, error?: string) => {
     const normalizedError = String(error ?? "")
@@ -17683,6 +17721,7 @@ export default function Home({
               {[
                 { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
                 { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
+                { id: "casino", icon: <Dices size={15} />, label: "CASSINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
               ].map((tab) => (
                 <button
@@ -17857,6 +17896,7 @@ export default function Home({
               label: "AO VIVO",
               badge: true,
             },
+            { id: "casino", icon: <Dices size={16} />, label: "CASSINO" },
             {
               id: "promos",
               icon: <Gift size={16} />,
@@ -24527,6 +24567,35 @@ export default function Home({
               </div>
             )}
 
+            {!expandedMatch && activeTab === "casino" && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="mb-4">
+                  <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
+                    <Dices className="text-red-600" /> Cassino
+                  </h2>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {[{ uid: "JILI_SLOT_001", label: "Slot" }].map((game) => (
+                    <button
+                      key={game.uid}
+                      disabled={casinoLoadingGame === game.uid}
+                      onClick={() => launchCasinoGame(game.uid)}
+                      className="aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"
+                    >
+                      {casinoLoadingGame === game.uid ? (
+                        <Loader2 className="animate-spin text-zinc-400" size={28} />
+                      ) : (
+                        <Dices className="text-red-600" size={28} />
+                      )}
+                      <span className="text-xs font-bold text-zinc-300 px-2 text-center">
+                        {game.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {activeTab === "promos" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 -mx-4 sm:-mx-6 lg:-mx-8 px-0">
                 <PromosPage
@@ -26009,6 +26078,33 @@ export default function Home({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* CASINO GAME FRAME — full-screen overlay so the provider's own domain
+          never shows in the address bar (games open inside our own iframe,
+          not a redirect to their site). */}
+      {casinoLaunchUrl && (
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+          <div className="flex items-center justify-between px-4 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0">
+            <div className="font-black text-lg tracking-tighter italic">
+              <span className="text-white">BET</span>
+              <span className="text-red-600">62</span>
+            </div>
+            <button
+              onClick={() => setCasinoLaunchUrl(null)}
+              className="p-2 text-zinc-400 hover:text-white transition-colors"
+              aria-label="Fechar jogo"
+            >
+              <X size={22} />
+            </button>
+          </div>
+          <iframe
+            src={casinoLaunchUrl}
+            title="Cassino"
+            className="flex-1 w-full border-0"
+            allow="autoplay; fullscreen"
+          />
+        </div>
+      )}
 
       {/* MOBILE APP DOWNLOAD BANNER */}
       <AnimatePresence>
