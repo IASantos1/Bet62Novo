@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 // 3D-styled tennis court, shown for live tennis matches the same way
 // Field3D is shown for football. The rally loop (ball, shadow, both rackets
@@ -48,6 +48,16 @@ export default function Court3D({
   const eventColorRef = useRef("#ccff00");
   const eventTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Big centered number that pops up over the court when a point is won —
+  // e.g. "15" -> "30" — instead of a generic label pill.
+  const [pointFlash, setPointFlash] = useState<{
+    id: number;
+    value: string;
+    team: "home" | "away";
+  } | null>(null);
+  const pointFlashIdRef = useRef(0);
+  const pointFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const prevSetsWon = useRef({ home: homeScore, away: awayScore });
   const prevGames = useRef<[number, number]>(
     sets.length ? sets[sets.length - 1]! : [0, 0],
@@ -67,6 +77,16 @@ export default function Court3D({
       setEvent(null);
       eventTimeoutRef.current = null;
     }, durationMs);
+  };
+
+  const triggerPointFlash = (team: "home" | "away", value: string) => {
+    if (pointFlashTimeoutRef.current) clearTimeout(pointFlashTimeoutRef.current);
+    pointFlashIdRef.current += 1;
+    setPointFlash({ id: pointFlashIdRef.current, value, team });
+    pointFlashTimeoutRef.current = setTimeout(() => {
+      setPointFlash(null);
+      pointFlashTimeoutRef.current = null;
+    }, 1100);
   };
 
   // Game won — current set's game tally going up. When a set finishes and
@@ -113,9 +133,9 @@ export default function Court3D({
     const prh = pointRank(ph);
     const pra = pointRank(pa);
     if (rh > prh && ra <= pra) {
-      triggerEvent("home", "PONTO", "#fbbf24", 1300);
+      triggerPointFlash("home", String(h));
     } else if (ra > pra && rh <= prh) {
-      triggerEvent("away", "PONTO", "#fbbf24", 1300);
+      triggerPointFlash("away", String(a));
     }
     prevPoints.current = currentPoints;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,6 +144,7 @@ export default function Court3D({
   useEffect(() => {
     return () => {
       if (eventTimeoutRef.current) clearTimeout(eventTimeoutRef.current);
+      if (pointFlashTimeoutRef.current) clearTimeout(pointFlashTimeoutRef.current);
     };
   }, []);
 
@@ -140,12 +161,6 @@ export default function Court3D({
     return () => observer.disconnect();
   }, []);
 
-  const bx     = ["14%", "32%", "49%", "51%", "68%", "84%", "14%"];
-  const by     = ["55%", "48%", "50%", "50%", "52%", "45%", "55%"];
-  const bz     = [40, 60, 0, 0, 60, 40, 40];
-  const bScale = [0.8, 1.1, 0.5, 0.5, 1.1, 0.8, 0.8];
-  const sOp    = [0.3, 0.15, 0.6, 0.6, 0.15, 0.3, 0.3];
-  const times  = [0, 0.18, 0.35, 0.5, 0.68, 0.85, 1];
   const rkRot  = [0, -30, 30, 10, 0];
   const rkT    = [0, 0.1, 0.35, 0.6, 1];
 
@@ -154,6 +169,7 @@ export default function Court3D({
   const homeServing = serving ? serving[0] : true;
   const leftDelay = homeServing ? 0 : 1.5;
   const rightDelay = homeServing ? 1.5 : 0;
+  const ballSide: "home" | "away" = homeServing ? "home" : "away";
 
   const currentGames = sets.length ? sets[sets.length - 1]! : undefined;
   const pts = currentPoints;
@@ -168,7 +184,7 @@ export default function Court3D({
       >
         <div
           style={{
-            transform: `rotateX(52deg) translateZ(-60px) scale(${scale})`,
+            transform: `rotateX(52deg) translateY(-40px) translateZ(-60px) scale(${scale})`,
             transformStyle: "preserve-3d",
           }}
           className="relative origin-center"
@@ -392,21 +408,32 @@ export default function Court3D({
               )}
             </motion.div>
 
-            {/* Ball shadow */}
-            <motion.div
-              className="absolute w-6 h-6 bg-black/50 rounded-full blur-[4px] pointer-events-none"
-              style={{ transform: "translateX(-50%) translateY(-50%)", zIndex: 10 }}
-              animate={{ top: by, left: bx, scale: bScale, opacity: sOp }}
-              transition={{ duration: 3, repeat: Infinity, ease: "linear", times }}
-            />
-
-            {/* Ball */}
-            <motion.div
-              className="absolute w-4 h-4 rounded-full bg-[#ccff00] shadow-[0_0_20px_rgba(204,255,0,0.85),inset_-2px_-2px_4px_rgba(0,0,0,0.3)] pointer-events-none"
-              style={{ transform: "translateX(-50%) translateY(-50%)", transformStyle: "preserve-3d", zIndex: 20 }}
-              animate={{ top: by, left: bx, z: bz }}
-              transition={{ duration: 3, repeat: Infinity, ease: "linear", times }}
-            />
+            {/* No real ball-position telemetry exists for tennis (same
+                situation as football) — so instead of a fabricated flight
+                path, we just show a soft shadow parked at whichever side
+                currently holds the ball (the server, the one real signal
+                we do have), crossing over the instant serve changes hands. */}
+            <AnimatePresence>
+              <motion.div
+                key={ballSide}
+                className="absolute rounded-full bg-black/45 blur-[3px] pointer-events-none"
+                style={{
+                  left: ballSide === "home" ? "23%" : "75%",
+                  top: ballSide === "home" ? "52%" : "55%",
+                  width: 22,
+                  height: 9,
+                  transform: "translate(-50%, -50%)",
+                  zIndex: 35,
+                }}
+                initial={{ opacity: 0, scale: 0.7 }}
+                animate={{ opacity: [0.28, 0.5, 0.28], scale: [0.95, 1.05, 0.95] }}
+                exit={{ opacity: 0, scale: 0.7 }}
+                transition={{
+                  opacity: { duration: 2, repeat: Infinity, ease: "easeInOut" },
+                  scale: { duration: 2, repeat: Infinity, ease: "easeInOut" },
+                }}
+              />
+            </AnimatePresence>
 
           </motion.div>
         </div>
@@ -447,9 +474,9 @@ export default function Court3D({
       )}
 
       {event && (
-        <div className="absolute inset-x-0 top-2 flex justify-center pointer-events-none">
+        <div className="absolute inset-x-0 top-[26px] flex justify-center pointer-events-none">
           <span
-            className="text-[11px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border"
+            className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border"
             style={{
               color: eventColorRef.current,
               borderColor: `${eventColorRef.current}80`,
@@ -461,6 +488,32 @@ export default function Court3D({
           </span>
         </div>
       )}
+
+      {/* Big centered number when a point is won — e.g. "15" flips to "30"
+          right over the court, instead of just updating the corner badge. */}
+      <AnimatePresence>
+        {pointFlash && (
+          <motion.div
+            key={pointFlash.id}
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.25 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+          >
+            <span
+              className="text-3xl font-black tabular-nums"
+              style={{
+                color: pointFlash.team === "home" ? "#7dd3fc" : "#fca5a5",
+                textShadow:
+                  "0 2px 10px rgba(0,0,0,0.85), 0 0 18px currentColor",
+              }}
+            >
+              {pointFlash.value}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
