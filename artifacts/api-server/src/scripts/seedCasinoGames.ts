@@ -7,7 +7,7 @@
 // JSON to pick up new/renamed games — existing rows are upserted by
 // (provider, game_uid) in a single bulk statement, never duplicated.
 import { sql } from "drizzle-orm";
-import { db, casinoGamesTable } from "@workspace/db";
+import { db, casinoGamesTable, initDb } from "@workspace/db";
 import casinoGamesData from "../data/casinoGames.json" with { type: "json" };
 
 type SourceGame = {
@@ -20,6 +20,11 @@ type SourceGame = {
 };
 
 async function main() {
+  // This script can run standalone (e.g. `railway run ... seed:casino`)
+  // without the main server ever having booted, so it can't assume
+  // initDb() already created the table — ensure it here first.
+  await initDb();
+
   const games = casinoGamesData as SourceGame[];
   const now = new Date();
 
