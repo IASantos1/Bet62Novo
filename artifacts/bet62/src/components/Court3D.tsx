@@ -315,7 +315,7 @@ export default function Court3D({
             flight below (both keyed off serveAnimId). */}
         <motion.div
           key={`home-racket-${serveAnimId}`}
-          style={{ position: "absolute", left: "5%", top: "45%", transformOrigin: "50% 88%", zIndex: 30 }}
+          style={{ position: "absolute", left: "8%", top: "45%", transformOrigin: "50% 88%", zIndex: 30 }}
           initial={restPose}
           animate={ballSide === "home" ? { rotate: swingRot, x: swingX } : restPose}
           transition={{ duration: 0.5, ease: "easeOut", times: swingTimes }}
@@ -358,13 +358,12 @@ export default function Court3D({
 
         <motion.div
           key={`away-racket-${serveAnimId}`}
-          style={{ position: "absolute", left: "95%", top: "45%", transformOrigin: "50% 88%", zIndex: 30,
-            transform: "scaleX(-1)" }}
-          initial={restPose}
+          style={{ position: "absolute", left: "92%", top: "45%", transformOrigin: "50% 88%", zIndex: 30 }}
+          initial={{ ...restPose, scaleX: -1 }}
           animate={
             ballSide === "away"
-              ? { rotate: swingRot.map((r) => -r), x: swingX.map((x) => -x) }
-              : restPose
+              ? { rotate: swingRot.map((r) => -r), x: swingX.map((x) => -x), scaleX: -1 }
+              : { ...restPose, scaleX: -1 }
           }
           transition={{ duration: 0.5, ease: "easeOut", times: swingTimes }}
         >
