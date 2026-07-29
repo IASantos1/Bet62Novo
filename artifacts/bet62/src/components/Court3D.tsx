@@ -199,12 +199,12 @@ export default function Court3D({
 
   return (
     <>
-      {/* ── Outer surround — US Open medium blue ── */}
+      {/* ── Outer surround — clay court "terra batida" ── */}
       <div
         className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none"
         style={{
-          background: "#4a90c8",
-          border: "3px solid #3a7ab0",
+          background: "#8a4a2e",
+          border: "3px solid #6e3a22",
         }}
       >
         {/* Inner court SVG — flat top-down, scales to fill its box exactly,
@@ -215,7 +215,7 @@ export default function Court3D({
           style={{ position: "absolute", left: "17.5%", top: "14%", width: "65%", height: "72%" }}
         >
           {/* Playing surface */}
-          <rect x="0" y="0" width="780" height="360" fill="#1a6ab8" />
+          <rect x="0" y="0" width="780" height="360" fill="#c2703d" />
 
           {/* BET62 watermark */}
           <text x="390" y="180" fontSize="70" fontWeight="900"
