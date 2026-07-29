@@ -1,15 +1,16 @@
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// 3D-styled tennis court, shown for live tennis matches the same way
-// Field3D is shown for football. The rally loop (ball, shadow, both rackets
-// swinging) is ambient/continuous — Statpal-style real point-by-point ball
-// physics isn't something any provider gives us — but unlike the original
-// version, this component now reacts to the REAL match state that already
-// flows into _liveExtra from buildTennisLiveV1 (SportsAPI Pro): who's
-// serving, the current game score, and sets won. Same "trigger event ->
-// label + highlight" strategy already proven in Field3D for goals/corners/
-// cards, applied here to point/game/set/serve changes instead.
+// Flat top-down tennis court (SVG + percentage-positioned overlays), shown
+// for live tennis matches the same way Field3D is shown for football.
+// This replaces an earlier 3D CSS-transform version (rotateX + perspective)
+// that kept getting cropped differently across devices/screen sizes —
+// percentages inside a plain 2D box always fit their container exactly, so
+// there's no perspective math to get wrong. Reacts to the REAL match state
+// that already flows into _liveExtra from buildTennisLiveV1 (SportsAPI
+// Pro): who's serving, the current game score, and sets won. Same
+// "trigger event -> label + highlight" strategy already proven in Field3D
+// for goals/corners/cards, applied here to point/game/set/serve changes.
 
 export interface Court3DProps {
   homeTeam?: string;
@@ -63,8 +64,6 @@ export default function Court3D({
   currentPoints,
   serving,
 }: Court3DProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0.5);
   const [event, setEvent] = useState<{
     label: string;
     team: "home" | "away" | null;
@@ -176,21 +175,8 @@ export default function Court3D({
     };
   }, []);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      const scaleX = (width * 1.08) / 1200;
-      const scaleY = (height * 1.05) / 370;
-      setScale(Math.max(0.2, Math.min(1.8, Math.min(scaleX, scaleY))));
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const rkRot  = [0, -30, 30, 10, 0];
-  const rkT    = [0, 0.1, 0.35, 0.6, 1];
+  const rkRot = [0, -30, 30, 10, 0];
+  const rkT   = [0, 0.1, 0.35, 0.6, 1];
 
   // Who's serving decides which racket swings first (serve) vs second
   // (return) — defaults to home when no real serve data is known yet.
@@ -199,14 +185,12 @@ export default function Court3D({
   const rightDelay = homeServing ? 1.5 : 0;
   const ballSide: "home" | "away" = homeServing ? "home" : "away";
   const serveSide = computeServeSide(currentPoints);
-  // Deuce/ad court sit on opposite sides of the server's own baseline —
-  // in our side-on camera that's a vertical (not horizontal) shift, since
-  // the net runs across the screen's width and each baseline's own left/
-  // right corresponds to depth in the world, not screen-left/right.
-  const ballTop = ballSide === "home"
-    ? (serveSide === "deuce" ? 26 : 44)
-    : (serveSide === "deuce" ? 29 : 47);
-  const ballLeft = ballSide === "home" ? 23 : 75;
+  // Deuce/ad court sit on opposite sides of the server's own half — in
+  // this top-down layout (baselines left/right, net running vertically in
+  // the middle) that's a vertical shift within the server's own racket
+  // position, symmetric around it.
+  const ballTop = serveSide === "deuce" ? 30 : 62;
+  const ballLeft = ballSide === "home" ? 24 : 76;
 
   const currentGames = sets.length ? sets[sets.length - 1]! : undefined;
   const pts = currentPoints;
@@ -215,278 +199,181 @@ export default function Court3D({
 
   return (
     <>
+      {/* ── Outer surround — US Open medium blue ── */}
       <div
-        ref={containerRef}
-        className="absolute inset-0 flex items-center justify-center [perspective:1400px] overflow-hidden pointer-events-none"
+        className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none"
+        style={{
+          background: "#4a90c8",
+          border: "3px solid #3a7ab0",
+        }}
       >
-        <div
-          style={{
-            transform: `rotateX(52deg) translateY(-40px) translateZ(-60px) scale(${scale})`,
-            transformStyle: "preserve-3d",
-          }}
-          className="relative origin-center"
+        {/* Inner court SVG — flat top-down, scales to fill its box exactly,
+            so there's no perspective math that can crop it. */}
+        <svg
+          viewBox="0 0 780 360"
+          preserveAspectRatio="none"
+          style={{ position: "absolute", left: "17.5%", top: "14%", width: "65%", height: "72%" }}
         >
+          {/* Playing surface */}
+          <rect x="0" y="0" width="780" height="360" fill="#1a6ab8" />
+
+          {/* BET62 watermark */}
+          <text x="390" y="180" fontSize="70" fontWeight="900"
+            fill="rgba(255,255,255,0.07)"
+            textAnchor="middle" dominantBaseline="central" letterSpacing="0.06em">
+            BET62
+          </text>
+
+          {/* Court lines */}
+          <g stroke="rgba(255,255,255,0.85)" strokeWidth="3" fill="none">
+            <rect x="0" y="0" width="780" height="360" />
+            <line x1="0"   y1="45"  x2="780" y2="45" />
+            <line x1="0"   y1="315" x2="780" y2="315" />
+            <line x1="180" y1="45"  x2="180" y2="315" />
+            <line x1="600" y1="45"  x2="600" y2="315" />
+            <line x1="180" y1="180" x2="600" y2="180" />
+            <line x1="0"   y1="180" x2="12"  y2="180" />
+            <line x1="768" y1="180" x2="780" y2="180" />
+          </g>
+
+          {/* Net */}
+          <line x1="390" y1="0" x2="390" y2="360"
+            stroke="rgba(8,18,38,0.9)" strokeWidth="6" />
+          <line x1="390" y1="0" x2="390" y2="360"
+            stroke="rgba(245,248,255,0.9)" strokeWidth="1.5" />
+        </svg>
+
+        {/* ── Rackets ── flat 2D, just rotate/scaleX — no perspective needed */}
+        <motion.div
+          style={{ position: "absolute", left: "20%", top: "46%", transformOrigin: "50% 88%", zIndex: 30 }}
+          animate={{ rotate: rkRot, x: [0, -8, 12, 4, 0] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: leftDelay }}
+        >
+          <svg width="30" height="66" viewBox="0 0 36 80" fill="none">
+            <ellipse cx="18" cy="20" rx="15" ry="18"
+              stroke="rgba(255,255,255,0.90)" strokeWidth="2.8"
+              fill="rgba(255,255,255,0.05)" />
+            {[-10,-5,0,5,10].map((dx) => {
+              const half = Math.sqrt(Math.max(0, 225 - dx*dx));
+              return <line key={`v${dx}`}
+                x1={18+dx} y1={20 - half + 2} x2={18+dx} y2={20 + half - 2}
+                stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
+            })}
+            {[-13,-8,-3,2,7,12].map((dy) => {
+              const half = Math.sqrt(Math.max(0, 324 - dy*dy));
+              return <line key={`h${dy}`}
+                x1={18 - half + 2} y1={20+dy} x2={18 + half - 2} y2={20+dy}
+                stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
+            })}
+            <path d="M11 36 L16 50 M25 36 L20 50"
+              stroke="rgba(255,255,255,0.80)" strokeWidth="2.2"
+              strokeLinecap="round" />
+            <rect x="14.5" y="50" width="7" height="28" rx="3" fill="#111111" />
+            {[54,59,64,69,72].map((y) => (
+              <line key={y} x1="14.5" y1={y} x2="21.5" y2={y}
+                stroke="rgba(255,255,255,0.25)" strokeWidth="0.9" />
+            ))}
+            <rect x="13" y="76" width="10" height="3" rx="1.5" fill="rgba(80,80,80,0.9)" />
+          </svg>
+          {homeServing && (
+            <span
+              className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px]"
+              style={{ filter: "drop-shadow(0 0 3px rgba(250,204,21,0.9))" }}
+            >
+              🎾
+            </span>
+          )}
+        </motion.div>
+
+        <motion.div
+          style={{ position: "absolute", left: "80%", top: "46%", transformOrigin: "50% 88%", zIndex: 30,
+            transform: "scaleX(-1)" }}
+          animate={{ rotate: rkRot.map(r => -r), x: [0, 8, -12, -4, 0] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: rightDelay }}
+        >
+          <svg width="30" height="66" viewBox="0 0 36 80" fill="none">
+            <ellipse cx="18" cy="20" rx="15" ry="18"
+              stroke="rgba(255,255,255,0.90)" strokeWidth="2.8"
+              fill="rgba(255,255,255,0.05)" />
+            {[-10,-5,0,5,10].map((dx) => {
+              const half = Math.sqrt(Math.max(0, 225 - dx*dx));
+              return <line key={`v${dx}`}
+                x1={18+dx} y1={20 - half + 2} x2={18+dx} y2={20 + half - 2}
+                stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
+            })}
+            {[-13,-8,-3,2,7,12].map((dy) => {
+              const half = Math.sqrt(Math.max(0, 324 - dy*dy));
+              return <line key={`h${dy}`}
+                x1={18 - half + 2} y1={20+dy} x2={18 + half - 2} y2={20+dy}
+                stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
+            })}
+            <path d="M11 36 L16 50 M25 36 L20 50"
+              stroke="rgba(255,255,255,0.80)" strokeWidth="2.2"
+              strokeLinecap="round" />
+            <rect x="14.5" y="50" width="7" height="28" rx="3" fill="#111111" />
+            {[54,59,64,69,72].map((y) => (
+              <line key={y} x1="14.5" y1={y} x2="21.5" y2={y}
+                stroke="rgba(255,255,255,0.25)" strokeWidth="0.9" />
+            ))}
+            <rect x="13" y="76" width="10" height="3" rx="1.5" fill="rgba(80,80,80,0.9)" />
+          </svg>
+          {!homeServing && (
+            <span
+              className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px]"
+              style={{ transform: "scaleX(-1)", filter: "drop-shadow(0 0 3px rgba(250,204,21,0.9))" }}
+            >
+              🎾
+            </span>
+          )}
+        </motion.div>
+
+        {/* No real ball-position telemetry exists for tennis (same
+            situation as football), so instead of a fabricated flight
+            path we show a "loading" cluster of pulsing ball dots — the
+            same visual language SportScore uses to mark "about to
+            serve" — parked at the server's box. It sits on the deuce
+            (right) or ad (left) side of that box per the real service
+            rule, and crosses over the instant either the server or the
+            side changes. */}
+        <AnimatePresence>
           <motion.div
-            className="relative w-[1200px] h-[600px] origin-center"
-            animate={{ rotateZ: [-0.7, 0.7, -0.7] }}
-            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
-            style={{ transformStyle: "preserve-3d" }}
+            key={`${ballSide}-${serveSide}`}
+            className="absolute pointer-events-none"
+            style={{
+              left: `${ballLeft}%`,
+              top: `${ballTop}%`,
+              transform: "translate(-50%, -50%)",
+              zIndex: 35,
+            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
           >
-
-            {/* ── Outer Surround — US Open medium blue ── */}
-            <div
-              className="absolute inset-0 rounded-xl overflow-hidden"
-              style={{
-                background: "#4a90c8",
-                border: "3px solid #3a7ab0",
-                boxShadow: "0 30px 60px rgba(0,0,0,0.5)",
-              }}
-            >
-              {/* Inner court SVG */}
-              <svg
-                viewBox="0 0 780 360"
-                style={{ position: "absolute", left: "17.5%", top: "14%", width: "65%", height: "72%" }}
-              >
-                {/* Playing surface */}
-                <rect x="0" y="0" width="780" height="360" fill="#1a6ab8" />
-
-                {/* BET62 watermark */}
-                <text x="390" y="180" fontSize="70" fontWeight="900"
-                  fill="rgba(255,255,255,0.07)"
-                  textAnchor="middle" dominantBaseline="central" letterSpacing="0.06em">
-                  BET62
-                </text>
-
-                {/* Court lines */}
-                <g stroke="rgba(255,255,255,0.85)" strokeWidth="3" fill="none">
-                  <rect x="0" y="0" width="780" height="360" />
-                  <line x1="0"   y1="45"  x2="780" y2="45" />
-                  <line x1="0"   y1="315" x2="780" y2="315" />
-                  <line x1="180" y1="45"  x2="180" y2="315" />
-                  <line x1="600" y1="45"  x2="600" y2="315" />
-                  <line x1="180" y1="180" x2="600" y2="180" />
-                  <line x1="0"   y1="180" x2="12"  y2="180" />
-                  <line x1="768" y1="180" x2="780" y2="180" />
-                </g>
-
-                {/* Net shadow on court surface */}
-                <line x1="390" y1="0" x2="390" y2="360"
-                  stroke="rgba(0,0,0,0.35)" strokeWidth="5" />
-              </svg>
-
-              {/* ── Net posts inside the surround ──
-                  Two dark bars running from the court top edge and bottom edge.
-                  The posts sit outside the inner court area (in the surround). */}
-            </div>
-
-            {/*
-              ── 3D NET PANEL ──
-              translateZ(20px) → small, realistic rise above the court surface.
-              The net appears as a dark bar with white top tape, centered on the
-              court's width (left: 50%).
-            */}
-            <div
-              style={{
-                position: "absolute",
-                left: "calc(50% - 3px)",
-                top: "14%",
-                height: "72%",
-                width: "6px",
-                transform: "translateZ(20px)",
-                transformStyle: "preserve-3d",
-                zIndex: 60,
-                borderRadius: "1px",
-                overflow: "hidden",
-              }}
-            >
-              {/* Net mesh body */}
-              <div style={{
-                position: "absolute",
-                inset: 0,
-                background: "rgba(8,18,38,0.95)",
-                backgroundImage:
-                  "linear-gradient(rgba(255,255,255,0.15) 1.5px, transparent 1.5px), " +
-                  "linear-gradient(90deg, rgba(255,255,255,0.15) 1.5px, transparent 1.5px)",
-                backgroundSize: "6px 6px",
-              }} />
-              {/* White top tape */}
-              <div style={{
-                position: "absolute",
-                top: 0, left: 0, right: 0, height: "6px",
-                background: "rgba(245,248,255,0.95)",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
-              }} />
-            </div>
-
-            {/* Net post caps at the two ends of the net */}
-            <div style={{
-              position: "absolute",
-              left: "calc(50% - 4px)",
-              top: "14%",
-              width: "8px", height: "8px",
-              transform: "translateZ(20px)",
-              background: "#7a9cb8",
-              borderRadius: "50%",
-              zIndex: 61,
-            }} />
-            <div style={{
-              position: "absolute",
-              left: "calc(50% - 4px)",
-              top: "calc(14% + 72% - 8px)",
-              width: "8px", height: "8px",
-              transform: "translateZ(20px)",
-              background: "#7a9cb8",
-              borderRadius: "50%",
-              zIndex: 61,
-            }} />
-
-            {/* ── Tennis Racket SVG (reusable inline) ── */}
-            {/* Left-side racket — serves first when home is serving */}
-            <motion.div
-              style={{ position: "absolute", left: "17%", top: "35%", transformOrigin: "50% 88%", zIndex: 30 }}
-              animate={{ rotate: rkRot, x: [0, -8, 12, 4, 0] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: leftDelay }}
-            >
-              <svg width="36" height="80" viewBox="0 0 36 80" fill="none">
-                {/* ── Head frame ── */}
-                <ellipse cx="18" cy="20" rx="15" ry="18"
-                  stroke="rgba(255,255,255,0.90)" strokeWidth="2.8"
-                  fill="rgba(255,255,255,0.05)" />
-                {/* Strings — vertical */}
-                {[-10,-5,0,5,10].map((dx) => {
-                  const half = Math.sqrt(Math.max(0, 225 - dx*dx));
-                  return <line key={`v${dx}`}
-                    x1={18+dx} y1={20 - half + 2} x2={18+dx} y2={20 + half - 2}
-                    stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
-                })}
-                {/* Strings — horizontal */}
-                {[-13,-8,-3,2,7,12].map((dy) => {
-                  const half = Math.sqrt(Math.max(0, 324 - dy*dy));
-                  return <line key={`h${dy}`}
-                    x1={18 - half + 2} y1={20+dy} x2={18 + half - 2} y2={20+dy}
-                    stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
-                })}
-                {/* ── Throat ── two converging lines */}
-                <path d="M11 36 L16 50 M25 36 L20 50"
-                  stroke="rgba(255,255,255,0.80)" strokeWidth="2.2"
-                  strokeLinecap="round" />
-                {/* ── Grip / Handle — black with wrap texture ── */}
-                <rect x="14.5" y="50" width="7" height="28" rx="3"
-                  fill="#111111" />
-                {/* Grip wrapping lines */}
-                {[54,59,64,69,72].map((y) => (
-                  <line key={y} x1="14.5" y1={y} x2="21.5" y2={y}
-                    stroke="rgba(255,255,255,0.25)" strokeWidth="0.9" />
-                ))}
-                {/* Butt cap */}
-                <rect x="13" y="76" width="10" height="3" rx="1.5"
-                  fill="rgba(80,80,80,0.9)" />
-              </svg>
-              {homeServing && (
-                <span
-                  className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px]"
-                  style={{ filter: "drop-shadow(0 0 3px rgba(250,204,21,0.9))" }}
-                >
-                  🎾
-                </span>
-              )}
-            </motion.div>
-
-            {/* Right-side racket — serves first when away is serving, mirrored */}
-            <motion.div
-              style={{ position: "absolute", left: "79%", top: "38%", transformOrigin: "50% 88%", zIndex: 30,
-                transform: "scaleX(-1)" /* mirror horizontally */ }}
-              animate={{ rotate: rkRot.map(r => -r), x: [0, 8, -12, -4, 0] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: rightDelay }}
-            >
-              <svg width="36" height="80" viewBox="0 0 36 80" fill="none">
-                <ellipse cx="18" cy="20" rx="15" ry="18"
-                  stroke="rgba(255,255,255,0.90)" strokeWidth="2.8"
-                  fill="rgba(255,255,255,0.05)" />
-                {[-10,-5,0,5,10].map((dx) => {
-                  const half = Math.sqrt(Math.max(0, 225 - dx*dx));
-                  return <line key={`v${dx}`}
-                    x1={18+dx} y1={20 - half + 2} x2={18+dx} y2={20 + half - 2}
-                    stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
-                })}
-                {[-13,-8,-3,2,7,12].map((dy) => {
-                  const half = Math.sqrt(Math.max(0, 324 - dy*dy));
-                  return <line key={`h${dy}`}
-                    x1={18 - half + 2} y1={20+dy} x2={18 + half - 2} y2={20+dy}
-                    stroke="rgba(255,255,255,0.35)" strokeWidth="0.7" />;
-                })}
-                <path d="M11 36 L16 50 M25 36 L20 50"
-                  stroke="rgba(255,255,255,0.80)" strokeWidth="2.2"
-                  strokeLinecap="round" />
-                <rect x="14.5" y="50" width="7" height="28" rx="3"
-                  fill="#111111" />
-                {[54,59,64,69,72].map((y) => (
-                  <line key={y} x1="14.5" y1={y} x2="21.5" y2={y}
-                    stroke="rgba(255,255,255,0.25)" strokeWidth="0.9" />
-                ))}
-                <rect x="13" y="76" width="10" height="3" rx="1.5"
-                  fill="rgba(80,80,80,0.9)" />
-              </svg>
-              {!homeServing && (
-                <span
-                  className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px]"
-                  style={{ transform: "scaleX(-1)", filter: "drop-shadow(0 0 3px rgba(250,204,21,0.9))" }}
-                >
-                  🎾
-                </span>
-              )}
-            </motion.div>
-
-            {/* No real ball-position telemetry exists for tennis (same
-                situation as football), so instead of a fabricated flight
-                path we show a "loading" cluster of pulsing ball dots — the
-                same visual language SportScore uses to mark "about to
-                serve" — parked at the server's box. It sits on the deuce
-                (right) or ad (left) side of that box per the real service
-                rule, and crosses over the instant either the server or the
-                side changes. */}
-            <AnimatePresence>
-              <motion.div
-                key={`${ballSide}-${serveSide}`}
-                className="absolute pointer-events-none"
+            {[0, 1, 2].map((i) => (
+              <motion.span
+                key={i}
+                className="absolute rounded-full"
                 style={{
-                  left: `${ballLeft}%`,
-                  top: `${ballTop}%`,
-                  transform: "translate(-50%, -50%)",
-                  zIndex: 35,
+                  width: 7 - i,
+                  height: 7 - i,
+                  left: i * 4 - 4,
+                  top: -i * 3,
+                  background:
+                    "radial-gradient(circle at 35% 30%, #eaff6b, #b9db00 60%, #92b800)",
+                  boxShadow: "0 0 4px rgba(220,255,0,0.75)",
                 }}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                {[0, 1, 2].map((i) => (
-                  <motion.span
-                    key={i}
-                    className="absolute rounded-full"
-                    style={{
-                      width: 7 - i,
-                      height: 7 - i,
-                      left: i * 4 - 4,
-                      top: -i * 3,
-                      background:
-                        "radial-gradient(circle at 35% 30%, #eaff6b, #b9db00 60%, #92b800)",
-                      boxShadow: "0 0 4px rgba(220,255,0,0.75)",
-                    }}
-                    animate={{ opacity: [0.15, 1, 0.15], scale: [0.7, 1.05, 0.7] }}
-                    transition={{
-                      duration: 1.1,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                      delay: i * 0.25,
-                    }}
-                  />
-                ))}
-              </motion.div>
-            </AnimatePresence>
-
+                animate={{ opacity: [0.15, 1, 0.15], scale: [0.7, 1.05, 0.7] }}
+                transition={{
+                  duration: 1.1,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 0.25,
+                }}
+              />
+            ))}
           </motion.div>
-        </div>
+        </AnimatePresence>
       </div>
 
       {/* Small scoreboard, tucked in the corner — same treatment as Field3D */}
