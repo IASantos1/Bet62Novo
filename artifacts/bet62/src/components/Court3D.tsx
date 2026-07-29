@@ -30,6 +30,30 @@ const pointRank = (v: number | string | undefined): number => {
   return Number.isFinite(n) ? n : -1;
 };
 
+// Real tennis rule, not a guess: the server starts each game from the
+// deuce (right) court, and the side alternates after every single point —
+// including through deuce/advantage. Deuce (40-40) is always served from
+// the right and advantage always from the left, regardless of how many
+// times the game has gone back to deuce, so those two cases are fixed;
+// everything else falls out of the parity of total points played.
+type ServeSide = "deuce" | "ad";
+const pointCount = (v: number | string | undefined): number => {
+  if (v === 15 || v === "15") return 1;
+  if (v === 30 || v === "30") return 2;
+  if (v === 40 || v === "40") return 3;
+  return 0;
+};
+const computeServeSide = (
+  pts: [number | string, number | string] | undefined,
+): ServeSide => {
+  if (!pts) return "deuce";
+  const [h, a] = pts;
+  if (h === "D" && a === "D") return "deuce";
+  if (h === "AD" || a === "AD") return "ad";
+  const total = pointCount(h) + pointCount(a);
+  return total % 2 === 0 ? "deuce" : "ad";
+};
+
 export default function Court3D({
   homeTeam = "Casa",
   awayTeam = "Fora",
@@ -73,6 +97,10 @@ export default function Court3D({
     if (eventTimeoutRef.current) clearTimeout(eventTimeoutRef.current);
     eventColorRef.current = color;
     setEvent({ label, team });
+    // GAME/SET GANHO is the more significant signal — don't let a leftover
+    // point-flash number linger on top of it.
+    if (pointFlashTimeoutRef.current) clearTimeout(pointFlashTimeoutRef.current);
+    setPointFlash(null);
     eventTimeoutRef.current = setTimeout(() => {
       setEvent(null);
       eventTimeoutRef.current = null;
@@ -170,6 +198,15 @@ export default function Court3D({
   const leftDelay = homeServing ? 0 : 1.5;
   const rightDelay = homeServing ? 1.5 : 0;
   const ballSide: "home" | "away" = homeServing ? "home" : "away";
+  const serveSide = computeServeSide(currentPoints);
+  // Deuce/ad court sit on opposite sides of the server's own baseline —
+  // in our side-on camera that's a vertical (not horizontal) shift, since
+  // the net runs across the screen's width and each baseline's own left/
+  // right corresponds to depth in the world, not screen-left/right.
+  const ballTop = ballSide === "home"
+    ? (serveSide === "deuce" ? 26 : 44)
+    : (serveSide === "deuce" ? 29 : 47);
+  const ballLeft = ballSide === "home" ? 23 : 75;
 
   const currentGames = sets.length ? sets[sets.length - 1]! : undefined;
   const pts = currentPoints;
@@ -235,14 +272,6 @@ export default function Court3D({
                 {/* Net shadow on court surface */}
                 <line x1="390" y1="0" x2="390" y2="360"
                   stroke="rgba(0,0,0,0.35)" strokeWidth="5" />
-
-                {/* Ball trail */}
-                <polyline points="110,195 200,185 280,178 390,175 500,168 580,162"
-                  fill="none" stroke="rgba(204,255,0,0.28)" strokeWidth="4"
-                  strokeLinecap="round" strokeLinejoin="round" />
-                <polyline points="110,195 200,185 280,178 390,175 500,168 580,162"
-                  fill="none" stroke="rgba(204,255,0,0.12)" strokeWidth="8"
-                  strokeLinecap="round" />
               </svg>
 
               {/* ── Net posts inside the surround ──
@@ -409,30 +438,51 @@ export default function Court3D({
             </motion.div>
 
             {/* No real ball-position telemetry exists for tennis (same
-                situation as football) — so instead of a fabricated flight
-                path, we just show a soft shadow parked at whichever side
-                currently holds the ball (the server, the one real signal
-                we do have), crossing over the instant serve changes hands. */}
+                situation as football), so instead of a fabricated flight
+                path we show a "loading" cluster of pulsing ball dots — the
+                same visual language SportScore uses to mark "about to
+                serve" — parked at the server's box. It sits on the deuce
+                (right) or ad (left) side of that box per the real service
+                rule, and crosses over the instant either the server or the
+                side changes. */}
             <AnimatePresence>
               <motion.div
-                key={ballSide}
-                className="absolute rounded-full bg-black/45 blur-[3px] pointer-events-none"
+                key={`${ballSide}-${serveSide}`}
+                className="absolute pointer-events-none"
                 style={{
-                  left: ballSide === "home" ? "23%" : "75%",
-                  top: ballSide === "home" ? "52%" : "55%",
-                  width: 22,
-                  height: 9,
+                  left: `${ballLeft}%`,
+                  top: `${ballTop}%`,
                   transform: "translate(-50%, -50%)",
                   zIndex: 35,
                 }}
-                initial={{ opacity: 0, scale: 0.7 }}
-                animate={{ opacity: [0.28, 0.5, 0.28], scale: [0.95, 1.05, 0.95] }}
-                exit={{ opacity: 0, scale: 0.7 }}
-                transition={{
-                  opacity: { duration: 2, repeat: Infinity, ease: "easeInOut" },
-                  scale: { duration: 2, repeat: Infinity, ease: "easeInOut" },
-                }}
-              />
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <motion.span
+                    key={i}
+                    className="absolute rounded-full"
+                    style={{
+                      width: 7 - i,
+                      height: 7 - i,
+                      left: i * 4 - 4,
+                      top: -i * 3,
+                      background:
+                        "radial-gradient(circle at 35% 30%, #eaff6b, #b9db00 60%, #92b800)",
+                      boxShadow: "0 0 4px rgba(220,255,0,0.75)",
+                    }}
+                    animate={{ opacity: [0.15, 1, 0.15], scale: [0.7, 1.05, 0.7] }}
+                    transition={{
+                      duration: 1.1,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: i * 0.25,
+                    }}
+                  />
+                ))}
+              </motion.div>
             </AnimatePresence>
 
           </motion.div>
