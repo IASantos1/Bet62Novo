@@ -165,6 +165,7 @@ import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
 import Field3D from "@/components/Field3D";
+import Court3D from "@/components/Court3D";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -18026,17 +18027,47 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        <Field3D
-                          homeScore={expandedMatch.homeScore ?? 0}
-                          awayScore={expandedMatch.awayScore ?? 0}
-                          cornersTotal={expandedMatch._liveExtra?.cornersTotal}
-                          yellowCardsHome={expandedMatch._liveExtra?.yellowCardsHome}
-                          yellowCardsAway={expandedMatch._liveExtra?.yellowCardsAway}
-                          redCardsHome={expandedMatch._liveExtra?.redCardsHomeCount}
-                          redCardsAway={expandedMatch._liveExtra?.redCardsAwayCount}
-                          homeTeam={teamNamePt(expandedMatch.home)}
-                          awayTeam={teamNamePt(expandedMatch.away)}
-                        />
+                        {(expandedMatch.sport ?? "football") === "tennis" ? (
+                          <div className="relative w-full max-w-[320px] mx-auto rounded-xl overflow-hidden border border-zinc-800/70 bg-zinc-950" style={{ height: 90 }}>
+                            <Court3D
+                              homeTeam={teamNamePt(expandedMatch.home)}
+                              awayTeam={teamNamePt(expandedMatch.away)}
+                              homeScore={expandedMatch.homeScore ?? 0}
+                              awayScore={expandedMatch.awayScore ?? 0}
+                              sets={expandedMatch._liveExtra?.sets}
+                              currentPoints={expandedMatch._liveExtra?.currentPoints}
+                              serving={expandedMatch._liveExtra?.serving}
+                            />
+                          </div>
+                        ) : (
+                          <Field3D
+                            homeScore={expandedMatch.homeScore ?? 0}
+                            awayScore={expandedMatch.awayScore ?? 0}
+                            cornersTotal={expandedMatch._liveExtra?.cornersTotal}
+                            yellowCardsHome={expandedMatch._liveExtra?.yellowCardsHome}
+                            yellowCardsAway={expandedMatch._liveExtra?.yellowCardsAway}
+                            redCardsHome={expandedMatch._liveExtra?.redCardsHomeCount}
+                            redCardsAway={expandedMatch._liveExtra?.redCardsAwayCount}
+                            homeTeam={teamNamePt(expandedMatch.home)}
+                            awayTeam={teamNamePt(expandedMatch.away)}
+                            minuteLabel={(() => {
+                              if (!expandedMatch.isLive) return undefined;
+                              const m = getDisplayMinute(expandedMatch);
+                              const isFootball =
+                                !expandedMatch.sport ||
+                                expandedMatch.sport === "football";
+                              const tag = isFootball
+                                ? getFootballPhaseTag(expandedMatch, m)
+                                : null;
+                              if (m <= 0) return "AO VIVO";
+                              if (tag === "HT") return "HT";
+                              if (tag && isFootball)
+                                return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                              if (tag) return `${m}' · ${tag}`;
+                              return `${m}'`;
+                            })()}
+                          />
+                        )}
                       </div>
                     ) : (
                       <>
@@ -18186,7 +18217,7 @@ export default function Home({
                       </>
                     )}
 
-                    {(expandedMatch.sport ?? "football") === "football" && (
+                    {["football", "tennis"].includes(expandedMatch.sport ?? "football") && (
                       <div className="flex items-center">
                         <button
                           onClick={() => setShowFieldView((v) => !v)}
