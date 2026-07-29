@@ -18028,7 +18028,7 @@ export default function Home({
                     {showFieldView ? (
                       <div className="mb-3">
                         {(expandedMatch.sport ?? "football") === "tennis" ? (
-                          <div className="relative w-full max-w-[320px] mx-auto rounded-xl overflow-hidden border border-zinc-800/70 bg-zinc-950" style={{ height: 90 }}>
+                          <div className="relative w-full max-w-[320px] mx-auto rounded-xl overflow-hidden border border-zinc-800/70 bg-zinc-950" style={{ height: 130 }}>
                             <Court3D
                               homeTeam={teamNamePt(expandedMatch.home)}
                               awayTeam={teamNamePt(expandedMatch.away)}

@@ -81,6 +81,11 @@ export default function Court3D({
   const pointFlashIdRef = useRef(0);
   const pointFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Every point starts with a serve, so replay the serve-flight animation
+  // (ball + fading trail) whenever the point score changes — including the
+  // very first render, for the match's opening serve.
+  const [serveAnimId, setServeAnimId] = useState(0);
+
   const prevSetsWon = useRef({ home: homeScore, away: awayScore });
   const prevGames = useRef<[number, number]>(
     sets.length ? sets[sets.length - 1]! : [0, 0],
@@ -169,6 +174,11 @@ export default function Court3D({
   }, [currentPoints]);
 
   useEffect(() => {
+    if (!currentPoints) return;
+    setServeAnimId((v) => v + 1);
+  }, [currentPoints]);
+
+  useEffect(() => {
     return () => {
       if (eventTimeoutRef.current) clearTimeout(eventTimeoutRef.current);
       if (pointFlashTimeoutRef.current) clearTimeout(pointFlashTimeoutRef.current);
@@ -185,12 +195,14 @@ export default function Court3D({
   const rightDelay = homeServing ? 1.5 : 0;
   const ballSide: "home" | "away" = homeServing ? "home" : "away";
   const serveSide = computeServeSide(currentPoints);
-  // Deuce/ad court sit on opposite sides of the server's own half — in
-  // this top-down layout (baselines left/right, net running vertically in
-  // the middle) that's a vertical shift within the server's own racket
-  // position, symmetric around it.
-  const ballTop = serveSide === "deuce" ? 30 : 62;
-  const ballLeft = ballSide === "home" ? 24 : 76;
+  // Serve is always struck cross-court into the diagonally opposite
+  // service box — never straight — so the destination sits on the
+  // opposite half (deuce/ad) from the origin, on the receiver's side of
+  // the net. Coordinates are in the same 780x360 world as the court SVG.
+  const serveOriginX = ballSide === "home" ? 15 : 765;
+  const serveOriginY = serveSide === "deuce" ? 110 : 250;
+  const serveDestX = ballSide === "home" ? 520 : 260;
+  const serveDestY = serveSide === "deuce" ? 250 : 110;
 
   const currentGames = sets.length ? sets[sets.length - 1]! : undefined;
   const pts = currentPoints;
@@ -208,11 +220,14 @@ export default function Court3D({
         }}
       >
         {/* Inner court SVG — flat top-down, scales to fill its box exactly,
-            so there's no perspective math that can crop it. */}
+            so there's no perspective math that can crop it. Fills almost
+            the entire widget (was inset 17.5%/14% with a thick surround
+            margin) per request to have the court take up the whole
+            rectangle. */}
         <svg
           viewBox="0 0 780 360"
           preserveAspectRatio="none"
-          style={{ position: "absolute", left: "17.5%", top: "14%", width: "65%", height: "72%" }}
+          style={{ position: "absolute", left: "1%", top: "2%", width: "98%", height: "96%" }}
         >
           {/* Playing surface */}
           <rect x="0" y="0" width="780" height="360" fill="#c2703d" />
@@ -241,11 +256,51 @@ export default function Court3D({
             stroke="rgba(8,18,38,0.9)" strokeWidth="6" />
           <line x1="390" y1="0" x2="390" y2="360"
             stroke="rgba(245,248,255,0.9)" strokeWidth="1.5" />
+
+          {/* No real ball-position telemetry exists for tennis (same
+              situation as football), so instead of a fabricated rally we
+              play a single serve flight — ball + fading trail — every
+              time a new point starts, since we DO know that for certain:
+              a serve happened. Travels cross-court from the server's box
+              to the diagonally opposite box, per the real service rule. */}
+          <AnimatePresence>
+            <motion.g key={serveAnimId}>
+              <motion.line
+                x1={serveOriginX}
+                y1={serveOriginY}
+                initial={{ x2: serveOriginX, y2: serveOriginY, opacity: 0.9 }}
+                animate={{
+                  x2: serveDestX,
+                  y2: serveDestY,
+                  opacity: [0.9, 0.7, 0],
+                }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.6, times: [0, 0.75, 1], ease: "easeOut" }}
+                stroke="rgba(224,255,110,0.65)"
+                strokeWidth={5}
+                strokeLinecap="round"
+              />
+              <motion.circle
+                r={9}
+                initial={{ cx: serveOriginX, cy: serveOriginY, opacity: 1 }}
+                animate={{
+                  cx: serveDestX,
+                  cy: serveDestY,
+                  opacity: [1, 1, 0],
+                }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.6, times: [0, 0.8, 1], ease: "easeOut" }}
+                fill="#eaff6b"
+                stroke="#8fb800"
+                strokeWidth={2}
+              />
+            </motion.g>
+          </AnimatePresence>
         </svg>
 
         {/* ── Rackets ── flat 2D, just rotate/scaleX — no perspective needed */}
         <motion.div
-          style={{ position: "absolute", left: "20%", top: "46%", transformOrigin: "50% 88%", zIndex: 30 }}
+          style={{ position: "absolute", left: "5%", top: "45%", transformOrigin: "50% 88%", zIndex: 30 }}
           animate={{ rotate: rkRot, x: [0, -8, 12, 4, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: leftDelay }}
         >
@@ -286,7 +341,7 @@ export default function Court3D({
         </motion.div>
 
         <motion.div
-          style={{ position: "absolute", left: "80%", top: "46%", transformOrigin: "50% 88%", zIndex: 30,
+          style={{ position: "absolute", left: "95%", top: "45%", transformOrigin: "50% 88%", zIndex: 30,
             transform: "scaleX(-1)" }}
           animate={{ rotate: rkRot.map(r => -r), x: [0, 8, -12, -4, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: rightDelay }}
@@ -327,53 +382,6 @@ export default function Court3D({
           )}
         </motion.div>
 
-        {/* No real ball-position telemetry exists for tennis (same
-            situation as football), so instead of a fabricated flight
-            path we show a "loading" cluster of pulsing ball dots — the
-            same visual language SportScore uses to mark "about to
-            serve" — parked at the server's box. It sits on the deuce
-            (right) or ad (left) side of that box per the real service
-            rule, and crosses over the instant either the server or the
-            side changes. */}
-        <AnimatePresence>
-          <motion.div
-            key={`${ballSide}-${serveSide}`}
-            className="absolute pointer-events-none"
-            style={{
-              left: `${ballLeft}%`,
-              top: `${ballTop}%`,
-              transform: "translate(-50%, -50%)",
-              zIndex: 35,
-            }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-          >
-            {[0, 1, 2].map((i) => (
-              <motion.span
-                key={i}
-                className="absolute rounded-full"
-                style={{
-                  width: 7 - i,
-                  height: 7 - i,
-                  left: i * 4 - 4,
-                  top: -i * 3,
-                  background:
-                    "radial-gradient(circle at 35% 30%, #eaff6b, #b9db00 60%, #92b800)",
-                  boxShadow: "0 0 4px rgba(220,255,0,0.75)",
-                }}
-                animate={{ opacity: [0.15, 1, 0.15], scale: [0.7, 1.05, 0.7] }}
-                transition={{
-                  duration: 1.1,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                  delay: i * 0.25,
-                }}
-              />
-            ))}
-          </motion.div>
-        </AnimatePresence>
       </div>
 
       {/* Small scoreboard, tucked in the corner — same treatment as Field3D */}
