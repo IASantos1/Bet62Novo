@@ -220,11 +220,14 @@ export default function Court3D({
         }}
       >
         {/* Inner court SVG — flat top-down, scales to fill its box exactly,
-            so there's no perspective math that can crop it. */}
+            so there's no perspective math that can crop it. Fills almost
+            the entire widget (was inset 17.5%/14% with a thick surround
+            margin) per request to have the court take up the whole
+            rectangle. */}
         <svg
           viewBox="0 0 780 360"
           preserveAspectRatio="none"
-          style={{ position: "absolute", left: "17.5%", top: "14%", width: "65%", height: "72%" }}
+          style={{ position: "absolute", left: "1%", top: "2%", width: "98%", height: "96%" }}
         >
           {/* Playing surface */}
           <rect x="0" y="0" width="780" height="360" fill="#c2703d" />
@@ -297,7 +300,7 @@ export default function Court3D({
 
         {/* ── Rackets ── flat 2D, just rotate/scaleX — no perspective needed */}
         <motion.div
-          style={{ position: "absolute", left: "20%", top: "46%", transformOrigin: "50% 88%", zIndex: 30 }}
+          style={{ position: "absolute", left: "5%", top: "45%", transformOrigin: "50% 88%", zIndex: 30 }}
           animate={{ rotate: rkRot, x: [0, -8, 12, 4, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: leftDelay }}
         >
@@ -338,7 +341,7 @@ export default function Court3D({
         </motion.div>
 
         <motion.div
-          style={{ position: "absolute", left: "80%", top: "46%", transformOrigin: "50% 88%", zIndex: 30,
+          style={{ position: "absolute", left: "95%", top: "45%", transformOrigin: "50% 88%", zIndex: 30,
             transform: "scaleX(-1)" }}
           animate={{ rotate: rkRot.map(r => -r), x: [0, 8, -12, -4, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", times: rkT, delay: rightDelay }}
