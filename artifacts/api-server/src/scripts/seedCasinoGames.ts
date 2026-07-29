@@ -28,6 +28,17 @@ async function main() {
   const games = casinoGamesData as SourceGame[];
   const now = new Date();
 
+  // Several titles are relisted under more than one "provider" label by the
+  // aggregator (e.g. the same BGaming slot appears under BNG, BNG Asia and
+  // BGaming), but only some of those copies carry an image URL. Backfill the
+  // ones that don't from a same-named copy that does, instead of showing the
+  // dice placeholder when a real thumbnail is available under a sibling entry.
+  const imgByName = new Map<string, string>();
+  for (const g of games) {
+    const key = g.name.trim().toLowerCase();
+    if (g.img && !imgByName.has(key)) imgByName.set(key, g.img);
+  }
+
   await db.insert(casinoGamesTable).values(
     games.map((g) => ({
       provider: g.provider,
@@ -35,7 +46,7 @@ async function main() {
       name: g.name,
       vendorCode: g.vendorCode,
       category: g.category,
-      img: g.img,
+      img: g.img ?? imgByName.get(g.name.trim().toLowerCase()) ?? null,
       isActive: true,
       updatedAt: now,
     })),
