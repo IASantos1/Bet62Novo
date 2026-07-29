@@ -155,7 +155,13 @@ router.post(
           { status: resp.status, data, userId, gameUid },
           "[casino] GetGameUrl failed",
         );
-        res.status(502).json({ error: "Não foi possível iniciar o jogo." });
+        // Surface the aggregator's own reason (e.g. region/licensing
+        // restrictions on that specific vendor) instead of a blanket
+        // message — this is the only place that reason is visible outside
+        // the server logs, and it's what tells us whether a given game
+        // needs to be disabled/reported to SilentAPI.
+        const reason = data?.msg ? ` (${data.msg})` : "";
+        res.status(502).json({ error: `Não foi possível iniciar o jogo.${reason}` });
         return;
       }
 

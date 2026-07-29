@@ -39,8 +39,20 @@ async function main() {
     if (g.img && !imgByName.has(key)) imgByName.set(key, g.img);
   }
 
+  // Collapse same-named relists down to a single tile — showing "3 African
+  // Drums" three times (once per provider label) reads as broken/duplicated
+  // to a player even though each copy is a technically distinct catalog row.
+  // Keep whichever copy has a real thumbnail; if none do, keep the first seen.
+  const bestByName = new Map<string, SourceGame>();
+  for (const g of games) {
+    const key = g.name.trim().toLowerCase();
+    const existing = bestByName.get(key);
+    if (!existing || (!existing.img && g.img)) bestByName.set(key, g);
+  }
+  const deduped = [...bestByName.values()];
+
   await db.insert(casinoGamesTable).values(
-    games.map((g) => ({
+    deduped.map((g) => ({
       provider: g.provider,
       gameUid: g.id,
       name: g.name,
@@ -57,11 +69,23 @@ async function main() {
       vendorCode: sql`excluded.vendor_code`,
       category: sql`excluded.category`,
       img: sql`excluded.img`,
+      isActive: true,
       updatedAt: sql`excluded.updated_at`,
     },
   });
 
-  console.log(`Seeded ${games.length} casino games into Postgres.`);
+  // Deactivate rows from a previous run that are no longer in the deduped
+  // set (e.g. a sibling relist that lost the "best copy" pick, or a game
+  // dropped from the source JSON) instead of leaving stale duplicates visible.
+  const keptKeys = deduped.map((g) => `${g.provider}:${g.id}`);
+  await db.execute(sql`
+    UPDATE casino_games
+    SET is_active = false, updated_at = NOW()
+    WHERE (provider || ':' || game_uid) <> ALL(${keptKeys})
+      AND is_active = true
+  `);
+
+  console.log(`Seeded ${deduped.length} unique casino games (from ${games.length} raw entries) into Postgres.`);
   process.exit(0);
 }
 
