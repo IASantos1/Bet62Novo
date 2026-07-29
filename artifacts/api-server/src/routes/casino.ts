@@ -4,8 +4,27 @@ import { eq } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
+import casinoGamesData from "../data/casinoGames.json" with { type: "json" };
 
 const router: IRouter = Router();
+
+// Consolidated from the provider catalogs supplied directly (BigTimeGaming,
+// BGaming, BetBY, AOG, AStarGaming, ACE, 9Wickets, 5GGaming, 3Oaks, 2J,
+// 18Peaches — 689 games total, deduplicated by provider+gameID). Provider
+// labels are taken verbatim from how each catalog was named, not invented.
+type CasinoGame = {
+  id: string;
+  name: string;
+  provider: string;
+  vendorCode: number | null;
+  category: string;
+  img: string | null;
+};
+const casinoGames = casinoGamesData as CasinoGame[];
+
+router.get("/games", (_req: Request, res: Response) => {
+  res.json({ games: casinoGames });
+});
 
 // SilentAPI needs an alphanumeric player id it can hand back to us on every
 // wallet callback. Our own numeric user id already satisfies their

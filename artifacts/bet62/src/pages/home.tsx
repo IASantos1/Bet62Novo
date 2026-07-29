@@ -481,6 +481,15 @@ const TEAM_BANNERS: Record<string, string> = {
 };
 
 type MainTab = "sports" | "live" | "casino" | "promos" | "mybets" | "wallet" | "profile";
+
+type CasinoGame = {
+  id: string;
+  name: string;
+  provider: string;
+  vendorCode: number | null;
+  category: string;
+  img: string | null;
+};
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -4502,6 +4511,10 @@ export default function Home({
   const [showWCPanel, setShowWCPanel] = useState(false);
   const [casinoLaunchUrl, setCasinoLaunchUrl] = useState<string | null>(null);
   const [casinoLoadingGame, setCasinoLoadingGame] = useState<string | null>(null);
+  const [casinoGames, setCasinoGames] = useState<CasinoGame[]>([]);
+  const [casinoGamesLoaded, setCasinoGamesLoaded] = useState(false);
+  const [casinoProvider, setCasinoProvider] = useState<string>("Todos");
+  const [casinoSearch, setCasinoSearch] = useState("");
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -8547,6 +8560,19 @@ export default function Home({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Casino catalog is static reference data (not user-specific) — fetch it
+  // once, the first time the tab is opened, rather than on every app load.
+  useEffect(() => {
+    if (activeTab !== "casino" || casinoGamesLoaded) return;
+    setCasinoGamesLoaded(true);
+    fetch("/api/casino/games")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.games)) setCasinoGames(data.games);
+      })
+      .catch(() => {});
+  }, [activeTab, casinoGamesLoaded]);
 
   // Real-time stream for pending ticket states, with fetch fallback if SSE drops.
   useEffect(() => {
@@ -24567,34 +24593,115 @@ export default function Home({
               </div>
             )}
 
-            {!expandedMatch && activeTab === "casino" && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="mb-4">
-                  <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                    <Dices className="text-red-600" /> Cassino
-                  </h2>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {[{ uid: "JILI_SLOT_001", label: "Slot" }].map((game) => (
-                    <button
-                      key={game.uid}
-                      disabled={casinoLoadingGame === game.uid}
-                      onClick={() => launchCasinoGame(game.uid)}
-                      className="aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"
-                    >
-                      {casinoLoadingGame === game.uid ? (
-                        <Loader2 className="animate-spin text-zinc-400" size={28} />
-                      ) : (
-                        <Dices className="text-red-600" size={28} />
+            {!expandedMatch && activeTab === "casino" && (() => {
+              const providers = [
+                "Todos",
+                ...Array.from(new Set(casinoGames.map((g) => g.provider))).sort(),
+              ];
+              const q = casinoSearch.trim().toLowerCase();
+              const filtered = casinoGames.filter(
+                (g) =>
+                  (casinoProvider === "Todos" || g.provider === casinoProvider) &&
+                  (!q || g.name.toLowerCase().includes(q)),
+              );
+              return (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="mb-4">
+                    <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
+                      <Dices className="text-red-600" /> Cassino
+                      {casinoGames.length > 0 && (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">
+                          ({casinoGames.length} jogos)
+                        </span>
                       )}
-                      <span className="text-xs font-bold text-zinc-300 px-2 text-center">
-                        {game.label}
-                      </span>
-                    </button>
-                  ))}
+                    </h2>
+                  </div>
+
+                  {casinoGames.length === 0 ? (
+                    <div className="text-center text-zinc-500 py-16">
+                      <Dices size={40} className="mx-auto mb-3 opacity-40" />
+                      <p className="font-medium">A carregar catálogo…</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative mb-3">
+                        <Search
+                          size={14}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                        />
+                        <input
+                          type="text"
+                          value={casinoSearch}
+                          onChange={(e) => setCasinoSearch(e.target.value)}
+                          placeholder="Pesquisar jogo…"
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                        />
+                        {casinoSearch && (
+                          <button
+                            onClick={() => setCasinoSearch("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2 overflow-x-auto pb-3 mb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+                        {providers.map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setCasinoProvider(p)}
+                            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
+                              casinoProvider === p
+                                ? "bg-red-600 text-white"
+                                : "bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+
+                      {filtered.length === 0 ? (
+                        <div className="text-center text-zinc-500 py-16">
+                          <p className="font-medium">Nenhum jogo encontrado.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                          {filtered.map((game) => (
+                            <button
+                              key={`${game.provider}-${game.id}`}
+                              disabled={casinoLoadingGame === game.id}
+                              onClick={() => launchCasinoGame(game.id)}
+                              className="aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
+                            >
+                              {casinoLoadingGame === game.id ? (
+                                <Loader2 className="animate-spin text-zinc-400" size={28} />
+                              ) : game.img ? (
+                                <img
+                                  src={game.img}
+                                  alt=""
+                                  className="absolute inset-0 w-full h-full object-cover"
+                                  loading="lazy"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <Dices className="text-red-600" size={28} />
+                              )}
+                              <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight bg-black/70 py-1 mt-auto w-full">
+                                {game.name}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {activeTab === "promos" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 -mx-4 sm:-mx-6 lg:-mx-8 px-0">
