@@ -1,29 +1,85 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, usersTable, casinoGamesTable } from "@workspace/db";
+import { and, asc, count, desc, eq, ilike } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
-import casinoGamesData from "../data/casinoGames.json" with { type: "json" };
+import { statpalCache } from "../services/statpal/cache.js";
 
 const router: IRouter = Router();
 
-// Consolidated from the provider catalogs supplied directly (BigTimeGaming,
-// BGaming, BetBY, AOG, AStarGaming, ACE, 9Wickets, 5GGaming, 3Oaks, 2J,
-// 18Peaches — 689 games total, deduplicated by provider+gameID). Provider
-// labels are taken verbatim from how each catalog was named, not invented.
-type CasinoGame = {
-  id: string;
-  name: string;
-  provider: string;
-  vendorCode: number | null;
-  category: string;
-  img: string | null;
-};
-const casinoGames = casinoGamesData as CasinoGame[];
+// Catalog now lives in Postgres (casino_games table, seeded via
+// `pnpm run seed:casino` from the provider dumps) instead of being shipped
+// to the browser as one ~700KB JSON blob. The front-end pages through it
+// 24 games at a time and never talks to the aggregator directly for
+// listing — only /launch calls out to SilentAPI.
+const GAMES_CACHE_TTL_SECONDS = 300;
+const PROVIDERS_CACHE_TTL_SECONDS = 3600;
+const DEFAULT_LIMIT = 24;
+const MAX_LIMIT = 60;
 
-router.get("/games", (_req: Request, res: Response) => {
-  res.json({ games: casinoGames });
+router.get("/games", async (req: Request, res: Response) => {
+  const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
+  const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
+  const page = Math.max(1, Number(req.query["page"]) || 1);
+  const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
+
+  const cacheKey = `casino:games:v1:${provider || "*"}:${search.toLowerCase()}:${page}:${limit}`;
+  const cached = await statpalCache.get(cacheKey);
+  if (cached) {
+    res.setHeader("Content-Type", "application/json");
+    res.send(cached);
+    return;
+  }
+
+  const conditions = [eq(casinoGamesTable.isActive, true)];
+  if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
+  if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
+  const where = and(...conditions);
+
+  const [games, [{ total }]] = await Promise.all([
+    db
+      .select({
+        id: casinoGamesTable.gameUid,
+        name: casinoGamesTable.name,
+        provider: casinoGamesTable.provider,
+        vendorCode: casinoGamesTable.vendorCode,
+        category: casinoGamesTable.category,
+        img: casinoGamesTable.img,
+      })
+      .from(casinoGamesTable)
+      .where(where)
+      .orderBy(desc(casinoGamesTable.popularity), asc(casinoGamesTable.name))
+      .limit(limit)
+      .offset((page - 1) * limit),
+    db.select({ total: count() }).from(casinoGamesTable).where(where),
+  ]);
+
+  const payload = JSON.stringify({ page, limit, total: Number(total), games });
+  await statpalCache.set(cacheKey, payload, GAMES_CACHE_TTL_SECONDS);
+  res.setHeader("Content-Type", "application/json");
+  res.send(payload);
+});
+
+router.get("/providers", async (_req: Request, res: Response) => {
+  const cacheKey = "casino:providers:v1";
+  const cached = await statpalCache.get(cacheKey);
+  if (cached) {
+    res.setHeader("Content-Type", "application/json");
+    res.send(cached);
+    return;
+  }
+
+  const rows = await db
+    .selectDistinct({ provider: casinoGamesTable.provider })
+    .from(casinoGamesTable)
+    .where(eq(casinoGamesTable.isActive, true))
+    .orderBy(asc(casinoGamesTable.provider));
+
+  const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });
+  await statpalCache.set(cacheKey, payload, PROVIDERS_CACHE_TTL_SECONDS);
+  res.setHeader("Content-Type", "application/json");
+  res.send(payload);
 });
 
 // SilentAPI needs an alphanumeric player id it can hand back to us on every
