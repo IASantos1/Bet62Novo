@@ -60,6 +60,7 @@ import {
   Search,
   LayoutGrid,
   ArrowLeft,
+  Dices,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -479,7 +480,16 @@ const TEAM_BANNERS: Record<string, string> = {
   "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
-type MainTab = "sports" | "live" | "promos" | "mybets" | "wallet" | "profile";
+type MainTab = "sports" | "live" | "casino" | "promos" | "mybets" | "wallet" | "profile";
+
+type CasinoGame = {
+  id: string;
+  name: string;
+  provider: string;
+  vendorCode: number | null;
+  category: string;
+  img: string | null;
+};
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -489,6 +499,7 @@ function normalizeMainTabPath(path: string): string {
 
 function getPathForMainTab(tab: MainTab): string {
   if (tab === "live") return "/ao-vivo";
+  if (tab === "casino") return "/casino";
   if (tab === "promos") return "/promocoes";
   if (tab === "wallet") return "/carteira";
   if (tab === "mybets") return "/minhas-apostas";
@@ -4498,6 +4509,17 @@ export default function Home({
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showWCPanel, setShowWCPanel] = useState(false);
+  const [casinoLaunchUrl, setCasinoLaunchUrl] = useState<string | null>(null);
+  const [casinoLoadingGame, setCasinoLoadingGame] = useState<string | null>(null);
+  const [casinoGames, setCasinoGames] = useState<CasinoGame[]>([]);
+  const [casinoProviders, setCasinoProviders] = useState<string[]>([]);
+  const [casinoProvider, setCasinoProvider] = useState<string>("Todos");
+  const [casinoSearch, setCasinoSearch] = useState("");
+  const [casinoSearchDebounced, setCasinoSearchDebounced] = useState("");
+  const [casinoPage, setCasinoPage] = useState(1);
+  const [casinoTotal, setCasinoTotal] = useState(0);
+  const [casinoLoadingPage, setCasinoLoadingPage] = useState(false);
+  const CASINO_PAGE_SIZE = 24;
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -8544,6 +8566,65 @@ export default function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // Provider filter chips are near-static reference data — fetch once, the
+  // first time the tab is opened.
+  useEffect(() => {
+    if (activeTab !== "casino" || casinoProviders.length > 0) return;
+    fetch("/api/casino/providers")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.providers)) setCasinoProviders(data.providers);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Debounce the search box so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setCasinoSearchDebounced(casinoSearch.trim()), 350);
+    return () => clearTimeout(t);
+  }, [casinoSearch]);
+
+  // The catalog (2800+ games) is never fetched in full — the backend pages
+  // it 24 at a time. Changing the provider or search resets to page 1;
+  // "Carregar mais" advances the page and appends to the accumulated list.
+  useEffect(() => {
+    if (activeTab !== "casino") return;
+    setCasinoPage(1);
+    setCasinoGames([]);
+    setCasinoLoadingPage(true);
+    const params = new URLSearchParams({ page: "1", limit: String(CASINO_PAGE_SIZE) });
+    if (casinoProvider !== "Todos") params.set("provider", casinoProvider);
+    if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
+    fetch(`/api/casino/games?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.games)) setCasinoGames(data.games);
+        setCasinoTotal(Number(data?.total) || 0);
+      })
+      .catch(() => {})
+      .finally(() => setCasinoLoadingPage(false));
+  }, [activeTab, casinoProvider, casinoSearchDebounced]);
+
+  const loadMoreCasinoGames = useCallback(() => {
+    const nextPage = casinoPage + 1;
+    setCasinoLoadingPage(true);
+    const params = new URLSearchParams({ page: String(nextPage), limit: String(CASINO_PAGE_SIZE) });
+    if (casinoProvider !== "Todos") params.set("provider", casinoProvider);
+    if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
+    fetch(`/api/casino/games?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.games)) {
+          setCasinoGames((prev) => [...prev, ...data.games]);
+          setCasinoPage(nextPage);
+        }
+        setCasinoTotal(Number(data?.total) || 0);
+      })
+      .catch(() => {})
+      .finally(() => setCasinoLoadingPage(false));
+  }, [casinoPage, casinoProvider, casinoSearchDebounced]);
+
   // Real-time stream for pending ticket states, with fetch fallback if SSE drops.
   useEffect(() => {
     if (activeTab !== "mybets" || !auth.token) return;
@@ -8715,6 +8796,40 @@ export default function Home({
       /* non-critical */
     }
   }, [auth.user]);
+
+  const launchCasinoGame = useCallback(
+    async (gameUid: string) => {
+      if (!auth.user) {
+        setAuthMode("login");
+        setAuthModalOpen(true);
+        return;
+      }
+      setCasinoLoadingGame(gameUid);
+      try {
+        const res = await fetch("/api/casino/launch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({ gameUid }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.url) {
+          if (!handleInvalidTokenError(res.status, data.error)) {
+            toast.error(data.error || "Não foi possível iniciar o jogo.");
+          }
+          return;
+        }
+        setCasinoLaunchUrl(data.url);
+      } catch {
+        toast.error("Não foi possível iniciar o jogo.");
+      } finally {
+        setCasinoLoadingGame(null);
+      }
+    },
+    [auth.user, auth.token],
+  );
 
   const handleInvalidTokenError = (status?: number, error?: string) => {
     const normalizedError = String(error ?? "")
@@ -17683,6 +17798,7 @@ export default function Home({
               {[
                 { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
                 { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
+                { id: "casino", icon: <Dices size={15} />, label: "CASSINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
               ].map((tab) => (
                 <button
@@ -17857,6 +17973,7 @@ export default function Home({
               label: "AO VIVO",
               badge: true,
             },
+            { id: "casino", icon: <Dices size={16} />, label: "CASSINO" },
             {
               id: "promos",
               icon: <Gift size={16} />,
@@ -24527,6 +24644,121 @@ export default function Home({
               </div>
             )}
 
+            {!expandedMatch && activeTab === "casino" && (() => {
+              const providerChips = ["Todos", ...casinoProviders];
+              const hasMore = casinoGames.length < casinoTotal;
+              return (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="mb-4">
+                    <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
+                      <Dices className="text-red-600" /> Cassino
+                      {casinoTotal > 0 && (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">
+                          ({casinoTotal} jogos)
+                        </span>
+                      )}
+                    </h2>
+                  </div>
+
+                  <div className="relative mb-3">
+                    <Search
+                      size={14}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                    />
+                    <input
+                      type="text"
+                      value={casinoSearch}
+                      onChange={(e) => setCasinoSearch(e.target.value)}
+                      placeholder="Pesquisar jogo…"
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                    />
+                    {casinoSearch && (
+                      <button
+                        onClick={() => setCasinoSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {providerChips.length > 1 && (
+                    <div className="flex gap-2 overflow-x-auto pb-3 mb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+                      {providerChips.map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setCasinoProvider(p)}
+                          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
+                            casinoProvider === p
+                              ? "bg-red-600 text-white"
+                              : "bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {casinoGames.length === 0 && casinoLoadingPage ? (
+                    <div className="text-center text-zinc-500 py-16">
+                      <Loader2 className="animate-spin mx-auto mb-3 opacity-60" size={32} />
+                      <p className="font-medium">A carregar catálogo…</p>
+                    </div>
+                  ) : casinoGames.length === 0 ? (
+                    <div className="text-center text-zinc-500 py-16">
+                      <p className="font-medium">Nenhum jogo encontrado.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                        {casinoGames.map((game) => (
+                          <button
+                            key={`${game.provider}-${game.id}`}
+                            disabled={casinoLoadingGame === game.id}
+                            onClick={() => launchCasinoGame(game.id)}
+                            className="aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
+                          >
+                            {casinoLoadingGame === game.id ? (
+                              <Loader2 className="animate-spin text-zinc-400" size={28} />
+                            ) : game.img ? (
+                              <img
+                                src={game.img}
+                                alt=""
+                                className="absolute inset-0 w-full h-full object-cover"
+                                loading="lazy"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <Dices className="text-red-600" size={28} />
+                            )}
+                            <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight bg-black/70 py-1 mt-auto w-full">
+                              {game.name}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {hasMore && (
+                        <div className="flex justify-center mt-5">
+                          <button
+                            onClick={loadMoreCasinoGames}
+                            disabled={casinoLoadingPage}
+                            className="px-6 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm font-bold text-white hover:border-zinc-600 transition-colors disabled:opacity-60 flex items-center gap-2"
+                          >
+                            {casinoLoadingPage && <Loader2 className="animate-spin" size={14} />}
+                            Carregar mais
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             {activeTab === "promos" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 -mx-4 sm:-mx-6 lg:-mx-8 px-0">
                 <PromosPage
@@ -26009,6 +26241,33 @@ export default function Home({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* CASINO GAME FRAME — full-screen overlay so the provider's own domain
+          never shows in the address bar (games open inside our own iframe,
+          not a redirect to their site). */}
+      {casinoLaunchUrl && (
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+          <div className="flex items-center justify-between px-4 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0">
+            <div className="font-black text-lg tracking-tighter italic">
+              <span className="text-white">BET</span>
+              <span className="text-red-600">62</span>
+            </div>
+            <button
+              onClick={() => setCasinoLaunchUrl(null)}
+              className="p-2 text-zinc-400 hover:text-white transition-colors"
+              aria-label="Fechar jogo"
+            >
+              <X size={22} />
+            </button>
+          </div>
+          <iframe
+            src={casinoLaunchUrl}
+            title="Cassino"
+            className="flex-1 w-full border-0"
+            allow="autoplay; fullscreen"
+          />
+        </div>
+      )}
 
       {/* MOBILE APP DOWNLOAD BANNER */}
       <AnimatePresence>

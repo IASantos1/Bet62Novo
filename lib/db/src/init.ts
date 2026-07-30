@@ -410,6 +410,26 @@ export async function initDb(): Promise<void> {
 
       CREATE UNIQUE INDEX IF NOT EXISTS sportscore_match_map_statpal_idx
         ON sportscore_match_map (sport, statpal_match_id);
+
+      CREATE TABLE IF NOT EXISTS casino_games (
+        id           SERIAL PRIMARY KEY,
+        provider     TEXT NOT NULL,
+        game_uid     TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        vendor_code  INTEGER,
+        category     TEXT NOT NULL DEFAULT 'slots',
+        img          TEXT,
+        is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+        popularity   INTEGER NOT NULL DEFAULT 0,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS casino_games_provider_game_idx
+        ON casino_games (provider, game_uid);
+
+      CREATE INDEX IF NOT EXISTS casino_games_provider_category_idx
+        ON casino_games (provider, category);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

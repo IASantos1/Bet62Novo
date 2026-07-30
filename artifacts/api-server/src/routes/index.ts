@@ -11,6 +11,7 @@ import profileRouter from "./profile.js";
 import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
 import predictionsRouter from "./predictions.js";
+import casinoRouter from "./casino.js";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use("/profile", profileRouter);
 router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/predictions", predictionsRouter);
+router.use("/casino", casinoRouter);
 
 export default router;

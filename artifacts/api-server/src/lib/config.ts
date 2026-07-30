@@ -31,10 +31,22 @@ const STATPAL_ONLY =
   FOOTBALL_LIVE_PROVIDER === "statpal" ||
   process.env["STATPAL_ONLY"] === "true";
 
+// SilentAPI — third-party casino game aggregator (game launch + wallet
+// callback). Secrets only ever come from the environment, never hardcoded —
+// same convention as SPORTSAPI_KEY/STATPAL_API_KEY above.
+const SILENTAPI_BASE_URL =
+  process.env["SILENTAPI_BASE_URL"]?.trim() || "https://silentapi.org/api";
+const SILENTAPI_AUTH_TOKEN = process.env["SILENTAPI_AUTH_TOKEN"] ?? "";
+const SILENTAPI_CALLBACK_SECRET =
+  process.env["SILENTAPI_CALLBACK_SECRET"] ?? "";
+
 export const CONFIG = {
   SPORTSAPI_KEY,
   STATPAL_API_KEY,
   STATPAL_BASE_URL,
+  SILENTAPI_BASE_URL,
+  SILENTAPI_AUTH_TOKEN,
+  SILENTAPI_CALLBACK_SECRET,
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
