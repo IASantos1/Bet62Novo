@@ -162,16 +162,30 @@ router.post(
         // restrictions on that specific vendor) instead of a blanket
         // message — this is the only place that reason is visible outside
         // the server logs, and it's what tells us whether a given game
-        // needs to be disabled/reported to SilentAPI.
-        const reason = data?.msg ? ` (${data.msg})` : "";
+        // needs to be disabled/reported to SilentAPI. Some failures come
+        // back with an HTTP error status and no JSON body at all (data is
+        // null) or a JSON body with no msg field — fall back to surfacing
+        // the HTTP status itself so a per-game report always carries SOME
+        // concrete signal instead of a blank "no reason given".
+        const reason = data?.msg
+          ? ` (${data.msg})`
+          : !resp.ok
+            ? ` (HTTP ${resp.status})`
+            : "";
         res.status(502).json({ error: `Não foi possível iniciar o jogo.${reason}` });
         return;
       }
 
       res.json({ url: data.payload.game_launch_url });
     } catch (err) {
+      // Network/timeout failures (DNS, connection refused, the 15s
+      // AbortSignal firing) never reach the branch above at all — surface
+      // the actual error message here too, since "some games work, some
+      // don't" with a shared URL/token points at a per-request issue
+      // (e.g. a slow provider backend timing out) rather than config.
+      const reason = err instanceof Error ? ` (${err.message})` : "";
       logger.error({ err, userId, gameUid }, "[casino] launch error");
-      res.status(502).json({ error: "Não foi possível iniciar o jogo." });
+      res.status(502).json({ error: `Não foi possível iniciar o jogo.${reason}` });
     }
   },
 );

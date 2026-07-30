@@ -16646,6 +16646,14 @@ const _tennisServingCache = new Map<
 >();
 const _tennisServingInFlight = new Map<number, Promise<void>>();
 const TENNIS_SERVING_TTL = 1_500;
+
+// Diagnostic only — see the log call in buildTennisLiveV1 for why this
+// exists. Not a cache in the "serve stale data" sense, just a per-match
+// "when did the point score last actually change" timestamp so we can
+// measure real point-to-point gaps against production logs instead of
+// guessing whether a reported lag is upstream staleness or normal tennis
+// pacing (long rallies/changeovers routinely take 15-90s on their own).
+const _tennisLastPointChangeAt = new Map<string, number>();
 type TennisLiveDetailSnapshot = {
   status: string;
   statusCode?: number;
@@ -21351,6 +21359,23 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         prevPointsV1 !== undefined &&
         (JSON.stringify(prevPointsV1) !== JSON.stringify(currentPoints) ||
           JSON.stringify(prevSetsV1) !== JSON.stringify(sets));
+      if (pointPlayedV1) {
+        // Diagnostic: our own fetch of SportsAPI Pro's /v1/tennis/live is
+        // capped at 500ms (TENNIS_LIVE_V1_TTL) and broadcast to clients at
+        // ~1s, so if a "the score is stuck for 30s" report is real, it will
+        // show up here as long gaps between point changes even though we
+        // polled far more often than that in between — proving the delay
+        // is upstream (or just a long rally/changeover), not our pipeline.
+        const lastChangeAt = _tennisLastPointChangeAt.get(id);
+        const gapMs = lastChangeAt !== undefined ? Date.now() - lastChangeAt : undefined;
+        _tennisLastPointChangeAt.set(id, Date.now());
+        if (gapMs !== undefined && gapMs > 15_000) {
+          logger.info(
+            { matchId: id, gapMs },
+            "[tennis-v1] long gap between observed point changes",
+          );
+        }
+      }
       let marketSuspensionV1: Record<string, number> | undefined =
         existingV1?.marketSuspension
           ? Object.fromEntries(
