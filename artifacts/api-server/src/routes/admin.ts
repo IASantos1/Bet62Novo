@@ -46,6 +46,7 @@ import {
   countryForLeagueName,
 } from "./matches.js";
 import { pulseScoreFetchFootballLeagues } from "../services/pulsescore/leagues.js";
+import { getPalaceCasinoProviders } from "../services/palaceCasino/client.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2368,6 +2369,31 @@ router.get(
       logger.error({ err }, "GET /api/admin/pulsescore-league-coverage error");
       res.status(500).json({
         error: "Erro ao consultar ligas do PulseScore",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+// Read-only diagnostic for the Palace Casino integration (in progress —
+// only providers/games listing + wallet are wired up so far, no launch
+// endpoint yet). Confirms PALACE_CASINO_API_TOKEN + base URL actually work
+// before building the rest (seed script, /launch route, callback handler).
+router.get(
+  "/palace-casino-debug",
+  adminMiddleware,
+  async (_req: AdminRequest, res) => {
+    if (!CONFIG.PALACE_CASINO_API_TOKEN) {
+      res.status(503).json({ error: "PALACE_CASINO_API_TOKEN não configurada" });
+      return;
+    }
+    try {
+      const providers = await getPalaceCasinoProviders();
+      res.json({ count: providers.length, providers });
+    } catch (err) {
+      logger.error({ err }, "GET /api/admin/palace-casino-debug error");
+      res.status(500).json({
+        error: "Erro ao consultar Palace Casino",
         detail: err instanceof Error ? err.message : String(err),
       });
     }

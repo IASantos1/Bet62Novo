@@ -40,6 +40,20 @@ const SILENTAPI_AUTH_TOKEN = process.env["SILENTAPI_AUTH_TOKEN"] ?? "";
 const SILENTAPI_CALLBACK_SECRET =
   process.env["SILENTAPI_CALLBACK_SECRET"] ?? "";
 
+// Palace Casino (Gold Slot Palace) — third-party casino game aggregator,
+// same shape of integration as SilentAPI above (game launch + wallet
+// callback). Intended to replace SilentAPI as the catalog source per the
+// user's plan to install a new system. Base URL confirmed by the user;
+// PALACE_CASINO_API_TOKEN is not set yet — the integration is inert
+// (empty catalog fetch) until it's added in Railway. Launch endpoint and
+// webhook/callback signing scheme are not documented yet either — only
+// wallet (deposit/withdraw-all) and game listing (providers/games) are
+// wired in so far.
+const PALACE_CASINO_BASE_URL =
+  process.env["PALACE_CASINO_BASE_URL"]?.trim() ||
+  "https://agent.goldslotpalase.com/v4";
+const PALACE_CASINO_API_TOKEN = process.env["PALACE_CASINO_API_TOKEN"] ?? "";
+
 // PulseScore — normalized real-bookmaker odds aggregator (bet365, etc.).
 // Football pulled via REST polling; tennis via its WebSocket feed (PRO plan
 // allows exactly 1 concurrent WS connection, so only one sport can stream
@@ -59,6 +73,8 @@ export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
   SILENTAPI_CALLBACK_SECRET,
+  PALACE_CASINO_BASE_URL,
+  PALACE_CASINO_API_TOKEN,
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
