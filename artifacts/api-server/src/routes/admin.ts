@@ -46,7 +46,10 @@ import {
   countryForLeagueName,
 } from "./matches.js";
 import { pulseScoreFetchFootballLeagues } from "../services/pulsescore/leagues.js";
-import { getPalaceCasinoProviders } from "../services/palaceCasino/client.js";
+import {
+  getPalaceCasinoProviders,
+  getPalaceCasinoAgentInfo,
+} from "../services/palaceCasino/client.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2375,10 +2378,13 @@ router.get(
   },
 );
 
-// Read-only diagnostic for the Palace Casino integration (in progress —
-// only providers/games listing + wallet are wired up so far, no launch
-// endpoint yet). Confirms PALACE_CASINO_API_TOKEN + base URL actually work
-// before building the rest (seed script, /launch route, callback handler).
+// Read-only diagnostic for the Palace Casino integration. Includes
+// agent/info specifically so the account's configured currency can be
+// eyeballed before going live — it was found to be USD ("internal_usd",
+// currency: 1) rather than the EUR our ledger assumes; the user asked
+// Palace Casino to switch it to EUR, so this is how to confirm that
+// actually landed (no documented currency-code table to check
+// programmatically — see getPalaceCasinoAgentInfo's doc comment).
 router.get(
   "/palace-casino-debug",
   adminMiddleware,
@@ -2388,8 +2394,11 @@ router.get(
       return;
     }
     try {
-      const providers = await getPalaceCasinoProviders();
-      res.json({ count: providers.length, providers });
+      const [agent, providers] = await Promise.all([
+        getPalaceCasinoAgentInfo(),
+        getPalaceCasinoProviders(),
+      ]);
+      res.json({ agent, count: providers.length, providers });
     } catch (err) {
       logger.error({ err }, "GET /api/admin/palace-casino-debug error");
       res.status(500).json({
