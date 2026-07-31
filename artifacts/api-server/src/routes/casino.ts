@@ -485,7 +485,14 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
         return;
       }
       case "cancel": {
-        const cancelTransGuid = String(data["cancel_trans_guid"] ?? "").trim();
+        // Accept both spellings — one real example from Palace Casino's own
+        // docs used "cancle_trans_guid" (missing the e) instead of the
+        // correctly-spelled field their PHP reference implementation uses.
+        // Unclear which is authoritative for real traffic, so read whichever
+        // is present rather than betting on one.
+        const cancelTransGuid = String(
+          data["cancel_trans_guid"] ?? data["cancle_trans_guid"] ?? "",
+        ).trim();
         if (!cancelTransGuid) {
           palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
