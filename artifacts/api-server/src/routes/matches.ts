@@ -23,6 +23,13 @@ import {
   findPulseScoreFootballOverride,
 } from "../services/pulsescore/football.js";
 import { findPulseScoreTennisOverride } from "../services/pulsescore/tennisWs.js";
+import {
+  pulseScoreBasketball,
+  pulseScoreHockey,
+  pulseScoreBaseball,
+  pulseScoreVolleyball,
+  type GenericMoneylineOverride,
+} from "../services/pulsescore/genericSportLive.js";
 
 const router: IRouter = Router();
 
@@ -19442,6 +19449,37 @@ function applyPulseScoreTennisOverlay(
   });
 }
 
+// Same reasoning as applyPulseScoreFootballOverlay/applyPulseScoreTennisOverlay
+// above, generalised for the REST-polled sports in genericSportLive.ts
+// (each on its own bookmaker prefix, see that file's header comment for why).
+// Only overlays odds.home/draw/away — score/clock/period stay on the
+// existing source for every sport, same settlement-safety reasoning.
+async function applyPulseScoreGenericOverlay(
+  matches: LiveMatchState[],
+  source: {
+    getLive: () => Promise<import("../services/pulsescore/client.js").PulseScoreEvent[]>;
+    findOverride: (
+      home: string,
+      away: string,
+      events: import("../services/pulsescore/client.js").PulseScoreEvent[],
+    ) => GenericMoneylineOverride | null;
+  },
+): Promise<LiveMatchState[]> {
+  if (matches.length === 0) return matches;
+  const events = await source.getLive();
+  if (events.length === 0) return matches;
+  return matches.map((m) => {
+    const override = source.findOverride(m.home, m.away, events);
+    if (!override?.odds) return m;
+    const { home, away, draw } = override.odds;
+    if (home <= 1.0 || away <= 1.0) return m;
+    return {
+      ...m,
+      odds: { home, draw: draw ?? m.odds.draw, away },
+    };
+  });
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
@@ -19676,7 +19714,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       (m) => !statpalNBAPairs.has(`${m.home}|${m.away}`),
     ),
   ];
-  const basketballLive = sportWithFallback("basketball", mergedBasketballLive);
+  const basketballLive = await applyPulseScoreGenericOverlay(
+    sportWithFallback("basketball", mergedBasketballLive),
+    pulseScoreBasketball,
+  );
   // Hockey live: merge Statpal NHL livescores + SportsAPI V2, same pattern as
   // basketball/baseball above. Previously this was SportsAPI V2 only — under
   // CONFIG.STATPAL_ONLY (the default, and Statpal is documented as "the
@@ -19695,7 +19736,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       (m) => !statpalNHLPairs.has(`${m.home}|${m.away}`),
     ),
   ];
-  const hockeyLive = sportWithFallback("hockey", mergedHockeyLive);
+  const hockeyLive = await applyPulseScoreGenericOverlay(
+    sportWithFallback("hockey", mergedHockeyLive),
+    pulseScoreHockey,
+  );
   // Baseball live: merge SportsAPI V2 + Statpal livescores.
   // Statpal wins when it has inning detail (innings, hits, errors, outs).
   // SportsAPI V2 wins for games Statpal hasn't yet flipped to live (sticky guard).
@@ -19712,10 +19756,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       (m) => !statpalMLBPairs.has(`${m.home}|${m.away}`),
     ),
   ];
-  const baseballLive = sportWithFallback("baseball", mergedBaseballLive);
-  const volleyballLiveItems = sportWithFallback(
-    "volleyball",
-    buildVolleyballLiveMatches(volleyballLiveTournaments),
+  const baseballLive = await applyPulseScoreGenericOverlay(
+    sportWithFallback("baseball", mergedBaseballLive),
+    pulseScoreBaseball,
+  );
+  const volleyballLiveItems = await applyPulseScoreGenericOverlay(
+    sportWithFallback(
+      "volleyball",
+      buildVolleyballLiveMatches(volleyballLiveTournaments),
+    ),
+    pulseScoreVolleyball,
   );
   const tennisLive = applyPulseScoreTennisOverlay(
     sportWithFallback("tennis", tennisLivePart),
