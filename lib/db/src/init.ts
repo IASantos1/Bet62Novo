@@ -421,12 +421,21 @@ export async function initDb(): Promise<void> {
         img          TEXT,
         is_active    BOOLEAN NOT NULL DEFAULT TRUE,
         popularity   INTEGER NOT NULL DEFAULT 0,
+        source       TEXT NOT NULL DEFAULT 'silentapi',
         created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      CREATE UNIQUE INDEX IF NOT EXISTS casino_games_provider_game_idx
-        ON casino_games (provider, game_uid);
+      -- Which aggregator this row launches through (silentapi | palace) -
+      -- both re-list the same underlying vendor game_codes (e.g.
+      -- Pragmatic Play's "vswaysdogs"), so provider+game_uid alone is not
+      -- unique once a second aggregator's catalog is seeded into the same
+      -- table; source disambiguates without needing a second table.
+      ALTER TABLE casino_games ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'silentapi';
+
+      DROP INDEX IF EXISTS casino_games_provider_game_idx;
+      CREATE UNIQUE INDEX IF NOT EXISTS casino_games_provider_game_source_idx
+        ON casino_games (provider, game_uid, source);
 
       CREATE INDEX IF NOT EXISTS casino_games_provider_category_idx
         ON casino_games (provider, category);
