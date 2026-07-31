@@ -42,6 +42,26 @@ async function palaceCasinoPost<T>(path: string, body: unknown): Promise<T> {
   return data.data as T;
 }
 
+export type PalaceCasinoAgentInfo = {
+  name: string;
+  currency: number;
+  balance: number;
+  win_ratio?: number;
+  rtp?: number;
+  whitelist?: string[];
+  client_ip?: string;
+};
+
+// No documented currency-code table (only ever seen 1 = USD in practice,
+// via an agent named "internal_usd") — this exists purely so a human can
+// glance at the raw name/currency fields and confirm the account is
+// actually configured for EUR before relying on centsToLedgerAmount/
+// ledgerAmountToCents in routes/casino.ts, which assume EUR. Do not infer
+// or hardcode a currency-code mapping here; check the debug route by eye.
+export function getPalaceCasinoAgentInfo(): Promise<PalaceCasinoAgentInfo> {
+  return palaceCasinoPost<PalaceCasinoAgentInfo>("/agent/info", {});
+}
+
 export type PalaceCasinoProvider = {
   provider_id: number;
   provider_name: string;
