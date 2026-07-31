@@ -249,32 +249,58 @@ router.post(
 // callback), so this can sit after express.json() as an ordinary route
 // instead of needing raw-body registration in app.ts.
 //
-// Timeout budget from the docs: "aposta"/"saldo" must respond within 2s,
-// everything else within 4s — keep this handler free of slow work.
-// win/cancel deliveries retry up to 51 times (first + 50 more, 2-4s apart)
-// until they get a 200, so every branch that touches money MUST be
-// idempotent on trans_guid — applyBalanceDelta's onConflictDoNothing on
-// idempotencyKey plus re-reading the current balance either way (whether
-// this call inserted or was a dedup no-op) is what makes that safe: a
-// retried delivery gets the same "OK, here's the balance" answer instead
-// of a second charge.
+// Field/command names and the response contract below are taken from
+// Palace Casino's own PHP reference implementation, NOT the earlier
+// (auto-translated-to-Portuguese) doc page — that page's JSON examples
+// turned out to have mistranslated field/command names ("comando"/"dados"/
+// "conta"/"autenticar" etc.) that don't match what their real server
+// sends: it's "command"/"data"/"account"/"authenticate" (English), and
+// critically **the response is ALWAYS HTTP 200** — every outcome, success
+// or failure, is communicated via the `result` field in the JSON body
+// (0 = success; nonzero = the specific failure, see PALACE_RESULT below).
+// The reference PHP never once calls http_response_code() for an error.
 //
-// NOT YET SAFE TO GO LIVE: toLedgerAmount/fromLedgerAmount below are
-// unimplemented — Palace Casino's amount unit (euros? cents? their own
-// points needing a conversion rate?) hasn't been confirmed yet. Every
-// branch that moves money routes through these two functions so there's
-// exactly one place to fix once that's known; until then they throw,
-// which correctly 500s (not silently misbooks) any real bet/win/cancel
-// that reaches this route.
-function toLedgerAmount(_rawAmount: number): string {
-  throw new Error(
-    "Palace Casino amount unit not confirmed yet (euros/cents/points?) — see toLedgerAmount in routes/casino.ts",
-  );
-}
-function fromLedgerAmount(_ledgerAmount: string | number): number {
-  throw new Error(
-    "Palace Casino amount unit not confirmed yet (euros/cents/points?) — see fromLedgerAmount in routes/casino.ts",
-  );
+// Timeout budget from the docs: "bet"/"balance" must respond within 2s,
+// everything else within 4s — keep this handler free of slow work.
+//
+// Idempotency, per the reference implementation (not what SilentAPI's
+// callback does — don't copy that pattern here): a *repeat* delivery of
+// the same trans_guid for bet/win is REJECTED with
+// PALACE_RESULT.ALREADY_PROCESSED, not silently re-answered as success.
+// Cancel is different: it's idempotent by re-checking a stable key derived
+// from cancel_trans_guid (see the "cancel" case below), matching the
+// reference's "UPDATE ... SET sort='CANCEL' WHERE trans_guid=cancel_trans_guid"
+// — the second cancel attempt for the same original transaction is a
+// harmless no-op, not an error.
+//
+// Amount unit: confirmed via the reference's own bet example ("amount":
+// 0.9) — this is a plain decimal amount in the ledger's currency (EUR),
+// not an integer-only unit like the reference's own Korean-Won example
+// data implies for THEIR default deployment. No scaling needed.
+const PALACE_RESULT = {
+  SUCCESS: 0,
+  USER_NOT_FOUND: 21,
+  BALANCE_INSUFFICIENT: 31,
+  ALREADY_PROCESSED: 41, // duplicate trans_guid for a new bet/win/cancel
+  TRANS_NOT_FOUND: 42, // status lookup for an unknown trans_guid
+  CANCEL_TRANS_NOT_FOUND: 43, // cancel_trans_guid never seen
+  INVALID_REQUEST: 90,
+  INTERNAL_ERROR: 99,
+  BAD_TOKEN: 100,
+} as const;
+
+function palaceResult(
+  res: Response,
+  result: number,
+  data?: Record<string, unknown>,
+): void {
+  // Always HTTP 200 — see header comment. status mirrors their reference's
+  // literal "OK"/"ERROR" string, which they may also inspect.
+  res.status(200).json({
+    result,
+    status: result === PALACE_RESULT.SUCCESS ? "OK" : "ERROR",
+    ...(data ? { data } : {}),
+  });
 }
 
 async function currentUserBalance(
@@ -289,6 +315,18 @@ async function currentUserBalance(
   return row?.balance ?? null;
 }
 
+async function ledgerEntryByKey(
+  tx: typeof db,
+  idempotencyKey: string,
+): Promise<{ amount: string } | null> {
+  const [row] = await tx
+    .select({ amount: ledgerEntriesTable.amount })
+    .from(ledgerEntriesTable)
+    .where(eq(ledgerEntriesTable.idempotencyKey, idempotencyKey))
+    .limit(1);
+  return row ?? null;
+}
+
 router.post("/palace/callback", async (req: Request, res: Response) => {
   const token = req.headers["callback-token"];
   if (
@@ -296,181 +334,200 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
     typeof token !== "string" ||
     !timingSafeEqualString(token, CONFIG.PALACE_CASINO_CALLBACK_TOKEN)
   ) {
-    res.status(401).json({ resultado: 1, status: "UNAUTHORIZED" });
+    palaceResult(res, PALACE_RESULT.BAD_TOKEN);
     return;
   }
 
   const body = req.body as {
-    comando?: unknown;
-    dados?: Record<string, unknown>;
+    command?: unknown;
+    data?: Record<string, unknown>;
   };
-  const comando = String(body.comando ?? "");
-  const dados = body.dados ?? {};
-  const conta = String(dados["conta"] ?? "").trim();
-  const userId = userIdFromMemberAccount(conta);
+  const command = String(body.command ?? "");
+  const data = body.data ?? {};
+  const account = String(data["account"] ?? "").trim();
+  const userId = userIdFromMemberAccount(account);
   if (!userId) {
-    logger.warn({ conta, comando }, "[palace-callback] unknown conta format");
-    res.status(400).json({ resultado: 1, status: "UNKNOWN_ACCOUNT" });
+    logger.warn({ account, command }, "[palace-callback] unknown account format");
+    palaceResult(res, PALACE_RESULT.USER_NOT_FOUND);
     return;
   }
 
   try {
-    switch (comando) {
-      case "autenticar": {
+    switch (command) {
+      case "authenticate": {
         const balance = await currentUserBalance(db, userId);
         if (balance === null) {
-          res.status(400).json({ resultado: 1, status: "UNKNOWN_ACCOUNT" });
+          palaceResult(res, PALACE_RESULT.USER_NOT_FOUND);
           return;
         }
-        res.json({
-          resultado: 0,
-          status: "OK",
-          dados: { conta, saldo: fromLedgerAmount(balance) },
+        palaceResult(res, PALACE_RESULT.SUCCESS, {
+          account,
+          balance: Number(balance),
         });
         return;
       }
-      case "saldo": {
+      case "balance": {
         const balance = await currentUserBalance(db, userId);
         if (balance === null) {
-          res.status(400).json({ resultado: 1, status: "UNKNOWN_ACCOUNT" });
+          palaceResult(res, PALACE_RESULT.USER_NOT_FOUND);
           return;
         }
-        res.json({
-          resultado: 0,
-          status: "OK",
-          dados: { saldo: fromLedgerAmount(balance) },
-        });
+        palaceResult(res, PALACE_RESULT.SUCCESS, { balance: Number(balance) });
         return;
       }
-      case "aposta": {
-        const transGuid = String(dados["trans_guid"] ?? "").trim();
-        const rawAmount = Number(dados["amount"]);
-        if (!transGuid || !Number.isFinite(rawAmount) || rawAmount <= 0) {
-          res.status(400).json({ resultado: 1, status: "INVALID_REQUEST" });
+      case "bet": {
+        const transGuid = String(data["trans_guid"] ?? "").trim();
+        const amount = Number(data["amount"]);
+        if (!transGuid || !Number.isFinite(amount) || amount <= 0) {
+          palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
         }
+        const idempotencyKey = `palace:${transGuid}`;
         try {
-          const balance = await db.transaction(async (tx) => {
-            await applyBalanceDelta(tx, {
+          const outcome = await db.transaction(async (tx) => {
+            const existing = await ledgerEntryByKey(
+              tx as unknown as typeof db,
+              idempotencyKey,
+            );
+            if (existing) return "duplicate" as const;
+            const ok = await applyBalanceDelta(tx, {
               userId,
-              amount: `-${toLedgerAmount(rawAmount)}`,
+              amount: (-amount).toFixed(2),
               kind: "casino_palace_bet",
-              idempotencyKey: `palace:${transGuid}`,
+              idempotencyKey,
               refType: "casino_palace_round",
-              refId: String(dados["round_id"] ?? transGuid),
-              metadata: dados,
+              refId: String(data["round_id"] ?? transGuid),
+              metadata: data,
               enforceNonNegative: true,
             });
-            return currentUserBalance(tx as unknown as typeof db, userId);
+            return ok ? ("applied" as const) : ("duplicate" as const);
           });
-          res.json({
-            resultado: 0,
-            status: "OK",
-            dados: { saldo: fromLedgerAmount(balance!) },
-          });
+          const balance = await currentUserBalance(db, userId);
+          if (outcome === "duplicate") {
+            palaceResult(res, PALACE_RESULT.ALREADY_PROCESSED, {
+              balance: Number(balance),
+            });
+          } else {
+            palaceResult(res, PALACE_RESULT.SUCCESS, { balance: Number(balance) });
+          }
         } catch (err) {
           logger.warn({ err, userId, transGuid }, "[palace-callback] bet declined");
-          res.status(400).json({ resultado: 1, status: "INSUFFICIENT_BALANCE" });
+          const balance = await currentUserBalance(db, userId);
+          palaceResult(res, PALACE_RESULT.BALANCE_INSUFFICIENT, {
+            balance: Number(balance),
+          });
         }
         return;
       }
-      case "vitória":
-      case "vitoria": {
-        const transGuid = String(dados["trans_guid"] ?? "").trim();
-        const rawAmount = Number(dados["amount"]);
-        if (!transGuid || !Number.isFinite(rawAmount) || rawAmount < 0) {
-          res.status(400).json({ resultado: 1, status: "INVALID_REQUEST" });
+      case "win": {
+        const transGuid = String(data["trans_guid"] ?? "").trim();
+        const amount = Number(data["amount"]);
+        if (!transGuid || !Number.isFinite(amount) || amount < 0) {
+          palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
         }
-        const balance = await db.transaction(async (tx) => {
+        const idempotencyKey = `palace:${transGuid}`;
+        const outcome = await db.transaction(async (tx) => {
+          const existing = await ledgerEntryByKey(
+            tx as unknown as typeof db,
+            idempotencyKey,
+          );
+          if (existing) return "duplicate" as const;
           await applyBalanceDelta(tx, {
             userId,
-            amount: toLedgerAmount(rawAmount),
+            amount: amount.toFixed(2),
             kind: "casino_palace_win",
-            idempotencyKey: `palace:${transGuid}`,
+            idempotencyKey,
             refType: "casino_palace_round",
-            refId: String(dados["round_id"] ?? transGuid),
-            metadata: dados,
+            refId: String(data["round_id"] ?? transGuid),
+            metadata: data,
           });
-          return currentUserBalance(tx as unknown as typeof db, userId);
+          return "applied" as const;
         });
-        res.json({
-          resultado: 0,
-          status: "OK",
-          dados: { saldo: fromLedgerAmount(balance!) },
-        });
+        const balance = await currentUserBalance(db, userId);
+        palaceResult(
+          res,
+          outcome === "duplicate"
+            ? PALACE_RESULT.ALREADY_PROCESSED
+            : PALACE_RESULT.SUCCESS,
+          { balance: Number(balance) },
+        );
         return;
       }
-      case "cancelar": {
-        const transGuid = String(dados["trans_guid"] ?? "").trim();
-        const cancelTransGuid = String(dados["cancel_trans_guid"] ?? "").trim();
-        if (!transGuid || !cancelTransGuid) {
-          res.status(400).json({ resultado: 1, status: "INVALID_REQUEST" });
+      case "cancel": {
+        const cancelTransGuid = String(data["cancel_trans_guid"] ?? "").trim();
+        if (!cancelTransGuid) {
+          palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
         }
-        const balance = await db.transaction(async (tx) => {
-          // Reverse exactly what we actually applied for cancel_trans_guid
-          // (looked up from our own ledger) rather than trusting the
-          // amount/type resent in this cancel payload — avoids any drift
-          // between what Palace Casino thinks it sent and what we recorded.
-          const [original] = await tx
-            .select({ amount: ledgerEntriesTable.amount })
-            .from(ledgerEntriesTable)
-            .where(eq(ledgerEntriesTable.idempotencyKey, `palace:${cancelTransGuid}`))
-            .limit(1);
-          if (original) {
-            const reversal = (-Number(original.amount)).toFixed(2);
-            await applyBalanceDelta(tx, {
-              userId,
-              amount: reversal,
-              kind: "casino_palace_cancel",
-              idempotencyKey: `palace:${transGuid}`,
-              refType: "casino_palace_round",
-              refId: String(dados["round_id"] ?? transGuid),
-              metadata: dados,
-            });
-          }
-          // original not found: nothing to reverse (already reversed, or
-          // the original bet/win never actually landed) — no-op, still
-          // answer with the current balance so the retry contract holds.
-          return currentUserBalance(tx as unknown as typeof db, userId);
+        const originalKey = `palace:${cancelTransGuid}`;
+        // Idempotency key for the *reversal* is derived from cancel_trans_guid
+        // (stable across retries) rather than this cancel event's own
+        // trans_guid, which may differ on each retry attempt — matching the
+        // reference's "mark the original row CANCEL" behavior: the first
+        // cancel of a given original transaction reverses it, any further
+        // cancel of the same original is a harmless no-op.
+        const reversalKey = `palace:cancel:${cancelTransGuid}`;
+        const outcome = await db.transaction(async (tx) => {
+          const original = await ledgerEntryByKey(
+            tx as unknown as typeof db,
+            originalKey,
+          );
+          if (!original) return "not_found" as const;
+          const alreadyReversed = await ledgerEntryByKey(
+            tx as unknown as typeof db,
+            reversalKey,
+          );
+          if (alreadyReversed) return "already_canceled" as const;
+          const reversal = (-Number(original.amount)).toFixed(2);
+          await applyBalanceDelta(tx, {
+            userId,
+            amount: reversal,
+            kind: "casino_palace_cancel",
+            idempotencyKey: reversalKey,
+            refType: "casino_palace_round",
+            refId: String(data["round_id"] ?? cancelTransGuid),
+            metadata: data,
+          });
+          return "reversed" as const;
         });
-        res.json({
-          resultado: 0,
-          status: "OK",
-          dados: { saldo: fromLedgerAmount(balance!) },
-        });
+        if (outcome === "not_found") {
+          const balance = await currentUserBalance(db, userId);
+          palaceResult(res, PALACE_RESULT.CANCEL_TRANS_NOT_FOUND, {
+            balance: Number(balance),
+          });
+          return;
+        }
+        const balance = await currentUserBalance(db, userId);
+        palaceResult(res, PALACE_RESULT.SUCCESS, { balance: Number(balance) });
         return;
       }
       case "status": {
-        const transGuid = String(dados["trans_guid"] ?? "").trim();
+        const transGuid = String(data["trans_guid"] ?? "").trim();
         if (!transGuid) {
-          res.status(400).json({ resultado: 1, status: "INVALID_REQUEST" });
+          palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
         }
-        const [row] = await db
-          .select({ id: ledgerEntriesTable.id })
-          .from(ledgerEntriesTable)
-          .where(eq(ledgerEntriesTable.idempotencyKey, `palace:${transGuid}`))
-          .limit(1);
-        res.json({
-          resultado: 0,
-          status: "OK",
-          dados: {
-            conta,
-            trans_guid: transGuid,
-            trans_status: row ? "OK" : "NOT_FOUND",
-          },
+        const original = await ledgerEntryByKey(db, `palace:${transGuid}`);
+        if (!original) {
+          palaceResult(res, PALACE_RESULT.TRANS_NOT_FOUND);
+          return;
+        }
+        const reversed = await ledgerEntryByKey(db, `palace:cancel:${transGuid}`);
+        palaceResult(res, PALACE_RESULT.SUCCESS, {
+          account,
+          trans_guid: transGuid,
+          trans_status: reversed ? "CANCELED" : "OK",
         });
         return;
       }
       default:
-        logger.warn({ comando }, "[palace-callback] unknown comando");
-        res.status(400).json({ resultado: 1, status: "UNKNOWN_COMMAND" });
+        logger.warn({ command }, "[palace-callback] unknown command");
+        palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
     }
   } catch (err) {
-    logger.error({ err, userId, comando }, "[palace-callback] processing error");
-    res.status(500).json({ resultado: 1, status: "ERROR" });
+    logger.error({ err, userId, command }, "[palace-callback] processing error");
+    palaceResult(res, PALACE_RESULT.INTERNAL_ERROR);
   }
 });
 
