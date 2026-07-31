@@ -11,7 +11,8 @@
     "test:settlement": "tsx --test src/tests/settlement.spec.ts",
     "test:core": "tsx --test src/tests/core.spec.ts",
     "seed:casino": "tsx src/scripts/seedCasinoGames.ts",
-    "casino:disable-all": "tsx src/scripts/deactivateAllCasinoGames.ts"
+    "casino:disable-all": "tsx src/scripts/deactivateAllCasinoGames.ts",
+    "casino:delete-all": "tsx src/scripts/deleteAllCasinoGames.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
