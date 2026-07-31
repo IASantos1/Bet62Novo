@@ -1161,7 +1161,11 @@ async function fetchStatpalFootballLiveV2(): Promise<{
         return ev ? [ev] : [];
       });
       for (const ev of oddsEvents) oddsLiveKnownIds.add(ev.id);
-      logger.info(
+      // debug, not info — this fires on every poll tick (~every few seconds
+      // whenever football is live) and isn't actionable on its own; set
+      // LOG_LEVEL=debug to see it when actually chasing the 20-min-gate
+      // issue mentioned above.
+      logger.debug(
         { eventCount: oddsEvents.length, source: "odds/live", knownLiveIds: oddsLiveKnownIds.size },
         "[statpal-football-live] odds/live confirmed-live ids updated",
       );
