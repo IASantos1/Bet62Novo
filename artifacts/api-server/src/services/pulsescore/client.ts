@@ -10,8 +10,8 @@ export function bookmakerPrefix(bookmaker: string = CONFIG.PULSESCORE_BOOKMAKER)
   return bookmaker === "bet365" ? "v3/bet365" : bookmaker;
 }
 
-export function pulseScoreRestUrl(path: string): string {
-  return `${CONFIG.PULSESCORE_BASE_URL}/${bookmakerPrefix()}${path}`;
+export function pulseScoreRestUrl(path: string, bookmaker?: string): string {
+  return `${CONFIG.PULSESCORE_BASE_URL}/${bookmakerPrefix(bookmaker)}${path}`;
 }
 
 export function pulseScoreWsUrl(sport: string): string {
@@ -20,8 +20,12 @@ export function pulseScoreWsUrl(sport: string): string {
   return `${httpBase}/${bookmakerPrefix()}/ws/live?key=${key}&sport=${encodeURIComponent(sport)}`;
 }
 
-export async function pulseScoreGet<T>(path: string, timeoutMs = 4000): Promise<T> {
-  const resp = await fetch(pulseScoreRestUrl(path), {
+export async function pulseScoreGet<T>(
+  path: string,
+  timeoutMs = 4000,
+  bookmaker?: string,
+): Promise<T> {
+  const resp = await fetch(pulseScoreRestUrl(path, bookmaker), {
     headers: { "X-Secret": CONFIG.PULSESCORE_API_KEY },
     signal: AbortSignal.timeout(timeoutMs),
   });
