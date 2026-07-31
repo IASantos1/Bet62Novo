@@ -53,6 +53,11 @@ const PALACE_CASINO_BASE_URL =
   process.env["PALACE_CASINO_BASE_URL"]?.trim() ||
   "https://agent.goldslotpalase.com/v4";
 const PALACE_CASINO_API_TOKEN = process.env["PALACE_CASINO_API_TOKEN"] ?? "";
+// Shared token Palace Casino sends back in the "Callback-Token" header on
+// every wallet callback (bet/win/cancel/balance/auth) — our auth mechanism
+// for that inbound webhook, configured on their side under Settings.
+const PALACE_CASINO_CALLBACK_TOKEN =
+  process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
 // PulseScore — normalized real-bookmaker odds aggregator (bet365, etc.).
 // Football pulled via REST polling; tennis via its WebSocket feed (PRO plan
@@ -75,6 +80,7 @@ export const CONFIG = {
   SILENTAPI_CALLBACK_SECRET,
   PALACE_CASINO_BASE_URL,
   PALACE_CASINO_API_TOKEN,
+  PALACE_CASINO_CALLBACK_TOKEN,
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
