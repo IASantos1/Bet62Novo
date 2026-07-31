@@ -7607,7 +7607,11 @@ type VolleyTournament = {
 };
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
-const VOLLEY_LIVE_TTL = 4 * 1000; // 4 s — delta poller needs fresh data
+// Was 4s — matched to the ~1s SSE broadcast tick (CONFIG.LIVE_UPDATE_INTERVAL)
+// like football/tennis, since polling slower than the broadcast cadence just
+// adds latency for no benefit (each broadcast tick would serve stale data
+// until the next poll anyway).
+const VOLLEY_LIVE_TTL = CONFIG.LIVE_UPDATE_INTERVAL;
 
 // SportsAPI Pro V2 live caches (30s each sport)
 let footballLiveV2Cache: SAPIV2Event[] | null = null;
@@ -10898,9 +10902,10 @@ function resolveOdds(
   };
 }
 
-// Statpal /v1/nhl/livescores — was 30s; goals/shots update far more often
-// than period transitions, so 30s made live scores noticeably stale.
-const NHL_LIVE_TTL = 5_000;
+// Statpal /v1/nhl/livescores — was 30s then 5s; matched to the ~1s SSE
+// broadcast tick like football/tennis, since polling slower than the
+// broadcast cadence just adds latency for no benefit.
+const NHL_LIVE_TTL = CONFIG.LIVE_UPDATE_INTERVAL;
 
 async function getNHLLive(): Promise<NHLTournament[]> {
   const now = Date.now();
@@ -11079,8 +11084,9 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
 // Statpal /v1/mlb/livescores — real-time MLB scores with inning-by-inning
 // breakdown, starting pitchers, venue info, hits, errors, outs.
 // Runs/hits/outs change far more often than innings do, so tie the TTL to
-// scoring frequency rather than inning-transition frequency.
-const MLB_LIVE_TTL = 5_000;
+// the ~1s SSE broadcast tick like football/tennis (was 5s — polling slower
+// than the broadcast cadence just adds latency for no benefit).
+const MLB_LIVE_TTL = CONFIG.LIVE_UPDATE_INTERVAL;
 
 async function getMLBLive(): Promise<MLBTournament[]> {
   const now = Date.now();
@@ -11450,10 +11456,11 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
   return result;
 }
 
-// Statpal /v1/nba/livescores — quarter-by-quarter scores with OT support
-// Points change on almost every possession, so tie the TTL to scoring
-// frequency rather than quarter-transition frequency.
-const NBA_LIVE_TTL = 5_000;
+// Statpal /v1/nba/livescores — quarter-by-quarter scores with OT support.
+// Points change on almost every possession, so tie the TTL to the ~1s SSE
+// broadcast tick like football/tennis (was 5s — polling slower than the
+// broadcast cadence just adds latency for no benefit).
+const NBA_LIVE_TTL = CONFIG.LIVE_UPDATE_INTERVAL;
 
 async function getNBALive(): Promise<NBATournament[]> {
   const now = Date.now();
@@ -19400,6 +19407,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     mlbLiveTournaments,
     nbaLiveTournaments,
     volleyballLiveTournaments,
+    nhlLiveTournaments,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -19415,6 +19423,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getMLBLive(),          // Statpal /v1/mlb/livescores — innings, hits, errors, outs
     getNBALive(),          // Statpal /v1/nba/livescores — quarter-by-quarter scores
     getVolleyballLive(),   // Statpal /v1/volleyball/livescores
+    getNHLLive(),          // Statpal /v1/nhl/livescores — periods, goals, shots
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -19604,10 +19613,25 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ),
   ];
   const basketballLive = sportWithFallback("basketball", mergedBasketballLive);
-  const hockeyLive = sportWithFallback(
-    "hockey",
-    buildHockeyLiveV2(hockeyEvents),
+  // Hockey live: merge Statpal NHL livescores + SportsAPI V2, same pattern as
+  // basketball/baseball above. Previously this was SportsAPI V2 only — under
+  // CONFIG.STATPAL_ONLY (the default, and Statpal is documented as "the
+  // primary and only live data source") getHockeyLiveV2() always returns an
+  // empty cache it never populates, so hockey had NO real live source wired
+  // in at all despite buildNHLLiveMatches/getNHLLive already existing (only
+  // reachable via the standalone /hockey-livescores debug route).
+  const statpalNHLLive = buildNHLLiveMatches(nhlLiveTournaments);
+  const sapiv2NHLLive = buildHockeyLiveV2(hockeyEvents);
+  const statpalNHLPairs = new Set(
+    statpalNHLLive.map((m) => `${m.home}|${m.away}`),
   );
+  const mergedHockeyLive = [
+    ...statpalNHLLive,
+    ...sapiv2NHLLive.filter(
+      (m) => !statpalNHLPairs.has(`${m.home}|${m.away}`),
+    ),
+  ];
+  const hockeyLive = sportWithFallback("hockey", mergedHockeyLive);
   // Baseball live: merge SportsAPI V2 + Statpal livescores.
   // Statpal wins when it has inning detail (innings, hits, errors, outs).
   // SportsAPI V2 wins for games Statpal hasn't yet flipped to live (sticky guard).
