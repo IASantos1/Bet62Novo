@@ -490,6 +490,7 @@ type CasinoGame = {
   vendorCode: number | null;
   category: string;
   img: string | null;
+  source?: string; // "silentapi" (default) | "palace"
 };
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
@@ -8799,22 +8800,34 @@ export default function Home({
   }, [auth.user]);
 
   const launchCasinoGame = useCallback(
-    async (gameUid: string) => {
+    async (game: CasinoGame) => {
       if (!auth.user) {
         setAuthMode("login");
         setAuthModalOpen(true);
         return;
       }
-      setCasinoLoadingGame(gameUid);
+      setCasinoLoadingGame(game.id);
       try {
-        const res = await fetch("/api/casino/launch", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${auth.token}`,
+        // source="palace" games launch through a different aggregator with
+        // an unrelated request shape (provider_id + game_symbol, no
+        // balance sent — see routes/casino.ts's /palace/launch) than the
+        // default SilentAPI path (gameUid + our own balance).
+        const isPalace = game.source === "palace";
+        const res = await fetch(
+          isPalace ? "/api/casino/palace/launch" : "/api/casino/launch",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${auth.token}`,
+            },
+            body: JSON.stringify(
+              isPalace
+                ? { providerId: game.vendorCode, gameSymbol: game.id }
+                : { gameUid: game.id },
+            ),
           },
-          body: JSON.stringify({ gameUid }),
-        });
+        );
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.url) {
           if (!handleInvalidTokenError(res.status, data.error)) {
@@ -24715,9 +24728,9 @@ export default function Home({
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                         {casinoGames.map((game) => (
                           <button
-                            key={`${game.provider}-${game.id}`}
+                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
                             disabled={casinoLoadingGame === game.id}
-                            onClick={() => launchCasinoGame(game.id)}
+                            onClick={() => launchCasinoGame(game)}
                             className="aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
                           >
                             {casinoLoadingGame === game.id ? (

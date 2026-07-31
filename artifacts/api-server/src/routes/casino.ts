@@ -49,9 +49,14 @@ router.get("/games", async (req: Request, res: Response) => {
         id: casinoGamesTable.gameUid,
         name: casinoGamesTable.name,
         provider: casinoGamesTable.provider,
+        // For source="palace" rows this doubles as the provider_id needed
+        // by /palace/launch (see seedPalaceCasinoGames.ts) - not a real
+        // "vendor code" for that source, but reusing the column avoids a
+        // schema change just for this.
         vendorCode: casinoGamesTable.vendorCode,
         category: casinoGamesTable.category,
         img: casinoGamesTable.img,
+        source: casinoGamesTable.source,
       })
       .from(casinoGamesTable)
       .where(where)
