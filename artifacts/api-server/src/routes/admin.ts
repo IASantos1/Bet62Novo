@@ -43,7 +43,9 @@ import {
   findSportscoreFixture,
   type SportscoreDiagStep,
   unknownStatpalMarkets,
+  countryForLeagueName,
 } from "./matches.js";
+import { pulseScoreFetchFootballLeagues } from "../services/pulsescore/leagues.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2325,6 +2327,52 @@ router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res)
     volleyball: pulseScoreVolleyball.getUsage(),
   });
 });
+
+// Read-only diagnostic ahead of a possible PulseScore fixtures cutover:
+// PulseScore's league listing has no country field (just a flat league
+// name), while our whole catalog (blocking, priority, market tier) is keyed
+// by "country: league". This reports what fraction of bet365's actual
+// prematch football league list we can already resolve a country for via
+// countryForLeagueName() (derived from DOMESTIC_PRIORITY) — the real
+// coverage number needed to decide whether that migration is safe yet,
+// instead of guessing from the league count alone.
+router.get(
+  "/pulsescore-league-coverage",
+  adminMiddleware,
+  async (_req: AdminRequest, res) => {
+    if (!CONFIG.PULSESCORE_API_KEY) {
+      res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
+      return;
+    }
+    try {
+      const leagues = await pulseScoreFetchFootballLeagues();
+      const resolved: Array<{ league: string; country: string; eventCount: number }> = [];
+      const unresolved: Array<{ league: string; eventCount: number }> = [];
+      for (const l of leagues) {
+        const country = countryForLeagueName(l.league);
+        if (country) resolved.push({ league: l.league, country, eventCount: l.eventCount });
+        else unresolved.push({ league: l.league, eventCount: l.eventCount });
+      }
+      res.json({
+        totalLeagues: leagues.length,
+        resolvedCount: resolved.length,
+        unresolvedCount: unresolved.length,
+        coveragePct:
+          leagues.length > 0
+            ? Math.round((resolved.length / leagues.length) * 1000) / 10
+            : 0,
+        resolved,
+        unresolved,
+      });
+    } catch (err) {
+      logger.error({ err }, "GET /api/admin/pulsescore-league-coverage error");
+      res.status(500).json({
+        error: "Erro ao consultar ligas do PulseScore",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 // Read-only diagnostic: market names Statpal's /odds/prematch feed returns
 // that we don't currently parse into AdvancedMarkets (see matches.ts —

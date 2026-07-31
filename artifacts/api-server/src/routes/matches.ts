@@ -1655,6 +1655,43 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["indonesia: bri liga 1", 999],
 ];
 
+// League name → country, derived from DOMESTIC_PRIORITY rather than
+// hand-maintained separately (would drift out of sync otherwise). Needed
+// for any fixture source whose schema doesn't carry a country field of its
+// own — PulseScore's normalized event schema is exactly that case: it only
+// has a flat `league` string, no country, while our whole catalog (league
+// priority, blocking, market tier) is keyed by "country: league".
+//
+// Only leagues whose bare name (country prefix stripped) is unambiguous
+// across the whole table are included — if the same bare name is paired
+// with more than one country (e.g. a generic "super league" used by
+// several countries), it's deliberately left out rather than guessing one
+// country at random and mis-tagging it some of the time.
+const LEAGUE_NAME_TO_COUNTRY: Map<string, string> = (() => {
+  const byLeague = new Map<string, Set<string>>();
+  for (const [key] of DOMESTIC_PRIORITY) {
+    const idx = key.indexOf(": ");
+    if (idx < 0) continue;
+    const country = key.slice(0, idx);
+    const league = key.slice(idx + 2);
+    if (!byLeague.has(league)) byLeague.set(league, new Set());
+    byLeague.get(league)!.add(country);
+  }
+  const out = new Map<string, string>();
+  for (const [league, countries] of byLeague) {
+    if (countries.size === 1) out.set(league, [...countries][0]!);
+  }
+  return out;
+})();
+
+/** Best-effort country lookup for a bare league name (no "country:" prefix),
+ * e.g. "premier league" → "england". Returns null when the league isn't in
+ * our priority table yet, or its bare name is ambiguous across countries —
+ * callers should treat null as "unknown", never guess. */
+export function countryForLeagueName(leagueName: string): string | null {
+  return LEAGUE_NAME_TO_COUNTRY.get(leagueName.trim().toLowerCase()) ?? null;
+}
+
 // All countries with explicit domestic league entries (used to detect intl tournaments)
 const ALL_DOMESTIC_COUNTRIES = new Set([
   // Europe
