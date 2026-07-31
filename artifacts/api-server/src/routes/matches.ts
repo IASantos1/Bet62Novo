@@ -22,6 +22,7 @@ import {
   getPulseScoreFootballLive,
   findPulseScoreFootballOverride,
 } from "../services/pulsescore/football.js";
+import { findPulseScoreTennisOverride } from "../services/pulsescore/tennisWs.js";
 
 const router: IRouter = Router();
 
@@ -19424,6 +19425,23 @@ async function applyPulseScoreFootballOverlay(
   });
 }
 
+// Same reasoning as applyPulseScoreFootballOverlay above, but for tennis
+// moneyline via the WS client (synchronous — reads the already-pushed
+// frame cache, no network call here). Score/games/sets/serving are left
+// untouched for the same settlement-safety reasons.
+function applyPulseScoreTennisOverlay(
+  matches: LiveMatchState[],
+): LiveMatchState[] {
+  if (matches.length === 0) return matches;
+  return matches.map((m) => {
+    const override = findPulseScoreTennisOverride(m.home, m.away);
+    if (!override?.odds) return m;
+    const { home, away } = override.odds;
+    if (home <= 1.0 || away <= 1.0) return m;
+    return { ...m, odds: { home, draw: m.odds.draw, away } };
+  });
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
@@ -19699,7 +19717,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     "volleyball",
     buildVolleyballLiveMatches(volleyballLiveTournaments),
   );
-  const tennisLive = sportWithFallback("tennis", tennisLivePart);
+  const tennisLive = applyPulseScoreTennisOverlay(
+    sportWithFallback("tennis", tennisLivePart),
+  );
   const boxingLive = sportWithFallback(
     "boxing",
     buildExtraLiveV2("boxing", mmaEvents),

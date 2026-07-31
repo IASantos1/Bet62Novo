@@ -7,6 +7,7 @@
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { pulseScoreWsUrl, type PulseScoreEvent } from "./client.js";
+import { teamNamesMatch } from "./teamMatch.js";
 
 let ws: WebSocket | null = null;
 let connected = false;
@@ -148,6 +149,82 @@ export function startPulseScoreTennisWs(): void {
  * or if no tennis matches are currently live upstream. */
 export function getPulseScoreTennisLive(): PulseScoreEvent[] {
   return [...liveByEventId.values()];
+}
+
+// ── match_winner → our own odds shape ───────────────────────────────────────
+// Same reasoning as football.ts: the docs only document match_winner and
+// total_goals by example, and total_goals is soccer-specific (goals) — there's
+// no tennis example at all, so only the moneyline (match_winner, 2 selections,
+// no draw) is mapped here. Anything else seen in real WS frames is logged
+// once instead of guessed at, same self-discovery approach as football.ts.
+export type PulseScoreTennisOverride = { odds?: { home: number; away: number } };
+
+const seenUnknownMarkets = new Set<string>();
+const seenMatchWinnerPeriods = new Set<string>();
+
+function decimalToNumber(raw: string | undefined): number | null {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 1.0 ? n : null;
+}
+
+function extractTennisOverride(ev: PulseScoreEvent): PulseScoreTennisOverride {
+  const matchWinnerMarkets = (ev.markets ?? []).filter(
+    (m) => m.canonicalMarket === "match_winner",
+  );
+  for (const m of (ev.markets ?? [])) {
+    if (m.canonicalMarket === "match_winner") continue;
+    if (!seenUnknownMarkets.has(m.canonicalMarket)) {
+      seenUnknownMarkets.add(m.canonicalMarket);
+      logger.info(
+        { canonicalMarket: m.canonicalMarket },
+        "[pulsescore] unmapped tennis canonicalMarket seen — candidate to add to the override mapping",
+      );
+    }
+  }
+  // No tennis example in the docs for how `period` is labelled on the
+  // moneyline (soccer uses "fulltime") — if more than one match_winner
+  // market shows up (e.g. one for the match, one per set), we can't safely
+  // tell which is which yet, so skip rather than risk showing set odds as
+  // match odds. Log the period values seen so this can be resolved from
+  // real data instead of a guess.
+  if (matchWinnerMarkets.length !== 1) {
+    for (const m of matchWinnerMarkets) {
+      const key = m.period || "(no period)";
+      if (!seenMatchWinnerPeriods.has(key)) {
+        seenMatchWinnerPeriods.add(key);
+        logger.info(
+          { period: m.period, count: matchWinnerMarkets.length },
+          "[pulsescore] tennis match_winner period seen — multiple candidates, needs disambiguation",
+        );
+      }
+    }
+    return {};
+  }
+  const market = matchWinnerMarkets[0]!;
+  let home: number | null = null;
+  let away: number | null = null;
+  for (const sel of market.selections ?? []) {
+    const val = decimalToNumber(sel.decimal);
+    if (val === null) continue;
+    if (teamNamesMatch(sel.name, ev.home)) home = val;
+    else if (teamNamesMatch(sel.name, ev.away)) away = val;
+  }
+  return home !== null && away !== null ? { odds: { home, away } } : {};
+}
+
+/** Finds the PulseScore tennis event matching a tracked match by player
+ * name (tolerant cross-provider match) and returns its market override, if
+ * any. Reads from the WS-pushed cache directly — no network call. */
+export function findPulseScoreTennisOverride(
+  home: string,
+  away: string,
+): PulseScoreTennisOverride | null {
+  const ev = [...liveByEventId.values()].find(
+    (e) => teamNamesMatch(home, e.home) && teamNamesMatch(away, e.away),
+  );
+  if (!ev) return null;
+  const override = extractTennisOverride(ev);
+  return override.odds ? override : null;
 }
 
 export function pulseScoreTennisWsStatus(): {
