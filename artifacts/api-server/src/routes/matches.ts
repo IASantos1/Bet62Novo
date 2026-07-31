@@ -18,6 +18,10 @@ import { db, matchResultsTable, sportscoreMatchMapTable } from "@workspace/db";
 import { eq, and, gte, sql, inArray } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
+import {
+  getPulseScoreFootballLive,
+  findPulseScoreFootballOverride,
+} from "../services/pulsescore/football.js";
 
 const router: IRouter = Router();
 
@@ -19376,6 +19380,50 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
+// Overlay fresher PulseScore (bookmaker-fed) odds onto the live football
+// list — match_winner (1x2) and total_goals (fulltime) only, the two
+// canonicalMarket values the PulseScore docs actually document; see
+// services/pulsescore/football.ts for why the rest aren't mapped yet.
+// Deliberately does NOT touch homeScore/awayScore/minute here: those drive
+// goal-suspension and settlement logic downstream, and a bad cross-provider
+// team match on that field could show a wrong score or misfire a
+// suspension — real-money-adjacent risk that isn't worth it for a value
+// that already only changes on goals, unlike odds which move every second.
+// A market only gets overridden if it isn't already zeroed out by
+// filterLiveMarkets' settlement logic (over/under lines already made
+// impossible by the current score stay impossible, never revived).
+async function applyPulseScoreFootballOverlay(
+  matches: LiveMatchState[],
+): Promise<LiveMatchState[]> {
+  if (matches.length === 0) return matches;
+  const psEvents = await getPulseScoreFootballLive();
+  if (psEvents.length === 0) return matches;
+  return matches.map((m) => {
+    const override = findPulseScoreFootballOverride(m.home, m.away, psEvents);
+    if (!override) return m;
+    const odds =
+      override.odds &&
+      override.odds.home > 1.0 &&
+      override.odds.draw > 1.0 &&
+      override.odds.away > 1.0
+        ? override.odds
+        : m.odds;
+    const totalGoals = override.totalGoals
+      ? { ...m.markets.totalGoals }
+      : m.markets.totalGoals;
+    if (override.totalGoals) {
+      for (const [key, val] of Object.entries(override.totalGoals)) {
+        const k = key as keyof AdvancedMarkets["totalGoals"];
+        // Only refresh a line that's still active — never revive one the
+        // settlement logic already zeroed for the current score.
+        if (totalGoals[k] > 0 && typeof val === "number") totalGoals[k] = val;
+      }
+    }
+    if (odds === m.odds && totalGoals === m.markets.totalGoals) return m;
+    return { ...m, odds, markets: { ...m.markets, totalGoals } };
+  });
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
@@ -19593,9 +19641,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   })();
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
-  const footballLive = sportWithFallback(
-    "football",
-    await buildFootballLiveV2(footballEvents),
+  const footballLive = await applyPulseScoreFootballOverlay(
+    sportWithFallback("football", await buildFootballLiveV2(footballEvents)),
   );
   // Basketball live: merge Statpal NBA livescores + SportsAPI V2.
   // Statpal wins when it has quarter detail (q1–q4, OT).
