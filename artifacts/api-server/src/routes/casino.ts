@@ -192,7 +192,7 @@ router.post(
           : !resp.ok
             ? ` (HTTP ${resp.status})`
             : "";
-        res.status(502).json({ error: `Não foi possível iniciar o jogo.${reason}` });
+        res.status(400).json({ error: `Não foi possível iniciar o jogo.${reason}` });
         return;
       }
 
@@ -205,7 +205,7 @@ router.post(
       // (e.g. a slow provider backend timing out) rather than config.
       const reason = err instanceof Error ? ` (${err.message})` : "";
       logger.error({ err, userId, gameUid }, "[casino] launch error");
-      res.status(502).json({ error: `Não foi possível iniciar o jogo.${reason}` });
+      res.status(400).json({ error: `Não foi possível iniciar o jogo.${reason}` });
     }
   },
 );
@@ -249,9 +249,14 @@ router.post(
       });
       res.json({ url: game_url });
     } catch (err) {
+      // 400, not 502 — this site is behind Cloudflare, which replaces the
+      // body of any "gateway" status (502/504/52x) with its own generic
+      // branded error page regardless of what we actually send, hiding the
+      // real `reason` from both the user and from us debugging a screenshot.
+      // 400 passes through untouched.
       const reason = err instanceof Error ? ` (${err.message})` : "";
       logger.error({ err, userId, providerId, gameSymbol }, "[palace-casino] launch error");
-      res.status(502).json({ error: `Não foi possível iniciar o jogo.${reason}` });
+      res.status(400).json({ error: `Não foi possível iniciar o jogo.${reason}` });
     }
   },
 );
