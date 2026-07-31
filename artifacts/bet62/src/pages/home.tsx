@@ -61,6 +61,7 @@ import {
   LayoutGrid,
   ArrowLeft,
   Dices,
+  ExternalLink,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -26244,21 +26245,34 @@ export default function Home({
 
       {/* CASINO GAME FRAME — full-screen overlay so the provider's own domain
           never shows in the address bar (games open inside our own iframe,
-          not a redirect to their site). */}
+          not a redirect to their site). Some game vendors set X-Frame-Options/
+          CSP that refuses to render inside ANY iframe — the browser blocks
+          that silently (no error, just a blank/black frame), so "Abrir em
+          nova aba" is always visible as a working escape hatch instead of
+          trying to auto-detect a block that browsers don't reliably expose. */}
       {casinoLaunchUrl && (
         <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-          <div className="flex items-center justify-between px-4 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0">
-            <div className="font-black text-lg tracking-tighter italic">
+          <div className="flex items-center justify-between px-3 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0 gap-2">
+            <div className="font-black text-lg tracking-tighter italic shrink-0">
               <span className="text-white">BET</span>
               <span className="text-red-600">62</span>
             </div>
-            <button
-              onClick={() => setCasinoLaunchUrl(null)}
-              className="p-2 text-zinc-400 hover:text-white transition-colors"
-              aria-label="Fechar jogo"
-            >
-              <X size={22} />
-            </button>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <button
+                onClick={() => window.open(casinoLaunchUrl, "_blank")}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors text-[11px] font-bold whitespace-nowrap shrink-0"
+              >
+                <ExternalLink size={13} />
+                Nova aba
+              </button>
+              <button
+                onClick={() => setCasinoLaunchUrl(null)}
+                className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
+                aria-label="Fechar jogo"
+              >
+                <X size={22} />
+              </button>
+            </div>
           </div>
           <iframe
             src={casinoLaunchUrl}
