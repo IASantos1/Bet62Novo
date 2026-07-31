@@ -27,6 +27,32 @@ const PROVIDERS_CACHE_TTL_SECONDS = 3600;
 const DEFAULT_LIMIT = 24;
 const MAX_LIMIT = 60;
 
+// ── Franchise grouping ("Gates of Olympus", "Big Bass", ...) for the
+// horizontal-scroll rows browsing view. There's no franchise field from
+// the provider — this derives one from the game name: normalize, drop a
+// leading article, then key on the first two remaining words. Verified
+// against the real catalog: "Gates of Olympus"/"Gates of Olympus 1000"/
+// "...Xmas 1000" all key to "gates olympus" (distinct from "Gates of
+// Gatot Kaca" -> "gates gatot"); "5 Lions"/"5 Lions Gold"/"5 Lions Dance"
+// all key to "5 lions"; "Big Bass Bonanza" and "Bigger Bass Bonanza" key
+// differently ("big bass" vs "bigger bass") - two related but genuinely
+// different rows, which matches what was asked for explicitly.
+const LEADING_ARTICLES = new Set(["the", "a", "an"]);
+
+function gameFamilyKey(name: string): string {
+  const cleaned = name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[™®©'']/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length > 0 && LEADING_ARTICLES.has(tokens[0]!)) tokens.shift();
+  const key = tokens.slice(0, 2).join(" ");
+  return key || cleaned || name.toLowerCase();
+}
+
 router.get("/games", async (req: Request, res: Response) => {
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
@@ -77,6 +103,83 @@ router.get("/games", async (req: Request, res: Response) => {
 
   const payload = JSON.stringify({ page, limit, total: Number(total), games });
   await statpalCache.set(cacheKey, payload, GAMES_CACHE_TTL_SECONDS);
+  res.setHeader("Content-Type", "application/json");
+  res.send(payload);
+});
+
+const GROUPS_CACHE_TTL_SECONDS = 300;
+const DEFAULT_GROUPS_LIMIT = 12;
+const MAX_GROUPS_LIMIT = 30;
+
+// Browsing-by-franchise view: paginates whole rows (franchises), not
+// individual games — page 1 might return 12 rows totalling 40 games. Not
+// used for search (a handful of matches split into many 1-game rows isn't
+// useful there); the front-end falls back to the flat /games list once a
+// search term is entered.
+router.get("/games/grouped", async (req: Request, res: Response) => {
+  const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
+  const page = Math.max(1, Number(req.query["page"]) || 1);
+  const limit = Math.min(
+    MAX_GROUPS_LIMIT,
+    Math.max(1, Number(req.query["limit"]) || DEFAULT_GROUPS_LIMIT),
+  );
+
+  const cacheKey = `casino:games-grouped:v1:${provider || "*"}:${page}:${limit}`;
+  const cached = await statpalCache.get(cacheKey);
+  if (cached) {
+    res.setHeader("Content-Type", "application/json");
+    res.send(cached);
+    return;
+  }
+
+  const conditions = [
+    eq(casinoGamesTable.isActive, true),
+    eq(casinoGamesTable.source, "palace"),
+  ];
+  if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
+
+  const rows = await db
+    .select({
+      id: casinoGamesTable.gameUid,
+      name: casinoGamesTable.name,
+      provider: casinoGamesTable.provider,
+      vendorCode: casinoGamesTable.vendorCode,
+      category: casinoGamesTable.category,
+      img: casinoGamesTable.img,
+      source: casinoGamesTable.source,
+      popularity: casinoGamesTable.popularity,
+    })
+    .from(casinoGamesTable)
+    .where(and(...conditions))
+    .orderBy(asc(casinoGamesTable.name));
+
+  const byKey = new Map<
+    string,
+    { name: string; games: Omit<(typeof rows)[number], "popularity">[] }
+  >();
+  for (const row of rows) {
+    const key = gameFamilyKey(row.name);
+    const { popularity: _popularity, ...game } = row;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.games.push(game);
+      // Shortest name is usually the base game ("Gates of Olympus" over
+      // "Gates of Olympus 1000") - use it as the row title.
+      if (game.name.length < existing.name.length) existing.name = game.name;
+    } else {
+      byKey.set(key, { name: game.name, games: [game] });
+    }
+  }
+
+  const allGroups = [...byKey.values()].sort(
+    (a, b) => b.games.length - a.games.length || a.name.localeCompare(b.name),
+  );
+
+  const totalGroups = allGroups.length;
+  const groups = allGroups.slice((page - 1) * limit, page * limit);
+
+  const payload = JSON.stringify({ page, limit, totalGroups, groups });
+  await statpalCache.set(cacheKey, payload, GROUPS_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);
 });
