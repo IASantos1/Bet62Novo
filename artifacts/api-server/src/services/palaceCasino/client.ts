@@ -1,11 +1,14 @@
 // Palace Casino (Gold Slot Palace) API client — third-party casino game
 // aggregator, intended to replace SilentAPI (see routes/casino.ts) as the
-// catalog source. Only wallet (deposit/withdraw-all) and game listing
-// (providers/games) are implemented so far, matching what's been
-// documented — the game-launch endpoint and the wallet-callback signing
-// scheme aren't documented yet, so there's no /launch equivalent here and
-// nothing wired into routes/casino.ts. This module is inert (every call
-// throws) until PALACE_CASINO_API_TOKEN is set.
+// catalog source. This account uses Seamless wallet mode: the balance
+// never leaves our platform, Palace Casino just asks us (via the
+// Callback-Token webhook — see routes/palaceCasino.ts) on every
+// bet/win/cancel and we answer with the current balance. The
+// palaceCasinoDeposit/palaceCasinoWithdrawAll functions below are for the
+// *other* wallet mode ("Transfer" — pre-funding a separate casino-side
+// balance) documented alongside this API; they're kept here as a faithful
+// client for that endpoint but are NOT part of the integration path we're
+// using, and are not called from anywhere.
 import { CONFIG } from "../../lib/config.js";
 
 class PalaceCasinoNotConfiguredError extends Error {
@@ -75,13 +78,47 @@ export function getPalaceCasinoGames(
   });
 }
 
+export type PalaceCasinoUser = { user_code: number; is_new_user: boolean };
+
+/** Creates (or, if the name already exists, just returns) the Palace
+ * Casino user for one of our players. Idempotent by name — safe, and
+ * documented as the intended pattern, to call on every launch rather than
+ * caching user_code ourselves. `name` should be memberAccountForUser(userId)
+ * (routes/casino.ts) for consistency with the SilentAPI integration and so
+ * routes/palaceCasino.ts's callback handler can reverse the mapping the
+ * same way (userIdFromMemberAccount). */
+export function ensurePalaceCasinoUser(name: string): Promise<PalaceCasinoUser> {
+  return palaceCasinoPost<PalaceCasinoUser>("/user/create", { name });
+}
+
+export type PalaceCasinoGameUrl = { game_url: string };
+
+/** Gets a one-time game launch URL, valid for 10 minutes. `gameSymbol` is
+ * the game_code from getPalaceCasinoGames(). rtp: 0 applies the agent's
+ * configured RTP (no per-user override). */
+export function getPalaceCasinoGameUrl(args: {
+  userCode: number;
+  providerId: number;
+  gameSymbol: string;
+  returnUrl: string;
+  lang?: number;
+}): Promise<PalaceCasinoGameUrl> {
+  return palaceCasinoPost<PalaceCasinoGameUrl>("/game/game-url", {
+    user_code: args.userCode,
+    provider_id: args.providerId,
+    game_symbol: args.gameSymbol,
+    lang: args.lang ?? 1,
+    return_url: args.returnUrl,
+    rtp: 0,
+    is_finish_jackpot: true,
+  });
+}
+
 export type PalaceCasinoWalletResult = { balance: number; amount: number };
 
 /** Pays money into the user's Palace Casino wallet, deducted from our
- * agent points. userCode is whatever Palace Casino returned when the
- * player account was first created there — not documented yet how that
- * account gets created, so this can't be called end-to-end until that's
- * clarified. */
+ * agent points. Transfer-mode only — not part of the Seamless integration
+ * path we're using, see module header. */
 export function palaceCasinoDeposit(
   userCode: number,
   amount: number,
