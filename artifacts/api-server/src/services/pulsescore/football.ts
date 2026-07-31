@@ -10,7 +10,36 @@ const FOOTBALL_LIVE_TTL_MS = 1_000; // matches the PRO plan's 1 req/s rate limit
 let cache: { events: PulseScoreEvent[]; fetchedAt: number } | null = null;
 let inFlight: Promise<PulseScoreEvent[]> | null = null;
 
+// PulseScore has no equivalent of Statpal's /user-request-count endpoint to
+// query usage from their side, so we count our own outbound calls instead —
+// resets at UTC midnight, same "requests today" shape the Statpal usage
+// admin card already shows.
+let requestsToday = 0;
+let usageDate = todayUtc();
+
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function rollUsageDateIfNeeded(): void {
+  const d = todayUtc();
+  if (d !== usageDate) {
+    usageDate = d;
+    requestsToday = 0;
+  }
+}
+
+export function getPulseScoreFootballUsage(): {
+  requestsToday: number;
+  date: string;
+} {
+  rollUsageDateIfNeeded();
+  return { requestsToday, date: usageDate };
+}
+
 async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
+  rollUsageDateIfNeeded();
+  requestsToday += 1;
   try {
     const data = await pulseScoreGet<PulseScoreEvent[]>(
       "/live-events?sport=soccer",

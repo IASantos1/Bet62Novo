@@ -17,6 +17,24 @@ let startedOnce = false;
 const liveByEventId = new Map<string, PulseScoreEvent>();
 let lastFrameAt = 0;
 
+// Same "count our own usage" reasoning as football.ts — PulseScore has no
+// usage-lookup endpoint, so track frames received (~1 per second while
+// connected) ourselves, resetting at UTC midnight.
+let framesToday = 0;
+let usageDate = todayUtc();
+
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function rollUsageDateIfNeeded(): void {
+  const d = todayUtc();
+  if (d !== usageDate) {
+    usageDate = d;
+    framesToday = 0;
+  }
+}
+
 type ConnectedMessage = {
   type: "connected";
   bookmaker: string;
@@ -33,6 +51,8 @@ type BroadcastFrame = {
 
 function applyFrame(frame: BroadcastFrame): void {
   lastFrameAt = Date.now();
+  rollUsageDateIfNeeded();
+  framesToday += 1;
   const seenIds = new Set<string>();
   for (const ev of frame.data ?? []) {
     if (!ev?.eventId) continue;
@@ -134,10 +154,15 @@ export function pulseScoreTennisWsStatus(): {
   connected: boolean;
   lastFrameAgeMs: number | null;
   liveCount: number;
+  framesToday: number;
+  date: string;
 } {
+  rollUsageDateIfNeeded();
   return {
     connected,
     lastFrameAgeMs: lastFrameAt > 0 ? Date.now() - lastFrameAt : null,
     liveCount: liveByEventId.size,
+    framesToday,
+    date: usageDate,
   };
 }
