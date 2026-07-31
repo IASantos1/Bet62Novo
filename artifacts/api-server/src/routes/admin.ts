@@ -18,7 +18,10 @@ import {
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
-import { getPulseScoreFootballLive } from "../services/pulsescore/football.js";
+import {
+  getPulseScoreFootballLive,
+  getPulseScoreFootballUsage,
+} from "../services/pulsescore/football.js";
 import {
   getPulseScoreTennisLive,
   pulseScoreTennisWsStatus,
@@ -2283,6 +2286,21 @@ router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res)
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+});
+
+// PulseScore usage — same "Utilização" card the admin dashboard already
+// shows for Statpal, but PulseScore has no /user-request-count equivalent
+// to query from their side, so this reports what WE'VE counted ourselves
+// (see the requestsToday/framesToday counters in the pulsescore services).
+router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res) => {
+  if (!CONFIG.PULSESCORE_API_KEY) {
+    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
+    return;
+  }
+  res.json({
+    football: getPulseScoreFootballUsage(),
+    tennis: pulseScoreTennisWsStatus(),
+  });
 });
 
 // Read-only diagnostic: market names Statpal's /odds/prematch feed returns

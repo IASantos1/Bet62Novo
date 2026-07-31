@@ -793,6 +793,19 @@ export default function AdminPage() {
   } | null>(null);
   const [statpalUsageLoading, setStatpalUsageLoading] = useState(false);
 
+  // PulseScore API usage (real bookmaker odds — football REST + tennis WS)
+  const [pulsescoreUsage, setPulsescoreUsage] = useState<{
+    football: { requestsToday: number; date: string };
+    tennis: {
+      connected: boolean;
+      lastFrameAgeMs: number | null;
+      liveCount: number;
+      framesToday: number;
+      date: string;
+    };
+  } | null>(null);
+  const [pulsescoreUsageLoading, setPulsescoreUsageLoading] = useState(false);
+
   // Filters/UI
   const [userSearch, setUserSearch] = useState("");
   const [betSearch, setBetSearch] = useState("");
@@ -904,6 +917,19 @@ export default function AdminPage() {
       /* ignore */
     } finally {
       setStatpalUsageLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchPulsescoreUsage = useCallback(async () => {
+    if (!token) return;
+    setPulsescoreUsageLoading(true);
+    try {
+      const res = await fetch("/api/admin/pulsescore-usage", { headers: authHeader });
+      if (res.ok) setPulsescoreUsage(await res.json());
+    } catch {
+      /* ignore */
+    } finally {
+      setPulsescoreUsageLoading(false);
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1224,7 +1250,10 @@ export default function AdminPage() {
     if (!token) return;
     // stats/users/bets/payments/withdrawals/riskData/analyticsData fetch
     // themselves via useQuery's `enabled` above, reacting to token/activeTab.
-    if (activeTab === "dashboard") fetchStatpalUsage();
+    if (activeTab === "dashboard") {
+      fetchStatpalUsage();
+      fetchPulsescoreUsage();
+    }
     else if (activeTab === "withdrawals") {
       fetchAuditLogs();
     } else if (activeTab === "events") {
@@ -2537,6 +2566,76 @@ export default function AdminPage() {
                       ) : (
                         <div className="text-center text-zinc-600 text-sm py-4">
                           Não foi possível obter dados da Statpal.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── PulseScore API Usage (real bookmaker odds) ── */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
+                          <Activity size={16} className="text-orange-400" />
+                          PulseScore API — Utilização
+                        </h3>
+                        <button
+                          onClick={fetchPulsescoreUsage}
+                          disabled={pulsescoreUsageLoading}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Atualizar"
+                        >
+                          <RefreshCw size={14} className={pulsescoreUsageLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
+
+                      {pulsescoreUsageLoading && !pulsescoreUsage ? (
+                        <div className="flex items-center justify-center py-6">
+                          <Loader2 size={22} className="animate-spin text-orange-400" />
+                        </div>
+                      ) : pulsescoreUsage ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                          {/* Football — request counter */}
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-3xl font-black text-orange-400 tabular-nums">
+                              {Number(pulsescoreUsage.football.requestsToday).toLocaleString("pt-PT")}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Futebol — pedidos hoje (REST)</div>
+                          </div>
+
+                          {/* Football — date */}
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-base font-black text-white tabular-nums">
+                              {pulsescoreUsage.football.date
+                                ? (() => {
+                                    const [y, m, d] = pulsescoreUsage.football.date.split("-");
+                                    return `${d}/${m}/${y}`;
+                                  })()
+                                : "—"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Data (UTC)</div>
+                          </div>
+
+                          {/* Tennis — WS connection status */}
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className={`flex items-center gap-1.5 text-sm font-black ${pulsescoreUsage.tennis.connected ? "text-emerald-400" : "text-red-400"}`}>
+                              <span className={`inline-block w-2 h-2 rounded-full ${pulsescoreUsage.tennis.connected ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
+                              {pulsescoreUsage.tennis.connected ? "Conectado" : "Desconectado"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Tênis — WebSocket</div>
+                          </div>
+
+                          {/* Tennis — frames + live count */}
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-3xl font-black text-orange-400 tabular-nums">
+                              {Number(pulsescoreUsage.tennis.framesToday).toLocaleString("pt-PT")}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">
+                              Tênis — frames hoje · {pulsescoreUsage.tennis.liveCount} ao vivo
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center text-zinc-600 text-sm py-4">
+                          Não foi possível obter dados da PulseScore.
                         </div>
                       )}
                     </div>
