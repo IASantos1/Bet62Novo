@@ -492,6 +492,7 @@ type CasinoGame = {
   img: string | null;
   source?: string; // "silentapi" (default) | "palace"
 };
+type CasinoGameGroup = { name: string; games: CasinoGame[] };
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -4522,6 +4523,15 @@ export default function Home({
   const [casinoTotal, setCasinoTotal] = useState(0);
   const [casinoLoadingPage, setCasinoLoadingPage] = useState(false);
   const CASINO_PAGE_SIZE = 24;
+  // Franchise rows ("Gates of Olympus", "Big Bass", ...) — the default
+  // browsing view. Paginated by row, not by game (loadMoreCasinoGroups
+  // fetches the next batch of franchises, not the next batch of games).
+  // Search bypasses this entirely and falls back to the flat grid above.
+  const [casinoGroups, setCasinoGroups] = useState<CasinoGameGroup[]>([]);
+  const [casinoGroupsPage, setCasinoGroupsPage] = useState(1);
+  const [casinoGroupsTotal, setCasinoGroupsTotal] = useState(0);
+  const [casinoGroupsLoading, setCasinoGroupsLoading] = useState(false);
+  const CASINO_GROUPS_PAGE_SIZE = 12;
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -8587,17 +8597,17 @@ export default function Home({
     return () => clearTimeout(t);
   }, [casinoSearch]);
 
-  // The catalog (2800+ games) is never fetched in full — the backend pages
-  // it 24 at a time. Changing the provider or search resets to page 1;
-  // "Carregar mais" advances the page and appends to the accumulated list.
+  // Flat grid — only used while searching (a handful of results split into
+  // many 1-game franchise rows isn't useful). Browsing without a search
+  // term uses the grouped-by-franchise effect below instead.
   useEffect(() => {
-    if (activeTab !== "casino") return;
+    if (activeTab !== "casino" || !casinoSearchDebounced) return;
     setCasinoPage(1);
     setCasinoGames([]);
     setCasinoLoadingPage(true);
     const params = new URLSearchParams({ page: "1", limit: String(CASINO_PAGE_SIZE) });
     if (casinoProvider !== "Todos") params.set("provider", casinoProvider);
-    if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
+    params.set("search", casinoSearchDebounced);
     fetch(`/api/casino/games?${params}`)
       .then((r) => r.json())
       .then((data) => {
@@ -8626,6 +8636,50 @@ export default function Home({
       .catch(() => {})
       .finally(() => setCasinoLoadingPage(false));
   }, [casinoPage, casinoProvider, casinoSearchDebounced]);
+
+  // Franchise rows — the default browsing view (no search term). Changing
+  // provider or clearing the search resets to page 1 (row 1..12); "Carregar
+  // mais" advances to the next batch of franchise rows and appends.
+  useEffect(() => {
+    if (activeTab !== "casino" || casinoSearchDebounced) return;
+    setCasinoGroupsPage(1);
+    setCasinoGroups([]);
+    setCasinoGroupsLoading(true);
+    const params = new URLSearchParams({
+      page: "1",
+      limit: String(CASINO_GROUPS_PAGE_SIZE),
+    });
+    if (casinoProvider !== "Todos") params.set("provider", casinoProvider);
+    fetch(`/api/casino/games/grouped?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.groups)) setCasinoGroups(data.groups);
+        setCasinoGroupsTotal(Number(data?.totalGroups) || 0);
+      })
+      .catch(() => {})
+      .finally(() => setCasinoGroupsLoading(false));
+  }, [activeTab, casinoProvider, casinoSearchDebounced]);
+
+  const loadMoreCasinoGroups = useCallback(() => {
+    const nextPage = casinoGroupsPage + 1;
+    setCasinoGroupsLoading(true);
+    const params = new URLSearchParams({
+      page: String(nextPage),
+      limit: String(CASINO_GROUPS_PAGE_SIZE),
+    });
+    if (casinoProvider !== "Todos") params.set("provider", casinoProvider);
+    fetch(`/api/casino/games/grouped?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.groups)) {
+          setCasinoGroups((prev) => [...prev, ...data.groups]);
+          setCasinoGroupsPage(nextPage);
+        }
+        setCasinoGroupsTotal(Number(data?.totalGroups) || 0);
+      })
+      .catch(() => {})
+      .finally(() => setCasinoGroupsLoading(false));
+  }, [casinoGroupsPage, casinoProvider]);
 
   // Real-time stream for pending ticket states, with fetch fallback if SSE drops.
   useEffect(() => {
@@ -24661,12 +24715,43 @@ export default function Home({
             {!expandedMatch && activeTab === "casino" && (() => {
               const providerChips = ["Todos", ...casinoProviders];
               const hasMore = casinoGames.length < casinoTotal;
+              const isSearching = !!casinoSearchDebounced;
+              const hasMoreGroups = casinoGroups.length < casinoGroupsTotal;
+
+              const renderGameTile = (game: CasinoGame, sizeClass: string) => (
+                <button
+                  key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
+                  disabled={casinoLoadingGame === game.id}
+                  onClick={() => launchCasinoGame(game)}
+                  className={`${sizeClass} aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
+                >
+                  {casinoLoadingGame === game.id ? (
+                    <Loader2 className="animate-spin text-zinc-400" size={28} />
+                  ) : game.img ? (
+                    <img
+                      src={game.img}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <Dices className="text-red-600" size={28} />
+                  )}
+                  <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight bg-black/70 py-1 mt-auto w-full">
+                    {game.name}
+                  </span>
+                </button>
+              );
+
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="mb-4">
                     <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
                       <Dices className="text-red-600" /> Cassino
-                      {casinoTotal > 0 && (
+                      {isSearching && casinoTotal > 0 && (
                         <span className="text-sm font-normal text-zinc-400 ml-1">
                           ({casinoTotal} jogos)
                         </span>
@@ -24714,55 +24799,74 @@ export default function Home({
                     </div>
                   )}
 
-                  {casinoGames.length === 0 && casinoLoadingPage ? (
+                  {isSearching ? (
+                    // Search results: flat grid (grouping a handful of matches
+                    // into many 1-game franchise rows isn't useful here).
+                    casinoGames.length === 0 && casinoLoadingPage ? (
+                      <div className="text-center text-zinc-500 py-16">
+                        <Loader2 className="animate-spin mx-auto mb-3 opacity-60" size={32} />
+                        <p className="font-medium">A carregar catálogo…</p>
+                      </div>
+                    ) : casinoGames.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-16">
+                        <p className="font-medium">Nenhum jogo encontrado.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                          {casinoGames.map((game) => renderGameTile(game, ""))}
+                        </div>
+
+                        {hasMore && (
+                          <div className="flex justify-center mt-5">
+                            <button
+                              onClick={loadMoreCasinoGames}
+                              disabled={casinoLoadingPage}
+                              className="px-6 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm font-bold text-white hover:border-zinc-600 transition-colors disabled:opacity-60 flex items-center gap-2"
+                            >
+                              {casinoLoadingPage && <Loader2 className="animate-spin" size={14} />}
+                              Carregar mais
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )
+                  ) : // Default browsing view: one horizontally-scrollable row per
+                  // franchise ("Gates of Olympus", "Big Bass", ...).
+                  casinoGroups.length === 0 && casinoGroupsLoading ? (
                     <div className="text-center text-zinc-500 py-16">
                       <Loader2 className="animate-spin mx-auto mb-3 opacity-60" size={32} />
                       <p className="font-medium">A carregar catálogo…</p>
                     </div>
-                  ) : casinoGames.length === 0 ? (
+                  ) : casinoGroups.length === 0 ? (
                     <div className="text-center text-zinc-500 py-16">
                       <p className="font-medium">Nenhum jogo encontrado.</p>
                     </div>
                   ) : (
                     <>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                        {casinoGames.map((game) => (
-                          <button
-                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
-                            disabled={casinoLoadingGame === game.id}
-                            onClick={() => launchCasinoGame(game)}
-                            className="aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
-                          >
-                            {casinoLoadingGame === game.id ? (
-                              <Loader2 className="animate-spin text-zinc-400" size={28} />
-                            ) : game.img ? (
-                              <img
-                                src={game.img}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover"
-                                loading="lazy"
-                                onError={(e) => {
-                                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                                }}
-                              />
-                            ) : (
-                              <Dices className="text-red-600" size={28} />
-                            )}
-                            <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight bg-black/70 py-1 mt-auto w-full">
-                              {game.name}
-                            </span>
-                          </button>
+                      <div className="space-y-6">
+                        {casinoGroups.map((group) => (
+                          <div key={group.name}>
+                            <h3 className="text-sm font-black uppercase tracking-wide text-zinc-300 mb-2">
+                              {group.name}
+                            </h3>
+                            <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+                              {group.games.map((game) =>
+                                renderGameTile(game, "w-28 sm:w-32 flex-shrink-0"),
+                              )}
+                            </div>
+                          </div>
                         ))}
                       </div>
 
-                      {hasMore && (
+                      {hasMoreGroups && (
                         <div className="flex justify-center mt-5">
                           <button
-                            onClick={loadMoreCasinoGames}
-                            disabled={casinoLoadingPage}
+                            onClick={loadMoreCasinoGroups}
+                            disabled={casinoGroupsLoading}
                             className="px-6 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm font-bold text-white hover:border-zinc-600 transition-colors disabled:opacity-60 flex items-center gap-2"
                           >
-                            {casinoLoadingPage && <Loader2 className="animate-spin" size={14} />}
+                            {casinoGroupsLoading && <Loader2 className="animate-spin" size={14} />}
                             Carregar mais
                           </button>
                         </div>
