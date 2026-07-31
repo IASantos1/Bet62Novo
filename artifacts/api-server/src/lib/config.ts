@@ -40,6 +40,18 @@ const SILENTAPI_AUTH_TOKEN = process.env["SILENTAPI_AUTH_TOKEN"] ?? "";
 const SILENTAPI_CALLBACK_SECRET =
   process.env["SILENTAPI_CALLBACK_SECRET"] ?? "";
 
+// PulseScore — normalized real-bookmaker odds aggregator (bet365, etc.).
+// Football pulled via REST polling; tennis via its WebSocket feed (PRO plan
+// allows exactly 1 concurrent WS connection, so only one sport can stream
+// live at a time — tennis was chosen since point-by-point pricing benefits
+// most from push updates). Running in parallel with the existing in-house
+// odds engine for comparison, not replacing it yet.
+const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
+const PULSESCORE_BASE_URL =
+  process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
+const PULSESCORE_BOOKMAKER =
+  process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
+
 export const CONFIG = {
   SPORTSAPI_KEY,
   STATPAL_API_KEY,
@@ -47,6 +59,9 @@ export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
   SILENTAPI_CALLBACK_SECRET,
+  PULSESCORE_API_KEY,
+  PULSESCORE_BASE_URL,
+  PULSESCORE_BOOKMAKER,
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
