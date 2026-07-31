@@ -18,6 +18,12 @@ import {
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
+import { getPulseScoreFootballLive } from "../services/pulsescore/football.js";
+import {
+  getPulseScoreTennisLive,
+  pulseScoreTennisWsStatus,
+} from "../services/pulsescore/tennisWs.js";
+import { CONFIG } from "../lib/config.js";
 import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
 import { timingSafeEqualString } from "../lib/security.js";
 import fs from "fs";
@@ -2246,6 +2252,34 @@ router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) 
     logger.error({ err }, "POST /api/admin/sportscore-test error");
     res.status(500).json({
       error: "Erro ao testar casamento com a SportScore",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+// Read-only diagnostic for the PulseScore integration (real bookmaker odds,
+// running in parallel with the in-house odds engine for comparison — not
+// wired into what users see yet). Football comes from a fresh REST fetch;
+// tennis comes from whatever the WebSocket's last ~1s frame cached, since
+// that connection is push-based rather than polled on demand.
+router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res) => {
+  if (!CONFIG.PULSESCORE_API_KEY) {
+    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
+    return;
+  }
+  try {
+    const [football, tennisStatus] = await Promise.all([
+      getPulseScoreFootballLive(),
+      Promise.resolve(pulseScoreTennisWsStatus()),
+    ]);
+    res.json({
+      football: { count: football.length, events: football },
+      tennis: { ...tennisStatus, events: getPulseScoreTennisLive() },
+    });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/pulsescore-debug error");
+    res.status(500).json({
+      error: "Erro ao consultar PulseScore",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
