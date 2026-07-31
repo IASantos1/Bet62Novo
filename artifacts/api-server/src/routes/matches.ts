@@ -1179,37 +1179,9 @@ async function fetchStatpalFootballLiveV2(): Promise<{
     });
     if (resp.ok) {
       const raw = (await resp.json()) as Record<string, unknown>;
-      const topKeys = Object.keys(raw);
       const { leagues, updatedTs } = extractStatpalLeagueFeed(raw, "live_matches");
       const events = leagues.flatMap((league) =>
         statpalList(league.match).map((match) => statpalMatchToV2Event(league, match)),
-      );
-      // Diagnostic: log the raw home/away object from the first match of the first
-      // league so we can see which field names the API actually uses for the score.
-      const firstLeague = leagues[0];
-      const firstMatch = firstLeague ? statpalList(firstLeague.match)[0] : undefined;
-      const firstMatchRaw = firstLeague
-        ? statpalList((firstLeague as unknown as Record<string, unknown>)["match"] as unknown)[0]
-        : undefined;
-      logger.info(
-        {
-          topKeys,
-          leagueCount: leagues.length,
-          eventCount: events.length,
-          source: "matches/live",
-          // Show what the first match's home/away objects look like so we can
-          // identify the correct field name for the score.
-          firstMatchHome: firstMatchRaw
-            ? (firstMatchRaw as Record<string, unknown>)["home"]
-            : undefined,
-          firstMatchAway: firstMatchRaw
-            ? (firstMatchRaw as Record<string, unknown>)["away"]
-            : undefined,
-          firstMatchNormalized: firstMatch
-            ? { home: firstMatch.home, away: firstMatch.away, status: firstMatch.status }
-            : undefined,
-        },
-        "[statpal-football-live] raw response shape",
       );
       if (events.length > 0) {
         // Wait for the parallel odds/live fetch so oddsLiveKnownIds is populated
