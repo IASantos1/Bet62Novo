@@ -17904,17 +17904,16 @@ async function buildFootballLiveV2(
     }
   }
 
-  // Apply market-tier depth/staking gating to the OUTPUT only — never mutate
-  // the objects stored in liveMatchState, since drift/suspension logic further
-  // up reads `existing.markets`/`existing._baseMarkets` and needs the full,
-  // untrimmed data to keep working correctly for every tier.
+  // Tag matchTier for reference only — do NOT trim markets by tier here.
+  // Pre-match never applied this cut (full market set always shown), so
+  // trimming it live made lower-tier leagues (most of the catalog) lose
+  // almost every market the instant a match went live — markets only
+  // "worked" pre-match. Stake caps for lower tiers are unaffected: bets.ts
+  // recomputes footballMarketTier()/footballMarketTierMaxStake() directly
+  // from liveMatchState at bet-placement time, independent of this field.
   return result.map((m) => {
     const tier = footballMarketTier(m.league, m.country);
-    return tier === 1
-      ? m.matchTier === tier
-        ? m
-        : { ...m, matchTier: tier }
-      : { ...m, matchTier: tier, markets: filterFootballMarketsByTier(m.markets, tier) };
+    return m.matchTier === tier ? m : { ...m, matchTier: tier };
   });
 }
 
