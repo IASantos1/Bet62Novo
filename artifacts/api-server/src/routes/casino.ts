@@ -14,11 +14,14 @@ import {
 
 const router: IRouter = Router();
 
-// Catalog now lives in Postgres (casino_games table, seeded via
-// `pnpm run seed:casino` from the provider dumps) instead of being shipped
-// to the browser as one ~700KB JSON blob. The front-end pages through it
-// 24 games at a time and never talks to the aggregator directly for
-// listing — only /launch calls out to SilentAPI.
+// Catalog lives in Postgres (casino_games table). SilentAPI is no longer
+// used — /games and /providers below only ever return source="palace"
+// rows (seeded via `pnpm run seed:palace-casino`, a live sync against
+// Palace Casino's own API); the SilentAPI /launch route and callback
+// further down are kept as dormant code, not deleted, in case that
+// decision changes, but nothing in the active catalog reaches them. The
+// front-end pages through the catalog 24 games at a time and never talks
+// to either aggregator directly for listing.
 const GAMES_CACHE_TTL_SECONDS = 300;
 const PROVIDERS_CACHE_TTL_SECONDS = 3600;
 const DEFAULT_LIMIT = 24;
@@ -30,7 +33,7 @@ router.get("/games", async (req: Request, res: Response) => {
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
-  const cacheKey = `casino:games:v1:${provider || "*"}:${search.toLowerCase()}:${page}:${limit}`;
+  const cacheKey = `casino:games:v2:${provider || "*"}:${search.toLowerCase()}:${page}:${limit}`;
   const cached = await statpalCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -38,7 +41,13 @@ router.get("/games", async (req: Request, res: Response) => {
     return;
   }
 
-  const conditions = [eq(casinoGamesTable.isActive, true)];
+  // Palace Casino only — SilentAPI is no longer used (kept as dormant code,
+  // not deleted, in case that decision changes; explicitly filtered out
+  // here rather than relying on its catalog happening to be empty).
+  const conditions = [
+    eq(casinoGamesTable.isActive, true),
+    eq(casinoGamesTable.source, "palace"),
+  ];
   if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
   const where = and(...conditions);
@@ -73,7 +82,7 @@ router.get("/games", async (req: Request, res: Response) => {
 });
 
 router.get("/providers", async (_req: Request, res: Response) => {
-  const cacheKey = "casino:providers:v1";
+  const cacheKey = "casino:providers:v2";
   const cached = await statpalCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -84,7 +93,7 @@ router.get("/providers", async (_req: Request, res: Response) => {
   const rows = await db
     .selectDistinct({ provider: casinoGamesTable.provider })
     .from(casinoGamesTable)
-    .where(eq(casinoGamesTable.isActive, true))
+    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, "palace")))
     .orderBy(asc(casinoGamesTable.provider));
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });
