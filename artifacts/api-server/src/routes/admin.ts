@@ -53,6 +53,8 @@ import {
   getPalaceCasinoProviders,
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
+import { listMappings, setMapping } from "../services/liveStream/mapping.js";
+import { getLiveEvents } from "../services/betby/state.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2808,6 +2810,67 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
     res.status(500).json({ error: "Erro ao gerar banner" });
   }
 });
+
+// ── BET62 Live + Match Tracker + Streaming — mapping admin ──────────────────
+// BetBY and SMYTDRYT don't share an event id (the Match Tracker doesn't need
+// mapping — it's resolved from Statpal by team name, see services/statpal/
+// liveTracker.ts), so the poller (services/betby/poller.ts) seeds one row
+// per live BetBY event here with only home/away/league filled in; an admin
+// fills in the SMYTDRYT video fields (looked up on SMYTDRYT's own dashboard
+// for the same fixture) to complete the stream side of the wiring.
+router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const [mappings, liveEvents] = await Promise.all([listMappings(), Promise.resolve(getLiveEvents())]);
+    const liveById = new Map(liveEvents.map((e) => [e.betbyEventId, e]));
+    res.json({
+      mappings: mappings.map((m) => ({
+        ...m,
+        isLive: liveById.has(m.betbyEventId),
+        status: liveById.get(m.betbyEventId)?.status ?? null,
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/live-stream/mappings error");
+    res.status(500).json({ error: "Erro ao listar mapeamentos" });
+  }
+});
+
+router.patch(
+  "/live-stream/mappings/:betbyEventId",
+  adminMiddleware,
+  async (req: AdminRequest, res) => {
+    const betbyEventId = String(req.params["betbyEventId"]);
+    const body = req.body as Record<string, unknown>;
+    const toIntOrNull = (v: unknown): number | null | undefined => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const toStrOrNull = (v: unknown): string | null | undefined => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      return String(v);
+    };
+    try {
+      const updated = await setMapping(betbyEventId, {
+        videoMatchId: toIntOrNull(body["videoMatchId"]),
+        videoSportId: toIntOrNull(body["videoSportId"]),
+        videoTournamentId: toIntOrNull(body["videoTournamentId"]),
+        videoStatsHost: toStrOrNull(body["videoStatsHost"]),
+        videoKey: toStrOrNull(body["videoKey"]),
+      });
+      if (!updated) {
+        res.status(404).json({ error: "Mapeamento não encontrado" });
+        return;
+      }
+      res.json(updated);
+    } catch (err) {
+      logger.error({ err, betbyEventId }, "PATCH /api/admin/live-stream/mappings/:betbyEventId error");
+      res.status(500).json({ error: "Erro ao atualizar mapeamento" });
+    }
+  },
+);
 
 // Read-only diagnostic: market names Statpal's /odds/prematch feed returns
 // that we don't currently parse into AdvancedMarkets (see matches.ts —

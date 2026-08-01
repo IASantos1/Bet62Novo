@@ -62,6 +62,7 @@ import {
   ArrowLeft,
   Dices,
   ExternalLink,
+  Radio,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -493,6 +494,33 @@ type CasinoGame = {
   source?: string; // "silentapi" (default) | "palace"
 };
 type CasinoGameGroup = { name: string; games: CasinoGame[] };
+// BET62 Live + Match Tracker + Streaming (BetBY live list + Statpal tracker
+// + SMYTDRYT stream) — separate pipeline/ID scheme from the existing
+// Statpal/SportsAPI-backed live matches above; only rendered when a BetBY
+// event has a stream ready.
+type BetbyLiveEvent = {
+  betbyEventId: string;
+  sport: string;
+  league: string;
+  country: string;
+  home: string;
+  away: string;
+  status: "LIVE" | "PREMATCH" | "FINISHED";
+  minute?: string;
+  homeScore?: number;
+  awayScore?: number;
+  tracker?: { provider: "statpal"; eventId: string };
+  stream?: { provider: "smytdryt"; matchId: number; key: string; url: string };
+};
+type MatchTracker = {
+  provider: "statpal";
+  eventId: string;
+  status: string;
+  minute: string;
+  homeScore: number;
+  awayScore: number;
+  incidents: Array<{ type: string; team: string; minute: number; player: string }>;
+};
 type CasinoBanner = {
   id: number;
   title: string;
@@ -4397,6 +4425,142 @@ function isWCMatch(league: string | null | undefined): boolean {
 
 function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
+// BET62 Live + Match Tracker + Streaming — HLS.js video (SMYTDRYT) +
+// polling Match Tracker (StatScore), self-contained so its lifecycle
+// (attach/detach HLS, start/stop tracker polling) doesn't entangle with the
+// rest of the page's state.
+function LiveStreamModal({
+  event,
+  onClose,
+}: {
+  event: BetbyLiveEvent;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [tracker, setTracker] = useState<MatchTracker | null>(null);
+  const [videoError, setVideoError] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const url = event.stream?.url;
+    if (!video || !url) return;
+    setVideoError(false);
+    let hls: import("hls.js").default | null = null;
+    let cancelled = false;
+
+    import("hls.js").then(({ default: Hls }) => {
+      if (cancelled) return;
+      if (Hls.isSupported()) {
+        hls = new Hls();
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.ERROR, (_evt, data) => {
+          if (data.fatal) setVideoError(true);
+        });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = url;
+      } else {
+        setVideoError(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      hls?.destroy();
+    };
+  }, [event.stream?.url]);
+
+  useEffect(() => {
+    if (!event.tracker) return;
+    let cancelled = false;
+    const poll = () => {
+      fetch(`/api/tracker/${encodeURIComponent(event.betbyEventId)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled && data) setTracker(data);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [event.betbyEventId, event.tracker]);
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+      <div className="flex items-center justify-between px-3 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0 gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-white truncate">
+            {event.home} vs {event.away}
+          </div>
+          <div className="text-[11px] text-zinc-500 truncate">{event.league}</div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
+          aria-label="Fechar transmissão"
+        >
+          <X size={22} />
+        </button>
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+        <div className="relative bg-black flex-1 lg:flex-[2] flex items-center justify-center min-h-[200px]">
+          {videoError ? (
+            <div className="text-center text-zinc-500 text-sm p-6">
+              Não foi possível carregar a transmissão.
+            </div>
+          ) : (
+            <video ref={videoRef} controls autoPlay playsInline className="w-full h-full" />
+          )}
+        </div>
+
+        <div className="flex-1 lg:flex-[1] lg:max-w-sm bg-zinc-950 border-t lg:border-t-0 lg:border-l border-zinc-800/60 overflow-y-auto p-4">
+          {!tracker ? (
+            <div className="text-center text-zinc-600 text-sm py-8">
+              <Loader2 className="animate-spin mx-auto mb-2 opacity-60" size={22} />
+              A carregar tracker…
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-2xl font-black text-white">
+                  {tracker.homeScore} - {tracker.awayScore}
+                </div>
+                <div className="text-xs font-bold text-red-400 uppercase">
+                  {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
+                </div>
+              </div>
+              <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
+                Incidentes
+              </div>
+              {tracker.incidents.length === 0 ? (
+                <div className="text-xs text-zinc-600">Sem incidentes ainda.</div>
+              ) : (
+                <div className="space-y-2">
+                  {tracker.incidents.map((inc, i) => (
+                    <div
+                      key={i}
+                      className="text-xs text-zinc-300 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2"
+                    >
+                      <span className="text-zinc-500 font-mono shrink-0">{inc.minute}'</span>
+                      <span className="font-medium capitalize">{inc.type}</span>
+                      <span className="text-zinc-500 truncate">{inc.player}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home({
   initialTab = "sports",
 }: {
@@ -4544,6 +4708,8 @@ export default function Home({
   const CASINO_GROUPS_PAGE_SIZE = 12;
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
+  const [betbyLiveEvents, setBetbyLiveEvents] = useState<BetbyLiveEvent[]>([]);
+  const [liveStreamModalEvent, setLiveStreamModalEvent] = useState<BetbyLiveEvent | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -8634,6 +8800,28 @@ export default function Home({
         if (Array.isArray(data?.banners)) setCasinoMiddleBanners(data.banners);
       })
       .catch(() => {});
+  }, [activeTab]);
+
+  // BET62 Live Stream (BetBY + StatScore + SMYTDRYT) — separate feed from
+  // the Statpal/SportsAPI live matches above; polls independently since it
+  // has its own 5s-cadence source (services/betby/poller.ts).
+  useEffect(() => {
+    if (activeTab !== "live") return;
+    let cancelled = false;
+    const poll = () => {
+      fetch("/api/live")
+        .then((r) => r.json())
+        .then((data) => {
+          if (!cancelled && Array.isArray(data)) setBetbyLiveEvents(data);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [activeTab]);
 
   // Flat grid — only used while searching (a handful of results split into
@@ -24532,6 +24720,43 @@ export default function Home({
                   </h2>
                 </div>
 
+                {/* ── Transmissões ao vivo (BetBY + StatScore + SMYTDRYT) ── */}
+                {betbyLiveEvents.filter((e) => e.stream).length > 0 && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-black uppercase tracking-wide text-zinc-300 mb-2 flex items-center gap-1.5">
+                      <Radio size={14} className="text-red-500" /> Transmissões
+                      ao vivo
+                    </h3>
+                    <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+                      {betbyLiveEvents
+                        .filter((e) => e.stream)
+                        .map((e) => (
+                          <button
+                            key={e.betbyEventId}
+                            onClick={() => setLiveStreamModalEvent(e)}
+                            className="flex-shrink-0 w-56 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-red-500/50 transition-colors p-3 text-left"
+                          >
+                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 mb-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                              AO VIVO {e.minute ? `· ${e.minute}` : ""}
+                            </div>
+                            <div className="text-sm font-semibold text-white truncate">
+                              {e.home} <span className="text-zinc-500">vs</span> {e.away}
+                            </div>
+                            <div className="text-xs text-zinc-500 truncate mt-0.5">
+                              {e.league}
+                            </div>
+                            {(e.homeScore != null || e.awayScore != null) && (
+                              <div className="text-lg font-black text-white mt-1">
+                                {e.homeScore ?? 0} - {e.awayScore ?? 0}
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* ── Search bar ── */}
                 {liveMatches.length > 0 && (
                   <div className="relative mb-3">
@@ -26501,6 +26726,13 @@ export default function Home({
             allow="autoplay; fullscreen"
           />
         </div>
+      )}
+
+      {liveStreamModalEvent && (
+        <LiveStreamModal
+          event={liveStreamModalEvent}
+          onClose={() => setLiveStreamModalEvent(null)}
+        />
       )}
 
       {/* MOBILE APP DOWNLOAD BANNER */}

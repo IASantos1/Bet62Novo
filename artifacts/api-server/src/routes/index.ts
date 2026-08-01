@@ -12,10 +12,12 @@ import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
 import predictionsRouter from "./predictions.js";
 import casinoRouter from "./casino.js";
+import liveStreamRouter from "./liveStream.js";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(liveStreamRouter);
 router.use("/auth", authRouter);
 router.use("/bets", betsRouter);
 router.use("/matches", matchesRouter);
