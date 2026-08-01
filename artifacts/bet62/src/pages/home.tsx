@@ -493,6 +493,16 @@ type CasinoGame = {
   source?: string; // "silentapi" (default) | "palace"
 };
 type CasinoGameGroup = { name: string; games: CasinoGame[] };
+type CasinoBanner = {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  ctaText: string | null;
+  imageUrl: string;
+  linkUrl: string | null;
+  position: "top" | "middle";
+  games: CasinoGame[];
+};
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -4532,6 +4542,8 @@ export default function Home({
   const [casinoGroupsTotal, setCasinoGroupsTotal] = useState(0);
   const [casinoGroupsLoading, setCasinoGroupsLoading] = useState(false);
   const CASINO_GROUPS_PAGE_SIZE = 12;
+  const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
+  const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -8606,6 +8618,23 @@ export default function Home({
     const t = setTimeout(() => setCasinoSearchDebounced(casinoSearch.trim()), 350);
     return () => clearTimeout(t);
   }, [casinoSearch]);
+
+  // Promo banners (top + middle) — near-static, fetch once per tab open.
+  useEffect(() => {
+    if (activeTab !== "casino") return;
+    fetch("/api/casino/banners?position=top")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.banners)) setCasinoTopBanners(data.banners);
+      })
+      .catch(() => {});
+    fetch("/api/casino/banners?position=middle")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.banners)) setCasinoMiddleBanners(data.banners);
+      })
+      .catch(() => {});
+  }, [activeTab]);
 
   // Flat grid — only used while searching (a handful of results split into
   // many 1-game franchise rows isn't useful). Browsing without a search
@@ -24744,6 +24773,42 @@ export default function Home({
               const isSearching = !!casinoSearchDebounced;
               const hasMoreGroups = casinoGroups.length < casinoGroupsTotal;
 
+              const handleBannerClick = (banner: CasinoBanner) => {
+                if (banner.linkUrl) {
+                  window.open(banner.linkUrl, "_blank", "noopener,noreferrer");
+                  return;
+                }
+                if (banner.games[0]) launchCasinoGame(banner.games[0]);
+              };
+
+              const renderBanner = (banner: CasinoBanner) => (
+                <button
+                  key={banner.id}
+                  onClick={() => handleBannerClick(banner)}
+                  className="relative w-full rounded-xl overflow-hidden border border-zinc-800 hover:border-zinc-700 transition-colors group text-left"
+                >
+                  <img
+                    src={banner.imageUrl}
+                    alt={banner.title}
+                    className="w-full h-28 sm:h-40 object-cover"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent flex flex-col justify-end p-3 sm:p-4">
+                    <span className="text-white font-black text-base sm:text-xl uppercase italic tracking-tight">
+                      {banner.title}
+                    </span>
+                    {banner.subtitle && (
+                      <span className="text-zinc-300 text-xs sm:text-sm mt-0.5">
+                        {banner.subtitle}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg bg-red-600 group-hover:bg-red-700 transition-colors text-white text-xs font-bold w-fit">
+                      {banner.ctaText || "Jogar Agora"}
+                    </span>
+                  </div>
+                </button>
+              );
+
               const renderGameTile = (game: CasinoGame, sizeClass: string) => (
                 <button
                   key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
@@ -24785,6 +24850,12 @@ export default function Home({
                     </h2>
                   </div>
 
+                  {casinoTopBanners.length > 0 && (
+                    <div className="space-y-3 mb-4">
+                      {casinoTopBanners.map((b) => renderBanner(b))}
+                    </div>
+                  )}
+
                   <div className="relative mb-3">
                     <Search
                       size={14}
@@ -24822,6 +24893,12 @@ export default function Home({
                           {p}
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                  {!isSearching && casinoMiddleBanners.length > 0 && (
+                    <div className="space-y-3 mb-4">
+                      {casinoMiddleBanners.map((b) => renderBanner(b))}
                     </div>
                   )}
 

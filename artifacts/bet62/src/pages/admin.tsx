@@ -203,6 +203,29 @@ type AdminCasinoTransaction = {
   createdAt: string;
 };
 
+type AdminCasinoBannerGame = {
+  id: number;
+  name: string;
+  provider: string;
+  img: string | null;
+};
+
+type AdminCasinoBanner = {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  ctaText: string | null;
+  imageUrl: string;
+  linkUrl: string | null;
+  position: "top" | "middle";
+  gameIds: number[];
+  isActive: boolean;
+  sortOrder: number;
+  games: AdminCasinoBannerGame[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 type UserDetail = {
   user: AdminUser;
   bets: AdminBet[];
@@ -864,6 +887,35 @@ export default function AdminPage() {
   const [casinoGameSearch, setCasinoGameSearch] = useState("");
   const [casinoGamePage, setCasinoGamePage] = useState(1);
   const [casinoTxPage, setCasinoTxPage] = useState(1);
+  const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
+  const [bannerForm, setBannerForm] = useState<{
+    title: string;
+    subtitle: string;
+    ctaText: string;
+    imageUrl: string;
+    linkUrl: string;
+    position: "top" | "middle";
+    gameIds: number[];
+    games: AdminCasinoBannerGame[];
+    isActive: boolean;
+    sortOrder: number;
+  }>({
+    title: "",
+    subtitle: "",
+    ctaText: "",
+    imageUrl: "",
+    linkUrl: "",
+    position: "top",
+    gameIds: [],
+    games: [],
+    isActive: true,
+    sortOrder: 0,
+  });
+  const [bannerGameSearch, setBannerGameSearch] = useState("");
+  const [bannerGameResults, setBannerGameResults] = useState<AdminCasinoBannerGame[]>([]);
+  const [bannerAiPrompt, setBannerAiPrompt] = useState("");
+  const [bannerAiLoading, setBannerAiLoading] = useState(false);
+  const [bannerSaving, setBannerSaving] = useState(false);
 
   const [balanceModal, setBalanceModal] = useState<AdminUser | null>(null);
   const [balanceAmount, setBalanceAmount] = useState("");
@@ -1142,6 +1194,175 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [token],
   );
+
+  const casinoBannersQuery = useQuery({
+    queryKey: ["admin", "casino", "banners"],
+    queryFn: async (): Promise<{ banners: AdminCasinoBanner[] }> => {
+      const res = await fetch("/api/admin/casino/banners", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load casino banners");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "casino" && casinoSubTab === "promotions",
+  });
+  const casinoBanners = casinoBannersQuery.data?.banners ?? [];
+  const casinoBannersLoading = casinoBannersQuery.isLoading;
+  const refetchCasinoBanners = casinoBannersQuery.refetch;
+
+  const openBannerModal = (banner: "new" | AdminCasinoBanner) => {
+    if (banner === "new") {
+      setBannerForm({
+        title: "",
+        subtitle: "",
+        ctaText: "Jogar Agora",
+        imageUrl: "",
+        linkUrl: "",
+        position: "top",
+        gameIds: [],
+        games: [],
+        isActive: true,
+        sortOrder: 0,
+      });
+    } else {
+      setBannerForm({
+        title: banner.title,
+        subtitle: banner.subtitle ?? "",
+        ctaText: banner.ctaText ?? "",
+        imageUrl: banner.imageUrl,
+        linkUrl: banner.linkUrl ?? "",
+        position: banner.position,
+        gameIds: banner.gameIds,
+        games: banner.games,
+        isActive: banner.isActive,
+        sortOrder: banner.sortOrder,
+      });
+    }
+    setBannerGameSearch("");
+    setBannerGameResults([]);
+    setBannerAiPrompt("");
+    setBannerModal(banner);
+  };
+
+  useEffect(() => {
+    if (!bannerModal || !bannerGameSearch.trim() || !token) {
+      setBannerGameResults([]);
+      return;
+    }
+    const tid = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/casino/games?search=${encodeURIComponent(bannerGameSearch.trim())}&limit=8`,
+          { headers: authHeader },
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setBannerGameResults(
+            (data.games ?? []).map((g: AdminCasinoGame) => ({
+              id: g.id,
+              name: g.name,
+              provider: g.provider,
+              img: g.img,
+            })),
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 300);
+    return () => clearTimeout(tid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bannerGameSearch, bannerModal, token]);
+
+  const addBannerGame = (game: AdminCasinoBannerGame) => {
+    setBannerForm((prev) =>
+      prev.gameIds.includes(game.id)
+        ? prev
+        : { ...prev, gameIds: [...prev.gameIds, game.id], games: [...prev.games, game] },
+    );
+  };
+  const removeBannerGame = (id: number) => {
+    setBannerForm((prev) => ({
+      ...prev,
+      gameIds: prev.gameIds.filter((g) => g !== id),
+      games: prev.games.filter((g) => g.id !== id),
+    }));
+  };
+
+  const generateBannerAi = async () => {
+    if (!bannerAiPrompt.trim()) return;
+    setBannerAiLoading(true);
+    try {
+      const res = await fetch("/api/admin/casino/banners/ai-generate", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: bannerAiPrompt.trim(), gameIds: bannerForm.gameIds }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setBannerForm((prev) => ({
+        ...prev,
+        title: data.title || prev.title,
+        subtitle: data.subtitle || prev.subtitle,
+        ctaText: data.ctaText || prev.ctaText,
+        imageUrl: prev.imageUrl || data.imageUrl || prev.imageUrl,
+      }));
+      toast.success("Banner gerado — reveja antes de guardar.");
+    } catch {
+      toast.error("Erro ao gerar banner com IA");
+    } finally {
+      setBannerAiLoading(false);
+    }
+  };
+
+  const saveBanner = async () => {
+    if (!bannerForm.title.trim() || !bannerForm.imageUrl.trim()) {
+      toast.error("Título e imagem são obrigatórios");
+      return;
+    }
+    setBannerSaving(true);
+    try {
+      const isNew = bannerModal === "new";
+      const url = isNew
+        ? "/api/admin/casino/banners"
+        : `/api/admin/casino/banners/${(bannerModal as AdminCasinoBanner).id}`;
+      const res = await fetch(url, {
+        method: isNew ? "POST" : "PATCH",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: bannerForm.title.trim(),
+          subtitle: bannerForm.subtitle.trim() || null,
+          ctaText: bannerForm.ctaText.trim() || null,
+          imageUrl: bannerForm.imageUrl.trim(),
+          linkUrl: bannerForm.linkUrl.trim() || null,
+          position: bannerForm.position,
+          gameIds: bannerForm.gameIds,
+          isActive: bannerForm.isActive,
+          sortOrder: bannerForm.sortOrder,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(isNew ? "Banner criado" : "Banner atualizado");
+      setBannerModal(null);
+      refetchCasinoBanners();
+    } catch {
+      toast.error("Erro ao guardar banner");
+    } finally {
+      setBannerSaving(false);
+    }
+  };
+
+  const deleteBanner = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/casino/banners/${id}`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Banner apagado");
+      refetchCasinoBanners();
+    } catch {
+      toast.error("Erro ao apagar banner");
+    }
+  };
 
   const fetchSuspended = useCallback(async () => {
     if (!token) return;
@@ -2119,6 +2340,7 @@ export default function AdminPage() {
       if (casinoSubTab === "overview") refetchCasinoOverview();
       else if (casinoSubTab === "games") refetchCasinoGames();
       else if (casinoSubTab === "transactions") refetchCasinoTx();
+      else if (casinoSubTab === "promotions") refetchCasinoBanners();
     } else if (activeTab === "settings") {
       fetchSettings();
       fetchAuditLogs();
@@ -5433,16 +5655,94 @@ export default function AdminPage() {
                 )}
 
                 {casinoSubTab === "promotions" && (
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center">
-                    <ImageIcon size={28} className="mx-auto mb-3 text-zinc-700" />
-                    <div className="text-sm text-zinc-400">
-                      Gestor de banners promocionais — em breve.
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-zinc-500 max-w-md">
+                        Banners de topo e de meio da página de cassino. Cada
+                        banner promove o seu próprio conjunto de jogos.
+                      </p>
+                      <button
+                        onClick={() => openBannerModal("new")}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors shrink-0"
+                      >
+                        <PlusCircle size={15} /> Novo Banner
+                      </button>
                     </div>
-                    <div className="text-xs text-zinc-600 mt-1">
-                      Vai permitir criar banners (topo e meio da página de
-                      cassino) associados a jogos específicos, com geração
-                      assistida por IA.
-                    </div>
+
+                    {casinoBannersLoading ? (
+                      <div className="flex items-center justify-center py-16 text-zinc-500">
+                        <Loader2 className="animate-spin" size={24} />
+                      </div>
+                    ) : casinoBanners.length === 0 ? (
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center">
+                        <ImageIcon size={28} className="mx-auto mb-3 text-zinc-700" />
+                        <div className="text-sm text-zinc-400">
+                          Ainda não há banners criados.
+                        </div>
+                      </div>
+                    ) : (
+                      (["top", "middle"] as const).map((pos) => {
+                        const items = casinoBanners.filter((b) => b.position === pos);
+                        if (items.length === 0) return null;
+                        return (
+                          <div key={pos}>
+                            <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
+                              {pos === "top" ? "Topo da página" : "Meio da página"}
+                            </div>
+                            <div className="space-y-2">
+                              {items.map((b) => (
+                                <div
+                                  key={b.id}
+                                  className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 flex items-center gap-3"
+                                >
+                                  <img
+                                    src={b.imageUrl}
+                                    alt=""
+                                    className="w-20 h-12 rounded object-cover shrink-0 bg-zinc-800"
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-semibold text-white truncate">
+                                        {b.title}
+                                      </span>
+                                      <span
+                                        className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${b.isActive ? "bg-green-600/20 text-green-400" : "bg-zinc-800 text-zinc-500"}`}
+                                      >
+                                        {b.isActive ? "Ativo" : "Inativo"}
+                                      </span>
+                                    </div>
+                                    {b.subtitle && (
+                                      <div className="text-xs text-zinc-500 truncate">
+                                        {b.subtitle}
+                                      </div>
+                                    )}
+                                    <div className="text-xs text-zinc-600 truncate mt-0.5">
+                                      {b.games.length > 0
+                                        ? b.games.map((g) => g.name).join(", ")
+                                        : "Nenhum jogo associado"}
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => openBannerModal(b)}
+                                    className="shrink-0 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors"
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Apagar o banner "${b.title}"?`)) deleteBanner(b.id);
+                                    }}
+                                    className="shrink-0 p-1.5 rounded-lg bg-zinc-800 hover:bg-red-900/40 text-zinc-400 hover:text-red-400 transition-colors"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 )}
               </motion.div>
@@ -7177,6 +7477,244 @@ export default function AdminPage() {
                   </div>
                 </>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL: Banner de Cassino (criar/editar) ── */}
+      <AnimatePresence>
+        {bannerModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setBannerModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95 }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-white">
+                  {bannerModal === "new" ? "Novo Banner" : "Editar Banner"}
+                </h2>
+                <button
+                  onClick={() => setBannerModal(null)}
+                  className="text-zinc-500 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* AI generator */}
+                <div className="bg-zinc-800/60 border border-zinc-700 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-zinc-300">
+                    <Zap size={13} className="text-red-400" /> Gerar com IA
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder='Ex: "Banner de boas-vindas para o Gates of Olympus"'
+                      value={bannerAiPrompt}
+                      onChange={(e) => setBannerAiPrompt(e.target.value)}
+                      className="bg-zinc-900 border-zinc-700 text-white text-sm"
+                    />
+                    <Button
+                      type="button"
+                      disabled={bannerAiLoading || !bannerAiPrompt.trim()}
+                      onClick={generateBannerAi}
+                      className="bg-red-600 hover:bg-red-700 text-white shrink-0"
+                    >
+                      {bannerAiLoading ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        "Gerar"
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-zinc-600 mt-1.5">
+                    Preenche título, subtítulo e texto do botão — revê antes
+                    de guardar.
+                  </p>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">Título</Label>
+                  <Input
+                    value={bannerForm.title}
+                    onChange={(e) =>
+                      setBannerForm((p) => ({ ...p, title: e.target.value }))
+                    }
+                    placeholder="Título do banner"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">Subtítulo</Label>
+                  <Input
+                    value={bannerForm.subtitle}
+                    onChange={(e) =>
+                      setBannerForm((p) => ({ ...p, subtitle: e.target.value }))
+                    }
+                    placeholder="Texto secundário (opcional)"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-zinc-400">
+                      Texto do botão
+                    </Label>
+                    <Input
+                      value={bannerForm.ctaText}
+                      onChange={(e) =>
+                        setBannerForm((p) => ({ ...p, ctaText: e.target.value }))
+                      }
+                      placeholder="Jogar Agora"
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Posição</Label>
+                    <div className="flex gap-2 mt-1">
+                      {(["top", "middle"] as const).map((pos) => (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() =>
+                            setBannerForm((p) => ({ ...p, position: pos }))
+                          }
+                          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${bannerForm.position === pos ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}
+                        >
+                          {pos === "top" ? "Topo" : "Meio"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">
+                    URL da imagem
+                  </Label>
+                  <Input
+                    value={bannerForm.imageUrl}
+                    onChange={(e) =>
+                      setBannerForm((p) => ({ ...p, imageUrl: e.target.value }))
+                    }
+                    placeholder="https://…"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                  {bannerForm.imageUrl && (
+                    <img
+                      src={bannerForm.imageUrl}
+                      alt=""
+                      className="mt-2 w-full h-24 object-cover rounded-lg bg-zinc-800"
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">
+                    Link personalizado (opcional)
+                  </Label>
+                  <Input
+                    value={bannerForm.linkUrl}
+                    onChange={(e) =>
+                      setBannerForm((p) => ({ ...p, linkUrl: e.target.value }))
+                    }
+                    placeholder="Se vazio, abre o primeiro jogo associado"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">
+                    Jogos promovidos
+                  </Label>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {bannerForm.games.map((g) => (
+                      <span
+                        key={g.id}
+                        className="flex items-center gap-1 pl-2 pr-1 py-1 rounded-full bg-zinc-800 border border-zinc-700 text-xs text-zinc-300"
+                      >
+                        {g.name}
+                        <button
+                          type="button"
+                          onClick={() => removeBannerGame(g.id)}
+                          className="text-zinc-500 hover:text-red-400"
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="relative mt-2">
+                    <Search
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                    />
+                    <Input
+                      value={bannerGameSearch}
+                      onChange={(e) => setBannerGameSearch(e.target.value)}
+                      placeholder="Pesquisar jogo para adicionar…"
+                      className="bg-zinc-800 border-zinc-700 text-white pl-8"
+                    />
+                  </div>
+                  {bannerGameResults.length > 0 && (
+                    <div className="mt-1.5 bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden divide-y divide-zinc-700/60">
+                      {bannerGameResults.map((g) => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => {
+                            addBannerGame(g);
+                            setBannerGameSearch("");
+                          }}
+                          disabled={bannerForm.gameIds.includes(g.id)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700/60 disabled:opacity-40 transition-colors"
+                        >
+                          {g.name}
+                          <span className="text-xs text-zinc-600">
+                            {g.provider}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-zinc-400">Ativo</Label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBannerForm((p) => ({ ...p, isActive: !p.isActive }))
+                    }
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${bannerForm.isActive ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                  >
+                    {bannerForm.isActive ? "Ativo" : "Inativo"}
+                  </button>
+                </div>
+
+                <Button
+                  className="w-full bg-red-600 hover:bg-red-700 text-white font-bold"
+                  disabled={bannerSaving}
+                  onClick={saveBanner}
+                >
+                  {bannerSaving ? (
+                    <Loader2 className="animate-spin mr-2" size={16} />
+                  ) : null}
+                  Guardar Banner
+                </Button>
+              </div>
             </motion.div>
           </motion.div>
         )}
