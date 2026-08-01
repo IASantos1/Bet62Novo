@@ -503,6 +503,38 @@ const PALACE_RESULT = {
   BAD_TOKEN: 100,
 } as const;
 
+// Palace Casino's own dashboard/docs are inconsistent about language: the
+// PHP reference implementation (ground truth for real production traffic)
+// uses English field names (command/data/account/result/balance), but their
+// own callback-test tool and one doc page send/expect Portuguese
+// (comando/dados/conta/resultado/saldo) — confirmed by the user pasting
+// that exact Portuguese doc page. Rather than bet on one being "the real
+// one", both requests (parseCommand below) and responses (palaceResult)
+// carry both sets of keys — costs nothing, and works regardless of which
+// side of their own platform is actually calling us.
+const COMMAND_ALIASES_PT: Record<string, string> = {
+  autenticar: "authenticate",
+  saldo: "balance",
+  aposta: "bet",
+  "vitória": "win",
+  vitoria: "win",
+  cancelar: "cancel",
+  status: "status",
+};
+
+function parseCommand(body: Record<string, unknown>): {
+  command: string;
+  data: Record<string, unknown>;
+} {
+  const rawCommand = String(body["command"] ?? body["comando"] ?? "");
+  const data = (body["data"] ?? body["dados"] ?? {}) as Record<string, unknown>;
+  return { command: COMMAND_ALIASES_PT[rawCommand] ?? rawCommand, data };
+}
+
+function accountFrom(data: Record<string, unknown>): string {
+  return String(data["account"] ?? data["conta"] ?? "").trim();
+}
+
 function palaceResult(
   res: Response,
   result: number,
@@ -510,10 +542,19 @@ function palaceResult(
 ): void {
   // Always HTTP 200 — see header comment. status mirrors their reference's
   // literal "OK"/"ERROR" string, which they may also inspect.
+  const status = result === PALACE_RESULT.SUCCESS ? "OK" : "ERROR";
+  const dataOut = data
+    ? {
+        ...data,
+        ...("account" in data ? { conta: data["account"] } : {}),
+        ...("balance" in data ? { saldo: data["balance"] } : {}),
+      }
+    : undefined;
   res.status(200).json({
     result,
-    status: result === PALACE_RESULT.SUCCESS ? "OK" : "ERROR",
-    ...(data ? { data } : {}),
+    resultado: result,
+    status,
+    ...(dataOut ? { data: dataOut, dados: dataOut } : {}),
   });
 }
 
@@ -552,13 +593,8 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  const body = req.body as {
-    command?: unknown;
-    data?: Record<string, unknown>;
-  };
-  const command = String(body.command ?? "");
-  const data = body.data ?? {};
-  const account = String(data["account"] ?? "").trim();
+  const { command, data } = parseCommand(req.body as Record<string, unknown>);
+  const account = accountFrom(data);
   const userId = userIdFromMemberAccount(account);
   if (!userId) {
     logger.warn({ account, command }, "[palace-callback] unknown account format");
