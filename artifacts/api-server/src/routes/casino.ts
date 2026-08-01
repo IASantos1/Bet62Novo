@@ -475,20 +475,22 @@ router.post(
 // — the second cancel attempt for the same original transaction is a
 // harmless no-op, not an error.
 //
-// Amount unit: Palace Casino sends/expects EUR amounts in minor units
-// (cents, as integers) — the industry-standard convention for casino/
-// sportsbook APIs (SoftSwiss, Pragmatic, Evolution, etc. all do this),
-// confirmed by the user. Our own ledger stores decimal EUR strings
-// ("50.00") — the established convention across the whole platform
-// (sports betting, payments, withdrawals) — so amounts are converted at
-// just this integration's boundary (centsToLedgerAmount/
-// ledgerAmountToCents below) rather than migrating the platform's
-// monetary representation, which is a much bigger, unrelated change.
-function centsToLedgerAmount(cents: number): string {
-  return (cents / 100).toFixed(2);
+// Amount unit: initially assumed Palace Casino used minor units (cents,
+// as integers) — the general convention for casino/sportsbook APIs
+// (SoftSwiss, Pragmatic, Evolution, etc.) and consistent with the docs'
+// "amount": 0.9 example if read as "0.9 units of 0.01". A live end-to-end
+// test proved that wrong for this integration: a real balance of 55.93
+// EUR sent as 5593 (cents) rendered in-game as "€5,593.00" — Palace
+// Casino's game engine reads the balance/amount fields as plain decimal
+// EUR, the same representation our own ledger already uses natively. So
+// there is no unit conversion left to do — these helpers just normalize
+// number/string shapes at the boundary (JSON wants a bare number, our
+// ledger wants a 2-decimal string).
+function toPalaceAmount(ledgerAmount: string | number): number {
+  return Number(Number(ledgerAmount).toFixed(2));
 }
-function ledgerAmountToCents(ledgerAmount: string | number): number {
-  return Math.round(Number(ledgerAmount) * 100);
+function fromPalaceAmount(amount: string | number): string {
+  return Number(amount).toFixed(2);
 }
 
 const PALACE_RESULT = {
@@ -612,7 +614,7 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
         }
         palaceResult(res, PALACE_RESULT.SUCCESS, {
           account,
-          balance: ledgerAmountToCents(balance),
+          balance: toPalaceAmount(balance),
         });
         return;
       }
@@ -623,14 +625,14 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
           return;
         }
         palaceResult(res, PALACE_RESULT.SUCCESS, {
-          balance: ledgerAmountToCents(balance),
+          balance: toPalaceAmount(balance),
         });
         return;
       }
       case "bet": {
         const transGuid = String(data["trans_guid"] ?? "").trim();
-        const amountCents = Number(data["amount"]);
-        if (!transGuid || !Number.isFinite(amountCents) || amountCents <= 0) {
+        const amount = Number(data["amount"]);
+        if (!transGuid || !Number.isFinite(amount) || amount <= 0) {
           palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
         }
@@ -644,7 +646,7 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
             if (existing) return "duplicate" as const;
             const ok = await applyBalanceDelta(tx, {
               userId,
-              amount: `-${centsToLedgerAmount(amountCents)}`,
+              amount: `-${fromPalaceAmount(amount)}`,
               kind: "casino_palace_bet",
               idempotencyKey,
               refType: "casino_palace_round",
@@ -657,26 +659,26 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
           const balance = await currentUserBalance(db, userId);
           if (outcome === "duplicate") {
             palaceResult(res, PALACE_RESULT.ALREADY_PROCESSED, {
-              balance: ledgerAmountToCents(balance!),
+              balance: toPalaceAmount(balance!),
             });
           } else {
             palaceResult(res, PALACE_RESULT.SUCCESS, {
-              balance: ledgerAmountToCents(balance!),
+              balance: toPalaceAmount(balance!),
             });
           }
         } catch (err) {
           logger.warn({ err, userId, transGuid }, "[palace-callback] bet declined");
           const balance = await currentUserBalance(db, userId);
           palaceResult(res, PALACE_RESULT.BALANCE_INSUFFICIENT, {
-            balance: ledgerAmountToCents(balance!),
+            balance: toPalaceAmount(balance!),
           });
         }
         return;
       }
       case "win": {
         const transGuid = String(data["trans_guid"] ?? "").trim();
-        const amountCents = Number(data["amount"]);
-        if (!transGuid || !Number.isFinite(amountCents) || amountCents < 0) {
+        const amount = Number(data["amount"]);
+        if (!transGuid || !Number.isFinite(amount) || amount < 0) {
           palaceResult(res, PALACE_RESULT.INVALID_REQUEST);
           return;
         }
@@ -689,7 +691,7 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
           if (existing) return "duplicate" as const;
           await applyBalanceDelta(tx, {
             userId,
-            amount: centsToLedgerAmount(amountCents),
+            amount: fromPalaceAmount(amount),
             kind: "casino_palace_win",
             idempotencyKey,
             refType: "casino_palace_round",
@@ -704,7 +706,7 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
           outcome === "duplicate"
             ? PALACE_RESULT.ALREADY_PROCESSED
             : PALACE_RESULT.SUCCESS,
-          { balance: ledgerAmountToCents(balance!) },
+          { balance: toPalaceAmount(balance!) },
         );
         return;
       }
@@ -755,13 +757,13 @@ router.post("/palace/callback", async (req: Request, res: Response) => {
         if (outcome === "not_found") {
           const balance = await currentUserBalance(db, userId);
           palaceResult(res, PALACE_RESULT.CANCEL_TRANS_NOT_FOUND, {
-            balance: ledgerAmountToCents(balance!),
+            balance: toPalaceAmount(balance!),
           });
           return;
         }
         const balance = await currentUserBalance(db, userId);
         palaceResult(res, PALACE_RESULT.SUCCESS, {
-          balance: ledgerAmountToCents(balance!),
+          balance: toPalaceAmount(balance!),
         });
         return;
       }
