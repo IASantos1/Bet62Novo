@@ -71,6 +71,11 @@ const PULSESCORE_BASE_URL =
 const PULSESCORE_BOOKMAKER =
   process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
 
+// Optional — powers the admin "AI-assisted casino banner" copy generator
+// (routes/admin.ts POST /casino/banners/ai-generate). Falls back to a
+// deterministic template when unset, so the feature works either way.
+const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
+
 export const CONFIG = {
   SPORTSAPI_KEY,
   STATPAL_API_KEY,
@@ -84,6 +89,7 @@ export const CONFIG = {
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
+  ANTHROPIC_API_KEY,
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,

@@ -11,6 +11,7 @@ import {
   sportscoreMatchMapTable,
   casinoGamesTable,
   ledgerEntriesTable,
+  casinoBannersTable,
 } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
@@ -2567,6 +2568,244 @@ router.get("/casino/transactions", adminMiddleware, async (req: AdminRequest, re
   } catch (err) {
     logger.error({ err }, "GET /api/admin/casino/transactions error");
     res.status(500).json({ error: "Erro ao listar transações" });
+  }
+});
+
+// ── Casino promo banners ─────────────────────────────────────────────────────
+// Admin CRUD for the casino page's top/middle banner slots (routes/casino.ts
+// GET /banners serves the public read side). Multiple banners can share a
+// position — sortOrder controls display order — each independently promoting
+// its own set of games via gameIds.
+function normalizeBannerGameIds(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((v) => Number(v))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+router.get("/casino/banners", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const banners = await db
+      .select()
+      .from(casinoBannersTable)
+      .orderBy(asc(casinoBannersTable.position), asc(casinoBannersTable.sortOrder), desc(casinoBannersTable.id));
+
+    const allGameIds = [
+      ...new Set(banners.flatMap((b) => normalizeBannerGameIds(b.gameIds))),
+    ];
+    const games = allGameIds.length
+      ? await db
+          .select({
+            id: casinoGamesTable.id,
+            name: casinoGamesTable.name,
+            provider: casinoGamesTable.provider,
+            img: casinoGamesTable.img,
+          })
+          .from(casinoGamesTable)
+          .where(inArray(casinoGamesTable.id, allGameIds))
+      : [];
+    const gamesById = new Map(games.map((g) => [g.id, g]));
+
+    res.json({
+      banners: banners.map((b) => ({
+        ...b,
+        games: normalizeBannerGameIds(b.gameIds)
+          .map((id) => gamesById.get(id))
+          .filter((g): g is NonNullable<typeof g> => !!g),
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/casino/banners error");
+    res.status(500).json({ error: "Erro ao listar banners" });
+  }
+});
+
+router.post("/casino/banners", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const title = String(body["title"] ?? "").trim();
+    const imageUrl = String(body["imageUrl"] ?? "").trim();
+    const position = String(body["position"] ?? "").trim();
+    if (!title || !imageUrl || (position !== "top" && position !== "middle")) {
+      res.status(400).json({ error: "title, imageUrl e position ('top'|'middle') são obrigatórios." });
+      return;
+    }
+    const [created] = await db
+      .insert(casinoBannersTable)
+      .values({
+        title,
+        subtitle: body["subtitle"] ? String(body["subtitle"]) : null,
+        ctaText: body["ctaText"] ? String(body["ctaText"]) : null,
+        imageUrl,
+        linkUrl: body["linkUrl"] ? String(body["linkUrl"]) : null,
+        position,
+        gameIds: normalizeBannerGameIds(body["gameIds"]),
+        isActive: body["isActive"] === undefined ? true : Boolean(body["isActive"]),
+        sortOrder: Number.isFinite(Number(body["sortOrder"])) ? Number(body["sortOrder"]) : 0,
+      })
+      .returning();
+    res.status(201).json(created);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/casino/banners error");
+    res.status(500).json({ error: "Erro ao criar banner" });
+  }
+});
+
+router.patch("/casino/banners/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Id inválido" });
+    return;
+  }
+  try {
+    const body = req.body as Record<string, unknown>;
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (body["title"] !== undefined) update["title"] = String(body["title"]).trim();
+    if (body["subtitle"] !== undefined) update["subtitle"] = body["subtitle"] ? String(body["subtitle"]) : null;
+    if (body["ctaText"] !== undefined) update["ctaText"] = body["ctaText"] ? String(body["ctaText"]) : null;
+    if (body["imageUrl"] !== undefined) update["imageUrl"] = String(body["imageUrl"]).trim();
+    if (body["linkUrl"] !== undefined) update["linkUrl"] = body["linkUrl"] ? String(body["linkUrl"]) : null;
+    if (body["position"] !== undefined) {
+      const position = String(body["position"]);
+      if (position !== "top" && position !== "middle") {
+        res.status(400).json({ error: "position deve ser 'top' ou 'middle'." });
+        return;
+      }
+      update["position"] = position;
+    }
+    if (body["gameIds"] !== undefined) update["gameIds"] = normalizeBannerGameIds(body["gameIds"]);
+    if (body["isActive"] !== undefined) update["isActive"] = Boolean(body["isActive"]);
+    if (body["sortOrder"] !== undefined) update["sortOrder"] = Number(body["sortOrder"]) || 0;
+
+    const [updated] = await db
+      .update(casinoBannersTable)
+      .set(update)
+      .where(eq(casinoBannersTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Banner não encontrado" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    logger.error({ err, id }, "PATCH /api/admin/casino/banners/:id error");
+    res.status(500).json({ error: "Erro ao atualizar banner" });
+  }
+});
+
+router.delete("/casino/banners/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Id inválido" });
+    return;
+  }
+  try {
+    const [deleted] = await db
+      .delete(casinoBannersTable)
+      .where(eq(casinoBannersTable.id, id))
+      .returning({ id: casinoBannersTable.id });
+    if (!deleted) {
+      res.status(404).json({ error: "Banner não encontrado" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, id }, "DELETE /api/admin/casino/banners/:id error");
+    res.status(500).json({ error: "Erro ao apagar banner" });
+  }
+});
+
+// AI-assisted banner copy: the admin describes the promotion in a prompt
+// ("cria um banner de boas-vindas para o Gates of Olympus") plus which games
+// it's for, and gets back a suggested title/subtitle/CTA (and an image
+// pulled from one of the promoted games) to review and tweak before saving —
+// there's no image-generation model wired up here, so the "image" side of
+// this is a sensible default, not a generated asset. Falls back to a
+// deterministic template when ANTHROPIC_API_KEY isn't configured, so the
+// button always does something useful rather than erroring out.
+router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as { prompt?: unknown; gameIds?: unknown };
+    const prompt = String(body.prompt ?? "").trim();
+    if (!prompt) {
+      res.status(400).json({ error: "prompt é obrigatório." });
+      return;
+    }
+    const gameIds = normalizeBannerGameIds(body.gameIds);
+    const games = gameIds.length
+      ? await db
+          .select({ id: casinoGamesTable.id, name: casinoGamesTable.name, img: casinoGamesTable.img })
+          .from(casinoGamesTable)
+          .where(inArray(casinoGamesTable.id, gameIds))
+      : [];
+    const gameNames = games.map((g) => g.name);
+    const suggestedImage = games.find((g) => g.img)?.img ?? null;
+
+    if (CONFIG.ANTHROPIC_API_KEY) {
+      try {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": CONFIG.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-3-5-haiku-20241022",
+            max_tokens: 300,
+            system:
+              "Escreves copy curta para banners promocionais de um casino online em português europeu. " +
+              "Responde APENAS com JSON válido no formato " +
+              '{"title": string (máx 40 caracteres), "subtitle": string (máx 80 caracteres), "ctaText": string (máx 20 caracteres, ex: \\"Jogar Agora\\")}. ' +
+              "Sem markdown, sem texto extra.",
+            messages: [
+              {
+                role: "user",
+                content: `Pedido do admin: ${prompt}${gameNames.length ? `\nJogos a promover: ${gameNames.join(", ")}` : ""}`,
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as { content?: Array<{ text?: string }> };
+          const text = data.content?.[0]?.text ?? "";
+          const parsed = JSON.parse(text.trim()) as {
+            title?: string;
+            subtitle?: string;
+            ctaText?: string;
+          };
+          if (parsed.title) {
+            res.json({
+              title: parsed.title,
+              subtitle: parsed.subtitle ?? "",
+              ctaText: parsed.ctaText || "Jogar Agora",
+              imageUrl: suggestedImage,
+              gameIds,
+            });
+            return;
+          }
+        }
+        logger.warn({ status: resp.status }, "[casino-banner-ai] Anthropic call failed, using template fallback");
+      } catch (err) {
+        logger.warn({ err }, "[casino-banner-ai] Anthropic call errored, using template fallback");
+      }
+    }
+
+    // Template fallback (also used when no API key is configured).
+    const primaryGame = gameNames[0];
+    res.json({
+      title: primaryGame ? `Joga ${primaryGame}` : prompt.slice(0, 40),
+      subtitle: gameNames.length > 1
+        ? `Disponível agora: ${gameNames.join(", ")}`
+        : prompt.slice(0, 80),
+      ctaText: "Jogar Agora",
+      imageUrl: suggestedImage,
+      gameIds,
+    });
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/casino/banners/ai-generate error");
+    res.status(500).json({ error: "Erro ao gerar banner" });
   }
 });
 

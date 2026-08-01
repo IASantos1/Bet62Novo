@@ -439,6 +439,24 @@ export async function initDb(): Promise<void> {
 
       CREATE INDEX IF NOT EXISTS casino_games_provider_category_idx
         ON casino_games (provider, category);
+
+      CREATE TABLE IF NOT EXISTS casino_banners (
+        id           SERIAL PRIMARY KEY,
+        title        TEXT NOT NULL,
+        subtitle     TEXT,
+        cta_text     TEXT,
+        image_url    TEXT NOT NULL,
+        link_url     TEXT,
+        position     TEXT NOT NULL,
+        game_ids     JSONB NOT NULL DEFAULT '[]',
+        is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order   INTEGER NOT NULL DEFAULT 0,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS casino_banners_position_active_idx
+        ON casino_banners (position, is_active, sort_order);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

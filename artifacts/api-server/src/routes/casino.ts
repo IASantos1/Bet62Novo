@@ -1,6 +1,12 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, usersTable, casinoGamesTable, ledgerEntriesTable } from "@workspace/db";
-import { and, asc, count, desc, eq, ilike } from "drizzle-orm";
+import {
+  db,
+  usersTable,
+  casinoGamesTable,
+  ledgerEntriesTable,
+  casinoBannersTable,
+} from "@workspace/db";
+import { and, asc, count, desc, eq, ilike, inArray } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
@@ -201,6 +207,80 @@ router.get("/providers", async (_req: Request, res: Response) => {
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });
   await statpalCache.set(cacheKey, payload, PROVIDERS_CACHE_TTL_SECONDS);
+  res.setHeader("Content-Type", "application/json");
+  res.send(payload);
+});
+
+const BANNERS_CACHE_TTL_SECONDS = 60;
+
+// Promo banners for the casino page — top and middle placements, each one
+// independently promoting a curated set of games. A banner only renders once
+// at least one of its promoted games is still active (catalog churn
+// shouldn't leave a banner pointing at a dead/removed game).
+router.get("/banners", async (req: Request, res: Response) => {
+  const position = typeof req.query["position"] === "string" ? req.query["position"].trim() : "";
+  if (position !== "top" && position !== "middle") {
+    res.status(400).json({ error: "position deve ser 'top' ou 'middle'." });
+    return;
+  }
+
+  const cacheKey = `casino:banners:v1:${position}`;
+  const cached = await statpalCache.get(cacheKey);
+  if (cached) {
+    res.setHeader("Content-Type", "application/json");
+    res.send(cached);
+    return;
+  }
+
+  const banners = await db
+    .select()
+    .from(casinoBannersTable)
+    .where(and(eq(casinoBannersTable.position, position), eq(casinoBannersTable.isActive, true)))
+    .orderBy(asc(casinoBannersTable.sortOrder), desc(casinoBannersTable.id));
+
+  const allGameIds = [
+    ...new Set(banners.flatMap((b) => (Array.isArray(b.gameIds) ? (b.gameIds as number[]) : []))),
+  ];
+  const games = allGameIds.length
+    ? await db
+        .select({
+          pk: casinoGamesTable.id,
+          // Shaped to match the public /games CasinoGame contract the
+          // frontend already knows how to render/launch (id = gameUid).
+          id: casinoGamesTable.gameUid,
+          name: casinoGamesTable.name,
+          provider: casinoGamesTable.provider,
+          vendorCode: casinoGamesTable.vendorCode,
+          category: casinoGamesTable.category,
+          img: casinoGamesTable.img,
+          source: casinoGamesTable.source,
+        })
+        .from(casinoGamesTable)
+        .where(and(inArray(casinoGamesTable.id, allGameIds), eq(casinoGamesTable.isActive, true)))
+    : [];
+  const gamesByPk = new Map(games.map((g) => [g.pk, g]));
+
+  const result = banners
+    .map((b) => {
+      const bannerGames = (Array.isArray(b.gameIds) ? (b.gameIds as number[]) : [])
+        .map((pk) => gamesByPk.get(pk))
+        .filter((g): g is NonNullable<typeof g> => !!g)
+        .map(({ pk: _pk, ...g }) => g);
+      return {
+        id: b.id,
+        title: b.title,
+        subtitle: b.subtitle,
+        ctaText: b.ctaText,
+        imageUrl: b.imageUrl,
+        linkUrl: b.linkUrl,
+        position: b.position,
+        games: bannerGames,
+      };
+    })
+    .filter((b) => b.linkUrl || b.games.length > 0);
+
+  const payload = JSON.stringify({ banners: result });
+  await statpalCache.set(cacheKey, payload, BANNERS_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);
 });
