@@ -18108,18 +18108,21 @@ export default function Home({
                           awayTeam={teamNamePt(expandedMatch.away)}
                           liveClockLabel={(() => {
                             if (!expandedMatch.isLive) return null;
-                            const m = getDisplayMinute(expandedMatch);
+                            // Minute/phase computation below is football-
+                            // specific (clock seconds, HT detection...) — for
+                            // every other sport just show "AO VIVO" rather
+                            // than feeding it values it wasn't built to
+                            // interpret (this was the reported tennis bug).
                             const isFootball =
                               !expandedMatch.sport ||
                               expandedMatch.sport === "football";
-                            const tag = isFootball
-                              ? getFootballPhaseTag(expandedMatch, m)
-                              : null;
+                            if (!isFootball) return "AO VIVO";
+                            const m = getDisplayMinute(expandedMatch);
+                            const tag = getFootballPhaseTag(expandedMatch, m);
                             if (m <= 0) return "AO VIVO";
                             if (tag === "HT") return "HT";
-                            if (tag && isFootball)
+                            if (tag)
                               return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                            if (tag) return `${m}' · ${tag}`;
                             return `${m}'`;
                           })()}
                         />
