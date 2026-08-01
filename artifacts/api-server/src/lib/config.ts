@@ -86,13 +86,23 @@ const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 // keyed by its own matchId. Neither StatScore nor SMYTDRYT share BetBY's ID
 // scheme, so live_stream_mappings (see lib/db) bridges both.
 //
-// BETBY_LIVE_EVENTS_URL/BETBY_API_TOKEN: no real BetBY REST API docs exist
-// yet — BetBY's real live feed turned out to be WebSocket-based (manifest +
-// authenticated ws_new connection), not a simple polled REST list, so this
-// client is still scaffolding pending the session-token-minting endpoint.
-// The poller no-ops with a warning until these are set, same
-// inert-until-configured pattern as PALACE_CASINO_API_TOKEN.
-const BETBY_LIVE_EVENTS_URL = process.env["BETBY_LIVE_EVENTS_URL"]?.trim() || "";
+// BetBY's real live feed is REST, not the WebSocket originally assumed:
+//   GET {BETBY_API_BASE_URL}/api/v4/live/brand/{BETBY_BRAND_ID}/{BETBY_LANG}/0
+// returns a manifest ({ version, top_events_versions, rest_events_versions }
+// among other bookkeeping fields); fetching that same path with a specific
+// version number instead of 0 returns a chunk of event data for that
+// version. Chunks are deltas, not full snapshots — an event's team names
+// (desc.competitors) only appear once, the first time it's seen, so
+// services/betby/client.ts keeps a persistent merged cache across polls
+// rather than treating each poll as self-contained (confirmed from a real
+// captured response: only 1 of ~40 events in one chunk carried `desc`).
+// The WebSocket (wss://.../api/v1/ws_new) + JWT handshake is believed to be
+// for session/auth purposes only, not required to read this public feed —
+// unconfirmed, so BETBY_API_TOKEN is sent as a Bearer header when present
+// but the poller still attempts the request without one.
+const BETBY_API_BASE_URL = process.env["BETBY_API_BASE_URL"]?.trim() || "";
+const BETBY_BRAND_ID = process.env["BETBY_BRAND_ID"]?.trim() || "";
+const BETBY_LANG = process.env["BETBY_LANG"]?.trim() || "en";
 const BETBY_API_TOKEN = process.env["BETBY_API_TOKEN"] ?? "";
 const BETBY_POLL_INTERVAL_MS = 5_000;
 
@@ -129,7 +139,9 @@ export const CONFIG = {
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
   ANTHROPIC_API_KEY,
-  BETBY_LIVE_EVENTS_URL,
+  BETBY_API_BASE_URL,
+  BETBY_BRAND_ID,
+  BETBY_LANG,
   BETBY_API_TOKEN,
   BETBY_POLL_INTERVAL_MS,
   STATSCORE_TRACKER_BASE_URL,
