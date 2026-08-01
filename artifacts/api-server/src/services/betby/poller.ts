@@ -4,9 +4,31 @@ import { fetchBetbyLiveEvents } from "./client.js";
 import { setLiveEvents, hydrateLiveEventsFromRedis } from "./state.js";
 import { ensureMapping } from "../liveStream/mapping.js";
 import { getTrackerForTeams } from "../statpal/liveTracker.js";
+import { resolveStatscoreEventId } from "../statscore/resolver.js";
+import { getStatscoreTracker } from "../statscore/tracker.js";
 import { resolveVideoInfo } from "../smytdryt/resolver.js";
 import { buildStreamUrl } from "../smytdryt/stream.js";
 import type { LiveEvent } from "./types.js";
+import type { MatchTracker } from "../liveStream/trackerTypes.js";
+
+// StatScore (real auth confirmed) is the primary tracker source once an
+// admin has mapped a statscoreEventId for this event; Statpal (matched by
+// team name, no mapping needed) is the automatic fallback so every live
+// event has *some* tracker before that mapping exists.
+async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
+  const statscoreEventId = await resolveStatscoreEventId(event.betbyEventId).catch(() => null);
+  if (statscoreEventId != null) {
+    try {
+      return await getStatscoreTracker(statscoreEventId);
+    } catch (err) {
+      logger.error(
+        { err, betbyEventId: event.betbyEventId, statscoreEventId },
+        "[betby-poller] StatScore tracker fetch failed, falling back to Statpal",
+      );
+    }
+  }
+  return getTrackerForTeams(event.home, event.away);
+}
 
 let pollTimer: NodeJS.Timeout | null = null;
 
@@ -35,7 +57,7 @@ async function tick(): Promise<void> {
       }
 
       const [tracker, videoInfo] = await Promise.all([
-        Promise.resolve(getTrackerForTeams(event.home, event.away)),
+        resolveTracker(event),
         resolveVideoInfo(event.betbyEventId).catch(() => null),
       ]);
 

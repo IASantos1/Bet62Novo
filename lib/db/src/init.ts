@@ -476,6 +476,12 @@ export async function initDb(): Promise<void> {
 
       CREATE UNIQUE INDEX IF NOT EXISTS live_stream_mappings_betby_event_idx
         ON live_stream_mappings (betby_event_id);
+
+      -- Real StatScore auth was confirmed after this table first shipped
+      -- (get_pushes/get_standings example URLs sharing one static partner
+      -- token), reinstating StatScore as the primary Match Tracker source
+      -- with Statpal as the automatic no-mapping-needed fallback.
+      ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS statscore_event_id INTEGER;
     `);
 
     console.info("[db/init] Schema initialisation complete.");

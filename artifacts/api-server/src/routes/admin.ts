@@ -2812,12 +2812,14 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
 });
 
 // ── BET62 Live + Match Tracker + Streaming — mapping admin ──────────────────
-// BetBY and SMYTDRYT don't share an event id (the Match Tracker doesn't need
-// mapping — it's resolved from Statpal by team name, see services/statpal/
-// liveTracker.ts), so the poller (services/betby/poller.ts) seeds one row
-// per live BetBY event here with only home/away/league filled in; an admin
-// fills in the SMYTDRYT video fields (looked up on SMYTDRYT's own dashboard
-// for the same fixture) to complete the stream side of the wiring.
+// BetBY doesn't share an event id with StatScore or SMYTDRYT, so the poller
+// (services/betby/poller.ts) seeds one row per live BetBY event here with
+// only home/away/league filled in; an admin fills in statscoreEventId
+// (looked up on StatScore's own dashboard for the same fixture — real auth
+// confirmed, see CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to
+// complete the tracker/stream wiring. Leaving statscoreEventId unset is
+// fine — the tracker automatically falls back to Statpal, matched by team
+// name (see services/statpal/liveTracker.ts).
 router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
     const [mappings, liveEvents] = await Promise.all([listMappings(), Promise.resolve(getLiveEvents())]);
@@ -2854,6 +2856,7 @@ router.patch(
     };
     try {
       const updated = await setMapping(betbyEventId, {
+        statscoreEventId: toIntOrNull(body["statscoreEventId"]),
         videoMatchId: toIntOrNull(body["videoMatchId"]),
         videoSportId: toIntOrNull(body["videoSportId"]),
         videoTournamentId: toIntOrNull(body["videoTournamentId"]),

@@ -2,19 +2,21 @@ import { db, liveStreamMappingsTable, type LiveStreamMappingRow } from "@workspa
 import { eq, sql } from "drizzle-orm";
 import type { LiveEvent } from "../betby/types.js";
 
-// Bridges BetBY's event id and SMYTDRYT's video info — the two providers
-// don't share an identifier scheme and there's no known automatic way to
-// resolve one from the other, so this is a manual-mapping table: the poller
-// seeds a row per live BetBY event (home/away/league only) the moment it's
-// first seen, and an admin fills in the video* fields once — after that
-// it's a straight lookup. (The Match Tracker doesn't need a row here — it's
-// resolved from Statpal by team name at read time, see services/statpal/
-// liveTracker.ts.) See routes/admin.ts's /live-stream/mappings endpoints.
+// Bridges BetBY's event id with StatScore's eventId and SMYTDRYT's video
+// info — none of the three share an identifier scheme and there's no known
+// automatic way to resolve one from another, so this is a manual-mapping
+// table: the poller seeds a row per live BetBY event (home/away/league
+// only) the moment it's first seen, and an admin fills in
+// statscoreEventId/video* fields once — after that it's a straight lookup.
+// (Statpal is the automatic fallback tracker for events not yet mapped to a
+// statscoreEventId — see services/statpal/liveTracker.ts — so this table
+// only strictly gates the stream side; the tracker side degrades
+// gracefully.) See routes/admin.ts's /live-stream/mappings endpoints.
 
 // Ensures a row exists for this BetBY event (creates a blank one on first
 // sight) and keeps the denormalized home/away/league fresh — called on
 // every poll tick, so it must stay cheap and never touch the resolved
-// video fields (an admin's manual work must never be clobbered).
+// statscore/video fields (an admin's manual work must never be clobbered).
 export async function ensureMapping(event: LiveEvent): Promise<void> {
   await db
     .insert(liveStreamMappingsTable)
@@ -50,6 +52,7 @@ export async function listMappings(): Promise<LiveStreamMappingRow[]> {
 export async function setMapping(
   betbyEventId: string,
   fields: Partial<{
+    statscoreEventId: number | null;
     videoMatchId: number | null;
     videoSportId: number | null;
     videoTournamentId: number | null;
