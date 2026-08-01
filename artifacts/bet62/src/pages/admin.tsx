@@ -1161,12 +1161,18 @@ export default function AdminPage() {
   const casinoAgentQuery = useQuery({
     queryKey: ["admin", "casino", "agent"],
     queryFn: async (): Promise<{
-      agent: { name?: string; currency?: number | string; balance?: number | string } | null;
-      count: number;
-      providers: Array<{ provider_id: number; provider_name: string; status: number }>;
+      apiTokenConfigured: boolean;
+      callbackTokenConfigured: boolean;
+      expectedCallbackUrl: string;
+      agent?: { name?: string; currency?: number | string; balance?: number | string } | null;
+      count?: number;
+      providers?: Array<{ provider_id: number; provider_name: string; status: number }>;
+      error?: string;
     }> => {
       const res = await fetch("/api/admin/palace-casino-debug", { headers: authHeader });
-      if (!res.ok) throw new Error("Failed to load Palace Casino agent info");
+      // Parsed regardless of status — even a 503 (tokens not configured)
+      // still carries apiTokenConfigured/callbackTokenConfigured/
+      // expectedCallbackUrl worth showing, not just a thrown error.
       return res.json();
     },
     enabled: !!token && activeTab === "casino" && casinoSubTab === "overview",
@@ -1174,7 +1180,36 @@ export default function AdminPage() {
   });
   const casinoAgent = casinoAgentQuery.data ?? null;
   const casinoAgentLoading = casinoAgentQuery.isLoading;
-  const casinoAgentError = casinoAgentQuery.isError;
+
+  const [casinoSelfTestUserId, setCasinoSelfTestUserId] = useState("");
+  const [casinoSelfTestLoading, setCasinoSelfTestLoading] = useState(false);
+  const [casinoSelfTestResult, setCasinoSelfTestResult] = useState<{
+    httpStatus?: number;
+    response?: { result?: number; status?: string; data?: { balance?: number } };
+    error?: string;
+  } | null>(null);
+
+  const runCasinoCallbackSelfTest = async () => {
+    const userId = Number(casinoSelfTestUserId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      toast.error("Indica um ID de utilizador válido");
+      return;
+    }
+    setCasinoSelfTestLoading(true);
+    setCasinoSelfTestResult(null);
+    try {
+      const res = await fetch("/api/admin/palace-casino-debug/self-test", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      setCasinoSelfTestResult(await res.json());
+    } catch {
+      setCasinoSelfTestResult({ error: "Erro de rede ao testar" });
+    } finally {
+      setCasinoSelfTestLoading(false);
+    }
+  };
 
   const toggleCasinoGameActive = useCallback(
     async (id: number, isActive: boolean) => {
@@ -5435,10 +5470,47 @@ export default function AdminPage() {
                           <Loader2 className="animate-spin" size={14} /> A
                           verificar…
                         </div>
-                      ) : casinoAgentError ? (
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-3 text-xs mb-3">
+                            <span
+                              className={`flex items-center gap-1.5 ${casinoAgent?.apiTokenConfigured ? "text-green-400" : "text-red-400"}`}
+                            >
+                              {casinoAgent?.apiTokenConfigured ? (
+                                <CheckCircle size={13} />
+                              ) : (
+                                <XCircle size={13} />
+                              )}
+                              PALACE_CASINO_API_TOKEN
+                            </span>
+                            <span
+                              className={`flex items-center gap-1.5 ${casinoAgent?.callbackTokenConfigured ? "text-green-400" : "text-red-400"}`}
+                            >
+                              {casinoAgent?.callbackTokenConfigured ? (
+                                <CheckCircle size={13} />
+                              ) : (
+                                <XCircle size={13} />
+                              )}
+                              PALACE_CASINO_CALLBACK_TOKEN
+                            </span>
+                          </div>
+                          {casinoAgent?.expectedCallbackUrl && (
+                            <div className="mb-3">
+                              <div className="text-xs text-zinc-600 mb-1">
+                                URL de callback a confirmar no painel da
+                                Palace Casino:
+                              </div>
+                              <code className="block text-xs text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 break-all">
+                                {casinoAgent.expectedCallbackUrl}
+                              </code>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {!casinoAgentLoading && !casinoAgent?.agent ? (
                         <div className="text-xs text-red-400 flex items-center gap-2">
-                          <WifiOff size={14} /> Não foi possível ligar ao
-                          Palace Casino (verifique PALACE_CASINO_API_TOKEN).
+                          <WifiOff size={14} />{" "}
+                          {casinoAgent?.error ?? "Não foi possível ligar ao Palace Casino."}
                         </div>
                       ) : casinoAgent?.agent ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
@@ -5480,6 +5552,61 @@ export default function AdminPage() {
                         <div className="text-xs text-zinc-600">
                           Sem dados.
                         </div>
+                      )}
+                    </div>
+
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Zap size={15} className="text-zinc-400" />
+                        <span className="text-sm font-semibold text-zinc-300">
+                          Testar Callback
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-600 mb-3">
+                        Simula uma chamada real da Palace Casino ao nosso
+                        próprio servidor (comando "authenticate") — confirma
+                        se o nosso código responde corretamente, sem
+                        depender da Palace Casino nos chamar primeiro.
+                      </p>
+                      <div className="flex gap-2">
+                        <Input
+                          type="number"
+                          placeholder="ID do utilizador"
+                          value={casinoSelfTestUserId}
+                          onChange={(e) => setCasinoSelfTestUserId(e.target.value)}
+                          className="bg-zinc-800 border-zinc-700 text-white text-sm max-w-[160px]"
+                        />
+                        <Button
+                          type="button"
+                          disabled={casinoSelfTestLoading || !casinoSelfTestUserId}
+                          onClick={runCasinoCallbackSelfTest}
+                          className="bg-red-600 hover:bg-red-700 text-white shrink-0"
+                        >
+                          {casinoSelfTestLoading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            "Testar"
+                          )}
+                        </Button>
+                      </div>
+                      {casinoSelfTestResult && (
+                        <div
+                          className={`mt-3 rounded-lg border p-3 text-xs font-mono whitespace-pre-wrap break-all ${
+                            casinoSelfTestResult.response?.result === 0
+                              ? "bg-green-900/20 border-green-800 text-green-300"
+                              : "bg-red-900/20 border-red-800 text-red-300"
+                          }`}
+                        >
+                          {JSON.stringify(casinoSelfTestResult, null, 2)}
+                        </div>
+                      )}
+                      {casinoSelfTestResult?.response?.result === 0 && (
+                        <p className="text-xs text-green-400 mt-2">
+                          O nosso código funciona — devolveu o saldo real
+                          deste utilizador. Se o jogo continua a mostrar
+                          CREDIT 0, o problema está confirmado do lado da
+                          Palace Casino (URL de callback ou conta de agente).
+                        </p>
                       )}
                     </div>
                   </div>
