@@ -226,6 +226,25 @@ type AdminCasinoBanner = {
   updatedAt: string;
 };
 
+type AdminLiveMapping = {
+  id: number;
+  betbyEventId: string;
+  home: string;
+  away: string;
+  league: string | null;
+  statscoreEventId: number | null;
+  videoMatchId: number | null;
+  videoSportId: number | null;
+  videoTournamentId: number | null;
+  videoStatsHost: string | null;
+  videoKey: string | null;
+  resolvedBy: "auto" | "manual";
+  isLive: boolean;
+  status: "LIVE" | "PREMATCH" | "FINISHED" | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type UserDetail = {
   user: AdminUser;
   bets: AdminBet[];
@@ -720,6 +739,7 @@ type TabId =
   | "events"
   | "settlement-logs"
   | "casino"
+  | "live"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -887,6 +907,21 @@ export default function AdminPage() {
   const [casinoGameSearch, setCasinoGameSearch] = useState("");
   const [casinoGamePage, setCasinoGamePage] = useState(1);
   const [casinoTxPage, setCasinoTxPage] = useState(1);
+
+  // Ao Vivo (BetBY + StatScore + SMYTDRYT) mapping tab — per-row edit
+  // buffer keyed by betbyEventId, only touched fields are sent on save.
+  const [liveMappingEdits, setLiveMappingEdits] = useState<
+    Record<string, Partial<{
+      statscoreEventId: string;
+      videoMatchId: string;
+      videoSportId: string;
+      videoTournamentId: string;
+      videoStatsHost: string;
+      videoKey: string;
+    }>>
+  >({});
+  const [liveMappingSaving, setLiveMappingSaving] = useState<Record<string, boolean>>({});
+
   const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
   const [bannerForm, setBannerForm] = useState<{
     title: string;
@@ -1242,6 +1277,71 @@ export default function AdminPage() {
   const casinoBanners = casinoBannersQuery.data?.banners ?? [];
   const casinoBannersLoading = casinoBannersQuery.isLoading;
   const refetchCasinoBanners = casinoBannersQuery.refetch;
+
+  // Polls every 5s while the tab is open so newly-detected BetBY live
+  // events (auto-seeded blank rows) show up without a manual refresh.
+  const liveMappingsQuery = useQuery({
+    queryKey: ["admin", "live-stream", "mappings"],
+    queryFn: async (): Promise<{ mappings: AdminLiveMapping[] }> => {
+      const res = await fetch("/api/admin/live-stream/mappings", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load live-stream mappings");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "live",
+    refetchInterval: activeTab === "live" ? 5000 : false,
+  });
+  const liveMappings = liveMappingsQuery.data?.mappings ?? [];
+  const liveMappingsLoading = liveMappingsQuery.isLoading;
+  const refetchLiveMappings = liveMappingsQuery.refetch;
+
+  const saveLiveMapping = useCallback(
+    async (betbyEventId: string) => {
+      const edits = liveMappingEdits[betbyEventId];
+      if (!edits) return;
+      setLiveMappingSaving((prev) => ({ ...prev, [betbyEventId]: true }));
+      try {
+        const body: Record<string, number | string | null> = {};
+        for (const key of [
+          "statscoreEventId",
+          "videoMatchId",
+          "videoSportId",
+          "videoTournamentId",
+          "videoStatsHost",
+          "videoKey",
+        ] as const) {
+          if (!(key in edits)) continue;
+          const raw = (edits[key] ?? "").trim();
+          if (key === "videoStatsHost" || key === "videoKey") {
+            body[key] = raw === "" ? null : raw;
+          } else {
+            body[key] = raw === "" ? null : Number(raw);
+          }
+        }
+        const res = await fetch(
+          `/api/admin/live-stream/mappings/${encodeURIComponent(betbyEventId)}`,
+          {
+            method: "PATCH",
+            headers: { ...authHeader, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+        );
+        if (!res.ok) throw new Error();
+        toast.success("Mapeamento guardado");
+        setLiveMappingEdits((prev) => {
+          const next = { ...prev };
+          delete next[betbyEventId];
+          return next;
+        });
+        refetchLiveMappings();
+      } catch {
+        toast.error("Erro ao guardar mapeamento");
+      } finally {
+        setLiveMappingSaving((prev) => ({ ...prev, [betbyEventId]: false }));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [liveMappingEdits, token],
+  );
 
   const openBannerModal = (banner: "new" | AdminCasinoBanner) => {
     if (banner === "new") {
@@ -2376,7 +2476,8 @@ export default function AdminPage() {
       else if (casinoSubTab === "games") refetchCasinoGames();
       else if (casinoSubTab === "transactions") refetchCasinoTx();
       else if (casinoSubTab === "promotions") refetchCasinoBanners();
-    } else if (activeTab === "settings") {
+    } else if (activeTab === "live") refetchLiveMappings();
+    else if (activeTab === "settings") {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
@@ -2523,6 +2624,12 @@ export default function AdminPage() {
       section: "pro",
     },
     {
+      id: "live",
+      icon: <Radio size={18} />,
+      label: "Ao Vivo",
+      section: "pro",
+    },
+    {
       id: "settings",
       icon: <Settings size={18} />,
       label: "Configurações",
@@ -2541,6 +2648,7 @@ export default function AdminPage() {
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
+    live: "Ao Vivo · Match Tracker",
     settings: "Configurações",
   };
 
@@ -5870,6 +5978,166 @@ export default function AdminPage() {
                         );
                       })
                     )}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── AO VIVO (BetBY + StatScore + SMYTDRYT) ── */}
+            {activeTab === "live" && (
+              <motion.div
+                key="live"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="space-y-4"
+              >
+                <div className="text-xs text-zinc-500 -mt-2">
+                  Eventos ao vivo detetados pela BetBY. O Match Tracker usa
+                  automaticamente o Statpal (por nome das equipas) até
+                  indicares um StatScore Event ID; a transmissão SMYTDRYT só
+                  aparece depois de preencheres os campos de vídeo.
+                </div>
+
+                {liveMappingsLoading ? (
+                  <div className="flex items-center justify-center py-16 text-zinc-500">
+                    <Loader2 className="animate-spin" size={24} />
+                  </div>
+                ) : liveMappings.length === 0 ? (
+                  <div className="text-center py-16 text-zinc-500 text-sm">
+                    Nenhum evento ao vivo detetado ainda. Confirma que
+                    BETBY_API_BASE_URL/BETBY_BRAND_ID estão configurados.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {liveMappings.map((m) => {
+                      const edits = liveMappingEdits[m.betbyEventId] ?? {};
+                      const val = (
+                        key:
+                          | "statscoreEventId"
+                          | "videoMatchId"
+                          | "videoSportId"
+                          | "videoTournamentId"
+                          | "videoStatsHost"
+                          | "videoKey",
+                      ): string =>
+                        key in edits
+                          ? (edits[key] ?? "")
+                          : (m[key] != null ? String(m[key]) : "");
+                      const setVal = (
+                        key:
+                          | "statscoreEventId"
+                          | "videoMatchId"
+                          | "videoSportId"
+                          | "videoTournamentId"
+                          | "videoStatsHost"
+                          | "videoKey",
+                        v: string,
+                      ) =>
+                        setLiveMappingEdits((prev) => ({
+                          ...prev,
+                          [m.betbyEventId]: { ...prev[m.betbyEventId], [key]: v },
+                        }));
+                      const hasEdits = Object.keys(edits).length > 0;
+                      const saving = !!liveMappingSaving[m.betbyEventId];
+                      return (
+                        <div
+                          key={m.betbyEventId}
+                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4"
+                        >
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-semibold text-white truncate">
+                                  {m.home} <span className="text-zinc-500">vs</span> {m.away}
+                                </span>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                    m.isLive
+                                      ? "bg-red-600/20 text-red-400"
+                                      : "bg-zinc-800 text-zinc-500"
+                                  }`}
+                                >
+                                  {m.isLive ? `AO VIVO${m.status ? ` · ${m.status}` : ""}` : "Inativo"}
+                                </span>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                    m.resolvedBy === "manual"
+                                      ? "bg-green-600/20 text-green-400"
+                                      : "bg-zinc-800 text-zinc-500"
+                                  }`}
+                                >
+                                  {m.resolvedBy === "manual" ? "Mapeado" : "Auto"}
+                                </span>
+                              </div>
+                              <div className="text-xs text-zinc-500 truncate mt-0.5">
+                                {m.league || "—"} · betbyEventId: {m.betbyEventId}
+                              </div>
+                            </div>
+                            <button
+                              disabled={!hasEdits || saving}
+                              onClick={() => saveLiveMapping(m.betbyEventId)}
+                              className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                            >
+                              {saving && <Loader2 size={12} className="animate-spin" />}
+                              Guardar
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">StatScore Event ID</Label>
+                              <Input
+                                value={val("statscoreEventId")}
+                                onChange={(e) => setVal("statscoreEventId", e.target.value)}
+                                placeholder="ex: 6309926"
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT matchId</Label>
+                              <Input
+                                value={val("videoMatchId")}
+                                onChange={(e) => setVal("videoMatchId", e.target.value)}
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT sportId</Label>
+                              <Input
+                                value={val("videoSportId")}
+                                onChange={(e) => setVal("videoSportId", e.target.value)}
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT tournamentId</Label>
+                              <Input
+                                value={val("videoTournamentId")}
+                                onChange={(e) => setVal("videoTournamentId", e.target.value)}
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT statsHost</Label>
+                              <Input
+                                value={val("videoStatsHost")}
+                                onChange={(e) => setVal("videoStatsHost", e.target.value)}
+                                placeholder="statsstart26.sptpub.com"
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT key</Label>
+                              <Input
+                                value={val("videoKey")}
+                                onChange={(e) => setVal("videoKey", e.target.value)}
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </motion.div>
