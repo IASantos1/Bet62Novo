@@ -496,22 +496,10 @@ type CasinoGame = {
 type CasinoGameGroup = { name: string; games: CasinoGame[] };
 // BET62 Live + Match Tracker + Streaming (BetBY live list + Statpal tracker
 // + SMYTDRYT stream) — separate pipeline/ID scheme from the existing
-// Statpal/SportsAPI-backed live matches above; only rendered when a BetBY
-// event has a stream ready.
-type BetbyLiveEvent = {
-  betbyEventId: string;
-  sport: string;
-  league: string;
-  country: string;
-  home: string;
-  away: string;
-  status: "LIVE" | "PREMATCH" | "FINISHED";
-  minute?: string;
-  homeScore?: number;
-  awayScore?: number;
-  tracker?: { provider: "statpal"; eventId: string };
-  stream?: { provider: "smytdryt"; matchId: number; key: string; url: string };
-};
+// Statpal/SportsAPI-backed live matches above. GET /api/live is a single
+// "LiveAggregator" feed with tracker + stream embedded inline (no separate
+// polling needed to see score/incidents); only rendered when a BetBY event
+// has a stream ready.
 type MatchTracker = {
   provider: "statpal";
   eventId: string;
@@ -520,6 +508,20 @@ type MatchTracker = {
   homeScore: number;
   awayScore: number;
   incidents: Array<{ type: string; team: string; minute: number; player: string }>;
+};
+type BetbyLiveEvent = {
+  eventId?: string;
+  betbyEventId: string;
+  sport: string;
+  league: string;
+  country: string;
+  home: string;
+  away: string;
+  status: "LIVE" | "PREMATCH" | "FINISHED";
+  minute?: string;
+  score: { home: number; away: number };
+  tracker?: MatchTracker;
+  stream?: { hls: string };
 };
 type CasinoBanner = {
   id: number;
@@ -4437,12 +4439,12 @@ function LiveStreamModal({
   onClose: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [tracker, setTracker] = useState<MatchTracker | null>(null);
+  const [tracker, setTracker] = useState<MatchTracker | null>(event.tracker ?? null);
   const [videoError, setVideoError] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
-    const url = event.stream?.url;
+    const url = event.stream?.hls;
     if (!video || !url) return;
     setVideoError(false);
     let hls: import("hls.js").default | null = null;
@@ -4468,7 +4470,7 @@ function LiveStreamModal({
       cancelled = true;
       hls?.destroy();
     };
-  }, [event.stream?.url]);
+  }, [event.stream?.hls]);
 
   useEffect(() => {
     if (!event.tracker) return;
@@ -24746,11 +24748,9 @@ export default function Home({
                             <div className="text-xs text-zinc-500 truncate mt-0.5">
                               {e.league}
                             </div>
-                            {(e.homeScore != null || e.awayScore != null) && (
-                              <div className="text-lg font-black text-white mt-1">
-                                {e.homeScore ?? 0} - {e.awayScore ?? 0}
-                              </div>
-                            )}
+                            <div className="text-lg font-black text-white mt-1">
+                              {e.score.home} - {e.score.away}
+                            </div>
                           </button>
                         ))}
                     </div>
