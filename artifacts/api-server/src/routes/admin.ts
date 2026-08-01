@@ -9,8 +9,10 @@ import {
   withdrawalsTable,
   settlementLogsTable,
   sportscoreMatchMapTable,
+  casinoGamesTable,
+  ledgerEntriesTable,
 } from "@workspace/db/schema";
-import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
+import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
   adminMiddleware,
   type AdminRequest,
@@ -2408,6 +2410,165 @@ router.get(
     }
   },
 );
+
+// ── Casino admin: overview / catalog / transactions ─────────────────────────
+// Kinds recorded by the Palace Casino wallet callback (routes/casino.ts) —
+// bet/win amounts are already signed (bet negative, win positive), and a
+// cancel row is the exact reversal of its original bet, so summing `amount`
+// across all three for a period gives the net change to *players'* balances;
+// GGR (house revenue) is the negative of that.
+const CASINO_LEDGER_KINDS = [
+  "casino_palace_bet",
+  "casino_palace_win",
+  "casino_palace_cancel",
+] as const;
+
+router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const [[gameCounts], [providerCounts], [todayNet], [allTimeNet]] =
+      await Promise.all([
+        db
+          .select({
+            total: count(),
+            active: sql<number>`count(*) filter (where ${casinoGamesTable.isActive})`,
+          })
+          .from(casinoGamesTable)
+          .where(eq(casinoGamesTable.source, "palace")),
+        db
+          .select({ total: sql<number>`count(distinct ${casinoGamesTable.provider})` })
+          .from(casinoGamesTable)
+          .where(and(eq(casinoGamesTable.source, "palace"), eq(casinoGamesTable.isActive, true))),
+        db
+          .select({ net: sum(ledgerEntriesTable.amount) })
+          .from(ledgerEntriesTable)
+          .where(
+            and(
+              inArray(ledgerEntriesTable.kind, CASINO_LEDGER_KINDS),
+              gte(ledgerEntriesTable.createdAt, startOfToday),
+            ),
+          ),
+        db
+          .select({ net: sum(ledgerEntriesTable.amount) })
+          .from(ledgerEntriesTable)
+          .where(inArray(ledgerEntriesTable.kind, CASINO_LEDGER_KINDS)),
+      ]);
+
+    res.json({
+      games: { total: Number(gameCounts?.total ?? 0), active: Number(gameCounts?.active ?? 0) },
+      providers: Number(providerCounts?.total ?? 0),
+      ggr: {
+        today: -(Number(todayNet?.net ?? 0)),
+        allTime: -(Number(allTimeNet?.net ?? 0)),
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/casino/overview error");
+    res.status(500).json({ error: "Erro ao consultar estatísticas do cassino" });
+  }
+});
+
+router.get("/casino/games", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
+    const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
+    const page = Math.max(1, Number(req.query["page"]) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 30));
+
+    const conditions = [eq(casinoGamesTable.source, "palace")];
+    if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
+    if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
+    const where = and(...conditions);
+
+    const [games, [{ total }]] = await Promise.all([
+      db
+        .select()
+        .from(casinoGamesTable)
+        .where(where)
+        .orderBy(asc(casinoGamesTable.provider), asc(casinoGamesTable.name))
+        .limit(limit)
+        .offset((page - 1) * limit),
+      db.select({ total: count() }).from(casinoGamesTable).where(where),
+    ]);
+
+    res.json({ page, limit, total: Number(total), games });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/casino/games error");
+    res.status(500).json({ error: "Erro ao listar jogos" });
+  }
+});
+
+router.patch(
+  "/casino/games/:id/active",
+  adminMiddleware,
+  async (req: AdminRequest, res) => {
+    const id = Number(req.params["id"]);
+    const isActive = Boolean((req.body as { isActive?: unknown })?.isActive);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Id inválido" });
+      return;
+    }
+    try {
+      const [updated] = await db
+        .update(casinoGamesTable)
+        .set({ isActive, updatedAt: new Date() })
+        .where(eq(casinoGamesTable.id, id))
+        .returning({ id: casinoGamesTable.id, isActive: casinoGamesTable.isActive });
+      if (!updated) {
+        res.status(404).json({ error: "Jogo não encontrado" });
+        return;
+      }
+      res.json(updated);
+    } catch (err) {
+      logger.error({ err, id }, "PATCH /api/admin/casino/games/:id/active error");
+      res.status(500).json({ error: "Erro ao atualizar jogo" });
+    }
+  },
+);
+
+router.get("/casino/transactions", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const userId = Number(req.query["userId"]) || null;
+    const kind = typeof req.query["kind"] === "string" ? req.query["kind"].trim() : "";
+    const page = Math.max(1, Number(req.query["page"]) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 30));
+
+    const conditions = [like(ledgerEntriesTable.kind, "casino_%")];
+    if (userId) conditions.push(eq(ledgerEntriesTable.userId, userId));
+    if (kind) conditions.push(eq(ledgerEntriesTable.kind, kind));
+    const where = and(...conditions);
+
+    const [rows, [{ total }]] = await Promise.all([
+      db
+        .select({
+          id: ledgerEntriesTable.id,
+          userId: ledgerEntriesTable.userId,
+          userEmail: usersTable.email,
+          amount: ledgerEntriesTable.amount,
+          currency: ledgerEntriesTable.currency,
+          kind: ledgerEntriesTable.kind,
+          refType: ledgerEntriesTable.refType,
+          refId: ledgerEntriesTable.refId,
+          metadata: ledgerEntriesTable.metadata,
+          createdAt: ledgerEntriesTable.createdAt,
+        })
+        .from(ledgerEntriesTable)
+        .leftJoin(usersTable, eq(usersTable.id, ledgerEntriesTable.userId))
+        .where(where)
+        .orderBy(desc(ledgerEntriesTable.createdAt))
+        .limit(limit)
+        .offset((page - 1) * limit),
+      db.select({ total: count() }).from(ledgerEntriesTable).where(where),
+    ]);
+
+    res.json({ page, limit, total: Number(total), transactions: rows });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/casino/transactions error");
+    res.status(500).json({ error: "Erro ao listar transações" });
+  }
+});
 
 // Read-only diagnostic: market names Statpal's /odds/prematch feed returns
 // that we don't currently parse into AdvancedMarkets (see matches.ts —

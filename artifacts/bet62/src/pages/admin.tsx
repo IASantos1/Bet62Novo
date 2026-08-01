@@ -48,6 +48,9 @@ import {
   Trash2,
   Radio,
   ScrollText,
+  Dices,
+  Image as ImageIcon,
+  Power,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -164,6 +167,40 @@ type KycDocument = {
   status: string;
   createdAt: string;
   reviewedAt: string | null;
+};
+
+type AdminCasinoOverview = {
+  games: { total: number; active: number };
+  providers: number;
+  ggr: { today: number; allTime: number };
+};
+
+type AdminCasinoGame = {
+  id: number;
+  provider: string;
+  gameUid: string;
+  name: string;
+  vendorCode: number | null;
+  category: string;
+  img: string | null;
+  isActive: boolean;
+  popularity: number;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AdminCasinoTransaction = {
+  id: number;
+  userId: number;
+  userEmail: string | null;
+  amount: string;
+  currency: string;
+  kind: string;
+  refType: string | null;
+  refId: string | null;
+  metadata: unknown;
+  createdAt: string;
 };
 
 type UserDetail = {
@@ -659,6 +696,7 @@ type TabId =
   | "analytics"
   | "events"
   | "settlement-logs"
+  | "casino"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -818,6 +856,14 @@ export default function AdminPage() {
     key: keyof AdminUser;
     dir: "asc" | "desc";
   }>({ key: "createdAt", dir: "desc" });
+
+  // Casino tab
+  const [casinoSubTab, setCasinoSubTab] = useState<
+    "overview" | "games" | "transactions" | "promotions"
+  >("overview");
+  const [casinoGameSearch, setCasinoGameSearch] = useState("");
+  const [casinoGamePage, setCasinoGamePage] = useState(1);
+  const [casinoTxPage, setCasinoTxPage] = useState(1);
 
   const [balanceModal, setBalanceModal] = useState<AdminUser | null>(null);
   const [balanceAmount, setBalanceAmount] = useState("");
@@ -1016,6 +1062,86 @@ export default function AdminPage() {
   const analyticsData = analyticsQuery.data ?? null;
   const analyticsLoading = analyticsQuery.isLoading;
   const refetchAnalytics = analyticsQuery.refetch;
+
+  const casinoOverviewQuery = useQuery({
+    queryKey: ["admin", "casino", "overview"],
+    queryFn: async (): Promise<AdminCasinoOverview> => {
+      const res = await fetch("/api/admin/casino/overview", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load casino overview");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "casino" && casinoSubTab === "overview",
+  });
+  const casinoOverview = casinoOverviewQuery.data ?? null;
+  const casinoOverviewLoading = casinoOverviewQuery.isLoading;
+  const refetchCasinoOverview = casinoOverviewQuery.refetch;
+
+  const casinoGamesQuery = useQuery({
+    queryKey: ["admin", "casino", "games", casinoGameSearch, casinoGamePage],
+    queryFn: async (): Promise<{ page: number; limit: number; total: number; games: AdminCasinoGame[] }> => {
+      const params = new URLSearchParams({ page: String(casinoGamePage), limit: "30" });
+      if (casinoGameSearch.trim()) params.set("search", casinoGameSearch.trim());
+      const res = await fetch(`/api/admin/casino/games?${params}`, { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load casino games");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "casino" && casinoSubTab === "games",
+  });
+  const casinoGamesData = casinoGamesQuery.data ?? { page: 1, limit: 30, total: 0, games: [] };
+  const casinoGamesLoading = casinoGamesQuery.isLoading;
+  const refetchCasinoGames = casinoGamesQuery.refetch;
+
+  const casinoTxQuery = useQuery({
+    queryKey: ["admin", "casino", "transactions", casinoTxPage],
+    queryFn: async (): Promise<{ page: number; limit: number; total: number; transactions: AdminCasinoTransaction[] }> => {
+      const res = await fetch(`/api/admin/casino/transactions?page=${casinoTxPage}&limit=30`, {
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error("Failed to load casino transactions");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "casino" && casinoSubTab === "transactions",
+  });
+  const casinoTxData = casinoTxQuery.data ?? { page: 1, limit: 30, total: 0, transactions: [] };
+  const casinoTxLoading = casinoTxQuery.isLoading;
+  const refetchCasinoTx = casinoTxQuery.refetch;
+
+  const casinoAgentQuery = useQuery({
+    queryKey: ["admin", "casino", "agent"],
+    queryFn: async (): Promise<{
+      agent: { name?: string; currency?: number | string; balance?: number | string } | null;
+      count: number;
+      providers: Array<{ provider_id: number; provider_name: string; status: number }>;
+    }> => {
+      const res = await fetch("/api/admin/palace-casino-debug", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load Palace Casino agent info");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "casino" && casinoSubTab === "overview",
+    retry: false,
+  });
+  const casinoAgent = casinoAgentQuery.data ?? null;
+  const casinoAgentLoading = casinoAgentQuery.isLoading;
+  const casinoAgentError = casinoAgentQuery.isError;
+
+  const toggleCasinoGameActive = useCallback(
+    async (id: number, isActive: boolean) => {
+      try {
+        const res = await fetch(`/api/admin/casino/games/${id}/active`, {
+          method: "PATCH",
+          headers: { ...authHeader, "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive }),
+        });
+        if (!res.ok) throw new Error();
+        toast.success(isActive ? "Jogo ativado" : "Jogo desativado");
+        refetchCasinoGames();
+      } catch {
+        toast.error("Erro ao atualizar jogo");
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token],
+  );
 
   const fetchSuspended = useCallback(async () => {
     if (!token) return;
@@ -1989,7 +2115,11 @@ export default function AdminPage() {
       fetchFeed();
       fetchEventRuntime();
     } else if (activeTab === "settlement-logs") fetchSettlementLogs();
-    else if (activeTab === "settings") {
+    else if (activeTab === "casino") {
+      if (casinoSubTab === "overview") refetchCasinoOverview();
+      else if (casinoSubTab === "games") refetchCasinoGames();
+      else if (casinoSubTab === "transactions") refetchCasinoTx();
+    } else if (activeTab === "settings") {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
@@ -2130,6 +2260,12 @@ export default function AdminPage() {
       section: "pro",
     },
     {
+      id: "casino",
+      icon: <Dices size={18} />,
+      label: "Cassino",
+      section: "pro",
+    },
+    {
       id: "settings",
       icon: <Settings size={18} />,
       label: "Configurações",
@@ -2147,6 +2283,7 @@ export default function AdminPage() {
     analytics: "Analytics",
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
+    casino: "Cassino",
     settings: "Configurações",
   };
 
@@ -4986,6 +5123,328 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
+              </motion.div>
+            )}
+
+            {/* ── CASSINO ── */}
+            {activeTab === "casino" && (
+              <motion.div
+                key="casino"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="space-y-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {(
+                    [
+                      { id: "overview", label: "Visão Geral" },
+                      { id: "games", label: "Jogos" },
+                      { id: "transactions", label: "Transações" },
+                      { id: "promotions", label: "Promoções" },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setCasinoSubTab(t.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${casinoSubTab === t.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "bg-zinc-900 text-zinc-400 border border-zinc-700 hover:text-white"}`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {casinoSubTab === "overview" && (
+                  <div className="space-y-4">
+                    {casinoOverviewLoading ? (
+                      <div className="flex items-center justify-center py-16 text-zinc-500">
+                        <Loader2 className="animate-spin" size={24} />
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                          <div className="text-xs text-zinc-500 mb-1">
+                            Jogos Ativos
+                          </div>
+                          <div className="text-2xl font-bold text-white">
+                            {casinoOverview?.games.active ?? 0}
+                            <span className="text-sm text-zinc-600 font-normal">
+                              {" "}
+                              / {casinoOverview?.games.total ?? 0}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                          <div className="text-xs text-zinc-500 mb-1">
+                            Provedores
+                          </div>
+                          <div className="text-2xl font-bold text-white">
+                            {casinoOverview?.providers ?? 0}
+                          </div>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                          <div className="text-xs text-zinc-500 mb-1">
+                            GGR Hoje
+                          </div>
+                          <div className="text-2xl font-bold text-green-400">
+                            {fmtEur(casinoOverview?.ggr.today ?? 0)}
+                          </div>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                          <div className="text-xs text-zinc-500 mb-1">
+                            GGR Total
+                          </div>
+                          <div className="text-2xl font-bold text-green-400">
+                            {fmtEur(casinoOverview?.ggr.allTime ?? 0)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Wifi size={15} className="text-zinc-400" />
+                        <span className="text-sm font-semibold text-zinc-300">
+                          Ligação Palace Casino
+                        </span>
+                      </div>
+                      {casinoAgentLoading ? (
+                        <div className="text-xs text-zinc-500 flex items-center gap-2">
+                          <Loader2 className="animate-spin" size={14} /> A
+                          verificar…
+                        </div>
+                      ) : casinoAgentError ? (
+                        <div className="text-xs text-red-400 flex items-center gap-2">
+                          <WifiOff size={14} /> Não foi possível ligar ao
+                          Palace Casino (verifique PALACE_CASINO_API_TOKEN).
+                        </div>
+                      ) : casinoAgent?.agent ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                          <div>
+                            <div className="text-xs text-zinc-600">Conta</div>
+                            <div className="text-zinc-200">
+                              {casinoAgent.agent.name ?? "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-600">Moeda</div>
+                            <div
+                              className={
+                                String(casinoAgent.agent.currency) === "EUR" ||
+                                String(casinoAgent.agent.currency) === "978"
+                                  ? "text-green-400"
+                                  : "text-yellow-400"
+                              }
+                            >
+                              {String(casinoAgent.agent.currency ?? "—")}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-600">Saldo</div>
+                            <div className="text-zinc-200">
+                              {casinoAgent.agent.balance ?? "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-600">
+                              Provedores (API)
+                            </div>
+                            <div className="text-zinc-200">
+                              {casinoAgent.count}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-zinc-600">
+                          Sem dados.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {casinoSubTab === "games" && (
+                  <div className="space-y-3">
+                    <div className="relative max-w-sm">
+                      <Search
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                      />
+                      <input
+                        type="text"
+                        value={casinoGameSearch}
+                        onChange={(e) => {
+                          setCasinoGameSearch(e.target.value);
+                          setCasinoGamePage(1);
+                        }}
+                        placeholder="Pesquisar jogo…"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                      />
+                    </div>
+
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                      {casinoGamesLoading ? (
+                        <div className="flex items-center justify-center py-16 text-zinc-500">
+                          <Loader2 className="animate-spin" size={24} />
+                        </div>
+                      ) : casinoGamesData.games.length === 0 ? (
+                        <div className="px-5 py-16 text-center text-zinc-600 text-sm">
+                          Nenhum jogo encontrado.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-zinc-800/60">
+                          {casinoGamesData.games.map((g) => (
+                            <div
+                              key={g.id}
+                              className="px-4 py-2.5 flex items-center gap-3 hover:bg-zinc-800/30 transition-colors"
+                            >
+                              {g.img ? (
+                                <img
+                                  src={g.img}
+                                  alt=""
+                                  className="w-9 h-9 rounded object-cover shrink-0 bg-zinc-800"
+                                />
+                              ) : (
+                                <div className="w-9 h-9 rounded shrink-0 bg-zinc-800 flex items-center justify-center">
+                                  <Dices size={14} className="text-zinc-600" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-zinc-200 truncate">
+                                  {g.name}
+                                </div>
+                                <div className="text-xs text-zinc-600 truncate">
+                                  {g.provider} · {g.category}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() =>
+                                  toggleCasinoGameActive(g.id, !g.isActive)
+                                }
+                                className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${g.isActive ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                              >
+                                <Power size={12} />
+                                {g.isActive ? "Ativo" : "Inativo"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {casinoGamesData.total > casinoGamesData.limit && (
+                      <div className="flex items-center justify-center gap-3 text-xs text-zinc-500">
+                        <button
+                          disabled={casinoGamePage <= 1}
+                          onClick={() => setCasinoGamePage((p) => Math.max(1, p - 1))}
+                          className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 disabled:opacity-40 hover:text-white transition-colors"
+                        >
+                          Anterior
+                        </button>
+                        <span>
+                          Página {casinoGamesData.page} de{" "}
+                          {Math.max(1, Math.ceil(casinoGamesData.total / casinoGamesData.limit))}
+                        </span>
+                        <button
+                          disabled={casinoGamePage * casinoGamesData.limit >= casinoGamesData.total}
+                          onClick={() => setCasinoGamePage((p) => p + 1)}
+                          className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 disabled:opacity-40 hover:text-white transition-colors"
+                        >
+                          Seguinte
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {casinoSubTab === "transactions" && (
+                  <div className="space-y-3">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                      {casinoTxLoading ? (
+                        <div className="flex items-center justify-center py-16 text-zinc-500">
+                          <Loader2 className="animate-spin" size={24} />
+                        </div>
+                      ) : casinoTxData.transactions.length === 0 ? (
+                        <div className="px-5 py-16 text-center text-zinc-600 text-sm">
+                          Nenhuma transação registada ainda.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-zinc-800/60">
+                          {casinoTxData.transactions.map((tx) => {
+                            const isCredit = parseFloat(tx.amount) > 0;
+                            const kindLabel = tx.kind
+                              .replace("casino_palace_", "")
+                              .replace("casino_", "");
+                            return (
+                              <div
+                                key={tx.id}
+                                className="px-4 py-2.5 flex items-center gap-4 hover:bg-zinc-800/30 transition-colors"
+                              >
+                                <div className="shrink-0 text-xs font-mono text-zinc-600 uppercase w-16">
+                                  {kindLabel}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm text-zinc-200 truncate">
+                                    {tx.userEmail ?? `user#${tx.userId}`}
+                                  </div>
+                                  <div className="text-xs text-zinc-600 truncate">
+                                    {tx.refType ?? ""} {tx.refId ?? ""}
+                                  </div>
+                                </div>
+                                <div
+                                  className={`shrink-0 text-sm font-bold ${isCredit ? "text-green-400" : "text-red-400"}`}
+                                >
+                                  {isCredit ? "+" : ""}
+                                  {fmtEur(tx.amount)}
+                                </div>
+                                <div className="shrink-0 text-xs text-zinc-600 w-32 text-right">
+                                  {fmtDate(tx.createdAt)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {casinoTxData.total > casinoTxData.limit && (
+                      <div className="flex items-center justify-center gap-3 text-xs text-zinc-500">
+                        <button
+                          disabled={casinoTxPage <= 1}
+                          onClick={() => setCasinoTxPage((p) => Math.max(1, p - 1))}
+                          className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 disabled:opacity-40 hover:text-white transition-colors"
+                        >
+                          Anterior
+                        </button>
+                        <span>
+                          Página {casinoTxData.page} de{" "}
+                          {Math.max(1, Math.ceil(casinoTxData.total / casinoTxData.limit))}
+                        </span>
+                        <button
+                          disabled={casinoTxPage * casinoTxData.limit >= casinoTxData.total}
+                          onClick={() => setCasinoTxPage((p) => p + 1)}
+                          className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 disabled:opacity-40 hover:text-white transition-colors"
+                        >
+                          Seguinte
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {casinoSubTab === "promotions" && (
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center">
+                    <ImageIcon size={28} className="mx-auto mb-3 text-zinc-700" />
+                    <div className="text-sm text-zinc-400">
+                      Gestor de banners promocionais — em breve.
+                    </div>
+                    <div className="text-xs text-zinc-600 mt-1">
+                      Vai permitir criar banners (topo e meio da página de
+                      cassino) associados a jogos específicos, com geração
+                      assistida por IA.
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 
