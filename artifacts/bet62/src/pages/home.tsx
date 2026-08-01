@@ -4750,6 +4750,9 @@ export default function Home({
   const [selectedSport, setSelectedSport] = useState<string>("all");
   const [upcomingSearchQuery, setUpcomingSearchQuery] = useState<string>("");
   const [showAllLeagues, setShowAllLeagues] = useState<boolean>(false);
+  // "default" = today (all leagues) + big leagues up to 7 days ahead.
+  // "month" = widens big-league fixtures out to the full fetched month window.
+  const [upcomingRange, setUpcomingRange] = useState<"default" | "month">("default");
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -6718,7 +6721,8 @@ export default function Home({
   // Stable key generators — wrapped in useCallback so they never get a new reference
   // on re-render, which would cascade into useCallback/useEffect loops.
   const upcomingSnapshotKey = useCallback(
-    (sport: string) => `bet62_snapshot_upcoming_v1:${sport}`,
+    (sport: string, range: string = "default") =>
+      `bet62_snapshot_upcoming_v1:${sport}${range === "month" ? ":month" : ""}`,
     [],
   );
   const liveSnapshotKey = useCallback(() => "bet62_snapshot_live_v1", []);
@@ -7411,7 +7415,10 @@ export default function Home({
       if (document.visibilityState === "hidden") return;
       if (isIdleRef.current || isLockedRef.current) return;
       if (showSpinner) setUpcomingLoading(true);
-      const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
+      const params = new URLSearchParams();
+      if (selectedSport !== "all") params.set("sport", selectedSport);
+      if (upcomingRange === "month") params.set("range", "month");
+      const param = params.toString() ? `?${params.toString()}` : "";
       try {
         upcomingFetchCtrlRef.current?.abort();
       } catch {}
@@ -7460,7 +7467,7 @@ export default function Home({
             merged.push({ ...m, isLive: false });
           return pruneUpcomingMatches(merged);
         });
-        writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
+        writeSnapshot(upcomingSnapshotKey(selectedSport, upcomingRange), matches);
       } catch {
       } finally {
         clearTimeout(tid);
@@ -7469,11 +7476,13 @@ export default function Home({
         if (showSpinner) setUpcomingLoading(false);
       }
     },
-    [selectedSport, upcomingSnapshotKey, writeSnapshot],
+    [selectedSport, upcomingRange, upcomingSnapshotKey, writeSnapshot],
   );
 
   useEffect(() => {
-    const snap = readSnapshot<any[]>(upcomingSnapshotKey(selectedSport));
+    const snap = readSnapshot<any[]>(
+      upcomingSnapshotKey(selectedSport, upcomingRange),
+    );
     const canUseSnap = !!(
       snap &&
       Date.now() - snap.savedAt < 10 * 60_000 &&
@@ -7495,6 +7504,7 @@ export default function Home({
     fetchUpcoming,
     readSnapshot,
     selectedSport,
+    upcomingRange,
     upcomingSnapshotKey,
     activeTab,
     pruneUpcomingMatches,
@@ -21940,6 +21950,22 @@ export default function Home({
                           <X size={14} />
                         </button>
                       )}
+                    </div>
+
+                    {/* ─── Range toggle: hoje + ligas grandes (7 dias) vs jogos do mês ── */}
+                    <div className="flex items-center gap-2 mb-4">
+                      <button
+                        onClick={() => setUpcomingRange("default")}
+                        className={`px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors ${upcomingRange === "default" ? "bg-red-600/20 text-red-400 border border-red-500/30" : "bg-zinc-900 text-zinc-400 border border-zinc-700 hover:text-white"}`}
+                      >
+                        Hoje
+                      </button>
+                      <button
+                        onClick={() => setUpcomingRange("month")}
+                        className={`px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors ${upcomingRange === "month" ? "bg-red-600/20 text-red-400 border border-red-500/30" : "bg-zinc-900 text-zinc-400 border border-zinc-700 hover:text-white"}`}
+                      >
+                        Jogos do mês
+                      </button>
                     </div>
 
                     {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
