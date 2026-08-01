@@ -158,11 +158,20 @@ function deriveStatus(state: BetbyEventState | undefined): LiveEvent["status"] {
   return "PREMATCH";
 }
 
+// Purely-numeric competitor names ("290398", "371649"...) are BetBY's own
+// internal outcome IDs leaking through — a real signal (confirmed from
+// production data) that the event is a special/novelty prop market
+// ("Which company has the best AI model...?", "US x Iran diplomatic
+// meeting...?", "Survivor 50 Winner") rather than a real two-team match, and
+// isn't caught by the `desc.virtual` (simulated-sport) check above.
+const NUMERIC_NAME = /^\d+$/;
+
 function toLiveEvent(betbyEventId: string, cached: CachedBetbyEvent): LiveEvent | null {
   const desc = cached.desc;
   if (!desc || desc.virtual) return null; // no team names yet, or a virtual/simulated event — skip
   const [home, away] = desc.competitors ?? [];
   if (!home?.name || !away?.name) return null;
+  if (NUMERIC_NAME.test(home.name.trim()) || NUMERIC_NAME.test(away.name.trim())) return null;
 
   const score = cached.score;
   return {
