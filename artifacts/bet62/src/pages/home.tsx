@@ -494,14 +494,14 @@ type CasinoGame = {
   source?: string; // "silentapi" (default) | "palace"
 };
 type CasinoGameGroup = { name: string; games: CasinoGame[] };
-// BET62 Live + Match Tracker + Streaming (BetBY live list + Statpal tracker
-// + SMYTDRYT stream) — separate pipeline/ID scheme from the existing
-// Statpal/SportsAPI-backed live matches above. GET /api/live is a single
-// "LiveAggregator" feed with tracker + stream embedded inline (no separate
-// polling needed to see score/incidents); only rendered when a BetBY event
-// has a stream ready.
+// BET62 Live + Match Tracker + Streaming (BetBY live list + StatScore/
+// Statpal tracker + SMYTDRYT stream) — separate pipeline/ID scheme from the
+// existing Statpal/SportsAPI-backed live matches above. GET /api/live is a
+// single "LiveAggregator" feed with tracker + stream embedded inline (no
+// separate polling needed to see score/incidents); only rendered when a
+// BetBY event has a stream ready.
 type MatchTracker = {
-  provider: "statpal";
+  provider: "statscore" | "statpal";
   eventId: string;
   status: string;
   minute: string;

@@ -1,25 +1,18 @@
-// BET62 Live + Match Tracker + Streaming — tracker source.
+// BET62 Live + Match Tracker + Streaming — automatic tracker fallback.
 //
-// The original plan called for StatScore's get_pushes endpoint, but there's
-// no real StatScore account/documentation for this project. Statpal, on the
-// other hand, is already the platform's live-football data source with real
-// credentials — routes/matches.ts already maintains `liveMatchState`, an
-// in-memory map of every live match (score, minute, status, incidents) fed
-// by Statpal's own live poller. Reusing it here means the tracker needs no
-// separate fetch, no separate cache, and no per-event ID mapping: a BetBY
-// event is matched to its Statpal live-match entry by team name, fresh, on
-// every tracker request.
+// StatScore's get_pushes (services/statscore/tracker.ts) is the primary
+// tracker source now that real auth is confirmed, but it still needs an
+// admin to map a statscoreEventId per BetBY event (no "list live events"
+// endpoint is documented for StatScore). Statpal needs no such mapping —
+// routes/matches.ts already maintains `liveMatchState`, an in-memory map of
+// every live match (score, minute, status, incidents) fed by Statpal's own
+// live poller — so a BetBY event is matched to it by team name, fresh, on
+// every tracker request, giving every live event *some* tracker data
+// immediately even before an admin has mapped a StatScore id.
 import { liveMatchState, type LiveMatchState } from "../../routes/matches.js";
+import type { MatchTracker } from "../liveStream/trackerTypes.js";
 
-export interface MatchTracker {
-  provider: "statpal";
-  eventId: string;
-  status: string;
-  minute: string;
-  homeScore: number;
-  awayScore: number;
-  incidents: Array<{ type: string; team: string; minute: number; player: string }>;
-}
+export type { MatchTracker };
 
 function normalizeTeamName(name: string): string {
   return name

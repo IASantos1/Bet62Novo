@@ -76,20 +76,35 @@ const PULSESCORE_BOOKMAKER =
 // deterministic template when unset, so the feature works either way.
 const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 
-// ── BET62 Live + Match Tracker + Streaming (BetBY / Statpal / SMYTDRYT) ──
-// BetBY supplies the live events list (score/minute/status), Statpal (the
-// platform's existing live-football data source — see services/statpal/
-// liveTracker.ts) supplies the Match Tracker matched by team name, SMYTDRYT
-// supplies the HLS stream URL keyed by its own matchId. BetBY and SMYTDRYT
-// don't share an ID scheme, so live_stream_mappings (see lib/db) bridges
-// just those two.
+// ── BET62 Live + Match Tracker + Streaming (BetBY / StatScore+Statpal / SMYTDRYT) ──
+// BetBY supplies the live events list (score/minute/status). The Match
+// Tracker is primarily StatScore's get_pushes (real auth confirmed — see
+// STATSCORE_AUTH below), which needs an admin-mapped eventId per BetBY
+// event (services/statscore/resolver.ts); Statpal (services/statpal/
+// liveTracker.ts, matched by team name, no mapping needed) is the automatic
+// fallback for events not yet mapped. SMYTDRYT supplies the HLS stream URL
+// keyed by its own matchId. Neither StatScore nor SMYTDRYT share BetBY's ID
+// scheme, so live_stream_mappings (see lib/db) bridges both.
 //
-// BETBY_LIVE_EVENTS_URL/BETBY_API_TOKEN: no real BetBY API docs exist yet —
-// the poller (services/betby/poller.ts) no-ops with a warning until these
-// are set, same inert-until-configured pattern as PALACE_CASINO_API_TOKEN.
+// BETBY_LIVE_EVENTS_URL/BETBY_API_TOKEN: no real BetBY REST API docs exist
+// yet — BetBY's real live feed turned out to be WebSocket-based (manifest +
+// authenticated ws_new connection), not a simple polled REST list, so this
+// client is still scaffolding pending the session-token-minting endpoint.
+// The poller no-ops with a warning until these are set, same
+// inert-until-configured pattern as PALACE_CASINO_API_TOKEN.
 const BETBY_LIVE_EVENTS_URL = process.env["BETBY_LIVE_EVENTS_URL"]?.trim() || "";
 const BETBY_API_TOKEN = process.env["BETBY_API_TOKEN"] ?? "";
 const BETBY_POLL_INTERVAL_MS = 5_000;
+
+// StatScore Match Tracker — GET {base}/get_pushes/{eventId}?timestamp={ts}&
+// auth={auth}. Confirmed real by the user with a live example URL; auth is
+// a static partner token (same value also works against
+// standings.pc.statscore.com/get_standings/{leagueId}), not set here as a
+// default since it's a secret — set STATSCORE_AUTH in the environment.
+const STATSCORE_TRACKER_BASE_URL =
+  process.env["STATSCORE_TRACKER_BASE_URL"]?.trim() ||
+  "https://events-d.pc.statscore.com";
+const STATSCORE_AUTH = process.env["STATSCORE_AUTH"] ?? "";
 
 // SMYTDRYT HLS stream — base path + stats host confirmed by the user's own
 // buildStreamUrl example; per-video matchId/sportId/tournamentId/key come
@@ -117,6 +132,8 @@ export const CONFIG = {
   BETBY_LIVE_EVENTS_URL,
   BETBY_API_TOKEN,
   BETBY_POLL_INTERVAL_MS,
+  STATSCORE_TRACKER_BASE_URL,
+  STATSCORE_AUTH,
   SMYTDRYT_BASE_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
   FOOTBALL_LIVE_PROVIDER,
