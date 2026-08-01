@@ -457,6 +457,25 @@ export async function initDb(): Promise<void> {
 
       CREATE INDEX IF NOT EXISTS casino_banners_position_active_idx
         ON casino_banners (position, is_active, sort_order);
+
+      CREATE TABLE IF NOT EXISTS live_stream_mappings (
+        id                   SERIAL PRIMARY KEY,
+        betby_event_id       TEXT NOT NULL,
+        home                 TEXT NOT NULL,
+        away                 TEXT NOT NULL,
+        league               TEXT,
+        video_match_id       INTEGER,
+        video_sport_id       INTEGER,
+        video_tournament_id  INTEGER,
+        video_stats_host     TEXT,
+        video_key            TEXT,
+        resolved_by          TEXT NOT NULL DEFAULT 'auto',
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS live_stream_mappings_betby_event_idx
+        ON live_stream_mappings (betby_event_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

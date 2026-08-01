@@ -76,6 +76,30 @@ const PULSESCORE_BOOKMAKER =
 // deterministic template when unset, so the feature works either way.
 const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 
+// ── BET62 Live + Match Tracker + Streaming (BetBY / Statpal / SMYTDRYT) ──
+// BetBY supplies the live events list (score/minute/status), Statpal (the
+// platform's existing live-football data source — see services/statpal/
+// liveTracker.ts) supplies the Match Tracker matched by team name, SMYTDRYT
+// supplies the HLS stream URL keyed by its own matchId. BetBY and SMYTDRYT
+// don't share an ID scheme, so live_stream_mappings (see lib/db) bridges
+// just those two.
+//
+// BETBY_LIVE_EVENTS_URL/BETBY_API_TOKEN: no real BetBY API docs exist yet —
+// the poller (services/betby/poller.ts) no-ops with a warning until these
+// are set, same inert-until-configured pattern as PALACE_CASINO_API_TOKEN.
+const BETBY_LIVE_EVENTS_URL = process.env["BETBY_LIVE_EVENTS_URL"]?.trim() || "";
+const BETBY_API_TOKEN = process.env["BETBY_API_TOKEN"] ?? "";
+const BETBY_POLL_INTERVAL_MS = 5_000;
+
+// SMYTDRYT HLS stream — base path + stats host confirmed by the user's own
+// buildStreamUrl example; per-video matchId/sportId/tournamentId/key come
+// from live_stream_mappings, not from here.
+const SMYTDRYT_BASE_URL =
+  process.env["SMYTDRYT_BASE_URL"]?.trim() ||
+  "https://edg05.smytdryt.live/ffcc30c5c68c83176e768a44d0068eed";
+const SMYTDRYT_DEFAULT_STATS_HOST =
+  process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
+
 export const CONFIG = {
   SPORTSAPI_KEY,
   STATPAL_API_KEY,
@@ -90,6 +114,11 @@ export const CONFIG = {
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
   ANTHROPIC_API_KEY,
+  BETBY_LIVE_EVENTS_URL,
+  BETBY_API_TOKEN,
+  BETBY_POLL_INTERVAL_MS,
+  SMYTDRYT_BASE_URL,
+  SMYTDRYT_DEFAULT_STATS_HOST,
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,

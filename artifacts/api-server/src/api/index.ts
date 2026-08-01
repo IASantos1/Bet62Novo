@@ -4,6 +4,7 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
+import { startBetbyPoller } from "../services/betby/poller.js";
 
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? "8080");
 
@@ -23,4 +24,6 @@ server.listen(port, () => {
   logger.info("Auto-settlement worker started");
 
   startPulseScoreTennisWs();
+
+  void startBetbyPoller();
 });
