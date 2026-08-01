@@ -677,6 +677,10 @@ export type UpcomingMatch = {
   markets: AdvancedMarkets;
   leagueId?: string;
   isWomens?: boolean;
+  /** Football only — true when the league is in the curated priority allowlist
+   * (footballLeagueAllowedStrict). Drives the default "today + big leagues up
+   * to 7 days ahead" vs "?range=month" widening in GET /upcoming. */
+  isPriorityLeague?: boolean;
   providerStatusGroup?: number;
   providerStatusText?: string;
   providerWinnerKnown?: boolean;
@@ -14214,6 +14218,29 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
 }
 
 // Shared helper: convert a SAPIV2Event startTimestamp to date/time strings (Europe/Lisbon)
+/** Calendar-day key (YYYY-MM-DD) for a unix-seconds timestamp, in Europe/Lisbon. */
+function lisbonDateKey(tsSec: number): string {
+  if (!tsSec) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(tsSec * 1000));
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  return `${p["year"]}-${p["month"]}-${p["day"]}`;
+}
+
+/** Whole calendar days between two YYYY-MM-DD keys (b - a). */
+function daysBetweenDateKeys(a: string, b: string): number {
+  const toUtcMs = (key: string) => {
+    const [y, m, d] = key.split("-").map(Number);
+    return Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  };
+  return Math.round((toUtcMs(b) - toUtcMs(a)) / 86_400_000);
+}
+
 function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   const ts = ev.startTimestamp;
   if (!ts) return { date: "", time: "" };
@@ -16240,8 +16267,23 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
   return result;
 }
 
+// Fetch window wide enough to cover the "?range=month" filter; the default
+// prematch view narrows this back down to today + 7 days for priority
+// leagues (see GET /upcoming). Fetches are per-day-cached (SCHEDULE_V2_TTL),
+// so widening this doesn't multiply live request volume.
+const FOOTBALL_UPCOMING_FETCH_DAYS = 30;
+// Bounds how many priority-league fixtures we carry through odds enrichment;
+// generous enough for a full month of top leagues worldwide.
+const FOOTBALL_UPCOMING_PRIORITY_CAP = 400;
+// Non-priority ("fallback") leagues only ever show for today, so this just
+// bounds how many today-only small-league fixtures we carry.
+const FOOTBALL_UPCOMING_FALLBACK_TODAY_CAP = 60;
+
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  const events = await getUpcomingEventsV2("football", 3);
+  const events = await getUpcomingEventsV2(
+    "football",
+    FOOTBALL_UPCOMING_FETCH_DAYS,
+  );
   if (events.length === 0) return buildFootballUpcomingV1();
   // Capture ground-truth scheduled kickoff for every fixture seen here, before
   // any league/team filtering — this is our only trustworthy source, since it
@@ -16249,7 +16291,9 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   for (const ev of events) {
     if (ev.startTimestamp) footballScheduledKickoffSec.set(ev.id, ev.startTimestamp);
   }
+  const todayKey = lisbonDateKey(Date.now() / 1000);
   const seen = new Set<string>();
+  const priorityIds = new Set<number>();
   const primary: SAPIV2Event[] = [];
   const fallback: SAPIV2Event[] = [];
 
@@ -16267,14 +16311,26 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     const key = `${home}|${away}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push(ev);
-    else if (!isLeagueUniversallyBlocked(`${leagueName} ${home} ${away}`))
-      fallback.push(ev);
-    if (primary.length >= 80) break;
+    if (footballLeagueAllowedStrict(countryRaw, leagueName)) {
+      if (primary.length < FOOTBALL_UPCOMING_PRIORITY_CAP) {
+        priorityIds.add(ev.id);
+        primary.push(ev);
+      }
+    } else if (!isLeagueUniversallyBlocked(`${leagueName} ${home} ${away}`)) {
+      // Small/non-priority leagues: only ever show for today, regardless of
+      // how far the fetch window reaches — keeps the default and month views
+      // from being flooded with minor-league fixtures weeks out.
+      if (
+        fallback.length < FOOTBALL_UPCOMING_FALLBACK_TODAY_CAP &&
+        lisbonDateKey(ev.startTimestamp ?? 0) === todayKey
+      )
+        fallback.push(ev);
+    }
   }
-  const filtered = (primary.length > 0 ? primary : fallback).slice(
-    0,
-    primary.length > 0 ? 80 : 3,
+  // Combine and re-sort chronologically — priority leagues can span the full
+  // fetch window, today-only fallback leagues interleave with them.
+  const filtered = [...primary, ...fallback].sort(
+    (a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0),
   );
 
   const oddsResults: Array<V2PreMatchOdds | null> = new Array(
@@ -16461,6 +16517,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       markets,
       isWomens,
       leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+      isPriorityLeague: priorityIds.has(ev.id),
     });
   }
 
@@ -24978,8 +25035,11 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
+
 router.get("/upcoming", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "all");
+  const range = String(req.query["range"] ?? "default");
   const cache = upcomingTopCache
     ? await getUpcomingAll()
     : await Promise.race([
@@ -25064,6 +25124,21 @@ router.get("/upcoming", async (req: Request, res: Response) => {
         const kickoffMs = parseUpcomingKickoffMs(m);
         if (kickoffMs == null) return true;
         return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
+      })() &&
+      (() => {
+        // Only football currently carries league-priority tagging. Default
+        // view: today's games from any league, plus priority ("big") league
+        // games up to UPCOMING_DEFAULT_PRIORITY_DAYS ahead. ?range=month
+        // lifts that cap so priority-league fixtures for the whole fetched
+        // window (see FOOTBALL_UPCOMING_FETCH_DAYS) are included too.
+        if (range === "month" || m.sport !== "football" || !m.isPriorityLeague)
+          return true;
+        const kickoffMs = parseUpcomingKickoffMs(m);
+        if (kickoffMs == null) return true;
+        const daysAhead = Math.floor(
+          (kickoffMs - now) / (24 * 60 * 60 * 1000),
+        );
+        return daysAhead <= UPCOMING_DEFAULT_PRIORITY_DAYS;
       })(),
   );
   res.json({ matches: filtered });
