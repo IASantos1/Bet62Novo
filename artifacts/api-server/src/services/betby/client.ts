@@ -76,8 +76,10 @@ function normalizeBetbyEvent(raw: unknown): LiveEvent | null {
     away,
     status,
     minute: pick(o, ["minute", "time"]) != null ? String(pick(o, ["minute", "time"])) : undefined,
-    homeScore: homeScoreRaw != null ? Number(homeScoreRaw) : undefined,
-    awayScore: awayScoreRaw != null ? Number(awayScoreRaw) : undefined,
+    score: {
+      home: homeScoreRaw != null ? Number(homeScoreRaw) : 0,
+      away: awayScoreRaw != null ? Number(awayScoreRaw) : 0,
+    },
   };
 }
 

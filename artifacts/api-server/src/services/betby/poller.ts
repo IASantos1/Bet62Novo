@@ -41,16 +41,12 @@ async function tick(): Promise<void> {
 
       const out: LiveEvent = { ...event };
       if (tracker) {
-        out.tracker = { provider: "statpal", eventId: tracker.eventId };
+        out.eventId = tracker.eventId;
+        out.tracker = tracker;
       }
       if (videoInfo) {
         out.videoMatchId = videoInfo.matchId;
-        out.stream = {
-          provider: "smytdryt",
-          matchId: videoInfo.matchId,
-          key: videoInfo.key,
-          url: buildStreamUrl(videoInfo),
-        };
+        out.stream = { hls: buildStreamUrl(videoInfo) };
       }
       return out;
     }),
