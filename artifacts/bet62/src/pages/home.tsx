@@ -4430,7 +4430,11 @@ function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 // polling Match Tracker (StatScore), self-contained so its lifecycle
 // (attach/detach HLS, start/stop tracker polling) doesn't entangle with the
 // rest of the page's state.
-function LiveStreamModal({
+// Video and Tracker are two independent entry points per event (each may be
+// available without the other — video needs SMYTDRYT admin mapping, tracker
+// resolves automatically via StatScore/PulseScore) — separate modals rather
+// than one combined view, per explicit request.
+function VideoStreamModal({
   event,
   onClose,
 }: {
@@ -4438,7 +4442,6 @@ function LiveStreamModal({
   onClose: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [tracker, setTracker] = useState<MatchTracker | null>(event.tracker ?? null);
   const [videoError, setVideoError] = useState(false);
 
   useEffect(() => {
@@ -4470,6 +4473,49 @@ function LiveStreamModal({
       hls?.destroy();
     };
   }, [event.stream?.hls]);
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+      <div
+        className="flex items-center justify-between px-3 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0 gap-2"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)", height: "calc(3.5rem + env(safe-area-inset-top, 0px))" }}
+      >
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-white truncate">
+            {event.home} vs {event.away}
+          </div>
+          <div className="text-[11px] text-zinc-500 truncate">{event.league}</div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
+          aria-label="Fechar transmissão"
+        >
+          <X size={22} />
+        </button>
+      </div>
+
+      <div className="relative bg-black flex-1 min-h-0 flex items-center justify-center">
+        {videoError ? (
+          <div className="text-center text-zinc-500 text-sm p-6">
+            Não foi possível carregar a transmissão.
+          </div>
+        ) : (
+          <video ref={videoRef} controls autoPlay playsInline className="w-full h-full" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TrackerModal({
+  event,
+  onClose,
+}: {
+  event: BetbyLiveEvent;
+  onClose: () => void;
+}) {
+  const [tracker, setTracker] = useState<MatchTracker | null>(event.tracker ?? null);
 
   useEffect(() => {
     // Always poll, even if this event had no tracker yet at the moment the
@@ -4510,61 +4556,49 @@ function LiveStreamModal({
         <button
           onClick={onClose}
           className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
-          aria-label="Fechar transmissão"
+          aria-label="Fechar tracker"
         >
           <X size={22} />
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-        <div className="relative bg-black flex-1 lg:flex-[2] flex items-center justify-center min-h-[200px]">
-          {videoError ? (
-            <div className="text-center text-zinc-500 text-sm p-6">
-              Não foi possível carregar a transmissão.
-            </div>
-          ) : (
-            <video ref={videoRef} controls autoPlay playsInline className="w-full h-full" />
-          )}
-        </div>
-
-        <div className="flex-1 lg:flex-[1] lg:max-w-sm bg-zinc-950 border-t lg:border-t-0 lg:border-l border-zinc-800/60 overflow-y-auto p-4">
-          {!tracker ? (
-            <div className="text-center text-zinc-600 text-sm py-8">
-              <Loader2 className="animate-spin mx-auto mb-2 opacity-60" size={22} />
-              A carregar tracker…
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-2xl font-black text-white">
-                  {tracker.homeScore} - {tracker.awayScore}
-                </div>
-                <div className="text-xs font-bold text-red-400 uppercase">
-                  {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
-                </div>
+      <div className="flex-1 min-h-0 bg-zinc-950 overflow-y-auto p-4">
+        {!tracker ? (
+          <div className="text-center text-zinc-600 text-sm py-8">
+            <Loader2 className="animate-spin mx-auto mb-2 opacity-60" size={22} />
+            A carregar tracker…
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-2xl font-black text-white">
+                {tracker.homeScore} - {tracker.awayScore}
               </div>
-              <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
-                Incidentes
+              <div className="text-xs font-bold text-red-400 uppercase">
+                {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
               </div>
-              {tracker.incidents.length === 0 ? (
-                <div className="text-xs text-zinc-600">Sem incidentes ainda.</div>
-              ) : (
-                <div className="space-y-2">
-                  {tracker.incidents.map((inc, i) => (
-                    <div
-                      key={i}
-                      className="text-xs text-zinc-300 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2"
-                    >
-                      <span className="text-zinc-500 font-mono shrink-0">{inc.minute}'</span>
-                      <span className="font-medium capitalize">{inc.type}</span>
-                      <span className="text-zinc-500 truncate">{inc.player}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+            </div>
+            <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
+              Incidentes
+            </div>
+            {tracker.incidents.length === 0 ? (
+              <div className="text-xs text-zinc-600">Sem incidentes ainda.</div>
+            ) : (
+              <div className="space-y-2">
+                {tracker.incidents.map((inc, i) => (
+                  <div
+                    key={i}
+                    className="text-xs text-zinc-300 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2"
+                  >
+                    <span className="text-zinc-500 font-mono shrink-0">{inc.minute}'</span>
+                    <span className="font-medium capitalize">{inc.type}</span>
+                    <span className="text-zinc-500 truncate">{inc.player}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -4718,7 +4752,8 @@ export default function Home({
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
   const [betbyLiveEvents, setBetbyLiveEvents] = useState<BetbyLiveEvent[]>([]);
-  const [liveStreamModalEvent, setLiveStreamModalEvent] = useState<BetbyLiveEvent | null>(null);
+  const [videoModalEvent, setVideoModalEvent] = useState<BetbyLiveEvent | null>(null);
+  const [trackerModalEvent, setTrackerModalEvent] = useState<BetbyLiveEvent | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -24371,8 +24406,12 @@ export default function Home({
                   </h2>
                 </div>
 
-                {/* ── Transmissões ao vivo (BetBY + StatScore + SMYTDRYT) ── */}
-                {betbyLiveEvents.filter((e) => e.stream).length > 0 && (
+                {/* ── Transmissões ao vivo (BetBY + StatScore/PulseScore + SMYTDRYT) ──
+                    Vídeo e Tracker são dois pontos de entrada independentes
+                    por jogo (um pode existir sem o outro), não um modal
+                    combinado — cada jogo mostra só os botões do que tem
+                    disponível. */}
+                {betbyLiveEvents.filter((e) => e.stream || e.tracker).length > 0 && (
                   <div className="mb-4">
                     <h3 className="text-sm font-black uppercase tracking-wide text-zinc-300 mb-2 flex items-center gap-1.5">
                       <Radio size={14} className="text-red-500" /> Transmissões
@@ -24380,12 +24419,11 @@ export default function Home({
                     </h3>
                     <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
                       {betbyLiveEvents
-                        .filter((e) => e.stream)
+                        .filter((e) => e.stream || e.tracker)
                         .map((e) => (
-                          <button
+                          <div
                             key={e.betbyEventId}
-                            onClick={() => setLiveStreamModalEvent(e)}
-                            className="flex-shrink-0 w-56 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-red-500/50 transition-colors p-3 text-left"
+                            className="flex-shrink-0 w-56 rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-left"
                           >
                             <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 mb-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -24397,10 +24435,28 @@ export default function Home({
                             <div className="text-xs text-zinc-500 truncate mt-0.5">
                               {e.league}
                             </div>
-                            <div className="text-lg font-black text-white mt-1">
+                            <div className="text-lg font-black text-white mt-1 mb-2">
                               {e.score.home} - {e.score.away}
                             </div>
-                          </button>
+                            <div className="flex gap-1.5">
+                              {e.stream && (
+                                <button
+                                  onClick={() => setVideoModalEvent(e)}
+                                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-red-600/15 hover:bg-red-600/25 border border-red-600/30 text-red-400 text-[11px] font-semibold transition-colors"
+                                >
+                                  <Radio size={11} /> Vídeo
+                                </button>
+                              )}
+                              {e.tracker && (
+                                <button
+                                  onClick={() => setTrackerModalEvent(e)}
+                                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[11px] font-semibold transition-colors"
+                                >
+                                  <BarChart2 size={11} /> Tracker
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         ))}
                     </div>
                   </div>
@@ -26380,10 +26436,17 @@ export default function Home({
         </div>
       )}
 
-      {liveStreamModalEvent && (
-        <LiveStreamModal
-          event={liveStreamModalEvent}
-          onClose={() => setLiveStreamModalEvent(null)}
+      {videoModalEvent && (
+        <VideoStreamModal
+          event={videoModalEvent}
+          onClose={() => setVideoModalEvent(null)}
+        />
+      )}
+
+      {trackerModalEvent && (
+        <TrackerModal
+          event={trackerModalEvent}
+          onClose={() => setTrackerModalEvent(null)}
         />
       )}
 
