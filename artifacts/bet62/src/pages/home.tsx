@@ -500,7 +500,7 @@ type CasinoGameGroup = { name: string; games: CasinoGame[] };
 // separate polling needed to see score/incidents); only rendered when a
 // BetBY event has a stream ready.
 type MatchTracker = {
-  provider: "statscore" | "statpal";
+  provider: "statscore" | "pulsescore";
   eventId: string;
   status: string;
   minute: string;

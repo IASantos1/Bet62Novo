@@ -8,9 +8,9 @@ import type { LiveEvent } from "../betby/types.js";
 // table: the poller seeds a row per live BetBY event (home/away/league
 // only) the moment it's first seen, and an admin fills in
 // statscoreEventId/video* fields once — after that it's a straight lookup.
-// (Statpal is the automatic fallback tracker for events not yet mapped to a
-// statscoreEventId — see services/statpal/liveTracker.ts — so this table
-// only strictly gates the stream side; the tracker side degrades
+// (PulseScore is the automatic fallback tracker for events not yet mapped to
+// a statscoreEventId — see services/pulsescore/betbyTracker.ts — so this
+// table only strictly gates the stream side; the tracker side degrades
 // gracefully.) See routes/admin.ts's /live-stream/mappings endpoints.
 
 // Ensures a row exists for this BetBY event (creates a blank one on first
