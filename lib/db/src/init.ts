@@ -480,8 +480,14 @@ export async function initDb(): Promise<void> {
       -- Real StatScore auth was confirmed after this table first shipped
       -- (get_pushes/get_standings example URLs sharing one static partner
       -- token), reinstating StatScore as the primary Match Tracker source
-      -- with Statpal as the automatic no-mapping-needed fallback.
+      -- with PulseScore as the automatic no-mapping-needed fallback.
       ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS statscore_event_id INTEGER;
+
+      -- SMYTDRYT's hex path segment (host/{this}/playlist.m3u8) turned out,
+      -- from real BetBY captures, to vary per match/stream rather than being
+      -- a fixed account-wide value — has to be admin-set per event like the
+      -- key, not a single global config default.
+      ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS video_base_path TEXT;
     `);
 
     console.info("[db/init] Schema initialisation complete.");

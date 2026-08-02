@@ -116,20 +116,15 @@ const STATSCORE_TRACKER_BASE_URL =
   "https://events-d.pc.statscore.com";
 const STATSCORE_AUTH = process.env["STATSCORE_AUTH"] ?? "";
 
-// SMYTDRYT HLS stream — base path + stats host confirmed by the user's own
-// buildStreamUrl example; per-video matchId/sportId/tournamentId/key come
-// from live_stream_mappings, not from here.
-//
-// The hex path segment below (between the host and /playlist.m3u8) was
-// re-confirmed against a real BetBY network capture and turned out to have
-// changed since the original capture this default was based on — the user's
-// current belief is that it's fixed per-account, not per-match/session, but
-// that's unverified (only checked against one match so far). If streams
-// start 400ing again, re-diff a fresh BetBY capture the same way before
-// assuming anything else is wrong.
-const SMYTDRYT_BASE_URL =
-  process.env["SMYTDRYT_BASE_URL"]?.trim() ||
-  "https://edg05.smytdryt.live/e34417db0028895ff9a29e8a0865eaea";
+// SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
+// between the host and /playlist.m3u8 was originally assumed to be a fixed
+// per-account value, but two real BetBY captures for two different matches
+// showed two different segments — it's per-match/per-stream, so it lives in
+// live_stream_mappings.videoBasePath (admin-set per event, like the key)
+// rather than as a config default here. statsHost + per-video
+// matchId/sportId/tournamentId/key/basePath come from live_stream_mappings.
+const SMYTDRYT_HOST_URL =
+  process.env["SMYTDRYT_HOST_URL"]?.trim() || "https://edg05.smytdryt.live";
 const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
@@ -154,7 +149,7 @@ export const CONFIG = {
   BETBY_POLL_INTERVAL_MS,
   STATSCORE_TRACKER_BASE_URL,
   STATSCORE_AUTH,
-  SMYTDRYT_BASE_URL,
+  SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
