@@ -119,9 +119,17 @@ const STATSCORE_AUTH = process.env["STATSCORE_AUTH"] ?? "";
 // SMYTDRYT HLS stream — base path + stats host confirmed by the user's own
 // buildStreamUrl example; per-video matchId/sportId/tournamentId/key come
 // from live_stream_mappings, not from here.
+//
+// The hex path segment below (between the host and /playlist.m3u8) was
+// re-confirmed against a real BetBY network capture and turned out to have
+// changed since the original capture this default was based on — the user's
+// current belief is that it's fixed per-account, not per-match/session, but
+// that's unverified (only checked against one match so far). If streams
+// start 400ing again, re-diff a fresh BetBY capture the same way before
+// assuming anything else is wrong.
 const SMYTDRYT_BASE_URL =
   process.env["SMYTDRYT_BASE_URL"]?.trim() ||
-  "https://edg05.smytdryt.live/ffcc30c5c68c83176e768a44d0068eed";
+  "https://edg05.smytdryt.live/e34417db0028895ff9a29e8a0865eaea";
 const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
