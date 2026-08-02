@@ -925,6 +925,10 @@ export default function AdminPage() {
     }>>
   >({});
   const [liveMappingSaving, setLiveMappingSaving] = useState<Record<string, boolean>>({});
+  const [liveMappingSearch, setLiveMappingSearch] = useState("");
+  const [liveMappingStatusFilter, setLiveMappingStatusFilter] = useState<
+    "all" | "live" | "mapped" | "unmapped"
+  >("all");
 
   const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
   const [bannerForm, setBannerForm] = useState<{
@@ -1297,6 +1301,25 @@ export default function AdminPage() {
   const liveMappings = liveMappingsQuery.data?.mappings ?? [];
   const liveMappingsLoading = liveMappingsQuery.isLoading;
   const refetchLiveMappings = liveMappingsQuery.refetch;
+
+  const filteredLiveMappings = liveMappings
+    .filter((m) => {
+      if (liveMappingStatusFilter === "live") return m.isLive;
+      if (liveMappingStatusFilter === "mapped") return m.resolvedBy === "manual";
+      if (liveMappingStatusFilter === "unmapped") return m.resolvedBy !== "manual";
+      return true;
+    })
+    .filter((m) => {
+      const q = liveMappingSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        m.home.toLowerCase().includes(q) ||
+        m.away.toLowerCase().includes(q) ||
+        (m.league ?? "").toLowerCase().includes(q) ||
+        m.betbyEventId.toLowerCase().includes(q) ||
+        String(m.statscoreEventId ?? "").includes(q)
+      );
+    });
 
   const saveLiveMapping = useCallback(
     async (betbyEventId: string) => {
@@ -6005,6 +6028,35 @@ export default function AdminPage() {
                   aparece depois de preencheres os campos de vídeo.
                 </div>
 
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+                  <div className="relative">
+                    <Search
+                      size={16}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                    />
+                    <Input
+                      placeholder="Buscar por equipa, liga ou betbyEventId..."
+                      value={liveMappingSearch}
+                      onChange={(e) => setLiveMappingSearch(e.target.value)}
+                      className="bg-zinc-900 border-zinc-700 text-white pl-9"
+                    />
+                  </div>
+                  <select
+                    value={liveMappingStatusFilter}
+                    onChange={(e) =>
+                      setLiveMappingStatusFilter(
+                        e.target.value as "all" | "live" | "mapped" | "unmapped",
+                      )
+                    }
+                    className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+                  >
+                    <option value="all">Todos os estados</option>
+                    <option value="live">Ao vivo</option>
+                    <option value="mapped">Mapeados</option>
+                    <option value="unmapped">Por mapear</option>
+                  </select>
+                </div>
+
                 {liveMappingsLoading ? (
                   <div className="flex items-center justify-center py-16 text-zinc-500">
                     <Loader2 className="animate-spin" size={24} />
@@ -6014,9 +6066,13 @@ export default function AdminPage() {
                     Nenhum evento ao vivo detetado ainda. Confirma que
                     BETBY_API_BASE_URL/BETBY_BRAND_ID estão configurados.
                   </div>
+                ) : filteredLiveMappings.length === 0 ? (
+                  <div className="text-center py-16 text-zinc-500 text-sm">
+                    Nenhum evento corresponde à pesquisa/filtro.
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {liveMappings.map((m) => {
+                    {filteredLiveMappings.map((m) => {
                       const edits = liveMappingEdits[m.betbyEventId] ?? {};
                       const val = (
                         key:
