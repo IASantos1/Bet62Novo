@@ -30,7 +30,19 @@ async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
       );
     }
   }
-  return getPulseScoreTrackerForTeams(event.home, event.away, event.sport);
+  try {
+    return await getPulseScoreTrackerForTeams(event.home, event.away, event.sport);
+  } catch (err) {
+    // Must not throw here: this runs inside Promise.all() over every live
+    // event in tick() below — an uncaught rejection from one event's
+    // PulseScore lookup would fail the whole batch and stall /api/live for
+    // every other event too.
+    logger.error(
+      { err, betbyEventId: event.betbyEventId },
+      "[betby-poller] PulseScore tracker fetch failed",
+    );
+    return null;
+  }
 }
 
 let pollTimer: NodeJS.Timeout | null = null;

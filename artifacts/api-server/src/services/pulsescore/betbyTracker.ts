@@ -39,8 +39,12 @@ async function liveEventsForBetbySport(sport: string): Promise<PulseScoreEvent[]
   return [];
 }
 
-function parseScore(raw: string | undefined): { home: number; away: number } | null {
-  if (!raw) return null;
+// Defensive against the field simply not matching what's documented (real
+// upstream data has repeatedly diverged from PulseScore's docs elsewhere in
+// this integration) — anything other than a plain "H-A" string is treated
+// as "no score yet" rather than risking a throw on unexpected input.
+function parseScore(raw: unknown): { home: number; away: number } | null {
+  if (typeof raw !== "string") return null;
   const m = /^(\d+)\s*-\s*(\d+)$/.exec(raw.trim());
   if (!m) return null;
   return { home: Number(m[1]), away: Number(m[2]) };
@@ -54,7 +58,11 @@ export async function getPulseScoreTrackerForTeams(
   const events = await liveEventsForBetbySport(sport);
   if (events.length === 0) return null;
   const ev = events.find(
-    (e) => teamNamesMatch(home, e.home) && teamNamesMatch(away, e.away),
+    (e) =>
+      typeof e?.home === "string" &&
+      typeof e?.away === "string" &&
+      teamNamesMatch(home, e.home) &&
+      teamNamesMatch(away, e.away),
   );
   if (!ev) return null;
   const score = parseScore(ev.score);
