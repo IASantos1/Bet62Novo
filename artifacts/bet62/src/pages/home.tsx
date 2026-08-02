@@ -4472,7 +4472,12 @@ function LiveStreamModal({
   }, [event.stream?.hls]);
 
   useEffect(() => {
-    if (!event.tracker) return;
+    // Always poll, even if this event had no tracker yet at the moment the
+    // modal opened (event.tracker is a one-time snapshot from when the user
+    // tapped the card, not kept in sync with the parent's ongoing /api/live
+    // poll) — gating on it meant the tracker could get stuck on "A carregar
+    // tracker..." forever if it simply wasn't ready yet at open time, even
+    // once the backend resolved one moments later.
     let cancelled = false;
     const poll = () => {
       fetch(`/api/tracker/${encodeURIComponent(event.betbyEventId)}`)
@@ -4488,7 +4493,7 @@ function LiveStreamModal({
       cancelled = true;
       clearInterval(id);
     };
-  }, [event.betbyEventId, event.tracker]);
+  }, [event.betbyEventId]);
 
   return (
     <div className="fixed inset-0 z-[70] bg-black flex flex-col">
