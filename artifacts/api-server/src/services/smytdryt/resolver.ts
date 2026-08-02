@@ -8,14 +8,16 @@ export interface VideoInfo {
   statsHost: string;
   key: string;
   basePath: string;
+  timestamp: number;
 }
 
 // Same story as StatScore's resolver — matchId/sportId/tournamentId/key/
-// basePath come from the admin-maintained mapping table, not from any
-// automatic matching. statsHost falls back to SMYTDRYT_DEFAULT_STATS_HOST
-// when the mapping row doesn't specify one explicitly; basePath has no
-// fallback (confirmed via real BetBY captures to vary per match/stream, so
-// there's no safe global default — see stream.ts).
+// basePath/timestamp come from the admin-maintained mapping table, not from
+// any automatic matching. statsHost falls back to SMYTDRYT_DEFAULT_STATS_HOST
+// when the mapping row doesn't specify one explicitly; basePath and
+// timestamp have no fallback — both confirmed via real testing to be
+// per-match/per-key values with no safe global default (see stream.ts:
+// the key is signed against this exact timestamp, not "now").
 export async function resolveVideoInfo(betbyEventId: string): Promise<VideoInfo | null> {
   const mapping = await getMapping(betbyEventId);
   if (
@@ -23,7 +25,8 @@ export async function resolveVideoInfo(betbyEventId: string): Promise<VideoInfo 
     !mapping.videoSportId ||
     !mapping.videoTournamentId ||
     !mapping.videoKey ||
-    !mapping.videoBasePath
+    !mapping.videoBasePath ||
+    !mapping.videoTimestamp
   ) {
     return null;
   }
@@ -34,5 +37,6 @@ export async function resolveVideoInfo(betbyEventId: string): Promise<VideoInfo 
     statsHost: mapping.videoStatsHost || CONFIG.SMYTDRYT_DEFAULT_STATS_HOST,
     key: mapping.videoKey,
     basePath: mapping.videoBasePath,
+    timestamp: mapping.videoTimestamp,
   };
 }

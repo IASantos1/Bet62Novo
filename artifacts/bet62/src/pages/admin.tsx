@@ -239,6 +239,7 @@ type AdminLiveMapping = {
   videoStatsHost: string | null;
   videoKey: string | null;
   videoBasePath: string | null;
+  videoTimestamp: number | null;
   resolvedBy: "auto" | "manual";
   isLive: boolean;
   status: "LIVE" | "PREMATCH" | "FINISHED" | null;
@@ -920,6 +921,7 @@ export default function AdminPage() {
       videoStatsHost: string;
       videoKey: string;
       videoBasePath: string;
+      videoTimestamp: string;
     }>>
   >({});
   const [liveMappingSaving, setLiveMappingSaving] = useState<Record<string, boolean>>({});
@@ -1311,6 +1313,7 @@ export default function AdminPage() {
           "videoStatsHost",
           "videoKey",
           "videoBasePath",
+          "videoTimestamp",
         ] as const) {
           if (!(key in edits)) continue;
           const raw = (edits[key] ?? "").trim();
@@ -6023,7 +6026,8 @@ export default function AdminPage() {
                           | "videoTournamentId"
                           | "videoStatsHost"
                           | "videoKey"
-                          | "videoBasePath",
+                          | "videoBasePath"
+                          | "videoTimestamp",
                       ): string =>
                         key in edits
                           ? (edits[key] ?? "")
@@ -6036,7 +6040,8 @@ export default function AdminPage() {
                           | "videoTournamentId"
                           | "videoStatsHost"
                           | "videoKey"
-                          | "videoBasePath",
+                          | "videoBasePath"
+                          | "videoTimestamp",
                         v: string,
                       ) =>
                         setLiveMappingEdits((prev) => ({
@@ -6148,6 +6153,19 @@ export default function AdminPage() {
                                 className="h-8 text-xs bg-zinc-950 border-zinc-700"
                               />
                             </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT timestamp</Label>
+                              <Input
+                                value={val("videoTimestamp")}
+                                onChange={(e) => setVal("videoTimestamp", e.target.value)}
+                                placeholder="o timestamp exato capturado com o key"
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                          </div>
+                          <div className="text-[10px] text-zinc-600 mt-2">
+                            O key e o timestamp têm de vir do mesmo pedido capturado — não colocar
+                            um timestamp diferente (ex: "agora"), o key está amarrado ao valor exato.
                           </div>
                         </div>
                       );

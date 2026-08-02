@@ -59,6 +59,7 @@ export async function setMapping(
     videoStatsHost: string | null;
     videoKey: string | null;
     videoBasePath: string | null;
+    videoTimestamp: number | null;
   }>,
 ): Promise<LiveStreamMappingRow | null> {
   const [row] = await db
