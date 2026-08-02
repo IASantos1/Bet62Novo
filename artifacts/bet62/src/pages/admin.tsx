@@ -238,6 +238,7 @@ type AdminLiveMapping = {
   videoTournamentId: number | null;
   videoStatsHost: string | null;
   videoKey: string | null;
+  videoBasePath: string | null;
   resolvedBy: "auto" | "manual";
   isLive: boolean;
   status: "LIVE" | "PREMATCH" | "FINISHED" | null;
@@ -918,6 +919,7 @@ export default function AdminPage() {
       videoTournamentId: string;
       videoStatsHost: string;
       videoKey: string;
+      videoBasePath: string;
     }>>
   >({});
   const [liveMappingSaving, setLiveMappingSaving] = useState<Record<string, boolean>>({});
@@ -1308,10 +1310,11 @@ export default function AdminPage() {
           "videoTournamentId",
           "videoStatsHost",
           "videoKey",
+          "videoBasePath",
         ] as const) {
           if (!(key in edits)) continue;
           const raw = (edits[key] ?? "").trim();
-          if (key === "videoStatsHost" || key === "videoKey") {
+          if (key === "videoStatsHost" || key === "videoKey" || key === "videoBasePath") {
             body[key] = raw === "" ? null : raw;
           } else {
             body[key] = raw === "" ? null : Number(raw);
@@ -6019,7 +6022,8 @@ export default function AdminPage() {
                           | "videoSportId"
                           | "videoTournamentId"
                           | "videoStatsHost"
-                          | "videoKey",
+                          | "videoKey"
+                          | "videoBasePath",
                       ): string =>
                         key in edits
                           ? (edits[key] ?? "")
@@ -6031,7 +6035,8 @@ export default function AdminPage() {
                           | "videoSportId"
                           | "videoTournamentId"
                           | "videoStatsHost"
-                          | "videoKey",
+                          | "videoKey"
+                          | "videoBasePath",
                         v: string,
                       ) =>
                         setLiveMappingEdits((prev) => ({
@@ -6131,6 +6136,15 @@ export default function AdminPage() {
                               <Input
                                 value={val("videoKey")}
                                 onChange={(e) => setVal("videoKey", e.target.value)}
+                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-[10px] text-zinc-500">SMYTDRYT basePath</Label>
+                              <Input
+                                value={val("videoBasePath")}
+                                onChange={(e) => setVal("videoBasePath", e.target.value)}
+                                placeholder="ex: e34417db0028895ff9a29e8a0865eaea"
                                 className="h-8 text-xs bg-zinc-950 border-zinc-700"
                               />
                             </div>

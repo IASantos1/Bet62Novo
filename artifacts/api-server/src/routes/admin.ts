@@ -2925,6 +2925,7 @@ router.patch(
         videoTournamentId: toIntOrNull(body["videoTournamentId"]),
         videoStatsHost: toStrOrNull(body["videoStatsHost"]),
         videoKey: toStrOrNull(body["videoKey"]),
+        videoBasePath: toStrOrNull(body["videoBasePath"]),
       });
       if (!updated) {
         res.status(404).json({ error: "Mapeamento não encontrado" });

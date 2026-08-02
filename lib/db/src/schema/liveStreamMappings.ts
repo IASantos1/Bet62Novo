@@ -8,9 +8,9 @@ import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 // row is seeded per live BetBY event automatically (home/away/league only),
 // and an admin fills in statscoreEventId/video* fields to complete the
 // wiring (see services/liveStream/mapping.ts). Until statscoreEventId is
-// set, the tracker automatically falls back to Statpal, matched by team
-// name (see services/statpal/liveTracker.ts) — so this table only gates the
-// stream side strictly, and the tracker side is a quality upgrade, not a
+// set, the tracker automatically falls back to PulseScore, matched by team
+// name (see services/pulsescore/betbyTracker.ts) — so this table only gates
+// the stream side strictly, and the tracker side is a quality upgrade, not a
 // hard requirement.
 export const liveStreamMappingsTable = pgTable("live_stream_mappings", {
   id: serial("id").primaryKey(),
@@ -24,6 +24,11 @@ export const liveStreamMappingsTable = pgTable("live_stream_mappings", {
   videoTournamentId: integer("video_tournament_id"),
   videoStatsHost: text("video_stats_host"),
   videoKey: text("video_key"),
+  // Hex path segment SMYTDRYT puts between the host and /playlist.m3u8
+  // (e.g. "e34417db0028895ff9a29e8a0865eaea") — confirmed via real BetBY
+  // captures to vary per match/stream, not a fixed account-wide value as
+  // originally assumed, so it has to be admin-set per event same as the key.
+  videoBasePath: text("video_base_path"),
   // "auto" — the row was only seeded by the poller (home/away/league only);
   // "manual" — an admin has filled in/overridden the statscore/video fields.
   resolvedBy: text("resolved_by").notNull().default("auto"),
