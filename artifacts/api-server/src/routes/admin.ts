@@ -2881,8 +2881,8 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
 // (looked up on StatScore's own dashboard for the same fixture — real auth
 // confirmed, see CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to
 // complete the tracker/stream wiring. Leaving statscoreEventId unset is
-// fine — the tracker automatically falls back to Statpal, matched by team
-// name (see services/statpal/liveTracker.ts).
+// fine — the tracker automatically falls back to PulseScore, matched by
+// team name (see services/pulsescore/betbyTracker.ts).
 router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
     const [mappings, liveEvents] = await Promise.all([listMappings(), Promise.resolve(getLiveEvents())]);

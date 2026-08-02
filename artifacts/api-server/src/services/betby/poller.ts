@@ -3,7 +3,7 @@ import { logger } from "../../lib/logger.js";
 import { fetchBetbyLiveEvents } from "./client.js";
 import { setLiveEvents, hydrateLiveEventsFromRedis } from "./state.js";
 import { ensureMapping } from "../liveStream/mapping.js";
-import { getTrackerForTeams } from "../statpal/liveTracker.js";
+import { getPulseScoreTrackerForTeams } from "../pulsescore/betbyTracker.js";
 import { resolveStatscoreEventId } from "../statscore/resolver.js";
 import { getStatscoreTracker } from "../statscore/tracker.js";
 import { resolveVideoInfo } from "../smytdryt/resolver.js";
@@ -12,9 +12,12 @@ import type { LiveEvent } from "./types.js";
 import type { MatchTracker } from "../liveStream/trackerTypes.js";
 
 // StatScore (real auth confirmed) is the primary tracker source once an
-// admin has mapped a statscoreEventId for this event; Statpal (matched by
-// team name, no mapping needed) is the automatic fallback so every live
-// event has *some* tracker before that mapping exists.
+// admin has mapped a statscoreEventId for this event; PulseScore (matched
+// by team name, no mapping needed — see services/pulsescore/betbyTracker.ts)
+// is the automatic fallback so every live event has *some* tracker before
+// that mapping exists. PulseScore replaced Statpal in this role per
+// explicit user decision — its schema has no minute/incidents, only score,
+// so the fallback tracker is a plain scoreboard until StatScore is mapped.
 async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
   const statscoreEventId = await resolveStatscoreEventId(event.betbyEventId).catch(() => null);
   if (statscoreEventId != null) {
@@ -23,11 +26,11 @@ async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
     } catch (err) {
       logger.error(
         { err, betbyEventId: event.betbyEventId, statscoreEventId },
-        "[betby-poller] StatScore tracker fetch failed, falling back to Statpal",
+        "[betby-poller] StatScore tracker fetch failed, falling back to PulseScore",
       );
     }
   }
-  return getTrackerForTeams(event.home, event.away);
+  return getPulseScoreTrackerForTeams(event.home, event.away, event.sport);
 }
 
 let pollTimer: NodeJS.Timeout | null = null;
