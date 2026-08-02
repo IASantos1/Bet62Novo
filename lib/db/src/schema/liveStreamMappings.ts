@@ -29,6 +29,13 @@ export const liveStreamMappingsTable = pgTable("live_stream_mappings", {
   // captures to vary per match/stream, not a fixed account-wide value as
   // originally assumed, so it has to be admin-set per event same as the key.
   videoBasePath: text("video_base_path"),
+  // Unix seconds timestamp captured together with videoKey — confirmed via
+  // live testing that the key is signed against this exact value, not
+  // "whatever time it is now": generating a fresh timestamp per request
+  // (the original approach) got a 400 every time, while replaying the
+  // original captured timestamp alongside its key worked. So this has to be
+  // stored and reused verbatim, never regenerated — see stream.ts.
+  videoTimestamp: integer("video_timestamp"),
   // "auto" — the row was only seeded by the poller (home/away/league only);
   // "manual" — an admin has filled in/overridden the statscore/video fields.
   resolvedBy: text("resolved_by").notNull().default("auto"),

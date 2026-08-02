@@ -488,6 +488,11 @@ export async function initDb(): Promise<void> {
       -- a fixed account-wide value — has to be admin-set per event like the
       -- key, not a single global config default.
       ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS video_base_path TEXT;
+
+      -- Confirmed via live testing: SMYTDRYT's key is signed against the
+      -- exact timestamp it was issued with, not "now" — must be captured
+      -- and stored alongside the key, never regenerated per request.
+      ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS video_timestamp INTEGER;
     `);
 
     console.info("[db/init] Schema initialisation complete.");
