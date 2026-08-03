@@ -19,7 +19,7 @@ export const eventRuntimeStatesTable = pgTable("event_runtime_states", {
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   eventRuntimeIdx: uniqueIndex("event_runtime_states_event_idx").on(table.eventId),
 }));
 

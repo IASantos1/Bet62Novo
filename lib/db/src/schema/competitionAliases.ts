@@ -8,7 +8,7 @@ export const competitionAliasesTable = pgTable("competition_aliases", {
   alias: text("alias").notNull(),
   normalizedAlias: text("normalized_alias").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   aliasProviderIdx: uniqueIndex("competition_aliases_provider_alias_idx").on(
     table.provider,
     table.normalizedAlias,

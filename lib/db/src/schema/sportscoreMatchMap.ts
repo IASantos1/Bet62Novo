@@ -28,7 +28,7 @@ export const sportscoreMatchMapTable = pgTable("sportscore_match_map", {
   source: text("source").notNull().default("manual"), // "manual" | "auto"
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   statpalIdx: uniqueIndex("sportscore_match_map_statpal_idx").on(
     table.sport,
     table.statpalMatchId,

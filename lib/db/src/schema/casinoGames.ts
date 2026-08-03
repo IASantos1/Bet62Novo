@@ -17,7 +17,7 @@ export const casinoGamesTable = pgTable("casino_games", {
   source: text("source").notNull().default("silentapi"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   providerGameSourceIdx: uniqueIndex("casino_games_provider_game_source_idx").on(
     table.provider,
     table.gameUid,

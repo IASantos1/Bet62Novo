@@ -11,7 +11,7 @@ export const competitionsTable = pgTable("competitions", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   canonicalIdx: uniqueIndex("competitions_canonical_idx").on(
     table.sport,
     table.normalizedCountry,

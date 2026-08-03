@@ -1,9 +1,10 @@
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { fetchBetbyLiveEvents } from "./client.js";
+import { fetchBetbyLiveEvents, getCachedExtractedVideo } from "./client.js";
 import { setLiveEvents, hydrateLiveEventsFromRedis } from "./state.js";
-import { ensureMapping } from "../liveStream/mapping.js";
+import { ensureMapping, applyAutoExtractedVideo } from "../liveStream/mapping.js";
 import { getPulseScoreTrackerForTeams } from "../pulsescore/betbyTracker.js";
+import { getStatpalTrackerForTeams } from "../statpal/liveTracker.js";
 import { resolveStatscoreEventId } from "../statscore/resolver.js";
 import { getStatscoreTracker } from "../statscore/tracker.js";
 import { resolveVideoInfo } from "../smytdryt/resolver.js";
@@ -11,13 +12,23 @@ import { buildStreamUrl } from "../smytdryt/stream.js";
 import type { LiveEvent } from "./types.js";
 import type { MatchTracker } from "../liveStream/trackerTypes.js";
 
-// StatScore (real auth confirmed) is the primary tracker source once an
-// admin has mapped a statscoreEventId for this event; PulseScore (matched
-// by team name, no mapping needed — see services/pulsescore/betbyTracker.ts)
-// is the automatic fallback so every live event has *some* tracker before
-// that mapping exists. PulseScore replaced Statpal in this role per
-// explicit user decision — its schema has no minute/incidents, only score,
-// so the fallback tracker is a plain scoreboard until StatScore is mapped.
+// Resolução de Match Tracker em 3 CAMADAS (confirmada config.ts arquitetura 4-tiers):
+//   1. StatScore (CAMADA 2) — placar/minuto/incidentes AO VIVO.
+//      • Payload mais rico (minute, status, home/away score, incidents feed completo).
+//      • AUTENTICAÇÃO: header X-Auth + Referer widgets.statscore.com + query ?auth= (compat).
+//      • Requer mapeamento MANUAL admin (live_stream_mappings.statscore_event_id).
+//   2. StatPal (CAMADA 3) — estatísticas/eventos. **FUTEBOL APENAS**.
+//      • RESPONSABILIDADES: Play-by-play, H2H, rankings, standings, logos, metadados de liga.
+//      • Lista /v2/soccer/matches/live, cruza por nome de time (ZERO trabalho manual).
+//      • Enriquecimento adicional via /match/{id}/statistics quando o fixture ID é conhecido.
+//      • Cota: 300k/dia → cache rigoroso, polling nunca mais rápido que ~15s (cadência de atualização).
+//   3. PulseScore (CAMADA 1) — Odds/Mercados. **ÚLTIMO RECURSO para scoreboard de tracker**.
+//      • RESPONSABILIDADE PRINCIPAL: Odds em tempo real / mercados agregados multi-bookmaker (ver matches.ts overlays).
+//      • Como TRACKER (fallback): best-effort scoreboard only (documentado schema garante só `score`;
+//        minute/clock/incidents se existirem no payload da casa são usados, senão vazios).
+//      • Cota ilimitada. WebSocket para tênis, REST para demais esportes.
+// Cada tier trata seus próprios erros — nunca deixe falha transitória de um provedor
+// derrubar todo o lote (Promise.all() design no tick() abaixo).
 async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
   const statscoreEventId = await resolveStatscoreEventId(event.betbyEventId).catch(() => null);
   if (statscoreEventId != null) {
@@ -26,10 +37,25 @@ async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
     } catch (err) {
       logger.error(
         { err, betbyEventId: event.betbyEventId, statscoreEventId },
-        "[betby-poller] StatScore tracker fetch failed, falling back to PulseScore",
+        "[betby-poller] StatScore tracker fetch failed, falling back to Statpal (auto)",
       );
     }
   }
+
+  const s = (event.sport || "").toLowerCase();
+  const statpalEligible = s.includes("soccer") || s.includes("football");
+  if (statpalEligible) {
+    try {
+      const tr = await getStatpalTrackerForTeams(event.home, event.away);
+      if (tr) return tr;
+    } catch (err) {
+      logger.error(
+        { err, betbyEventId: event.betbyEventId },
+        "[betby-poller] Statpal (auto) tracker fetch failed, falling back to PulseScore (odds overlay fallback)",
+      );
+    }
+  }
+
   try {
     return await getPulseScoreTrackerForTeams(event.home, event.away, event.sport);
   } catch (err) {
@@ -39,7 +65,7 @@ async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
     // every other event too.
     logger.error(
       { err, betbyEventId: event.betbyEventId },
-      "[betby-poller] PulseScore tracker fetch failed",
+      "[betby-poller] PulseScore tracker (odds-overlay fallback) fetch failed",
     );
     return null;
   }
@@ -58,10 +84,14 @@ async function tick(): Promise<void> {
   if (events.length === 0) return;
 
   // Seed/refresh the mapping table for every live event seen (cheap upsert,
-  // never touches admin-set video fields), then attach whatever's already
-  // resolved (tracker via Statpal team-name match, stream via the mapping
-  // table) so the frontend gets both in the same /api/live payload without
-  // an extra round-trip.
+  // never touches admin-set video fields). If the BetBY chunk for this event
+  // carried a raw SMYTDRYT playlist URL (deep-scanned in client.ts), try
+  // applying it now via applyAutoExtractedVideo() — that helper only writes
+  // when the row is still fully auto (no manual videoMatchId/videoKey yet),
+  // so an admin's manual work is safe. Then attach whatever's already
+  // resolved (tracker via the 3-tier cascade above, stream via either the
+  // freshly-applied auto video fields or pre-existing manual ones) so the
+  // frontend gets both inline in the same /api/live payload.
   const enriched = await Promise.all(
     events.map(async (event): Promise<LiveEvent> => {
       try {
@@ -69,6 +99,18 @@ async function tick(): Promise<void> {
       } catch (err) {
         logger.error({ err, betbyEventId: event.betbyEventId }, "[betby-poller] ensureMapping failed");
         return event;
+      }
+
+      const extracted = getCachedExtractedVideo(event.betbyEventId);
+      if (extracted) {
+        try {
+          await applyAutoExtractedVideo(event.betbyEventId, extracted);
+        } catch (err) {
+          logger.error(
+            { err, betbyEventId: event.betbyEventId },
+            "[betby-poller] auto video extraction DB write failed",
+          );
+        }
       }
 
       const [tracker, videoInfo] = await Promise.all([

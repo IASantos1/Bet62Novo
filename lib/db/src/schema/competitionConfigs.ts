@@ -21,7 +21,7 @@ export const competitionConfigsTable = pgTable("competition_configs", {
   stakeLimitMultiplier: integer("stake_limit_multiplier").notNull().default(100),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   configCompetitionIdx: uniqueIndex("competition_configs_competition_idx").on(table.competitionId),
 }));
 

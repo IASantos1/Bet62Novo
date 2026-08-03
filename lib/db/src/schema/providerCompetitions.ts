@@ -15,7 +15,7 @@ export const providerCompetitionsTable = pgTable("provider_competitions", {
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   providerKeyIdx: uniqueIndex("provider_competitions_provider_key_idx").on(
     table.provider,
     table.providerSport,

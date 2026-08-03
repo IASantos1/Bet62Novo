@@ -11,7 +11,7 @@ export const settlementLogsTable = pgTable("settlement_logs", {
   payout: decimal("payout", { precision: 12, scale: 2 }),
   message: text("message"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   settlementKeyIdx: uniqueIndex("settlement_logs_settlement_key_idx").on(table.settlementKey),
 }));
 

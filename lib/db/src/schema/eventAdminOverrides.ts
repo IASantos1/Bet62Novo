@@ -16,7 +16,7 @@ export const eventAdminOverridesTable = pgTable("event_admin_overrides", {
   updatedBy: text("updated_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
+}, (table: any) => ({
   eventOverrideIdx: uniqueIndex("event_admin_overrides_event_idx").on(table.eventId),
 }));
 

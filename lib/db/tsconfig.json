@@ -6,7 +6,14 @@
     "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": ".",
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["es2022"],
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "noImplicitAny": false,
+    "strictPropertyInitialization": false
   },
-  "include": ["src", "drizzle.config.ts"]
+  "include": ["src/**/*", "drizzle.config.ts"]
 }

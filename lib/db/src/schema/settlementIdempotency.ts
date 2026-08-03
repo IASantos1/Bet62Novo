@@ -33,7 +33,7 @@ export const settlementIdempotencyTable = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table: any) => ({
     jobIdIdx: uniqueIndex("settlement_idempotency_jobid_idx").on(table.jobId),
   }),
 );

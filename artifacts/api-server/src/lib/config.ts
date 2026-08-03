@@ -59,12 +59,11 @@ const PALACE_CASINO_API_TOKEN = process.env["PALACE_CASINO_API_TOKEN"] ?? "";
 const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
-// PulseScore — normalized real-bookmaker odds aggregator (bet365, etc.).
-// Football pulled via REST polling; tennis via its WebSocket feed (PRO plan
-// allows exactly 1 concurrent WS connection, so only one sport can stream
-// live at a time — tennis was chosen since point-by-point pricing benefits
-// most from push updates). Running in parallel with the existing in-house
-// odds engine for comparison, not replacing it yet.
+// PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
+//   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
+//   - NÃO FAZ: Estatísticas detalhadas, H2H, rankings, logos, play-by-play.
+// Futebol puxado via REST polling; tênis via WebSocket (PRO plan permite 1 conexão WS concorrente — tênis foi o escolhido por atualização point-by-point).
+// Cota: ilimitada conforme plano do usuário. Usar sempre que possível para overlay de odds e comparação multi-bookmaker.
 const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
 const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
@@ -76,35 +75,69 @@ const PULSESCORE_BOOKMAKER =
 // deterministic template when unset, so the feature works either way.
 const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 
-// ── BET62 Live + Match Tracker + Streaming (BetBY / StatScore+Statpal / SMYTDRYT) ──
-// BetBY supplies the live events list (score/minute/status). The Match
-// Tracker is primarily StatScore's get_pushes (real auth confirmed — see
-// STATSCORE_AUTH below), which needs an admin-mapped eventId per BetBY
-// event (services/statscore/resolver.ts); Statpal (services/statpal/
-// liveTracker.ts, matched by team name, no mapping needed) is the automatic
-// fallback for events not yet mapped. SMYTDRYT supplies the HLS stream URL
-// keyed by its own matchId. Neither StatScore nor SMYTDRYT share BetBY's ID
-// scheme, so live_stream_mappings (see lib/db) bridges both.
+// ── BET62 Live + Match Tracker + Streaming (Arquitetura 4 CAMADAS) ──
 //
-// BetBY's real live feed is REST, not the WebSocket originally assumed:
-//   GET {BETBY_API_BASE_URL}/api/v4/live/brand/{BETBY_BRAND_ID}/{BETBY_LANG}/0
-// returns a manifest ({ version, top_events_versions, rest_events_versions }
-// among other bookkeeping fields); fetching that same path with a specific
-// version number instead of 0 returns a chunk of event data for that
-// version. Chunks are deltas, not full snapshots — an event's team names
-// (desc.competitors) only appear once, the first time it's seen, so
-// services/betby/client.ts keeps a persistent merged cache across polls
-// rather than treating each poll as self-contained (confirmed from a real
-// captured response: only 1 of ~40 events in one chunk carried `desc`).
-// The WebSocket (wss://.../api/v1/ws_new) + JWT handshake is believed to be
-// for session/auth purposes only, not required to read this public feed —
-// unconfirmed, so BETBY_API_TOKEN is sent as a Bearer header when present
-// but the poller still attempts the request without one.
+//  CAMADA 1 (ODDS/MERCADOS): PulseScore — agregador odds multi-bookmaker.
+//    • Odds em tempo real, mercados normalizados (canonicalMarket), WebSocket ~1s (tênis).
+//    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
+//
+//  CAMADA 2 (TRACKER LIVE): StatScore — placar/minuto/incidentes AO VIVO.
+//    • Endpoint: /get_pushes/{eventId}. Auth: header X-Auth (OBRIGATÓRIO) + query ?auth= fallback compat.
+//    • Requer Referer: https://widgets.statscore.com/. Payload mais rico (minute, status, incidents[]).
+//    • Requer mapeamento MANUAL do admin (live_stream_mappings.statscore_event_id).
+//
+//  CAMADA 3 (STATS/EVENTOS): StatPal — dados estatísticos, play-by-play, metadados.
+//    • RESPONSABILIDADES: Estatísticas de jogo, play-by-play, H2H, rankings/standings, logos, ligas detalhadas.
+//    • NÃO FAZ: Agregação multi-bookmaker de odds (isso é PulseScore).
+//    • Soccer: /v2/soccer/matches/live + /match/{id}/statistics. Outros esportes: /v1/*
+//    • Cota: 300.000 requests/dia. Cache TTL rigoroso. Verificação de quota via /user-request-count (GRÁTIS, não conta na cota).
+//    • 100% AUTOMÁTICO por nome de time (ZERO trabalho manual por partida — futebol apenas).
+//
+//  CAMADA 4 (STREAM HLS): SMYTDRYT (BetBY deep-scan) — extração de URLs .m3u8.
+//    • O BetBY entrega a playlist HLS final em chunks do feed v4 quando tiver cobertura vídeo;
+//      se não tiver, admin preenche manualmente os 7 campos de vídeo em live_stream_mappings.
+//
+//  BetBY fornece a lista de eventos (score/minute/status) via REST v4 (delta manifest, cache persistente de
+//  desc.competitors através das versões). poller.ts.resolveTracker() executa a cascata 2→3→1 a cada 5s.
 const BETBY_API_BASE_URL = process.env["BETBY_API_BASE_URL"]?.trim() || "";
 const BETBY_BRAND_ID = process.env["BETBY_BRAND_ID"]?.trim() || "";
 const BETBY_LANG = process.env["BETBY_LANG"]?.trim() || "en";
 const BETBY_API_TOKEN = process.env["BETBY_API_TOKEN"] ?? "";
+// Short-lived (24h) ES256 JWT generated by the bet62 frontend handshake with
+// BetBY. Required to call stream/tracker endpoints over HTTP and to open the
+// wss://.../api/v1/ws_new WebSocket that returns handshake_success. Will be
+// refreshed by BetbyJwtService whenever frontend pushes a new token.
+const BETBY_JWT = process.env["BETBY_JWT"] ?? "";
+// WebSocket path for the BetBY session WS that performs handshake_success and
+// accepts get_stream/get_match_tracker actions. User confirmed
+// /api/v1/ws_new works in their existing session capture; overridable for
+// staging mirrors.
+const BETBY_WS_PATH = process.env["BETBY_WS_PATH"]?.trim() || "/api/v1/ws_new";
+// The BetBY live feed (confirmed against api-h-*.sptpub.com) validates
+// browser-origin headers before returning data — omitting these yields 403
+// or empty payloads even with the correct brandId. Defaults point at the
+// production frontend domain the user shared, overridable for dev/staging
+// mirrors.
+const BETBY_ORIGIN = process.env["BETBY_ORIGIN"]?.trim() || "https://bet62.plus";
+const BETBY_REFERER = process.env["BETBY_REFERER"]?.trim() || "https://bet62.plus/";
 const BETBY_POLL_INTERVAL_MS = 5_000;
+// SCRAPING BETBY COM AUTENTICAÇÃO MÁXIMA COMO FONTE PRINCIPAL (V26b-definitivo 2026-08-03):
+//   Quando true, os endpoints /api/live e /api/matches/live-match/:id
+//   passam a usar TODOS OS RECURSOS da BetBY para OBTER MÁXIMO DE DADOS:
+//
+//   ✅ 1. URLS COMPLETAS v4 (brand_id + lang + version)
+//   ✅ 2. CHAVE TOKEN BETBY_API_TOKEN (API key v1 do operador X-Api-Key / X-BetBy-Token)
+//   ✅ 3. JWT ES256 (Bearer BetBY de sessão via betbyJwt service)
+//   ✅ 4. Headers completos Chrome + X-BetBy-Brand + X-BetBy-Lang
+//
+//   Tudo é enviado em CADA requisição (manifest, chunk v4, auth_side broadcasts).
+//   Frontend (home.tsx) NÃO precisa de nenhuma alteração: continua recebendo
+//   schema Match Bet62 idêntico.
+const SCRAPER_BETBY_PUBLIC_PRIMARY =
+  (process.env["SCRAPER_BETBY_PUBLIC_PRIMARY"]?.trim() || "true").toLowerCase() === "true";
+const SCRAPER_BETBY_PUBLIC_POLL_MS = Number(
+  process.env["SCRAPER_BETBY_PUBLIC_POLL_MS"] ?? 20_000,
+);
 
 // StatScore Match Tracker — GET {base}/get_pushes/{eventId}?timestamp={ts}&
 // auth={auth}. Confirmed real by the user with a live example URL; auth is
@@ -146,7 +179,13 @@ export const CONFIG = {
   BETBY_BRAND_ID,
   BETBY_LANG,
   BETBY_API_TOKEN,
+  BETBY_JWT,
+  BETBY_WS_PATH,
+  BETBY_ORIGIN,
+  BETBY_REFERER,
   BETBY_POLL_INTERVAL_MS,
+  SCRAPER_BETBY_PUBLIC_PRIMARY,
+  SCRAPER_BETBY_PUBLIC_POLL_MS,
   STATSCORE_TRACKER_BASE_URL,
   STATSCORE_AUTH,
   SMYTDRYT_HOST_URL,

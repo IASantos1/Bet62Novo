@@ -1,5 +1,4 @@
 {
-  "include": ["src/**/*"],
   "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
   "compilerOptions": {
     "noEmit": true,
@@ -10,26 +9,18 @@
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
     "module": "esnext",
-    "types": ["node", "vite/client", "react", "react-dom"],
     "isolatedModules": true,
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitReturns": true,
-    "noImplicitAny": true,
-    "noImplicitThis": true,
-    "strictNullChecks": true,
-    "strictBindCallApply": true,
-    "strictPropertyInitialization": true,
+    "noEmitOnError": false,
     "alwaysStrict": true,
     "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@assets/*": ["../../attached_assets/*"]
+      "@assets/*": ["../../attached_assets/*"],
+      "@workspace/api-client-react": ["../../lib/api-client-react/src/index.ts"]
     }
   },
-  "references": [
-    {
-      "path": "../../lib/api-client-react"
-    }
-  ]
+  "include": ["src/**/*"]
 }

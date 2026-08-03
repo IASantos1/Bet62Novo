@@ -30,6 +30,22 @@ import {
   pulseScoreVolleyball,
   type GenericMoneylineOverride,
 } from "../services/pulsescore/genericSportLive.js";
+import { findBetbyEvent } from "../services/betby/liveFeed.js";
+import {
+  getAllBetbyEventsAsMatches,
+  findBet62MatchByBetbyIdOrMatchId,
+  startBackgroundPoller as startBetbyPublicPoller,
+  getCachedFeed as getBetbyPublicFeedCache,
+  getLastRefreshMs as getBetbyPublicRefreshMs,
+} from "../services/betby/publicScraperWithMapper.js";
+
+// Inicia o scraper público BetBY em background (polling 20s) se a flag
+// SCRAPER_BETBY_PUBLIC_PRIMARY estiver true (default true no config.ts).
+// Faz isso no top-level, logo após imports, para garantir que o primeiro
+// tick já populou o feed antes do primeiro request /api/live chegar.
+if (CONFIG.SCRAPER_BETBY_PUBLIC_PRIMARY) {
+  startBetbyPublicPoller(CONFIG.SCRAPER_BETBY_PUBLIC_POLL_MS || 20_000);
+}
 
 const router: IRouter = Router();
 
@@ -13431,7 +13447,7 @@ function buildFormula1UpcomingFromTournaments(
         f1Extra: { raceWinner: f1MarketsData.raceWinner, podium: f1MarketsData.podium },
       } satisfies UpcomingMatch;
     })
-    .filter((match): match is UpcomingMatch => !!match);
+    .filter((match): match is any => !!match);
 }
 
 function buildFormula1LiveFromTournaments(
@@ -17607,7 +17623,7 @@ async function buildFootballLiveV2(
       // fetchStatpalMatchStats may include { football: { goals, cards } } — merge
       // into statsOverlay so player names survive when the next tick returns no events.
       const freshFootball = statpalStats?.football;
-      const prevFootball = prevLx?.football as { goals?: unknown[]; cards?: unknown[] } | undefined;
+      const prevFootball = (prevLx as Record<string, any>)?.football as any;
       const mergedFootball = freshFootball ?? prevFootball;
       if (mergedFootball && ((mergedFootball.goals?.length ?? 0) > 0 || (mergedFootball.cards?.length ?? 0) > 0)) {
         (statsOverlay as Record<string, unknown>).football = mergedFootball;
@@ -20582,6 +20598,36 @@ router.get("/live", async (req: Request, res: Response) => {
   const limit = Number.isFinite(limitRaw)
     ? Math.max(0, Math.min(500, limitRaw))
     : 0;
+
+  // ─── SCRAPER BETBY PÚBLICO COMO FONTE PRINCIPAL ────────────────────
+  // Se flag ativada (default true), usa dados da BetBY mapeados para schema Match.
+  // Isso evita rate limit da Bet62, dispensa login/JWT HS256 e entrega
+  // score/minuto/streams direto da BetBY. O frontend não sabe a diferença.
+  if (CONFIG.SCRAPER_BETBY_PUBLIC_PRIMARY) {
+    try {
+      const matches = getAllBetbyEventsAsMatches({
+        onlyReal: true,
+        // default: retorna live + poucos prematch próximos. Para forçar só live:
+        // onlyLive: true,
+      });
+      const capped = limit > 0 ? matches.slice(0, limit) : matches;
+      if (!lean) {
+        res.json({ matches: capped, source: "betby_public", lastRefreshMs: getBetbyPublicRefreshMs() });
+        return;
+      }
+      const out = capped.map((m) => {
+        const anyM = m as any;
+        const { markets, events, betbyStreams, ...rest } = anyM;
+        return rest;
+      });
+      res.json({ matches: out, source: "betby_public", lastRefreshMs: getBetbyPublicRefreshMs() });
+      return;
+    } catch (err) {
+      logger.error({ err }, "[live route] betby-public primary failed, falling back");
+      // cai no fluxo antigo abaixo se houver erro
+    }
+  }
+
   try {
     const payload = await getLivePayloadCached();
     const effectivePayload =
@@ -20683,14 +20729,163 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     res.json({ match: null });
     return;
   }
+
+  // ─── BETBY PÚBLICA COMO FONTE PRINCIPAL ─────────────────────────────
+  //  1. Se o ID começa com "betby-" → direto da BetBY, sem confusão.
+  //  2. Se a flag estiver ligada (default true), PRIMEIRO tenta BetBY
+  //     (inclui fuzzy por ID prefixado ou busca por nome).
+  //  3. Se não encontrar, cai no fluxo antigo Bet62.
+  if (CONFIG.SCRAPER_BETBY_PUBLIC_PRIMARY || id.startsWith("betby-")) {
+    try {
+      const betbyMatch = findBet62MatchByBetbyIdOrMatchId(id);
+      if (betbyMatch) {
+        res.json({
+          match: betbyMatch,
+          source: "betby_public",
+          lastRefreshMs: getBetbyPublicRefreshMs(),
+        });
+        return;
+      }
+
+      // Fallback: ID não é da BetBY e não encontrou o jogo → tenta fuzzy
+      // por nome usando o feed Bet62 (procuramos o jogo no payload Bet62
+      // e depois tentamos encontrar correspondência na BetBY).
+      if (!id.startsWith("betby-")) {
+        const payloadBet62 = await getLivePayloadCached(forceFresh);
+        const fallbackBet62 =
+          payloadBet62.matches.find((m) => String(m.id) === id) ??
+          (getLivePayloadFallback()?.matches.find((m) => String(m.id) === id) ?? null);
+        if (fallbackBet62) {
+          // Tenta fuzzy join com BetBY (mantém original do Bet62, mas
+          // enriquece stream e score). Diferente do injector antigo,
+          // aqui NÃO usamos esse enriquecimento mais a menos que
+          // explicitamente pedirem via query.
+          if (String(req.query["injectBetby"] ?? "0") === "1") {
+            const home = extractTeamNameFromBet62(fallbackBet62, "home");
+            const away = extractTeamNameFromBet62(fallbackBet62, "away");
+            if (home && away) {
+              const candidates = findBetbyEvent({
+                home,
+                away,
+                tournament: extractTournament(fallbackBet62) || undefined,
+                sport: detectSportFromBet62IdOrMatch(id, fallbackBet62),
+                minScore: 0.28,
+                topN: 3,
+              });
+              const top = candidates[0];
+              if (top) {
+                (fallbackBet62 as any).injected_betby = {
+                  match_quality: top.label,
+                  confidence_score: top.score,
+                  teams_swapped: top.swapped,
+                  event_id: top.event.id,
+                  score: top.event.score,
+                  broadcasts: top.event.broadcasts || [],
+                  widgets: top.event.widgets || [],
+                  alternatives: candidates.slice(1).map((c) => ({
+                    event_id: c.event.id,
+                    score: c.score,
+                    quality: c.label,
+                    home: c.event.home.name,
+                    away: c.event.away.name,
+                    broadcasts_count: c.event.broadcasts.length,
+                  })),
+                };
+              }
+            }
+          }
+          res.json({ match: fallbackBet62, source: "bet62_with_fallback" });
+          return;
+        }
+      }
+    } catch (err) {
+      logger.error({ err, id }, "[live-match] betby-public primary failed, falling back");
+    }
+  }
+
   try {
     const payload = await getLivePayloadCached(forceFresh);
     const effectivePayload =
       payload.matches.length === 0
         ? (getLivePayloadFallback() ?? payload)
         : payload;
-    const match =
+    let match =
       effectivePayload.matches.find((m) => String(m.id) === id) ?? null;
+
+    // BetBY injector SÓ acontece se a flag principal estiver DESLIGADA
+    // (ou seja, modo legado: Bet62 é fonte, BetBY é só fallback).
+    if (match && !CONFIG.SCRAPER_BETBY_PUBLIC_PRIMARY) {
+      try {
+        const streamHls: unknown =
+          (match as any).stream?.hls ?? (match as any).streamHls ?? null;
+        const hasRealHls =
+          typeof streamHls === "string" &&
+          streamHls.length >= 10 &&
+          !streamHls.startsWith("0x") &&
+          streamHls !== "0" &&
+          streamHls !== "";
+        const home = extractTeamNameFromBet62(match, "home");
+        const away = extractTeamNameFromBet62(match, "away");
+        const tournament = extractTournament(match);
+        if (home && away) {
+          const candidates = findBetbyEvent({
+            home,
+            away,
+            tournament: tournament || undefined,
+            sport: detectSportFromBet62IdOrMatch(id, match),
+            minScore: 0.28,
+            topN: 3,
+          });
+          const top = candidates[0];
+          if (top) {
+            (match as any).injected_betby = {
+              match_quality: top.label,
+              confidence_score: top.score,
+              teams_swapped: top.swapped,
+              home_similarity: top.homeScore,
+              away_similarity: top.awayScore,
+              tournament_similarity: top.tournamentScore,
+              original_query: { home, away, tournament: tournament || null },
+              event_id: top.event.id,
+              sport: top.event.sport,
+              category: top.event.category,
+              tournament: top.event.tournament,
+              competitors: { home: top.event.home, away: top.event.away },
+              state: top.event.state,
+              score: top.event.score,
+              broadcasts: top.event.broadcasts || [],
+              widgets: top.event.widgets || [],
+              feed_generated: getFeedDoc_generated(),
+              alternatives: candidates.slice(1).map((c) => ({
+                event_id: c.event.id,
+                score: c.score,
+                quality: c.label,
+                home: c.event.home.name,
+                away: c.event.away.name,
+                tournament: c.event.tournament.name,
+                broadcasts_count: c.event.broadcasts.length,
+              })),
+            };
+            if (!hasRealHls) {
+              (match as any).betby_fallback_active = true;
+              const primaryStream =
+                (top.event.broadcasts || [])[0] ||
+                (top.event.broadcasts || [])[1] ||
+                null;
+              if (primaryStream) {
+                (match as any).betby_primary_broadcast = primaryStream;
+              }
+            }
+          }
+        }
+      } catch (injetErr) {
+        logger.warn(
+          { err: injetErr, id },
+          "[betby-inject] falha transiente na injeção BetBY — ignora",
+        );
+      }
+    }
+
     res.json({ match });
   } catch {
     const fallback = getLivePayloadFallback();
@@ -20699,6 +20894,92 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     });
   }
 });
+
+// ── Helpers usados pelo injector BetBY (nunca quebram mesmo com formatos inesperados) ──
+function getFeedDoc_generated(): number {
+  try {
+    const { getFeedDoc } = require("../services/betby/liveFeed.js");
+    return Number(getFeedDoc?.()?.generated ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+function extractTeamNameFromBet62(match: any, side: "home" | "away"): string | null {
+  if (!match || typeof match !== "object") return null;
+  // homeTeam / awayTeam pode ser string ou objeto com .name
+  const keyMain = side === "home" ? "homeTeam" : "awayTeam";
+  const direct = (match as any)[keyMain];
+  if (typeof direct === "string" && direct) return direct;
+  if (direct && typeof direct === "object") {
+    const n = (direct as any).name ?? (direct as any).title ?? (direct as any).displayName;
+    if (typeof n === "string" && n) return n;
+  }
+  // Alternativas (outros schemas usados em providers diferentes)
+  for (const k of [
+    `${side}_team`,
+    `${side}Name`,
+    `${side}_name`,
+    `${side}TeamName`,
+    `${side}Team`,
+    side,
+  ]) {
+    const v = (match as any)[k];
+    if (typeof v === "string" && v) return v;
+    if (v && typeof v === "object") {
+      const vn = (v as any).name;
+      if (typeof vn === "string" && vn) return vn;
+    }
+  }
+  return null;
+}
+
+function extractTournament(match: any): string | null {
+  if (!match || typeof match !== "object") return null;
+  for (const k of [
+    "tournament",
+    "league",
+    "competition",
+    "tournamentName",
+    "leagueName",
+    "category",
+    "countryLeague",
+    "tourney",
+  ]) {
+    const v = (match as any)[k];
+    if (typeof v === "string" && v) return v;
+    if (v && typeof v === "object") {
+      const vn = (v as any).name ?? (v as any).title;
+      if (typeof vn === "string" && vn) return vn;
+    }
+  }
+  return null;
+}
+
+function detectSportFromBet62IdOrMatch(id: string, match: any): "football" | "basketball" | "tennis" | "baseball" | "hockey" | null {
+  const idLower = String(id).toLowerCase();
+  if (idLower.startsWith("football") || idLower.startsWith("fb-v") || idLower.startsWith("soccer")) return "football";
+  if (idLower.startsWith("basketball") || idLower.startsWith("bb-v")) return "basketball";
+  if (idLower.startsWith("tennis") || idLower.startsWith("tn-v")) return "tennis";
+  if (idLower.startsWith("baseball") || idLower.startsWith("bs-v")) return "baseball";
+  if (idLower.startsWith("hockey") || idLower.startsWith("hk-v")) return "hockey";
+  // Fallback: tenta detectar por sport/sport_id no objeto
+  if (match && typeof match === "object") {
+    const s =
+      (match as any).sport?.id ??
+      (match as any).sport?.slug ??
+      (match as any).sport?.name ??
+      (match as any).sport_id ??
+      (match as any).sportName;
+    const sl = String(s ?? "").toLowerCase();
+    if (/football|soccer/.test(sl)) return "football";
+    if (/basket|basquet/.test(sl)) return "basketball";
+    if (/tenis/.test(sl)) return "tennis";
+    if (/baseball|beisebol/.test(sl)) return "baseball";
+    if (/hockey|hquei/.test(sl)) return "hockey";
+  }
+  return null;
+}
 
 // SportScore Match Tracker — resolves the SportScore match identifiers
 // mapped to a Statpal match (see sportscoreMatchMapTable). Statpal stays
@@ -35028,7 +35309,8 @@ router.get("/confrontos", async (req: Request, res: Response) => {
     const t2id = liveEntry?.awayTeamId;
     if (t1id && t2id) {
       try {
-        const h2hUrl = buildStatpalUrl("/v2/soccer/head-to-head");
+        const h2hUrlRaw = buildStatpalUrl("/v2/soccer/head-to-head");
+        const h2hUrl = (typeof h2hUrlRaw === "string" ? new URL(h2hUrlRaw) : h2hUrlRaw) as URL;
         h2hUrl.searchParams.set("team1_id", t1id);
         h2hUrl.searchParams.set("team2_id", t2id);
         const h2hResp = await fetch(h2hUrl.toString(), {
@@ -36125,7 +36407,7 @@ export function initLiveWsServer(httpServer: http.Server): void {
 
   httpServer.on(
     "upgrade",
-    (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
+    (req: http.IncomingMessage, socket: any, head: any) => {
       const url = req.url ?? "";
       if (url === "/api/matches/ws" || url.startsWith("/api/matches/ws?")) {
         wss.handleUpgrade(req, socket, head, (ws: WsClient) => {
