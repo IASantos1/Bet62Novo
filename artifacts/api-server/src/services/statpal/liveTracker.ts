@@ -15,6 +15,15 @@ type MatchStatsCacheEntry = { data: any; fetchedAt: number };
 const matchStatsCache = new Map<string, MatchStatsCacheEntry>();
 const matchStatsInFlight = new Map<string, Promise<any>>();
 
+// /v2/soccer/matches/live is not included in every Statpal subscription (see
+// matches.ts's fetchStatpalFootballLiveV2, which already established this
+// for bet62's account: that endpoint returns nothing here, and the
+// confirmed-working source is /v2/soccer/odds/live instead — same envelope,
+// Portuguese-keyed ("informação_da_partida", "lar"/"ausente", "nome" — see
+// statpalOddsMatchToV2Event). Try matches/live first anyway (harmless, and
+// correct for any subscription that does include it) and fall back to
+// odds/live otherwise, so this doesn't silently return nothing for the
+// account it's actually running against.
 async function getFootballLiveList(): Promise<any> {
   const now = Date.now();
   if (liveListCache && now - liveListCache.fetchedAt < LIVE_LIST_TTL_MS) {
@@ -24,6 +33,14 @@ async function getFootballLiveList(): Promise<any> {
     liveListInFlight = statpal
       .client
       .getFootballLive()
+      .then(async (d) => {
+        if (flattenLiveList(d).length > 0) return d;
+        const oddsLive = await statpal.client.getFootballOddsLive().catch((err) => {
+          logger.warn({ err }, "[statpal-live-tracker] odds/live fallback fetch failed");
+          return null;
+        });
+        return oddsLive ?? d;
+      })
       .then((d) => {
         liveListCache = { data: d, fetchedAt: Date.now() };
         return d;
@@ -91,6 +108,42 @@ type StatpalLiveEvent = {
   [k: string]: any;
 };
 
+// bet62's Statpal subscription responds in Portuguese, nested two levels
+// deep: { "informação_da_partida": { main_id, minuto, placar, liga, ... },
+// "informações_da_equipe": { lar: { nome, id }, ausente: { nome, id } } }
+// (English equivalents "match_info"/"team_info"/"home"/"away"/"name" are
+// supported too, in case a different subscription plan uses them — same
+// convention as statpalOddsMatchToV2Event in matches.ts, which is the
+// proven-working reference this was ported from).
+function tryParsePortugueseMatch(r: Record<string, any>): StatpalLiveEvent | null {
+  const info = r["informação_da_partida"] ?? r["match_info"];
+  const teams = r["informações_da_equipe"] ?? r["team_info"];
+  if (!info || typeof info !== "object" || !teams || typeof teams !== "object") return null;
+
+  const id = info["main_id"] ?? info["id"];
+  if (id == null) return null;
+
+  const homeRaw = teams["lar"] ?? teams["home"];
+  const awayRaw = teams["ausente"] ?? teams["away"];
+  const homeName = String(homeRaw?.["nome"] ?? homeRaw?.["name"] ?? "").trim();
+  const awayName = String(awayRaw?.["nome"] ?? awayRaw?.["name"] ?? "").trim();
+  if (!homeName || !awayName) return null;
+
+  const scoreParts = String(info["placar"] ?? info["score"] ?? "0:0").split(":");
+  const homeScore = homeRaw?.["pontuação"] ?? homeRaw?.["score"] ?? scoreParts[0];
+  const awayScore = awayRaw?.["pontuação"] ?? awayRaw?.["score"] ?? scoreParts[1];
+
+  return {
+    match_id: String(id),
+    home: { name: homeName, id: homeRaw?.["id"] != null ? String(homeRaw["id"]) : undefined },
+    away: { name: awayName, id: awayRaw?.["id"] != null ? String(awayRaw["id"]) : undefined },
+    minute: info["minuto"] ?? info["minute"],
+    status: (r["status"] as any)?.["concluído"] === "1" || (r["status"] as any)?.["finished"] === "1" ? "FT" : "LIVE",
+    home_score: homeScore,
+    away_score: awayScore,
+  };
+}
+
 function flattenLiveList(raw: any): StatpalLiveEvent[] {
   const out: StatpalLiveEvent[] = [];
   if (!raw) return out;
@@ -100,6 +153,13 @@ function flattenLiveList(raw: any): StatpalLiveEvent[] {
   }
   if (typeof raw !== "object") return out;
   const r = raw as Record<string, any>;
+
+  const ptMatch = tryParsePortugueseMatch(r);
+  if (ptMatch) {
+    out.push(ptMatch);
+    return out; // matched leaf — no need to recurse further into this node
+  }
+
   const id = pick<string>(r, ["match_id", "matchId", "id", "fixture_id", "event_id"]);
   const hasTeams =
     (r.home?.name || r.homeName || r.home_team) && (r.away?.name || r.awayName || r.away_team);
@@ -107,21 +167,17 @@ function flattenLiveList(raw: any): StatpalLiveEvent[] {
     out.push({
       match_id: String(id),
       home: {
-        name:
-          String(pick(r, ["home.name", "homeName", "home_team", "homeTeam"]) ?? "").trim() ||
-          undefined,
-        id: pick<string>(r, ["home.id", "homeId", "home_team_id"]),
+        name: String(r.home?.name ?? r.homeName ?? r.home_team ?? r.homeTeam ?? "").trim() || undefined,
+        id: r.home?.id != null ? String(r.home.id) : (r.homeId ?? r.home_team_id),
       },
       away: {
-        name:
-          String(pick(r, ["away.name", "awayName", "away_team", "awayTeam"]) ?? "").trim() ||
-          undefined,
-        id: pick<string>(r, ["away.id", "awayId", "away_team_id"]),
+        name: String(r.away?.name ?? r.awayName ?? r.away_team ?? r.awayTeam ?? "").trim() || undefined,
+        id: r.away?.id != null ? String(r.away.id) : (r.awayId ?? r.away_team_id),
       },
       minute: pick(r, ["minute", "time", "clock", "elapsed"]),
       status: pick(r, ["status", "status_name", "state", "match_status"]),
-      home_score: pick(r, ["home_score", "homeScore", "scores.home"]),
-      away_score: pick(r, ["away_score", "awayScore", "scores.away"]),
+      home_score: r.home_score ?? r.homeScore ?? r.scores?.home,
+      away_score: r.away_score ?? r.awayScore ?? r.scores?.away,
       ...r,
     });
   }
