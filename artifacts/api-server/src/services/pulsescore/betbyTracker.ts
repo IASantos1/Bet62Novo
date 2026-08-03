@@ -42,7 +42,12 @@ function pick<T = unknown>(o: any, keys: string[]): T | undefined {
 async function liveEventsForBetbySport(sport: string): Promise<PulseScoreEvent[]> {
   const s = (sport || "").toLowerCase();
   if (s.includes("soccer") || s.includes("football")) return getPulseScoreFootballLive();
-  if (s.includes("tennis")) return Promise.resolve(getPulseScoreTennisLive());
+  // "table-tennis" contains "tennis" as a substring — must be excluded
+  // explicitly or it's silently misrouted to the real-tennis fetcher, which
+  // will never find a table-tennis match by team name (PulseScore has no
+  // table-tennis coverage under this integration; falls through to the
+  // unmapped "return []" below, same end result but for the right reason).
+  if (s.includes("tennis") && !s.includes("table")) return Promise.resolve(getPulseScoreTennisLive());
   if (s.includes("basketball") || s.includes("basket")) return pulseScoreBasketball.getLive();
   if (s.includes("hockey")) return pulseScoreHockey.getLive();
   if (s.includes("baseball")) return pulseScoreBaseball.getLive();
