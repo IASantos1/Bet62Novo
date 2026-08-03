@@ -33,13 +33,22 @@ async function getFootballLiveList(): Promise<any> {
     liveListInFlight = statpal
       .client
       .getFootballLive()
+      .then((d) => (flattenLiveList(d).length > 0 ? d : null))
+      .catch((err) => {
+        // bet62's subscription doesn't include matches/live (confirmed HTTP
+        // 429 in production) — a rejection here must still fall through to
+        // the odds/live endpoint below, same as an empty-but-successful
+        // response. Without this catch, the .then() chain skips straight to
+        // the outer .catch() and the fallback never runs.
+        logger.warn({ err }, "[statpal-live-tracker] matches/live fetch failed, trying odds/live");
+        return null;
+      })
       .then(async (d) => {
-        if (flattenLiveList(d).length > 0) return d;
-        const oddsLive = await statpal.client.getFootballOddsLive().catch((err) => {
+        if (d) return d;
+        return statpal.client.getFootballOddsLive().catch((err) => {
           logger.warn({ err }, "[statpal-live-tracker] odds/live fallback fetch failed");
           return null;
         });
-        return oddsLive ?? d;
       })
       .then((d) => {
         liveListCache = { data: d, fetchedAt: Date.now() };
