@@ -133,8 +133,18 @@ const BETBY_POLL_INTERVAL_MS = 5_000;
 //   Tudo é enviado em CADA requisição (manifest, chunk v4, auth_side broadcasts).
 //   Frontend (home.tsx) NÃO precisa de nenhuma alteração: continua recebendo
 //   schema Match Bet62 idêntico.
+// Default OFF: this path was shipping identical placeholder odds
+// ({home:2.1, draw:3.4, away:3.2}) for every match (ev.markets is never
+// populated by the chunk parser — see the TODO in
+// publicScraperWithMapper.ts's buildOddsMock) and returning ~300+ events
+// unfiltered by liveness, which froze the Ao Vivo tab on mobile. Confirmed
+// in production: when this path errors and the old Statpal pipeline takes
+// over as fallback, the tab immediately becomes usable again with real,
+// differentiated odds. Flip back to true only once real markets are wired
+// up and the feed-refresh cache does incremental merges instead of a full
+// destructive replace per cycle.
 const SCRAPER_BETBY_PUBLIC_PRIMARY =
-  (process.env["SCRAPER_BETBY_PUBLIC_PRIMARY"]?.trim() || "true").toLowerCase() === "true";
+  (process.env["SCRAPER_BETBY_PUBLIC_PRIMARY"]?.trim() || "false").toLowerCase() === "true";
 const SCRAPER_BETBY_PUBLIC_POLL_MS = Number(
   process.env["SCRAPER_BETBY_PUBLIC_POLL_MS"] ?? 20_000,
 );
