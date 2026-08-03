@@ -11,8 +11,22 @@
 // (verified to separate real near-misses like "Deportivo Cali" vs
 // "Deportivo Pasto" from genuine spelling/abbreviation variants).
 
+// BetBY's individual-player sports (tennis, table-tennis, etc.) name
+// players "Lastname, Firstname" — e.g. "Ruse, Elena-Gabriela" — while every
+// other provider used here (Statpal/SportsAPI) shows "Firstname Lastname".
+// A literal comma essentially never appears in a real team/club name, so
+// it's an unambiguous signal to reorder before comparing rather than a
+// generic normalization that could misfire on club names.
+function reorderSurnameFirst(name: string): string {
+  const idx = name.indexOf(",");
+  if (idx < 0) return name;
+  const last = name.slice(0, idx).trim();
+  const first = name.slice(idx + 1).trim();
+  return first && last ? `${first} ${last}` : name;
+}
+
 function slugifyTeamName(name: string): string {
-  return name
+  return reorderSurnameFirst(name)
     .normalize("NFD")
     .replace(/\p{Mn}/gu, "")
     .toLowerCase()
@@ -56,5 +70,25 @@ export function teamNamesMatch(a: string, b: string): boolean {
   if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
   if (slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b)) return true;
   if (slugifyTeamNameSorted(a) === slugifyTeamNameSorted(b)) return true;
-  return nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82;
+  if (nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82) return true;
+
+  // Surname-only fallback — only when at least one side is confirmed to be
+  // a "Lastname, Firstname" individual-player name (comma present), since
+  // comparing just the last token would be dangerous for club names (e.g.
+  // "Real Madrid" vs "Atletico Madrid" both end in "madrid"). Handles a
+  // provider abbreviating/dropping the given name (e.g. BetBY's full
+  // "Ruse, Elena-Gabriela" vs another provider's "E. Ruse" or just "Ruse"),
+  // which the general fuzzy-similarity check above can fail on when the
+  // given name makes up a large share of the string length.
+  if (a.includes(",") || b.includes(",")) {
+    const surnameOf = (name: string): string => {
+      const tokens = slugifyTeamName(name).split("-").filter(Boolean);
+      return tokens[tokens.length - 1] ?? "";
+    };
+    const sa = surnameOf(a);
+    const sb = surnameOf(b);
+    if (sa && sb && sa === sb) return true;
+  }
+
+  return false;
 }
