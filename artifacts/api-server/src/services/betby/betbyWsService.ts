@@ -191,20 +191,21 @@ class BetbyWsService {
           this.state.msgsOut = 0;
           this.state.bytesIn = 0;
           logger.debug("[betby-ws] ws open — enviando handshake");
-          // handshake
+          // handshake — formato real confirmado via captura de tráfego (não
+          // o {params:{jwt,brand,lang}, requestId} assumido antes): a BetBY
+          // espera {action:"handshake", payload:{token}} sem requestId, e
+          // responde {action:"handshake_success", payload:{player_id}} — os
+          // dados de brand/lang já vêm embutidos no próprio JWT (iss/lang).
           const reqId = uoid("handshake");
           const msg = {
             action: "handshake",
-            params: {
-              jwt: this.obterJwt(),
-              brand: this.obterBrand(),
-              lang: this.obterLang(),
+            payload: {
+              token: this.obterJwt(),
             },
-            requestId: reqId,
           };
           this.pending.set(reqId, {
             action: "handshake",
-            params: msg.params,
+            params: msg.payload,
             resolve: (resp: any) => {
               clearTimeout(toHandshake);
               this.state.handshakeResp = resp || true;
@@ -233,13 +234,18 @@ class BetbyWsService {
           const rid: string | undefined = js.requestId || js.request_id;
           const action = js.action || "?";
 
-          // Handshake sem requestId (resposta top-level): busca primeiro pending handshake
-          if (action === "handshake" && !rid) {
+          // Handshake sem requestId (resposta top-level): ação real de
+          // sucesso é "handshake_success" (não "handshake") — confirmado via
+          // captura de tráfego real. Trata também "handshake_error"/
+          // "handshake_fail" como rejeição, caso a BetBY responda assim para
+          // um token inválido/expirado.
+          if ((action === "handshake_success" || action === "handshake_error" || action === "handshake_fail") && !rid) {
             for (const [id, p] of this.pending.entries()) {
               if (p.action === "handshake") {
                 clearTimeout(p.timer);
                 this.pending.delete(id);
-                p.resolve(js);
+                if (action === "handshake_success") p.resolve(js);
+                else p.reject(new Error(js?.payload?.message || js?.error || action));
                 break;
               }
             }
