@@ -20605,10 +20605,18 @@ router.get("/live", async (req: Request, res: Response) => {
   // score/minuto/streams direto da BetBY. O frontend não sabe a diferença.
   if (CONFIG.SCRAPER_BETBY_PUBLIC_PRIMARY) {
     try {
+      // onlyLive: true — a página Ao Vivo só precisa de jogos em curso; o
+      // pré-jogo "próximo" já tem o seu próprio caminho dedicado
+      // (GET /live-filler, acionado pelo frontend só quando há 0 jogos ao
+      // vivo). Sem este filtro, o feed BetBY (que cobre centenas de eventos
+      // por todos os desportos) devolvia até `limit` (500) jogos reais
+      // incluindo pré-jogos de todos os desportos a cada poll — um payload
+      // muito maior do que o pipeline antigo alguma vez produzia, e que o
+      // frontend serializa inteiro para localStorage a cada ciclo
+      // (writeSnapshot) — causa provável dos crashes repetidos em mobile.
       const matches = getAllBetbyEventsAsMatches({
         onlyReal: true,
-        // default: retorna live + poucos prematch próximos. Para forçar só live:
-        // onlyLive: true,
+        onlyLive: true,
       });
       const capped = limit > 0 ? matches.slice(0, limit) : matches;
       if (!lean) {
