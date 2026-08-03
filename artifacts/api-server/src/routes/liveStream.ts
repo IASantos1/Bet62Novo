@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { getLiveEvents, getLiveEvent } from "../services/betby/state.js";
 import { resolveVideoInfo } from "../services/smytdryt/resolver.js";
 import { buildStreamUrl } from "../services/smytdryt/stream.js";
+import { listAllExtractedVideos } from "../services/betby/client.js";
 
 const router: IRouter = Router();
 
@@ -48,6 +49,18 @@ router.get("/stream/:betbyEventId", async (req: Request, res: Response) => {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+});
+
+// Diagnostic only — lists every BetBY event for which client.ts's deep-scan
+// (extractVideoInfo/deepScanUrls) found a SMYTDRYT playlist URL embedded in
+// the raw feed chunk, i.e. auto-detected without any admin mapping. Empty
+// doesn't mean the scanner is broken — it means BetBY itself isn't
+// embedding video-stream data for any currently live event (no video
+// coverage on their end for those specific matches), which is the far more
+// common case for lower-tier fixtures.
+router.get("/live/auto-video-debug", (_req: Request, res: Response) => {
+  const videos = listAllExtractedVideos();
+  res.json({ count: videos.length, videos });
 });
 
 export default router;
