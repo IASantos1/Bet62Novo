@@ -38,6 +38,9 @@ import {
   getCachedFeed as getBetbyPublicFeedCache,
   getLastRefreshMs as getBetbyPublicRefreshMs,
 } from "../services/betby/publicScraperWithMapper.js";
+import { getLiveEvents } from "../services/betby/state.js";
+import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
+import type { MatchTracker } from "../services/liveStream/trackerTypes.js";
 
 // Inicia o scraper público BetBY em background (polling 20s) se a flag
 // SCRAPER_BETBY_PUBLIC_PRIMARY estiver true (default true no config.ts).
@@ -671,6 +674,14 @@ export type LiveMatchState = {
   };
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
+  // BetBY tracker/stream cross-matched onto this match by team name (see
+  // attachBetbyTrackerAndStream below) — present only when a live BetBY
+  // event was found whose home/away names fuzzy-match this one. Lets the
+  // frontend show Tracker/Vídeo buttons inline on the match itself instead
+  // of in a separate "Transmissões ao vivo" list.
+  betbyEventId?: string;
+  betbyTracker?: MatchTracker;
+  betbyStream?: { hls?: string };
 };
 
 export type F1DriverOdd = { name: string; shortName: string; team: string; pos: number; odd: number };
@@ -20588,6 +20599,28 @@ export function broadcastBatchDelta(
   }
 }
 
+// Cross-matches each Statpal/SportsAPI-sourced live match against the
+// BetBY poller's already-resolved live events (services/betby/state.js —
+// tracker via the StatScore→Statpal→PulseScore cascade, stream via
+// SMYTDRYT) by team name, and attaches whichever of tracker/stream it
+// found directly onto the match. Lets the frontend show a Tracker/Vídeo
+// button on the match's own card instead of a separate "Transmissões ao
+// vivo" list showing the same match twice under two different names.
+// Cheap: getLiveEvents() reads from an in-memory cache, no network call.
+function attachBetbyTrackerAndStream(matches: LiveMatchState[]): void {
+  const betbyEvents = getLiveEvents().filter((e) => e.tracker || e.stream);
+  if (betbyEvents.length === 0) return;
+  for (const m of matches) {
+    const found = betbyEvents.find(
+      (e) => teamNamesMatch(m.home, e.home) && teamNamesMatch(m.away, e.away),
+    );
+    if (!found) continue;
+    m.betbyEventId = found.betbyEventId;
+    if (found.tracker) m.betbyTracker = found.tracker;
+    if (found.stream) m.betbyStream = found.stream;
+  }
+}
+
 router.get("/live", async (req: Request, res: Response) => {
   res.setHeader(
     "Cache-Control",
@@ -20646,6 +20679,7 @@ router.get("/live", async (req: Request, res: Response) => {
       limit > 0
         ? effectivePayload.matches.slice(0, limit)
         : effectivePayload.matches;
+    attachBetbyTrackerAndStream(matches);
     if (!lean) {
       res.json({ matches });
       return;

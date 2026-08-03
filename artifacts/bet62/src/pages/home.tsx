@@ -3773,6 +3773,14 @@ type Match = {
     raceWinner: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
     podium: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
   };
+  // BetBY tracker/stream cross-matched server-side onto this match by team
+  // name (see matches.ts's attachBetbyTrackerAndStream) — present only when
+  // a live BetBY event was found for this match. Drives the inline
+  // Tracker/Vídeo buttons on the match card, replacing the old separate
+  // "Transmissões ao vivo" list that showed the same match twice.
+  betbyEventId?: string;
+  betbyTracker?: MatchTracker;
+  betbyStream?: { hls?: string };
 };
 
 type BetSelection = {
@@ -4751,7 +4759,6 @@ export default function Home({
   const CASINO_GROUPS_PAGE_SIZE = 12;
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
-  const [betbyLiveEvents, setBetbyLiveEvents] = useState<BetbyLiveEvent[]>([]);
   const [videoModalEvent, setVideoModalEvent] = useState<BetbyLiveEvent | null>(null);
   const [trackerModalEvent, setTrackerModalEvent] = useState<BetbyLiveEvent | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
@@ -8846,28 +8853,6 @@ export default function Home({
       .catch(() => {});
   }, [activeTab]);
 
-  // BET62 Live Stream (BetBY + StatScore + SMYTDRYT) — separate feed from
-  // the Statpal/SportsAPI live matches above; polls independently since it
-  // has its own 5s-cadence source (services/betby/poller.ts).
-  useEffect(() => {
-    if (activeTab !== "live") return;
-    let cancelled = false;
-    const poll = () => {
-      fetch("/api/live")
-        .then((r) => r.json())
-        .then((data) => {
-          if (!cancelled && Array.isArray(data)) setBetbyLiveEvents(data);
-        })
-        .catch(() => {});
-    };
-    poll();
-    const id = setInterval(poll, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [activeTab]);
-
   // Flat grid — only used while searching (a handful of results split into
   // many 1-game franchise rows isn't useful). Browsing without a search
   // term uses the grouped-by-franchise effect below instead.
@@ -11046,6 +11031,25 @@ export default function Home({
     </div>
   );
 
+  // Builds the BetbyLiveEvent shape VideoStreamModal/TrackerModal expect,
+  // from the BetBY fields the backend cross-matched onto this Match by team
+  // name (see matches.ts's attachBetbyTrackerAndStream). Only called when
+  // match.betbyEventId is present.
+  const matchToBetbyLiveEvent = (match: Match): BetbyLiveEvent => ({
+    betbyEventId: match.betbyEventId!,
+    eventId: match.betbyTracker?.eventId,
+    sport: match.sport ?? "football",
+    league: match.league,
+    country: match.country ?? "",
+    home: match.home,
+    away: match.away,
+    status: match.isLive ? "LIVE" : "PREMATCH",
+    minute: match.betbyTracker?.minute,
+    score: { home: match.homeScore ?? 0, away: match.awayScore ?? 0 },
+    tracker: match.betbyTracker,
+    stream: match.betbyStream?.hls ? { hls: match.betbyStream.hls } : undefined,
+  });
+
   const renderMatchCard = (match: Match) => {
     const matchKey = String(match.id);
     const sport = match.sport ?? "football";
@@ -11217,6 +11221,38 @@ export default function Home({
               {dateStr}{match.time ? ` · ${match.time}` : ""}
             </span>
           </div>
+          {/* ── BetBY tracker/vídeo, cross-matched onto this exact match by
+              team name (see attachBetbyTrackerAndStream in matches.ts) —
+              independent buttons, a match can have one without the other. */}
+          {(match.betbyTracker || match.betbyStream) && (
+            <div
+              className="flex gap-1.5 mb-2"
+              onClick={stopCardOpen}
+              onTouchStart={stopCardOpen}
+              onTouchMove={stopCardOpen}
+              onTouchEnd={stopCardOpen}
+              onPointerDown={stopCardOpen}
+              onPointerMove={stopCardOpen}
+              onPointerUp={stopCardOpen}
+            >
+              {match.betbyStream && (
+                <button
+                  onClick={() => setVideoModalEvent(matchToBetbyLiveEvent(match))}
+                  className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-red-600/15 hover:bg-red-600/25 border border-red-600/30 text-red-400 text-[10px] font-semibold transition-colors"
+                >
+                  <Radio size={10} /> Vídeo
+                </button>
+              )}
+              {match.betbyTracker && (
+                <button
+                  onClick={() => setTrackerModalEvent(matchToBetbyLiveEvent(match))}
+                  className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+                >
+                  <BarChart2 size={10} /> Tracker
+                </button>
+              )}
+            </div>
+          )}
           {/* Teams + odds — side by side on sm+, stacked on mobile */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex-1 min-w-0">
@@ -24405,62 +24441,6 @@ export default function Home({
                       })()}
                   </h2>
                 </div>
-
-                {/* ── Transmissões ao vivo (BetBY + StatScore/PulseScore + SMYTDRYT) ──
-                    Vídeo e Tracker são dois pontos de entrada independentes
-                    por jogo (um pode existir sem o outro), não um modal
-                    combinado — cada jogo mostra só os botões do que tem
-                    disponível. */}
-                {betbyLiveEvents.filter((e) => e.stream || e.tracker).length > 0 && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-black uppercase tracking-wide text-zinc-300 mb-2 flex items-center gap-1.5">
-                      <Radio size={14} className="text-red-500" /> Transmissões
-                      ao vivo
-                    </h3>
-                    <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
-                      {betbyLiveEvents
-                        .filter((e) => e.stream || e.tracker)
-                        .map((e) => (
-                          <div
-                            key={e.betbyEventId}
-                            className="flex-shrink-0 w-56 rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-left"
-                          >
-                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 mb-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                              AO VIVO {e.minute ? `· ${e.minute}` : ""}
-                            </div>
-                            <div className="text-sm font-semibold text-white truncate">
-                              {e.home} <span className="text-zinc-500">vs</span> {e.away}
-                            </div>
-                            <div className="text-xs text-zinc-500 truncate mt-0.5">
-                              {e.league}
-                            </div>
-                            <div className="text-lg font-black text-white mt-1 mb-2">
-                              {e.score.home} - {e.score.away}
-                            </div>
-                            <div className="flex gap-1.5">
-                              {e.stream && (
-                                <button
-                                  onClick={() => setVideoModalEvent(e)}
-                                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-red-600/15 hover:bg-red-600/25 border border-red-600/30 text-red-400 text-[11px] font-semibold transition-colors"
-                                >
-                                  <Radio size={11} /> Vídeo
-                                </button>
-                              )}
-                              {e.tracker && (
-                                <button
-                                  onClick={() => setTrackerModalEvent(e)}
-                                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[11px] font-semibold transition-colors"
-                                >
-                                  <BarChart2 size={11} /> Tracker
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )}
 
                 {/* ── Search bar ── */}
                 {liveMatches.length > 0 && (
