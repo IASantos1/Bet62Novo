@@ -889,6 +889,20 @@ export default function AdminPage() {
   } | null>(null);
   const [pulsescoreUsageLoading, setPulsescoreUsageLoading] = useState(false);
 
+  // BetBY native WebSocket JWT (get_match_tracker/get_stream) — short-lived
+  // token captured manually from a real BetBY browser session, pasted here
+  // instead of requiring a redeploy every time it expires (~24-48h).
+  const [betbyJwtStatus, setBetbyJwtStatus] = useState<{
+    hasToken: boolean;
+    hoursLeft: number | null;
+    needsRefresh: boolean;
+    hasMatchTrackerFlag: boolean;
+    hasCashoutFlag: boolean;
+  } | null>(null);
+  const [betbyJwtStatusLoading, setBetbyJwtStatusLoading] = useState(false);
+  const [betbyJwtInput, setBetbyJwtInput] = useState("");
+  const [betbyJwtSaving, setBetbyJwtSaving] = useState(false);
+
   // Filters/UI
   const [userSearch, setUserSearch] = useState("");
   const [betSearch, setBetSearch] = useState("");
@@ -1073,6 +1087,43 @@ export default function AdminPage() {
       setPulsescoreUsageLoading(false);
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchBetbyJwtStatus = useCallback(async () => {
+    if (!token) return;
+    setBetbyJwtStatusLoading(true);
+    try {
+      const res = await fetch("/api/betby/ws/jwt-status", { headers: authHeader });
+      if (res.ok) setBetbyJwtStatus(await res.json());
+    } catch {
+      /* ignore */
+    } finally {
+      setBetbyJwtStatusLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submitBetbyJwt = useCallback(async () => {
+    if (!token || !betbyJwtInput.trim()) return;
+    setBetbyJwtSaving(true);
+    try {
+      const res = await fetch("/api/betby/ws/jwt", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ token: betbyJwtInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Token inválido");
+        return;
+      }
+      toast.success("JWT da BetBY instalado com sucesso");
+      setBetbyJwtInput("");
+      await fetchBetbyJwtStatus();
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setBetbyJwtSaving(false);
+    }
+  }, [token, betbyJwtInput]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const usersQuery = useQuery({
     queryKey: ["admin", "users"],
@@ -1764,6 +1815,7 @@ export default function AdminPage() {
     if (activeTab === "dashboard") {
       fetchStatpalUsage();
       fetchPulsescoreUsage();
+      fetchBetbyJwtStatus();
     }
     else if (activeTab === "withdrawals") {
       fetchAuditLogs();
@@ -3169,6 +3221,68 @@ export default function AdminPage() {
                           Não foi possível obter dados da PulseScore.
                         </div>
                       )}
+                    </div>
+
+                    {/* ── BetBY WebSocket nativo (get_match_tracker / get_stream) ── */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
+                          <Activity size={16} className="text-blue-400" />
+                          BetBY WebSocket Nativo — JWT
+                        </h3>
+                        <button
+                          onClick={fetchBetbyJwtStatus}
+                          disabled={betbyJwtStatusLoading}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Atualizar"
+                        >
+                          <RefreshCw size={14} className={betbyJwtStatusLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
+
+                      {betbyJwtStatus && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className={`flex items-center gap-1.5 text-sm font-black ${betbyJwtStatus.hasToken && !betbyJwtStatus.needsRefresh ? "text-emerald-400" : "text-red-400"}`}>
+                              <span className={`inline-block w-2 h-2 rounded-full ${betbyJwtStatus.hasToken && !betbyJwtStatus.needsRefresh ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
+                              {!betbyJwtStatus.hasToken ? "Sem token" : betbyJwtStatus.needsRefresh ? "Expirado" : "Válido"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Estado do token</div>
+                          </div>
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-2xl font-black text-blue-400 tabular-nums">
+                              {betbyJwtStatus.hoursLeft != null ? betbyJwtStatus.hoursLeft.toFixed(1) : "—"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Horas restantes</div>
+                          </div>
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-xs font-bold text-zinc-300 text-center">
+                              Tracker: {betbyJwtStatus.hasMatchTrackerFlag ? "✓" : "✗"} · Cashout: {betbyJwtStatus.hasCashoutFlag ? "✓" : "✗"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Flags da BetBY</div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={betbyJwtInput}
+                          onChange={(e) => setBetbyJwtInput(e.target.value)}
+                          placeholder="Cole aqui o JWT capturado de uma sessão real da BetBY (eyJ...)"
+                          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
+                        />
+                        <button
+                          onClick={submitBetbyJwt}
+                          disabled={betbyJwtSaving || !betbyJwtInput.trim()}
+                          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
+                        >
+                          {betbyJwtSaving ? "Instalando..." : "Instalar JWT"}
+                        </button>
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-2">
+                        O token expira a cada ~24-48h — quando o estado mostrar "Expirado", capture um novo na sessão do navegador e cole aqui.
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
