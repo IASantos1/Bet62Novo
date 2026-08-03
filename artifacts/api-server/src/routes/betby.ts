@@ -20,6 +20,8 @@ import {
   betbyBridgeTake,
   type BetbyWsState,
 } from "../services/betby/betbyWsService.js";
+import { betbyJwt } from "../services/betby/jwtService.js";
+import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
 
 const router: IRouter = Router();
 
@@ -352,6 +354,65 @@ router.get("/betby/ws/stream/:eventId", async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * GET /betby/ws/jwt-status
+ *   Estado atual do JWT usado pelo betbyWsService (validade, flags, horas
+ *   restantes) — admin only, não expõe o token em si.
+ */
+router.get(
+  "/betby/ws/jwt-status",
+  adminMiddleware,
+  (_req: AdminRequest, res: Response) => {
+    const snap = betbyJwt.snapshot();
+    res.json({
+      ok: true,
+      hasToken: !!snap.token,
+      payload: snap.payload
+        ? { iss: snap.payload.iss, sub: snap.payload.sub, lang: snap.payload.lang, ff: snap.payload.ff }
+        : null,
+      issuedAt: snap.issuedAt,
+      expiresAt: snap.expiresAt,
+      hoursLeft: snap.hoursLeft,
+      needsRefresh: snap.needsRefresh,
+      hasMatchTrackerFlag: snap.hasMatchTrackerFlag,
+      hasCashoutFlag: snap.hasCashoutFlag,
+    });
+  },
+);
+
+/**
+ * POST /betby/ws/jwt
+ *   Instala um JWT capturado manualmente do navegador (sessão BetBY real) —
+ *   admin only. Substitui o token atual sem precisar de redeploy; expira em
+ *   ~24-48h e precisa ser recolado quando o GET /jwt-status indicar
+ *   needsRefresh: true.
+ *
+ *   Body JSON: { token: "eyJ..." }
+ */
+router.post(
+  "/betby/ws/jwt",
+  adminMiddleware,
+  (req: AdminRequest, res: Response) => {
+    const token = String((req.body && req.body.token) || "").trim();
+    if (!token) {
+      res.status(400).json({ ok: false, error: "token_obrigatorio" });
+      return;
+    }
+    const snap = betbyJwt.setToken(token, "admin-endpoint");
+    if (!snap.token) {
+      res.status(400).json({ ok: false, error: "token_invalido_nao_decodificou_como_jwt" });
+      return;
+    }
+    res.json({
+      ok: true,
+      installed: true,
+      hoursLeft: snap.hoursLeft,
+      hasMatchTrackerFlag: snap.hasMatchTrackerFlag,
+      hasCashoutFlag: snap.hasCashoutFlag,
+    });
+  },
+);
 
 /**
  * POST /betby/ws/bridge-result
