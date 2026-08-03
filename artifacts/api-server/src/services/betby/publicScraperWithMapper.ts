@@ -170,16 +170,65 @@ let lastFetchMs = 0;
 let fetchingNow = false;
 const POLL_INTERVAL_MS = 20_000; // 20s (razão entre atualidade e evitar rate limit)
 
-const BRAND_ID = (CONFIG.BETBY_BRAND_ID || process.env.BETBY_BRAND_ID || "2633251597353889792").trim();
+// Incremental event store — refreshPublicBetbyFeed() used to replace
+// feedCache wholesale every cycle, built only from whichever manifest/chunk/
+// auth_side calls happened to succeed *that* cycle. A single chunk timeout
+// (BetBY rate limit, transient network blip) meant every event that only
+// lived in that chunk vanished from the response until the next successful
+// cycle — visible in production as live football matches flickering in and
+// out of the Ao Vivo list. Now each successful fetch only *upserts* events
+// into this store (keyed by BetBY event id) and stamps lastSeenAt; an event
+// is only dropped once it's been missing across several consecutive cycles
+// (STALE_GRACE_MS), which is a much stronger signal it's genuinely gone
+// (finished / no longer live) than "this one poll's chunk fetch failed".
+const eventStore = new Map<string, { event: BetbyEvent; lastSeenAt: number }>();
+const STALE_GRACE_MS = POLL_INTERVAL_MS * 4;
+
+function computeStats(events: BetbyEvent[]): BetbyPublicFeedDoc["stats"] {
+  const total = events.length;
+  const real = events.filter((e) => !e.virtual).length;
+  const virtual = total - real;
+  const futebol_real = events.filter(
+    (e) => !e.virtual && (e.sport.id === "1" || /soccer|football/i.test(e.sport.name ?? "")),
+  ).length;
+  const com_broadcasts = events.filter((e) => e.broadcasts.length > 0).length;
+  const com_widgets = events.filter((e) => e.widgets.length > 0).length;
+  const broadcasts_total = events.reduce((s, e) => s + e.broadcasts.length, 0);
+  const widgets_total = events.reduce((s, e) => s + e.widgets.length, 0);
+  return { total, real, virtual, futebol_real, com_broadcasts, com_widgets, broadcasts_total, widgets_total };
+}
+
+// Merges a cycle's freshly-parsed events into the persistent store and
+// returns the current full event list (fresh + still-within-grace stale
+// entries). Called even on a partial fetch — that's the whole point.
+function mergeIntoEventStore(freshEvents: BetbyEvent[]): BetbyEvent[] {
+  const now = Date.now();
+  for (const ev of freshEvents) {
+    eventStore.set(ev.id, { event: ev, lastSeenAt: now });
+  }
+  for (const [id, entry] of eventStore) {
+    if (now - entry.lastSeenAt > STALE_GRACE_MS) eventStore.delete(id);
+  }
+  return Array.from(eventStore.values()).map((entry) => entry.event);
+}
+
+// No fallback brand ID: the previous default here ("2633251597353889792")
+// and the hdonegame.com Origin/Referer below did not belong to any bet62
+// configuration seen anywhere else in this codebase — the original BetBY
+// poller (services/betby/client.ts) requires BETBY_BRAND_ID with no
+// fallback and disables itself if it's missing, and that's the correct
+// behavior here too: silently querying BetBY with an unverified brand id
+// and a foreign operator's Origin/Referer is not something this service
+// should ever do on its own. If BETBY_BRAND_ID isn't configured, the
+// fetch functions below no-op (see the guard in refreshPublicBetbyFeed).
+const BRAND_ID = (CONFIG.BETBY_BRAND_ID || process.env.BETBY_BRAND_ID || "").trim();
 const BASE_URL =
   (CONFIG as any).BETBY_API_BASE_URL ||
   process.env.BETBY_API_BASE_URL ||
   "https://api-h-c7818b61-608.sptpub.com";
 const LANG = (CONFIG as any).BETBY_LANG || process.env.BETBY_LANG || "en";
-const BETBY_ORIGIN =
-  (CONFIG as any).BETBY_ORIGIN || process.env.BETBY_ORIGIN || "https://hdonegame.com";
-const BETBY_REFERER =
-  (CONFIG as any).BETBY_REFERER || process.env.BETBY_REFERER || "https://hdonegame.com/game/gamesUrl";
+const BETBY_ORIGIN = (CONFIG as any).BETBY_ORIGIN || process.env.BETBY_ORIGIN || "https://bet62.plus";
+const BETBY_REFERER = (CONFIG as any).BETBY_REFERER || process.env.BETBY_REFERER || "https://bet62.plus/";
 const BETBY_API_KEY_V1 =
   ((CONFIG as any).BETBY_API_TOKEN || process.env.BETBY_API_TOKEN || "").trim();
 
@@ -397,7 +446,18 @@ function parseChunksToBetbyEvents(
 // =====================================================================
 // REFRESH PÚBLICO (chama manifesto → chunks → auth_side)
 // =====================================================================
+let _warnedNoBrandId = false;
+
 export async function refreshPublicBetbyFeed(): Promise<BetbyPublicFeedDoc | null> {
+  if (!BRAND_ID) {
+    if (!_warnedNoBrandId) {
+      _warnedNoBrandId = true;
+      logger.warn(
+        "[betby-public] BETBY_BRAND_ID not configured — scraper disabled (no fallback brand id).",
+      );
+    }
+    return feedCache;
+  }
   if (fetchingNow) return feedCache;
   fetchingNow = true;
   try {
@@ -428,6 +488,9 @@ export async function refreshPublicBetbyFeed(): Promise<BetbyPublicFeedDoc | nul
     const auth = extractAuthSideMap(authRaw || {});
 
     const doc = parseChunksToBetbyEvents(chunks, auth);
+    const mergedEvents = mergeIntoEventStore(doc.events);
+    doc.events = mergedEvents;
+    doc.stats = computeStats(mergedEvents);
     doc.source = {
       manifestVersionTop: topV[0] ?? null,
       manifestVersionRest: restV[restV.length - 1] ?? null,
@@ -436,8 +499,8 @@ export async function refreshPublicBetbyFeed(): Promise<BetbyPublicFeedDoc | nul
     feedCache = doc;
     lastFetchMs = Date.now();
     logger.info(
-      { stats: doc.stats, source: doc.source },
-      "[betby-public] feed atualizado via scraping público",
+      { stats: doc.stats, source: doc.source, freshThisCycle: chunks.length, storeSize: eventStore.size },
+      "[betby-public] feed atualizado via scraping público (merge incremental)",
     );
     return doc;
   } catch (err) {
@@ -500,17 +563,25 @@ function matchStatusAndMinute(ev: BetbyEvent): {
 }
 
 function buildOddsMock(ev: BetbyEvent): Odds {
-  // Odds reais podem ser extraídas de markets do chunk v4 quando existirem.
-  // Enquanto isso (para manter o layout renderizando), retorna valores neutros
-  // com hasRealOdds=false se não tiver markets no chunk.
-  // TODO: extrair markets de ev.markets quando o chunk carregar a key markets.
+  // TODO: real markets extraction was never implemented — ev.markets is
+  // never populated anywhere in parseChunksToBetbyEvents (the raw v4 chunk's
+  // actual market/odds field shape hasn't been confirmed against a live
+  // sample yet). Both branches below used to return plausible-looking
+  // hardcoded numbers (2.10/3.40/3.20 or 2.00/3.30/3.30) regardless of the
+  // real match — indistinguishable from real odds in the UI, and confirmed
+  // in production showing identical numbers on every single match. Return
+  // zeroed odds instead: hasRealBetbyMarkets() already reports false here,
+  // so callers that check that flag are unaffected, but anything that
+  // fell back to reading odds.home/away directly now correctly sees "no
+  // odds" instead of a confident-looking fake price.
   const anyE = ev as any;
   const hasMarkets = !!(anyE.markets && typeof anyE.markets === "object" && Object.keys(anyE.markets).length > 0);
   if (!hasMarkets) {
-    // valores placeholder (NÃO são considerados reais)
-    return { home: 2.1, draw: 3.4, away: 3.2 };
+    return { home: 0, draw: 0, away: 0 };
   }
-  return { home: 2.0, draw: 3.3, away: 3.3 };
+  // Reachable once markets extraction is actually implemented — until then
+  // hasMarkets is always false, so this never runs today.
+  return { home: 0, draw: 0, away: 0 };
 }
 
 function hasRealBetbyMarkets(ev: BetbyEvent): boolean {
