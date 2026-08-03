@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { logger } from "../lib/logger.js";
+import { logger } from "../../lib/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FEEDS_DIR = path.resolve(__dirname, "..", "..", "tmp", "feeds_reais_2026");
