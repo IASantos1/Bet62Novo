@@ -12017,7 +12017,13 @@ router.get("/volleyball-livescores", async (_req: Request, res: Response) => {
 });
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
-const V2_LIVE_MAX_STALE_MS = 30_000;
+// A Statpal rate-limit (429) backoff routinely outlasts 30s, and wiping the
+// live cache to empty during that window causes the live section to go
+// completely blank until it recovers — worse, any match that first turns
+// live during the outage then reads as "already stale" once the feed comes
+// back (see the evAgeSeconds > 20min gate below), permanently excluding it.
+// Ride out longer outages with stale-but-present data instead.
+const V2_LIVE_MAX_STALE_MS = 5 * 60_000;
 const WS_PREFERRED_MAX_STALE_MS = 10_000;
 
 /** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
@@ -17115,11 +17121,27 @@ async function buildFootballLiveV2(
     // price live odds on matches in progress, so these bypass the "never seen + >20min"
     // gate that exists to block Statpal pre-match fixtures faking a live status.
     const isConfirmedOddsLive = oddsLiveKnownIds.has(ev.id);
+    // fromUpcoming is keyed off SportsAPI Pro's id space (buildUpcomingMatches),
+    // which never matches ev.id here when the live feed is Statpal-sourced (the
+    // normal path) — different providers, different ids. In practice it almost
+    // never rescues anything, leaving isConfirmedOddsLive as the only bypass. If
+    // Statpal itself rate-limits (429) both /matches/live and /odds/live for
+    // over 20 minutes around a match's kickoff (easily hit — that's exactly when
+    // request volume spikes across many simultaneous kickoffs), the match comes
+    // back from the outage already "too old" with neither rescue available, and
+    // is permanently excluded from ever reaching Ao Vivo. groundTruthStart is
+    // populated from Statpal's own daily fixture feed (refreshFootballGroundTruthKickoffs),
+    // same id space as the live feed and independently cached/refreshed — its
+    // mere presence already means Statpal has genuinely confirmed this fixture
+    // exists with a real scheduled kickoff, which is a legitimate rescue signal
+    // in its own right.
+    const hasGroundTruthKickoff = groundTruthStart != null;
     if (
       !liveMatchState.has(`football-v2-${ev.id}`) &&
       evAgeSeconds > 20 * 60 &&
       !fromUpcoming &&
-      !isConfirmedOddsLive
+      !isConfirmedOddsLive &&
+      !hasGroundTruthKickoff
     )
       continue;
 
