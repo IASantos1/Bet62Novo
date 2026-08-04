@@ -826,6 +826,7 @@ export default function AdminPage() {
       status?: number;
       detail: string;
     }>;
+    tracker?: { ok: boolean; status?: number; raw?: unknown; error?: string };
     error?: string;
     detail?: string;
   } | null>(null);
@@ -7054,6 +7055,34 @@ export default function AdminPage() {
                               </div>
                             </div>
                           ))}
+                        </div>
+                      )}
+                      {sportscoreTestResult.tracker && (
+                        <div className="mt-3 pt-3" style={{ borderTop: "1px solid #27272a" }}>
+                          <div className="flex items-center gap-2 mb-2">
+                            {sportscoreTestResult.tracker.ok ? (
+                              <CheckCircle size={14} style={{ color: "#34d399" }} />
+                            ) : (
+                              <XCircle size={14} style={{ color: "#f87171" }} />
+                            )}
+                            <span
+                              className="text-xs font-bold"
+                              style={{ color: sportscoreTestResult.tracker.ok ? "#34d399" : "#f87171" }}
+                            >
+                              Tracker (/api/widget/tracker/):{" "}
+                              {sportscoreTestResult.tracker.ok
+                                ? "resposta recebida"
+                                : sportscoreTestResult.tracker.error}
+                            </span>
+                          </div>
+                          {sportscoreTestResult.tracker.raw != null && (
+                            <pre
+                              className="text-[10px] whitespace-pre-wrap break-all max-h-64 overflow-y-auto p-2 rounded"
+                              style={{ background: "#09090b", color: "#a1a1aa" }}
+                            >
+                              {JSON.stringify(sportscoreTestResult.tracker.raw, null, 2)}
+                            </pre>
+                          )}
                         </div>
                       )}
                     </div>

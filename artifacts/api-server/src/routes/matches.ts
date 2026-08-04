@@ -21462,6 +21462,29 @@ export async function findSportscoreFixture(
   return findViaTeamSchedule(sport, homeTeam, awayTeam, diag);
 }
 
+// Fetches SportScore's own Match Tracker payload (GET /api/widget/tracker/)
+// for a fixture already resolved via findSportscoreFixture — this endpoint
+// was documented in the comment above since the integration's early days
+// but never actually called anywhere; findSportscoreFixture only ever
+// resolved the id/slug and stopped there. Shape is intentionally read
+// defensively (no hard-coded field list) since this is the first real
+// sample of this endpoint's response seen by this codebase.
+export async function fetchSportscoreTracker(
+  sport: string,
+  trackerId: string,
+): Promise<{ ok: boolean; status?: number; raw?: unknown; error?: string }> {
+  if (!trackerId) return { ok: false, error: "trackerId vazio" };
+  const url = `https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(trackerId)}&src=bet62.com`;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) return { ok: false, status: resp.status, error: `HTTP ${resp.status}` };
+    const raw = await resp.json();
+    return { ok: true, status: resp.status, raw };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 router.get(
   "/sportscore-id/:sport/:matchId",
   async (req: Request, res: Response) => {
