@@ -24895,7 +24895,7 @@ export default function Home({
                     <filter id="casino-art-sharpen">
                       <feConvolveMatrix
                         order="3"
-                        kernelMatrix="0 -1 0 -1 5 -1 0 -1 0"
+                        kernelMatrix="0 -0.3 0 -0.3 2.2 -0.3 0 -0.3 0"
                         preserveAlpha="true"
                       />
                     </filter>
