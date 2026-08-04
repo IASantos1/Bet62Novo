@@ -4851,13 +4851,11 @@ export default function Home({
     "balance",
   );
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
-  const [showAppBanner, setShowAppBanner] = useState(() => {
-    try {
-      return !localStorage.getItem("bet62_app_banner_dismissed");
-    } catch {
-      return true;
-    }
-  });
+  // No native app exists yet — the "download for iOS/Android" banner
+  // advertised a nonexistent app, so it's disabled at the source instead of
+  // deleting all its JSX/positioning logic (which would need to be re-added
+  // once a real app ships).
+  const [showAppBanner, setShowAppBanner] = useState(false);
 
   // Auth form state
   const [loginEmail, setLoginEmail] = useState("");
@@ -21664,64 +21662,56 @@ export default function Home({
                   )}
                 </div>
 
-                {/* Web: 3-column grid. PWA (installed app): horizontal scroll
-                    instead of stacking, per explicit request. */}
-                <div className="home-promo-row grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Always 3 side-by-side columns, mobile included — no
+                    stacking on any viewport. */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
                   <button
                     onClick={() => selectMainTab("casino")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-4"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4"
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                    <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                       Cassino
                     </div>
-                    <div className="text-base font-black text-white">+2000 Jogos</div>
-                    <div className="text-xs text-zinc-400">As melhores slots!</div>
+                    <div className="text-sm sm:text-base font-black text-white">+2000 Jogos</div>
+                    <div className="text-[10px] sm:text-xs text-zinc-400">As melhores slots!</div>
+                    <div className="flex items-center gap-1 mt-2 text-red-400">
+                      <Gift size={11} />
+                      <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
+                    </div>
                   </button>
                   <button
                     onClick={() => {
                       setDepositModalOpen(true);
                       setActiveTab("wallet");
                     }}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-4"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4"
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                    <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                       Depósito €10
                     </div>
-                    <div className="text-base font-black text-amber-400">Ganhe €5</div>
-                    <div className="text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
+                    <div className="text-sm sm:text-base font-black text-amber-400">Ganhe €5</div>
+                    <div className="text-[10px] sm:text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
+                    <div className="flex items-center gap-1 mt-2 text-red-400">
+                      <Gift size={11} />
+                      <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
+                    </div>
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-4"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4"
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                    <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                       Aposte Ao Vivo
                     </div>
-                    <div className="text-base font-black text-white flex items-center gap-2">
+                    <div className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
                       Emoção em tempo real
-                      <span className="relative flex h-1.5 w-1.5">
+                      <span className="relative flex h-1.5 w-1.5 shrink-0">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
                       </span>
                     </div>
                   </button>
                 </div>
-
-                <button
-                  onClick={() => selectMainTab("promos", fetchCashback)}
-                  className="w-full text-left rounded-xl border border-red-900/40 bg-gradient-to-r from-red-950/40 via-zinc-900 to-zinc-900 hover:border-red-800/60 transition-colors p-4 flex items-center gap-3"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-red-600/15 text-red-500 flex items-center justify-center shrink-0">
-                    <Gift size={18} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-black text-white">Ofertas Especiais</div>
-                    <div className="text-xs text-zinc-400">
-                      Aproveite os melhores bónus do mercado
-                    </div>
-                  </div>
-                  <ChevronRight size={16} className="text-zinc-500 shrink-0" />
-                </button>
 
                 <div>
                   <div className="flex items-center gap-2 mb-3">
