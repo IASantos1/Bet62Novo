@@ -24785,7 +24785,7 @@ export default function Home({
                   title={game.name}
                   aria-label={game.name}
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
-                  className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
+                  className={`${sizeClass} casino-card-shine aspect-[7/10] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
                 >
                   {casinoLoadingGame === game.id ? (
                     <Loader2 className="animate-spin text-zinc-400" size={28} />
@@ -24894,7 +24894,7 @@ export default function Home({
                       </div>
                     ) : (
                       <>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                           {casinoGames.map((game) => renderGameTile(game, ""))}
                         </div>
 
@@ -24933,7 +24933,7 @@ export default function Home({
                             </h3>
                             <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
                               {group.games.map((game) =>
-                                renderGameTile(game, "w-28 sm:w-32 flex-shrink-0"),
+                                renderGameTile(game, "w-32 sm:w-36 flex-shrink-0"),
                               )}
                             </div>
                           </div>
