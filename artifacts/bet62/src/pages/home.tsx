@@ -24767,12 +24767,23 @@ export default function Home({
                 </button>
               );
 
+              // Staggers each card's shine sweep so a whole row doesn't
+              // animate in perfect lockstep — derived from the game id
+              // itself (stable across re-renders) rather than array index,
+              // since index shifts as groups load more games.
+              const shineDelay = (id: string): number => {
+                let h = 0;
+                for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 1000;
+                return (h / 1000) * 2.4;
+              };
+
               const renderGameTile = (game: CasinoGame, sizeClass: string) => (
                 <button
                   key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
                   disabled={casinoLoadingGame === game.id}
                   onClick={() => launchCasinoGame(game)}
-                  className={`${sizeClass} aspect-square rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center gap-2 overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
+                  style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
+                  className={`${sizeClass} casino-card-shine aspect-[2/3] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
                 >
                   {casinoLoadingGame === game.id ? (
                     <Loader2 className="animate-spin text-zinc-400" size={28} />
