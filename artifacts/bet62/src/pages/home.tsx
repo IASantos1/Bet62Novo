@@ -514,6 +514,11 @@ type MatchTracker = {
 type BetbyLiveEvent = {
   eventId?: string;
   betbyEventId: string;
+  // Our own match id (Statpal-sourced) — used to poll the Tracker directly
+  // (StatScore/SportScore/Statpal/PulseScore, no BetBY indirection) instead
+  // of betbyEventId, which is only ever set when BetBY separately has a
+  // matching stream for this fixture.
+  matchId?: string;
   sport: string;
   league: string;
   country: string;
@@ -4536,8 +4541,16 @@ function TrackerModal({
     // tracker..." forever if it simply wasn't ready yet at open time, even
     // once the backend resolved one moments later.
     let cancelled = false;
+    // Prefer our own match id (StatScore/SportScore/Statpal/PulseScore,
+    // resolved directly against our own match — no BetBY indirection).
+    // Falls back to the old BetBY-event-keyed endpoint only when this event
+    // genuinely has no matchId (shouldn't happen from matchToBetbyLiveEvent,
+    // kept for safety).
+    const url = event.matchId
+      ? `/api/matches/tracker/${encodeURIComponent(event.matchId)}`
+      : `/api/tracker/${encodeURIComponent(event.betbyEventId)}`;
     const poll = () => {
-      fetch(`/api/tracker/${encodeURIComponent(event.betbyEventId)}`)
+      fetch(url)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!cancelled && data) setTracker(data);
@@ -4550,7 +4563,7 @@ function TrackerModal({
       cancelled = true;
       clearInterval(id);
     };
-  }, [event.betbyEventId]);
+  }, [event.matchId, event.betbyEventId]);
 
   return (
     <div className="fixed inset-0 z-[70] bg-black flex flex-col">
@@ -11070,6 +11083,7 @@ export default function Home({
   // match.betbyEventId is present.
   const matchToBetbyLiveEvent = (match: Match): BetbyLiveEvent => ({
     betbyEventId: match.betbyEventId!,
+    matchId: String(match.id),
     eventId: match.betbyTracker?.eventId,
     sport: match.sport ?? "football",
     league: match.league,
