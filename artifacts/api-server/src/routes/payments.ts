@@ -285,7 +285,13 @@ router.get("/status/:orderId", authMiddleware, async (req: AuthRequest, res: Res
   const orderId = String(req.params["orderId"]);
   try {
     const [payment] = await db
-      .select({ status: paymentsTable.status, amount: paymentsTable.amount, method: paymentsTable.method, userId: paymentsTable.userId })
+      .select({
+        status: paymentsTable.status,
+        amount: paymentsTable.amount,
+        method: paymentsTable.method,
+        userId: paymentsTable.userId,
+        requestId: paymentsTable.requestId,
+      })
       .from(paymentsTable)
       .where(eq(paymentsTable.orderId, orderId))
       .limit(1);
@@ -293,7 +299,36 @@ router.get("/status/:orderId", authMiddleware, async (req: AuthRequest, res: Res
     if (!payment) { res.status(404).json({ error: "Ordem não encontrada" }); return; }
     if (payment.userId !== req.user!.id) { res.status(403).json({ error: "Proibido" }); return; }
 
-    res.json({ status: payment.status, amount: payment.amount, method: payment.method });
+    let status = payment.status;
+
+    // Self-heal: the webhook is the normal path to credit a deposit, but if
+    // it's missed or misconfigured (wrong endpoint, key/secret mismatch),
+    // a payment can sit "pending" forever even though Stripe already
+    // charged it. While the client is still polling here, double-check
+    // with Stripe directly and credit if it actually succeeded — the same
+    // fallback /card-return already relies on for card payments.
+    if (status === "pending" && payment.requestId) {
+      try {
+        const stripe = getStripe();
+        let paid = false;
+        if (payment.requestId.startsWith("pi_")) {
+          const intent = await stripe.paymentIntents.retrieve(payment.requestId);
+          paid = intent.status === "succeeded";
+        } else if (payment.requestId.startsWith("cs_")) {
+          const session = await stripe.checkout.sessions.retrieve(payment.requestId);
+          paid = session.payment_status === "paid";
+        }
+        if (paid) {
+          await creditPayment(orderId);
+          status = "completed";
+          logger.info({ orderId }, "Payment status self-heal: credited via Stripe re-check");
+        }
+      } catch (err) {
+        logger.warn({ err, orderId }, "Payment status self-heal check failed (non-fatal)");
+      }
+    }
+
+    res.json({ status, amount: payment.amount, method: payment.method });
   } catch (err) {
     logger.error({ err, orderId }, "Payment status check error");
     res.status(500).json({ error: "Erro interno" });
