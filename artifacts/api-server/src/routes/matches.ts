@@ -20928,6 +20928,17 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
       }
     }
 
+    // The main /live list route attaches StatScore/SportScore/Statpal/
+    // PulseScore tracker+stream data via attachBetbyTrackerAndStream, but
+    // this single-match route builds its own response from scratch and
+    // never called it — so a match's card correctly showed the Tracker/
+    // Vídeo buttons (populated from the /live list), but the moment the
+    // frontend re-fetched this match individually (expandedMatch's live-
+    // sync effect, or a bookmark/deep-link straight to a match), the
+    // betbyTracker field was silently dropped and the UI fell back to the
+    // static field diagram / hid the buttons entirely.
+    if (match) attachBetbyTrackerAndStream([match as unknown as LiveMatchState]);
+
     res.json({ match });
   } catch {
     const fallback = getLivePayloadFallback();
