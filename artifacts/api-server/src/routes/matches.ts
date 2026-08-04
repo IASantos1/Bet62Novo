@@ -21442,6 +21442,35 @@ async function findViaTeamSchedule(
   return null;
 }
 
+// The live-list endpoint (findInLiveFixturesList) never carries a numeric
+// id — only the slug extracted from its "url" field — so a fixture found
+// there always came back with id: "", which the Tracker endpoint can't use
+// (it requires the numeric id, not the slug). Backfill it with one extra
+// call to the single-match detail endpoint, which does return the id (same
+// call findByGuessedSlug already makes for its own candidates).
+async function backfillTrackerId(
+  sport: string,
+  slug: string,
+  diag: SportscoreDiagStep[],
+): Promise<string> {
+  const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) {
+      diag.push({ step: "backfill-id", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
+      return "";
+    }
+    const data = (await resp.json()) as Record<string, unknown>;
+    const m = (data["match"] ?? data) as Record<string, unknown>;
+    const id = pickStr(m, ["id", "matchId", "match_id"]) ?? "";
+    diag.push({ step: "backfill-id", url, ok: !!id, status: resp.status, detail: id ? `id "${id}"` : "no id in detail response either" });
+    return id;
+  } catch (err) {
+    diag.push({ step: "backfill-id", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
+    return "";
+  }
+}
+
 export async function findSportscoreFixture(
   sport: string,
   homeTeam: string,
@@ -21454,7 +21483,12 @@ export async function findSportscoreFixture(
   }
 
   const fromList = await findInLiveFixturesList(sport, homeTeam, awayTeam, diag);
-  if (fromList) return fromList;
+  if (fromList) {
+    if (!fromList.id && fromList.slug) {
+      fromList.id = await backfillTrackerId(sport, fromList.slug, diag);
+    }
+    return fromList;
+  }
 
   const fromGuess = await findByGuessedSlug(sport, homeTeam, awayTeam, diag);
   if (fromGuess) return fromGuess;
