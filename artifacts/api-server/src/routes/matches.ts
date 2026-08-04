@@ -21104,6 +21104,15 @@ function slugifyTeamNameExpanded(name: string): string {
 // as the canonical form; every member of a group is considered the same club.
 const TEAM_ALIAS_GROUPS: string[][] = [
   ["rapid-bucuresti", "rapid-1923"], // FC Rapid (Romania) rebranded to FC Rapid 1923
+  // Statpal shows the short name "Central Cordoba"; SportScore shows the
+  // full official name "Central Cordoba SDE" (Santiago del Estero) — a
+  // disambiguating qualifier, not a generic club-type suffix like "FC"/"CF",
+  // since a *different* real club ("Central Cordoba de Rosario") also
+  // exists in Argentine football. Deliberately NOT added to CLUB_TOKEN_RE
+  // (which strips generic suffixes from every team name) — that would risk
+  // conflating the two distinct clubs; this alias only equates these two
+  // specific spellings to each other.
+  ["central-cordoba", "central-cordoba-sde"],
 ];
 const TEAM_ALIAS_CANONICAL = new Map<string, string>();
 for (const group of TEAM_ALIAS_GROUPS) {
