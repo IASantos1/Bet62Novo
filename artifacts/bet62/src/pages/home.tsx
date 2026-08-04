@@ -21698,85 +21698,41 @@ export default function Home({
                   )}
                 </div>
 
-                {/* Always 3 side-by-side columns, mobile included. Inside
-                    each card, text and image sit side by side (not
-                    stacked) — text on the left, real photo filling the
-                    right side of the card, matching the reference. */}
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                {/* Full banner images (text already baked into the artwork) —
+                    shown whole, one per row, so the text stays legible. */}
+                <div className="grid grid-cols-1 gap-2 sm:gap-3">
                   <button
                     onClick={() => selectMainTab("casino")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors flex items-stretch overflow-hidden"
+                    className="rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1836/856]"
                   >
-                    <div className="flex-1 min-w-0 p-2.5 sm:p-4 flex flex-col justify-center">
-                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                        Casino
-                      </div>
-                      <div className="text-sm sm:text-base font-black text-white leading-tight">+2000 Jogos</div>
-                      <div className="text-[10px] sm:text-xs text-zinc-400">As melhores slots!</div>
-                      <div className="flex items-center gap-1 mt-2 text-red-400">
-                        <Gift size={11} />
-                        <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
-                      </div>
-                    </div>
-                    <div className="relative w-16 sm:w-40 shrink-0 h-full overflow-hidden">
-                      <img
-                        src="/promo-roulette.png"
-                        alt=""
-                        aria-hidden="true"
-                        className="w-full h-full object-contain"
-                      />
-                      <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-zinc-900 to-transparent pointer-events-none" />
-                    </div>
+                    <img
+                      src="/promo-casino-banner.png"
+                      alt="Casino +2000 Jogos"
+                      className="w-full h-full object-cover"
+                    />
                   </button>
                   <button
                     onClick={() => {
                       setDepositModalOpen(true);
                       setActiveTab("wallet");
                     }}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors flex items-stretch overflow-hidden"
+                    className="rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
                   >
-                    <div className="flex-1 min-w-0 p-2.5 sm:p-4 flex flex-col justify-center">
-                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                        Depósito €10
-                      </div>
-                      <div className="text-sm sm:text-base font-black text-amber-400 leading-tight">Ganhe €5</div>
-                      <div className="text-[10px] sm:text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
-                      <div className="flex items-center gap-1 mt-2 text-red-400">
-                        <Gift size={11} />
-                        <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
-                      </div>
-                    </div>
-                    <div className="relative w-16 sm:w-40 shrink-0 h-full overflow-hidden">
-                      <img
-                        src="/promo-coin.png"
-                        alt=""
-                        aria-hidden="true"
-                        className="w-full h-full object-contain"
-                      />
-                      <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-zinc-900 to-transparent pointer-events-none" />
-                    </div>
+                    <img
+                      src="/promo-cashback-banner.png"
+                      alt="Cashback Semanal"
+                      className="w-full h-full object-cover"
+                    />
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors flex items-stretch overflow-hidden"
+                    className="rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
                   >
-                    <div className="flex-1 min-w-0 p-2.5 sm:p-4 flex flex-col justify-center">
-                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                        Aposte Ao Vivo
-                      </div>
-                      <div className="text-sm sm:text-base font-black text-white leading-tight">
-                        Emoção em tempo real
-                      </div>
-                    </div>
-                    <div className="relative w-16 sm:w-40 shrink-0 h-full overflow-hidden">
-                      <img
-                        src="/promo-live.png"
-                        alt=""
-                        aria-hidden="true"
-                        className="w-full h-full object-contain"
-                      />
-                      <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-zinc-900 to-transparent pointer-events-none" />
-                    </div>
+                    <img
+                      src="/promo-live-banner.png"
+                      alt="Aposte Ao Vivo"
+                      className="w-full h-full object-cover"
+                    />
                   </button>
                 </div>
 
