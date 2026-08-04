@@ -8914,12 +8914,12 @@ export default function Home({
     if (homeCasinoPreview.length > 0) return;
     setHomeCasinoPreviewLoading(true);
     const titles = [
-      "Big Bass Splash",
-      "Gates of Olympus",
       "Fortune Tiger",
       "Aviator",
-      "Sweet Bonanza 2500",
+      "Gates of Olympus",
       "Sweet Bonanza",
+      "Big Bass Bonanza",
+      "Starlight Princess",
     ];
     Promise.all(
       titles.map((title) =>
@@ -21707,16 +21707,12 @@ export default function Home({
                     onClick={() => selectMainTab("casino")}
                     className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
                   >
-                    <div
-                      className="self-end w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-[8px] sm:text-[9px] font-black text-white mb-1"
-                      style={{
-                        background:
-                          "conic-gradient(#dc2626 0deg 45deg, #18181b 45deg 90deg, #dc2626 90deg 135deg, #18181b 135deg 180deg, #dc2626 180deg 225deg, #18181b 225deg 270deg, #dc2626 270deg 315deg, #18181b 315deg 360deg)",
-                        boxShadow: "0 0 0 2px #27272a, 0 2px 6px rgba(0,0,0,0.5)",
-                      }}
-                    >
-                      777
-                    </div>
+                    <img
+                      src="/promo-roulette.png"
+                      alt=""
+                      aria-hidden="true"
+                      className="self-end w-12 h-9 sm:w-16 sm:h-11 object-cover rounded-lg mb-1"
+                    />
                     <div>
                       <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                         Casino
@@ -21736,15 +21732,12 @@ export default function Home({
                     }}
                     className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
                   >
-                    <div
-                      className="self-end w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-sm sm:text-base font-black text-amber-900 mb-1"
-                      style={{
-                        background: "radial-gradient(circle at 35% 30%, #fde68a, #f0b429 55%, #b8860b 100%)",
-                        boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
-                      }}
-                    >
-                      €
-                    </div>
+                    <img
+                      src="/promo-coin.png"
+                      alt=""
+                      aria-hidden="true"
+                      className="self-end w-12 h-9 sm:w-16 sm:h-11 object-cover rounded-lg mb-1"
+                    />
                     <div>
                       <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                         Depósito €10
@@ -21761,9 +21754,12 @@ export default function Home({
                     onClick={() => selectMainTab("live")}
                     className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
                   >
-                    <div className="self-end w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-red-600 flex items-center justify-center shadow-[0_0_0_2px_rgba(220,38,38,0.25)] mb-1">
-                      <span className="text-[7px] sm:text-[8px] font-black text-white tracking-tight">LIVE</span>
-                    </div>
+                    <img
+                      src="/promo-live.png"
+                      alt=""
+                      aria-hidden="true"
+                      className="self-end w-12 h-9 sm:w-16 sm:h-11 object-cover rounded-lg mb-1"
+                    />
                     <div>
                       <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                         Aposte Ao Vivo
