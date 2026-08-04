@@ -456,15 +456,6 @@ html.light-mode .bg-zinc-900[style*="linear-gradient"] {
     display: none;
   }
 }
-/* Installed PWA (display-mode: standalone) renders these cards at a
-   different effective width than the regular browser tab, which made
-   object-cover crop noticeably more of the baked-in game title there.
-   Use a shorter, closer-to-native aspect ratio in that context only. */
-@media (display-mode: standalone) {
-  .casino-card-shine {
-    aspect-ratio: 4 / 5 !important;
-  }
-}
 
 button,
 [role="button"],
