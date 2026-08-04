@@ -24792,13 +24792,13 @@ export default function Home({
                   ) : game.img ? (
                     // Game artwork already has its title baked in — no
                     // overlay caption here, it only fought with that text
-                    // and got cut off. aspect-[4/5] is close enough to the
-                    // source art's native ratio that object-cover fills the
-                    // card at full size without slicing the baked-in title.
+                    // and got cut off. object-contain shows the art exactly
+                    // as the provider sends it (no crop/zoom); the card
+                    // itself keeps its fixed size regardless.
                     <img
                       src={game.img}
                       alt={game.name}
-                      className="absolute inset-0 w-full h-full object-cover"
+                      className="absolute inset-0 w-full h-full object-contain"
                       loading="lazy"
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).style.display = "none";
