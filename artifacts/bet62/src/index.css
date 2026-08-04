@@ -456,6 +456,23 @@ html.light-mode .bg-zinc-900[style*="linear-gradient"] {
     display: none;
   }
 }
+/* Destaques home-tab promo row (Cassino +2000 Jogos / Depósito €10 /
+   Aposta Ao Vivo): installed PWA scrolls it sideways instead of stacking
+   one per row, per explicit request — web keeps the stacked grid. */
+@media (display-mode: standalone) {
+  .home-promo-row {
+    display: flex;
+    grid-template-columns: none;
+    overflow-x: auto;
+    gap: 0.75rem;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .home-promo-row > * {
+    flex: 0 0 82%;
+    scroll-snap-align: start;
+  }
+}
 
 button,
 [role="button"],
