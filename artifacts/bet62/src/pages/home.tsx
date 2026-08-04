@@ -24804,6 +24804,7 @@ export default function Home({
                       src={game.img}
                       alt={game.name}
                       className="absolute inset-0 w-full h-full object-fill"
+                      style={{ filter: "url(#casino-art-sharpen)" }}
                       loading="lazy"
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).style.display = "none";
@@ -24884,6 +24885,21 @@ export default function Home({
                       {casinoMiddleBanners.map((b) => renderBanner(b))}
                     </div>
                   )}
+
+                  {/* Referenced by the game art's filter:url(#casino-art-sharpen) below —
+                      object-fill stretches the art to fill the card, and the browser's
+                      default smoothing on a stretched/upscaled image reads as blur. An
+                      unsharp-mask convolution counteracts that without touching the
+                      stretch/crop behavior itself. */}
+                  <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
+                    <filter id="casino-art-sharpen">
+                      <feConvolveMatrix
+                        order="3"
+                        kernelMatrix="0 -1 0 -1 5 -1 0 -1 0"
+                        preserveAlpha="true"
+                      />
+                    </filter>
+                  </svg>
 
                   {isSearching ? (
                     // Search results: flat grid (grouping a handful of matches
