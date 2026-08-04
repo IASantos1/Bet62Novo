@@ -24785,7 +24785,7 @@ export default function Home({
                   title={game.name}
                   aria-label={game.name}
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
-                  className={`${sizeClass} casino-card-shine aspect-[4/5] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
+                  className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
                 >
                   {casinoLoadingGame === game.id ? (
                     <Loader2 className="animate-spin text-zinc-400" size={28} />
