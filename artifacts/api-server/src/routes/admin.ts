@@ -2271,8 +2271,8 @@ router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) 
     const diag: SportscoreDiagStep[] = [];
     const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
     const tracker = fixture?.slug
-      ? await fetchSportscoreTracker(sport, fixture.slug)
-      : { ok: false, error: "fixture não encontrado — sem slug pra consultar o tracker" };
+      ? await fetchSportscoreTracker(sport, fixture.slug, { id: fixture.id || null })
+      : { ok: false as const, error: "fixture não encontrado — sem slug pra consultar o tracker", url: "" };
     const mappedTracker =
       tracker.ok && tracker.raw
         ? sportscoreMatchToTracker(tracker.raw as Record<string, unknown>, homeTeam, awayTeam)

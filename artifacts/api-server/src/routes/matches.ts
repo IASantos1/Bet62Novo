@@ -20628,10 +20628,13 @@ export function broadcastBatchDelta(
 
 // ── Direct Tracker Resolution (no BetBY dependency) ─────────────────────
 // Resolves Tracker data straight from OUR OWN live match list (Statpal-
-// sourced home/away names), cascading StatScore (manual mapping) ->
-// SportScore (automatic, football/basketball/tennis/cricket/hockey) ->
-// Statpal (automatic, football safety net) -> PulseScore (last resort) —
-// same providers/order as services/betby/poller.ts's resolveTracker(),
+// sourced home/away names), cascading:
+//   SportScore (auto, football/basketball/tennis/cricket/hockey — JSON
+//     tracker from /api/widget/match/ plus optional tracker widget URL
+//     from /api/widget/tracker/ when the match has a tracker.profile)
+//   -> Statpal (auto, football safety net)
+//   -> PulseScore (last resort)
+// Same providers/order as services/betby/poller.ts's resolveTracker(),
 // just driven by our own match instead of a BetBY event, so a naming
 // mismatch on BetBY's side can never block this again.
 //
@@ -21328,13 +21331,17 @@ function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
-// SportScore's list endpoints (/api/widget/matches/, /api/widget/team/)
-// never actually include an "id"/"slug" field on each fixture — only a
-// "url" like "/football/match/vipers-vs-gor-mahia/". Without this, every
-// entry from those endpoints was silently dropped (no id, no slug, nothing
-// to build the tracker embed URL from), so name-matching against them was
-// dead code no matter how good the match was — only the guess-slug tier
-// (which never touches this field) could ever produce a result.
+// SportScore's free widget list endpoints (/api/widget/matches/,
+// /api/widget/team/) return NO numeric "id" or "slug" top-level fields on
+// each fixture item — only a "url" like
+// "/football/match/vipers-vs-gor-mahia/". The only "id" anywhere is the
+// opaque tracker id nested inside /match/?slug= (not numeric, not shared).
+// So list-side id/slug extraction walks the url path segment; if a future
+// API version starts returning id/slug top-level, pickStr() already picks
+// them first. Without this url fallback every list-side entry was silently
+// dropped (no id, no slug, nothing to build the tracker call from), so
+// name-matching against the list was dead code no matter how good the match
+// was — only the guess-slug tier could ever produce a result.
 function slugFromMatchUrl(obj: Record<string, unknown>): string | null {
   const url = pickStr(obj, ["url"]);
   if (!url) return null;
@@ -21460,6 +21467,100 @@ function givenNameTokensCompatible(a: string[], b: string[]): boolean {
   return true;
 }
 
+// SportScore shows the FULL official name on every listing ("Larne FC" /
+// "FC Iberia 1999 Tbilisi") while Statpal/Bet62 ships short-space versions
+// of the same fixture ("Larne" / "Iberia 1999") —  the short name is a
+// strict SUBSET of the full one, they're the same club. A plain stripped-
+// slug equality check misses this because the SHORTER stripped name is
+// obviously not equal to the LONGER one. A raw fuzzy similarity also fails
+// because the extra words drag the character-level ratio well below 0.82
+// (e.g. "iberia-1999" vs "iberia-1999-tbilisi" only scores ~0.69 even
+// though the two names share every identity-bearing token).
+//
+// The match therefore requires:
+//   • split each stripped slug into a token set;
+//   • mark a small fixed vocabulary of non-identity tokens (city names,
+//     countries, US/Brazilian state abbreviations, numeric founding years
+//     and the "fc/cf/sc..." club-suffix words we already strip) as OPTIONAL
+//     — they can be present on one side only without breaking the match;
+//   • every OTHER token on the SHORTER side MUST appear on the longer side
+//     too (so "Larne" ⊆ "Larne FC" passes; "Larne" ⊇ "Larne" passes);
+//   • to keep "Manchester United" distinct from "Manchester City" / "Man.
+//     Central" etc., identity-bearing tokens (united, city, real,
+//     atlético, saint/germain, benfica, porto, ...) ARE ALWAYS required —
+//     they're NOT optional, and "united" on one side missing on the other
+//     is a hard no-match.
+// Only runs as a LAST TIER after all other equality/sorted/abbreviated-name
+// checks have had their shot.
+const TEAM_NAME_OPTIONAL_TOKENS = new Set<string>([
+  // city / region / country names that commonly get tacked on for disambig
+  // by SportScore but are often dropped by Statpal/Bet62's short names.
+  "tbilisi", "bucuresti", "bucurești", "bucharest", "warszawa", "warsaw",
+  "berlin", "lisboa", "lisbon", "madrid", "barcelona", "paris", "london",
+  "roma", "rome", "amsterdam", "praha", "prague", "viena", "vienna",
+  "budapest", "belgrade", "zagreb", "athens", "moscow", "kiev", "kyiv",
+  "georgia", "romania", "poland", "germany", "portugal", "spain", "france",
+  "england", "italy", "netherlands", "czechia", "czech", "austria",
+  "hungary", "serbia", "croatia", "greece", "russia", "ukraine", "armenia",
+  "brazil", "brasil", "argentina", "chile", "colombia", "peru", "uruguay",
+  "paraguay", "bolivia", "venezuela", "ecuador", "usa", "mexico", "japan",
+  "china", "india", "korea", "australia", "nigeria", "egypt", "morocco",
+  "tunisia", "saudi", "arabia", "iran", "iraq", "qatar", "uae", "turkey",
+  "belgium", "sweden", "norway", "denmark", "finland", "iceland",
+  "scotland", "ireland", "wales", "switzerland",
+  // Brazilian state short-hands (Flamengo RJ, Palmeiras SP, etc.)
+  "rj", "sp", "df", "ba", "mg", "rs", "sc", "pr", "ce", "pe", "es", "pb",
+  "go", "mt", "ms", "to", "ma", "rn", "pi", "al", "se", "ro", "rr", "ap",
+  "am", "pa", "ac",
+  // Generic words that are not part of the club's unique brand identity
+  // (Real / United / City are identity-bearing — they are NOT here and are
+  // always required).
+  "nacional", "recreativo", "desportivo", "esportivo", "esporte",
+  "desportiva", "independencia", "independência", "cooperativa",
+  "associacao", "associação", "associacão",
+  // club-suffix words already stripped elsewhere — redundant here but kept
+  // to make the "required set" below deterministic.
+  "fc", "cf", "ud", "sc", "ac", "cd", "afc", "sad", "club", "clube",
+  "sporting", "sport",
+  // cardinal / directional words used as disambiguators (Atlético Norte,
+  // Sportivo Oeste…)
+  "norte", "sul", "leste", "oeste", "sudeste", "nordeste", "centro",
+  "central", "north", "south", "east", "west", "northeast", "northwest",
+  "southeast", "southwest",
+]);
+function isNumericToken(t: string): boolean {
+  return /^\d{2,}$/.test(t);
+}
+function splitStrippedTokens(name: string): { required: Set<string>; optional: Set<string> } {
+  const stripped = slugifyTeamNameStripped(name);
+  const tokens = stripped.split("-").filter(Boolean);
+  const required = new Set<string>();
+  const optional = new Set<string>();
+  for (const t of tokens) {
+    if (TEAM_NAME_OPTIONAL_TOKENS.has(t) || isNumericToken(t)) optional.add(t);
+    else required.add(t);
+  }
+  return { required, optional };
+}
+function subsetTokenNamesMatch(a: string, b: string): boolean {
+  const A = splitStrippedTokens(a);
+  const B = splitStrippedTokens(b);
+  if (A.required.size === 0 || B.required.size === 0) return false;
+  const smaller = A.required.size <= B.required.size ? A.required : B.required;
+  const larger = A.required.size <= B.required.size ? B.required : A.required;
+  for (const tok of smaller) if (!larger.has(tok)) return false;
+  // Any non-optional, non-matching brand-bearing unique tokens that appear
+  // on BOTH sides but have NO overlap outside the smaller set must be
+  // exactly equal; otherwise "Larne United" passes against "Larne FC"
+  // (both sets share "larne" and the remainder are 1 word each but
+  // differ). Require that both sides have no brand-bearing extra words OR
+  // their union size equals their common size (i.e. they share every
+  // brand-bearing token between them).
+  const onlyA = new Set([...A.required].filter((t) => !B.required.has(t)));
+  const onlyB = new Set([...B.required].filter((t) => !A.required.has(t)));
+  return onlyA.size === 0 || onlyB.size === 0;
+}
+
 function abbreviatedPersonNameMatch(a: string, b: string): boolean {
   const pa = parsePersonName(a);
   const pb = parsePersonName(b);
@@ -21475,6 +21576,7 @@ function namesMatch(a: string, b: string): boolean {
   if (slugifyTeamNameAliased(a) === slugifyTeamNameAliased(b)) return true;
   if (slugifyTeamNameSorted(a) === slugifyTeamNameSorted(b)) return true;
   if (nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82) return true;
+  if (subsetTokenNamesMatch(a, b)) return true;
   return abbreviatedPersonNameMatch(a, b);
 }
 
@@ -21589,34 +21691,76 @@ async function findInLiveFixturesList(
 // (which also gives us the numeric id). This is a genuine verification
 // against real match data, not a blind HTTP-status check against the HTML
 // embed page.
+// Builds the set of SportScore single-match slugs we want to probe in
+// findByGuessedSlug. In addition to the 4 base slugifiers (plain/stripped/
+// expanded/aliased) on each side, try a handful of SportScore-specific
+// conventions the stripped slugifier above intentionally does NOT do on
+// its own — because those transformations would change the MEANING of a
+// club name if applied to equality comparisons (which they aren't here;
+// every candidate is verified against the real API for a real team-name
+// match before being accepted). Concrete example of why this is needed:
+//   • Bet62/Statpal  →   "Larne"  vs  "Iberia 1999"
+//   • SportScore     →   "Larne FC"  vs  "FC Iberia 1999 Tbilisi"
+//   • Working slug   →   "larne-fc-vs-fc-iberia-1999-tbilisi"
+// None of the 4 base slugifiers produce anything close to that slug.
+// Cap the total unique candidate count so a bad input can't explode the
+// list into thousands of HTTP requests.
+const CITY_SUFFIXES_FOR_GUESS: string[] = [
+  "tbilisi", "bucuresti", "warszawa", "berlin", "lisboa", "madrid",
+  "barcelona", "paris", "london", "roma", "amsterdam", "praha", "viena",
+  "budapest", "belgrade", "zagreb", "athens", "sao-paulo", "rio",
+  "moscow", "kyiv", "kiev",
+];
+function buildGuessTeamVariants(name: string): string[] {
+  const base = [
+    slugifyTeamName(name),
+    slugifyTeamNameStripped(name),
+    slugifyTeamNameExpanded(name),
+    slugifyTeamNameAliased(name),
+  ].filter(Boolean);
+  const out = new Set<string>(base);
+  for (const b of base) {
+    if (!b) continue;
+    // "Larne" → "larne-fc" / "fc-larne"
+    out.add(`${b}-fc`);
+    out.add(`fc-${b}`);
+    out.add(`${b}-sc`);
+    out.add(`${b}-cf`);
+    out.add(`${b}-af`);
+    // "Iberia 1999" → "fc-iberia-1999-tbilisi" / "iberia-1999-tbilisi"
+    for (const c of CITY_SUFFIXES_FOR_GUESS) {
+      out.add(`${b}-${c}`);
+      out.add(`fc-${b}-${c}`);
+      out.add(`${b}-fc-${c}`);
+    }
+  }
+  return Array.from(out).filter(Boolean);
+}
 async function findByGuessedSlug(
   sport: string,
   homeTeam: string,
   awayTeam: string,
   diag: SportscoreDiagStep[],
 ): Promise<SportscoreFixture | null> {
-  const h = slugifyTeamName(homeTeam);
-  const a = slugifyTeamName(awayTeam);
-  const hStripped = slugifyTeamNameStripped(homeTeam);
-  const aStripped = slugifyTeamNameStripped(awayTeam);
-  const hExpanded = slugifyTeamNameExpanded(homeTeam);
-  const aExpanded = slugifyTeamNameExpanded(awayTeam);
-  const hAliased = slugifyTeamNameAliased(homeTeam);
-  const aAliased = slugifyTeamNameAliased(awayTeam);
-  const candidates = Array.from(
-    new Set(
-      [
-        `${h}-vs-${a}`,
-        `${a}-vs-${h}`,
-        `${hStripped}-vs-${aStripped}`,
-        `${aStripped}-vs-${hStripped}`,
-        `${hExpanded}-vs-${aExpanded}`,
-        `${aExpanded}-vs-${hExpanded}`,
-        `${hAliased}-vs-${aAliased}`,
-        `${aAliased}-vs-${hAliased}`,
-      ].filter((s) => !s.startsWith("-vs-") && !s.endsWith("-vs-")),
-    ),
-  );
+  const hVariants = buildGuessTeamVariants(homeTeam);
+  const aVariants = buildGuessTeamVariants(awayTeam);
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const h of hVariants) for (const a of aVariants) {
+    const s1 = `${h}-vs-${a}`;
+    if (!s1.startsWith("-vs-") && !s1.endsWith("-vs-") && !seen.has(s1)) {
+      seen.add(s1);
+      candidates.push(s1);
+    }
+    const s2 = `${a}-vs-${h}`;
+    if (!s2.startsWith("-vs-") && !s2.endsWith("-vs-") && !seen.has(s2)) {
+      seen.add(s2);
+      candidates.push(s2);
+    }
+  }
+  // Safety cap — enough to cover the common 144–1280 space but bounded so
+  // a pathological team name pair can't make 10k+ network calls.
+  if (candidates.length > 1280) candidates.length = 1280;
 
   for (const slug of candidates) {
     const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
@@ -21743,12 +21887,16 @@ async function findViaTeamSchedule(
 }
 
 // findInLiveFixturesList never carries a numeric id — only the slug
-// extracted from its "url" field. That's fine: the Tracker data comes from
-// GET /api/widget/match/?slug=... (see fetchSportscoreTracker below), which
-// only ever needed the slug, not a numeric id (a real captured response
-// confirmed /api/widget/match/ has no top-level numeric id field at all —
-// the only id-shaped value present is a separate, differently-formatted
-// match.tracker.id, unrelated to what the original docs implied).
+// extracted from its "url" field. Both findByGuessedSlug and
+// findViaTeamSchedule also look for a numeric top-level "id" on the match
+// record (via pickStr(["id","matchId","match_id"])) but — confirmed against
+// a real captured 2026-08-04 response — SportScore's widget JSON has NO
+// numeric match id at any level. The only opaque id returned is the nested
+// match.tracker.id ("318q66hx3e97qo9" style), which is NOT the same concept
+// as the "MATCH_ID numeric" the original endpoint docs described; it only
+// works as ?id= on the /tracker/ endpoint (which returns HTML/iframe, not
+// JSON). Our actual tracker JSON payload therefore comes from
+// GET /api/widget/match/?sport=X&slug=Y (see fetchSportscoreTracker below).
 export async function findSportscoreFixture(
   sport: string,
   homeTeam: string,
@@ -21769,32 +21917,53 @@ export async function findSportscoreFixture(
   return findViaTeamSchedule(sport, homeTeam, awayTeam, diag);
 }
 
-// Fetches SportScore's own Match Tracker payload — confirmed via a real
-// captured response that GET /api/widget/match/?sport=X&slug=Y (the SAME
-// single-match detail endpoint already used to confirm a guessed slug)
-// already returns everything needed for our own Tracker: home_score/
-// away_score, status/status_text/live_minute, and a real incidents[] array
-// (goal/card type, side, minute, player name) — richer than StatScore or
-// Statpal ever gave us. The separately-documented /api/widget/tracker/
-// endpoint takes an opaque id nested at match.tracker.id (not the numeric
-// id the original docs implied) and was never confirmed to return anything
-// useful, so this deliberately doesn't call it — /api/widget/match/ alone
-// is enough.
+// Fetches SportScore's own Match Tracker payload. The official docs say
+// GET /api/widget/match/?sport=X&id=MATCH_ID with a numeric MATCH_ID from
+// the /matches/ list, but a real 2026-08-04 probe confirmed the current
+// live widget API:
+//   • /matches/?sport=X returns NO id/slug top-level on each item — only
+//     a "url" field like /football/match/flamengo-vs-palmeiras/ from which
+//     we extract the slug.
+//   • /match/?sport=X&slug= (what we call) returns the full tracker JSON
+//     (home_score/away_score, live_minute/status_text, incidents[],
+//     lineups, stats, home_ht_score/away_ht_score and a nested
+//     match.tracker = { id, profile, sport }.
+//     There is NO top-level numeric match id.
+//   • /tracker/?sport=X&id= (with the opaque tracker.id above, or with
+//     ?profile= too) returns **HTML/iframe** — embeds a nested iframe on
+//     widgets-v2.thesports01.com carrying SportScore branding we CANNOT
+//     strip. So it is NEVER rendered inside Bet62; we only use the JSON
+//     from /match/ and paint a 100% white-label MiniFieldView SVG.
+//
+// Strategy: if the fixture gave us a numeric id (future-proofing), try
+// ?id= first, then fall back to ?slug= with what we know works today.
 export async function fetchSportscoreTracker(
   sport: string,
   slug: string,
-): Promise<{ ok: boolean; status?: number; raw?: unknown; error?: string }> {
-  if (!slug) return { ok: false, error: "slug vazio" };
-  const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!resp.ok) return { ok: false, status: resp.status, error: `HTTP ${resp.status}` };
-    const data = (await resp.json()) as Record<string, unknown>;
-    const raw = (data["match"] ?? data) as Record<string, unknown>;
-    return { ok: true, status: resp.status, raw };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  opts?: { id?: string | null },
+): Promise<{ ok: boolean; status?: number; raw?: unknown; error?: string; url: string }> {
+  const candidates: Array<{ key: "id" | "slug"; value: string; label: string }> = [];
+  if (opts?.id) candidates.push({ key: "id", value: String(opts.id), label: "id" });
+  if (slug) candidates.push({ key: "slug", value: slug, label: "slug" });
+  if (candidates.length === 0) return { ok: false, error: "nem id nem slug fornecidos", url: "" };
+
+  let lastFailure: { ok: false; status?: number; error: string; url: string } | null = null;
+  for (const cand of candidates) {
+    const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&${encodeURIComponent(cand.key)}=${encodeURIComponent(cand.value)}&src=bet62.com`;
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) {
+        lastFailure = { ok: false, status: resp.status, error: `HTTP ${resp.status} via ${cand.label}`, url };
+        continue;
+      }
+      const data = (await resp.json()) as Record<string, unknown>;
+      const raw = (data["match"] ?? data) as Record<string, unknown>;
+      return { ok: true, status: resp.status, raw, url };
+    } catch (err) {
+      lastFailure = { ok: false, error: (err instanceof Error ? err.message : String(err)) + ` via ${cand.label}`, url };
+    }
   }
+  return lastFailure ?? { ok: false, error: "sem candidatos", url: "" };
 }
 
 function sportscoreIncidentType(inc: Record<string, unknown>): string {
@@ -21812,8 +21981,20 @@ function sportscoreIncidentType(inc: Record<string, unknown>): string {
 }
 
 // Maps a raw /api/widget/match/ response into our own MatchTracker shape —
-// same normalized contract StatScore/Statpal/PulseScore already produce, so
-// the frontend/poller don't need to care which provider actually answered.
+// same normalized contract Statpal/PulseScore already produce, so the
+// frontend/poller don't need to care which provider actually answered.
+//
+// NOTE: SportScore's /api/widget/tracker/ endpoint was probed live and
+// returns ONLY HTML/iframe (embedding widgets-v2.thesports01.com). That
+// iframe carries SportScore branding/logo we can't strip, so we deliberately
+// NO LONGER expose any widgetUrl. Instead we render a 100% BET62 branded
+// MiniFieldView SVG on the client, overlayed with formations, HT scores,
+// incidents and clock — all sourced from THIS JSON. The only visual we
+// can't get from SportScore JSON is live ball/player x,y positions (they
+// aren't in the JSON at all); any match not rendered by the iframe relies
+// purely on incidents + clock (the Bet62 layout always showed SVG pitches
+// with incidents anyway — the iframe was only ever a luxury overlay that
+// leaked competitor branding).
 export function sportscoreMatchToTracker(
   raw: Record<string, unknown> | undefined,
   homeTeamName: string,
@@ -21842,20 +22023,49 @@ export function sportscoreMatchToTracker(
       });
     }
   }
-  const trackerObj = raw["tracker"];
+  let homeFormation: string | null = null;
+  let awayFormation: string | null = null;
+  let lineupConfirmed: boolean | null = null;
+  let homeHalfTimeScore: number | null = null;
+  let awayHalfTimeScore: number | null = null;
   let eventId = "";
-  let widgetUrl: string | undefined;
+
+  const trackerObj = raw["tracker"];
   if (trackerObj && typeof trackerObj === "object") {
     const t = trackerObj as Record<string, unknown>;
-    const widgetId = String(t["id"] ?? "");
-    const profile = String(t["profile"] ?? "");
-    const widgetSport = String(t["sport"] ?? "");
-    eventId = widgetId;
-    if (widgetId && profile && widgetSport) {
-      widgetUrl = `https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(widgetSport)}&id=${encodeURIComponent(widgetId)}&profile=${encodeURIComponent(profile)}&src=bet62.com`;
-    }
+    eventId = String(t["id"] ?? "");
   }
-  return { provider: "sportscore", eventId, status, minute, homeScore, awayScore, incidents, widgetUrl };
+  const lineups = raw["lineups"];
+  if (lineups && typeof lineups === "object") {
+    const lu = lineups as Record<string, unknown>;
+    const hf = lu["home_formation"];
+    const af = lu["away_formation"];
+    const cf = lu["confirmed"];
+    if (typeof hf === "string" && hf.trim()) homeFormation = hf.trim();
+    if (typeof af === "string" && af.trim()) awayFormation = af.trim();
+    if (typeof cf === "boolean") lineupConfirmed = cf;
+  }
+  const hhts = raw["home_ht_score"];
+  const ahts = raw["away_ht_score"];
+  if (typeof hhts === "number" && Number.isFinite(hhts)) homeHalfTimeScore = hhts;
+  else if (typeof hhts === "string" && /^\d+$/.test(hhts.trim())) homeHalfTimeScore = parseInt(hhts.trim(), 10);
+  if (typeof ahts === "number" && Number.isFinite(ahts)) awayHalfTimeScore = ahts;
+  else if (typeof ahts === "string" && /^\d+$/.test(ahts.trim())) awayHalfTimeScore = parseInt(ahts.trim(), 10);
+
+  return {
+    provider: "sportscore",
+    eventId,
+    status,
+    minute,
+    homeScore,
+    awayScore,
+    incidents,
+    homeFormation,
+    awayFormation,
+    lineupConfirmed,
+    homeHalfTimeScore,
+    awayHalfTimeScore,
+  };
 }
 
 // End-to-end: resolve the fixture by team name, then fetch+map its tracker
@@ -21868,7 +22078,7 @@ export async function getSportscoreTrackerForTeams(
   const diag: SportscoreDiagStep[] = [];
   const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
   if (!fixture?.slug) return null;
-  const tracker = await fetchSportscoreTracker(sport, fixture.slug);
+  const tracker = await fetchSportscoreTracker(sport, fixture.slug, { id: fixture.id || null });
   if (!tracker.ok || !tracker.raw) return null;
   return sportscoreMatchToTracker(tracker.raw as Record<string, unknown>, homeTeam, awayTeam);
 }

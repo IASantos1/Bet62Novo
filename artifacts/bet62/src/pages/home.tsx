@@ -7,10 +7,7 @@ import {
   createContext,
   useContext,
   Children,
-  lazy,
-  Suspense,
   type ReactNode,
-  type FormEvent,
 } from "react";
 import trophyImg from "/trophy-bet62.png";
 import { useLocation } from "wouter";
@@ -26,41 +23,23 @@ import {
   Flag,
   LogOut,
   User,
-  History,
   Loader2,
   Zap,
-  TrendingUp,
   ChevronRight,
-  ChevronLeft,
   ChevronDown,
   ChevronUp,
   AlertCircle,
-  BarChart2,
-  Lightbulb,
   Wallet,
-  ArrowDownCircle,
-  ArrowUpCircle,
   Plus,
   Clock,
-  Smartphone,
-  Copy,
-  Share2,
   Circle,
-  CircleDollarSign,
   Lock,
-  Trash2,
   Check,
-  Fingerprint,
-  ScanFace,
   ShieldCheck,
   RefreshCw,
   Ticket,
-  CalendarDays,
-  ListOrdered,
   Search,
-  LayoutGrid,
   ArrowLeft,
-  Dices,
   ExternalLink,
   Radio,
 } from "lucide-react";
@@ -507,9 +486,11 @@ type MatchTracker = {
   homeScore: number;
   awayScore: number;
   incidents: Array<{ type: string; team: string; minute: number; player: string }>;
-  // SportScore only: ready-to-embed iframe URL for their own animated
-  // pitch/court widget — no odds/betting, purely visual.
-  widgetUrl?: string;
+  homeFormation?: string | null;
+  awayFormation?: string | null;
+  homeHalfTimeScore?: number | null;
+  awayHalfTimeScore?: number | null;
+  lineupConfirmed?: boolean | null;
 };
 type BetbyLiveEvent = {
   eventId?: string;
@@ -4465,18 +4446,27 @@ function VideoStreamModal({
     const url = event.stream?.hls;
     if (!video || !url) return;
     setVideoError(false);
-    let hls: import("hls.js").default | null = null;
+    let hls: any | null = null;
     let cancelled = false;
 
-    import("hls.js").then(({ default: Hls }) => {
+    import("hls.js").then((mod) => {
+      const Hls: any = mod.default ?? mod;
       if (cancelled) return;
-      if (Hls.isSupported()) {
-        hls = new Hls();
-        hls.loadSource(url);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.ERROR, (_evt, data) => {
-          if (data.fatal) setVideoError(true);
-        });
+      if (Hls && typeof Hls.isSupported === "function" && Hls.isSupported()) {
+        hls = typeof Hls === "function" ? new Hls() : null;
+        if (hls && typeof hls.loadSource === "function") {
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          const Events = (Hls as any).Events ?? (hls as any).Events ?? { ERROR: "hlsError" };
+          const onEv = typeof hls.on === "function" ? (e: string, cb: any) => hls.on(e, cb) : null;
+          if (onEv && typeof Events === "object" && Events.ERROR) {
+            onEv(Events.ERROR, (_evt: any, data: any) => {
+              if (data?.fatal) setVideoError(true);
+            });
+          }
+        } else {
+          setVideoError(true);
+        }
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = url;
       } else {
@@ -4602,21 +4592,14 @@ function TrackerModal({
                 {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
               </div>
             </div>
-            {tracker.widgetUrl && (
-              <div
-                className="mb-4 rounded-xl overflow-hidden border border-zinc-800 bg-black"
-                style={{ aspectRatio: "16/10" }}
-              >
-                <iframe
-                  src={tracker.widgetUrl}
-                  className="w-full h-full"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  title="Match tracker"
-                  sandbox="allow-scripts allow-same-origin"
-                />
-              </div>
-            )}
+            {/* SportScore iframe intentionally removed: it embeds a
+                widgets-v2.thesports01.com frame with SportScore branding that
+                we cannot strip. Instead, Bet62 renders its own white-label
+                SVG pitch elsewhere (MiniFieldView on the expanded card) with
+                live incidents/clock/formations/HT scores from SportScore JSON.
+                The only data the iframe used to have that we DON'T have as
+                JSON is ball/player x,y live positions — nothing about odds
+                or live match narrative was lost. */}
             <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
               Incidentes
             </div>
@@ -4699,7 +4682,7 @@ export default function Home({
     if (Math.abs(x - s.x) > 24 || Math.abs(y - s.y) > 24) s.moved = true;
   }, []);
   const tapTouchStart = useCallback(
-    (e: React.TouchEvent) => {
+    (e: any) => {
       if (Date.now() - lastPointerDownAtRef.current < 300) return;
       const t = e.touches?.[0];
       if (!t) return;
@@ -4708,7 +4691,7 @@ export default function Home({
     [tapStartAt],
   );
   const tapTouchMove = useCallback(
-    (e: React.TouchEvent) => {
+    (e: any) => {
       if (Date.now() - lastPointerDownAtRef.current < 300) return;
       const s = tapStateRef.current;
       if (!s) return;
@@ -4733,27 +4716,27 @@ export default function Home({
         handler();
       };
       return {
-        onTouchStart: (e: React.TouchEvent) => {
+        onTouchStart: (e: any) => {
           tapTouchStart(e);
         },
-        onTouchMove: (e: React.TouchEvent) => {
+        onTouchMove: (e: any) => {
           tapTouchMove(e);
         },
         onTouchEnd: finish,
-        onPointerDown: (e: React.PointerEvent) => {
+        onPointerDown: (e: any) => {
           if (e.pointerType !== "touch") return;
           lastPointerDownAtRef.current = Date.now();
           tapStartAt(e.clientX, e.clientY);
         },
-        onPointerMove: (e: React.PointerEvent) => {
+        onPointerMove: (e: any) => {
           if (e.pointerType !== "touch") return;
           tapMoveAt(e.clientX, e.clientY);
         },
-        onPointerUp: (e: React.PointerEvent) => {
+        onPointerUp: (e: any) => {
           if (e.pointerType !== "touch") return;
           finish();
         },
-        onPointerCancel: (e: React.PointerEvent) => {
+        onPointerCancel: (e: any) => {
           if (e.pointerType !== "touch") return;
           tapStateRef.current = null;
           lastTouchAtRef.current = Date.now();
@@ -6991,7 +6974,7 @@ export default function Home({
     [],
   );
   const LIVE_SNAPSHOT_MAX_AGE_MS = 20_000;
-  const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
+  function readSnapshot<T>(key: string): Snapshot<T> | null {
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return null;
@@ -7002,12 +6985,12 @@ export default function Home({
     } catch {
       return null;
     }
-  }, []);
-  const writeSnapshot = useCallback((key: string, value: any) => {
+  }
+  function writeSnapshot(key: string, value: any) {
     try {
       localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
     } catch {}
-  }, []);
+  }
 
   // Sync expandedMatch with live data silently (score/odds update without closing panel).
   // Also handles the case where the match was opened *before* it went live (e.g. from
@@ -7039,7 +7022,7 @@ export default function Home({
     const id = String(expandedMatch.id);
     const hasMarkets = !!(expandedMatch as any).markets;
     if (hasMarkets) return;
-    const snap = readSnapshot<Match>(matchSnapshotKey(id));
+    const snap = readSnapshot(matchSnapshotKey(id));
     const canUseSnap = !!(
       snap &&
       Date.now() - snap.savedAt < 10 * 60_000 &&
@@ -7071,8 +7054,8 @@ export default function Home({
           // before that resolution finishes, m.betbyTracker can be empty
           // even though `prev` already had a good one from the periodic
           // /live list sync. Never let a fetch that's simply "too early"
-          // permanently erase a tracker (and its SportScore widgetUrl)
-          // that's already showing.
+          // permanently erase a tracker (formations/HT score/incidents)
+          // that's already showing on this expanded card.
           const mm = m as any;
           const pv = prev as any;
           return {
@@ -7755,7 +7738,7 @@ export default function Home({
   );
 
   useEffect(() => {
-    const snap = readSnapshot<any[]>(
+    const snap = readSnapshot(
       upcomingSnapshotKey(selectedSport, upcomingRange),
     );
     const canUseSnap = !!(
@@ -7766,7 +7749,7 @@ export default function Home({
     if (canUseSnap) {
       setUpcomingMatches(
         pruneUpcomingMatches(
-          snap.value.map((m) => ({ ...(m as any), isLive: false })),
+          (snap.value as any[]).map((m) => ({ ...(m as any), isLive: false })),
         ),
       );
       setUpcomingLoading(false);
@@ -8144,7 +8127,7 @@ export default function Home({
       if (currentPath !== targetPath) navigate(targetPath);
       onSelect?.();
       if (id === "live" && prev !== "live") {
-        const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
+        const snap = readSnapshot(liveSnapshotKey());
         const canUseSnap = !!(
           snap &&
           Date.now() - snap.savedAt < LIVE_SNAPSHOT_MAX_AGE_MS &&
@@ -8154,7 +8137,7 @@ export default function Home({
         const hasMatches = liveMatchesRef.current.length > 0;
         if (snap && canUseSnap && !hasMatches) {
           setLiveMatches(
-            snap.value.map((m) => ({ ...(m as any), isLive: true })),
+            (snap.value as any[]).map((m) => ({ ...(m as any), isLive: true })),
           );
           setLiveLoading(false);
           setLiveTransport("cache");
@@ -8254,7 +8237,7 @@ export default function Home({
     // ── 1. Show cached snapshot immediately (zero-latency initial render) ────
     const hasMatches = liveMatchesRef.current.length > 0;
     if (!hasMatches) {
-      const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
+      const snap = readSnapshot(liveSnapshotKey());
       const canUseSnap = !!(
         snap &&
         Date.now() - snap.savedAt < LIVE_SNAPSHOT_MAX_AGE_MS &&
@@ -8262,7 +8245,7 @@ export default function Home({
       );
       if (snap && canUseSnap) {
         setLiveMatches(
-          snap.value.map((m) => ({ ...(m as any), isLive: true })),
+          (snap.value as any[]).map((m) => ({ ...(m as any), isLive: true })),
         );
         setLiveLoading(false);
         setLiveTransport("cache");
@@ -8512,7 +8495,7 @@ export default function Home({
       for (const id of ids) {
         if (ctrl.signal.aborted) return;
         if (livePrefetchingRef.current.has(id)) continue;
-        const snap = readSnapshot<Match>(matchSnapshotKey(id));
+        const snap = readSnapshot(matchSnapshotKey(id));
         const canUseSnap = !!(
           snap &&
           Date.now() - snap.savedAt < LIVE_SNAPSHOT_MAX_AGE_MS &&
@@ -8638,15 +8621,17 @@ export default function Home({
         });
         if (res.ok) {
           const bets: UserBet[] = await res.json();
-          setMyBets((prev) => {
-            const prevMap = new Map(prev.map((bet) => [bet.id, bet] as const));
+          setMyBets((prev: any) => {
+            const prevMap = new Map<string, any>(
+              prev.map((bet: any) => [String(bet.id), bet] as const),
+            );
             return bets.map((bet) => {
-              if (bet.status !== "pending") return bet;
-              const prevBet = prevMap.get(bet.id);
-              if (!prevBet || prevBet.status !== "pending") return bet;
-              const prevSelections = getBetSelections(prevBet);
+              if ((bet as any).status !== "pending") return bet;
+              const prevBet = prevMap.get(String(bet.id));
+              if (!prevBet || (prevBet as any).status !== "pending") return bet;
+              const prevSelections = getBetSelections(prevBet as UserBet);
               const nextSelections = getBetSelections(bet);
-              const mergedSelections = nextSelections.map((sel, index) => {
+              const mergedSelections = nextSelections.map<any>((sel, index) => {
                 const prevSel = prevSelections[index];
                 if (!prevSel) return sel;
                 return {
@@ -8676,7 +8661,7 @@ export default function Home({
               return {
                 ...bet,
                 selections: mergedSelections,
-                statusPreview: bet.statusPreview ?? prevBet.statusPreview,
+                statusPreview: (bet as any).statusPreview ?? (prevBet as any).statusPreview,
               };
             });
           });
@@ -8780,9 +8765,9 @@ export default function Home({
       const stateMap = new Map(
         incoming.map((bet) => [bet.betId, bet] as const),
       );
-      setMyBets((prev) =>
+      setMyBets((prev: any) =>
         prev.map((bet) => {
-          if (bet.status !== "pending") return bet;
+          if ((bet as any).status !== "pending") return bet;
           const next = stateMap.get(bet.id);
           if (!next) return bet;
           const baseSelections = getBetSelections(bet);
@@ -9410,7 +9395,7 @@ export default function Home({
   })();
   const effectiveBetMode: "simples" | "multipla" =
     hasDuplicateMatches || bets.length <= 1 ? "simples" : betMode;
-  const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
+  const totalOdds = bets.reduce((acc: any, bet: any) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
   const [betStakes, setBetStakes] = useState<Record<string, string>>({});
   const simplesPotential = bets
@@ -9500,7 +9485,7 @@ export default function Home({
   };
 
   // ── Lock screen handlers ────────────────────────────────────────────────────
-  const handlePasswordUnlock = async (e: React.FormEvent) => {
+  const handlePasswordUnlock = async (e: any) => {
     e.preventDefault();
     if (!lockPassword || !auth.user) return;
     setLockLoading(true);
@@ -9605,7 +9590,7 @@ export default function Home({
     }
   };
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: any) => {
     e.preventDefault();
     setAuthLoading(true);
     try {
@@ -9625,7 +9610,7 @@ export default function Home({
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: any) => {
     e.preventDefault();
     if (regDob) {
       const dob = new Date(regDob);
@@ -11295,7 +11280,7 @@ export default function Home({
                   onClick={() => setTrackerModalEvent(matchToBetbyLiveEvent(match))}
                   className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
                 >
-                  <BarChart2 size={10} /> Tracker
+                  <Activity size={10} /> Tracker
                 </button>
               )}
             </div>
@@ -11695,7 +11680,7 @@ export default function Home({
                   }}
                   title="Limpar boletim"
                 >
-                  <Trash2 size={14} className="text-red-500" />
+                  <X size={14} className="text-red-500" />
                 </button>
               )}
             </div>
@@ -17818,7 +17803,7 @@ export default function Home({
         <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-white">
-              <Fingerprint size={20} className="text-blue-400" />
+              <ShieldCheck size={20} className="text-blue-400" />
               Desbloqueio Biométrico
             </DialogTitle>
           </DialogHeader>
@@ -17830,7 +17815,7 @@ export default function Home({
               desbloquear a sessão após 120 segundos sem atividade.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
-              <ScanFace size={18} className="text-blue-400 shrink-0" />
+              <ShieldCheck size={18} className="text-blue-400 shrink-0" />
               <p className="text-xs text-blue-300">
                 O dispositivo irá solicitar a verificação biométrica. Nenhum
                 dado biométrico é enviado para os nossos servidores.
@@ -17841,7 +17826,7 @@ export default function Home({
                 onClick={handleRegisterBiometric}
                 className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold"
               >
-                <Fingerprint size={15} className="mr-1.5" />
+                <ShieldCheck size={15} className="mr-1.5" />
                 Ativar agora
               </Button>
               <Button
@@ -17879,7 +17864,7 @@ export default function Home({
               {[
                 { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
                 { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
-                { id: "casino", icon: <Dices size={15} />, label: "CASSINO" },
+                { id: "casino", icon: <Activity size={15} />, label: "CASSINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
               ].map((tab) => (
                 <button
@@ -18018,7 +18003,7 @@ export default function Home({
                         });
                       }}
                     >
-                      <History size={14} className="mr-2" /> Apostas
+                      <Clock size={14} className="mr-2" /> Apostas
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className="bg-zinc-700" />
                     <DropdownMenuItem
@@ -18054,7 +18039,7 @@ export default function Home({
               label: "AO VIVO",
               badge: true,
             },
-            { id: "casino", icon: <Dices size={16} />, label: "CASSINO" },
+            { id: "casino", icon: <Activity size={16} />, label: "CASSINO" },
             {
               id: "promos",
               icon: <Gift size={16} />,
@@ -18104,7 +18089,7 @@ export default function Home({
               })}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
-              <History size={16} />
+              <Clock size={16} />
               MINHAS APOSTAS
             </button>
           )}
@@ -18229,7 +18214,16 @@ export default function Home({
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
                           awayTeam={teamNamePt(expandedMatch.away)}
-                          widgetUrl={expandedMatch.betbyTracker?.widgetUrl}
+                          homeFormation={expandedMatch.betbyTracker?.homeFormation}
+                          awayFormation={expandedMatch.betbyTracker?.awayFormation}
+                          homeHalfTimeScore={
+                            expandedMatch.betbyTracker?.homeHalfTimeScore
+                          }
+                          awayHalfTimeScore={
+                            expandedMatch.betbyTracker?.awayHalfTimeScore
+                          }
+                          lineupConfirmed={expandedMatch.betbyTracker?.lineupConfirmed}
+                          incidents={expandedMatch.betbyTracker?.incidents}
                           liveClockLabel={(() => {
                             if (!expandedMatch.isLive) return null;
                             // Minute/phase computation below is football-
@@ -18305,7 +18299,7 @@ export default function Home({
                           onClick={() => setMatchViewTab(matchViewTab === "stats" ? "markets" : "stats")}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "stats" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
                         >
-                          <BarChart2 size={11} />
+                          <Activity size={11} />
                           Stats
                         </button>
                       </div>
@@ -18410,7 +18404,7 @@ export default function Home({
                           {showFieldView ? (
                             <ArrowLeft size={14} className="text-white" />
                           ) : (
-                            <LayoutGrid size={14} className="text-white" />
+                            <ChevronUp size={14} className="text-white" />
                           )}
                         </button>
                       </div>
@@ -18500,7 +18494,7 @@ export default function Home({
                       };
 
                       const calcComboOdds = (sels: ComboSel[]) =>
-                        +(sels.reduce((acc, s) => acc * s.odds, 1) * 0.98).toFixed(2);
+                        +(sels.reduce((acc: any, s: any) => acc * s.odds, 1) * 0.98).toFixed(2);
 
                       // 2 previsões da equipa da casa + 2 previsões da equipa visitante
                       const combos: Combo[] = [
@@ -21600,7 +21594,7 @@ export default function Home({
                 // Convert real volleyball odds to MatchCard-compatible Match objects (O/U 3.5 sets in markets)
                 const volleyOddsAsMatches: Match[] =
                   selectedSport === "volleyball" || selectedSport === "all"
-                    ? volleyOddsMatches.map((o) => {
+                    ? (volleyOddsMatches as any[]).map((o) => {
                         const mkt = _emptyMkt();
                         if (o.overUnder) {
                           mkt.totalGoals.over25 = o.overUnder.over;
@@ -22969,9 +22963,7 @@ export default function Home({
                                 };
 
                                 // Group upcoming by round
-                                const upcomingByRound = upcoming.reduce<
-                                  Record<string, TournamentMatch[]>
-                                >((acc, m) => {
+                                const upcomingByRound = upcoming.reduce((acc: any, m: any) => {
                                   (acc[m.round] = acc[m.round] ?? []).push(m);
                                   return acc;
                                 }, {});
@@ -23330,9 +23322,7 @@ export default function Home({
                               : d.split(".").slice(0, 2).join("/");
 
                         // Group by league
-                        const byLeague = volleyOddsMatches.reduce<
-                          Record<string, VolleyOddsEntry[]>
-                        >((acc, m) => {
+                        const byLeague = volleyOddsMatches.reduce((acc: any, m: any) => {
                           (acc[m.league] ??= []).push(m);
                           return acc;
                         }, {});
@@ -23360,7 +23350,7 @@ export default function Home({
                             {volleyOddsOpen && (
                               <div className="space-y-3">
                                 {Object.entries(byLeague).map(
-                                  ([league, matches]) => (
+                                  ([league, matches]: [string, any[]]) => (
                                     <div
                                       key={league}
                                       className="rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden"
@@ -24029,9 +24019,7 @@ export default function Home({
                           return mlbOddsMap.has(k);
                         });
                         if (upcomingWithOdds.length === 0) return null;
-                        const byDate = upcomingWithOdds.reduce<
-                          Record<string, typeof upcoming>
-                        >((acc, m) => {
+                        const byDate = upcomingWithOdds.reduce((acc: any, m: any) => {
                           (acc[m.date] ??= []).push(m);
                           return acc;
                         }, {});
@@ -24048,7 +24036,7 @@ export default function Home({
                             <div className="space-y-3">
                               {Object.entries(byDate)
                                 .slice(0, 7)
-                                .map(([date, games]) => (
+                                .map(([date, games]: [string, any[]]) => (
                                   <div key={date}>
                                     <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-2">
                                       <span>{fmtDate(date)}</span>
@@ -24130,9 +24118,7 @@ export default function Home({
                             awayOdds: o.homeOdds,
                           });
                         });
-                        const byDate = upcoming.reduce<
-                          Record<string, typeof upcoming>
-                        >((acc, m) => {
+                        const byDate = upcoming.reduce((acc: any, m: any) => {
                           (acc[m.date] ??= []).push(m);
                           return acc;
                         }, {});
@@ -24197,7 +24183,7 @@ export default function Home({
                             <div className="space-y-3">
                               {Object.entries(byDate)
                                 .slice(0, 7)
-                                .map(([date, games]) => (
+                                .map(([date, games]: [string, any[]]) => (
                                   <div key={date}>
                                     <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-2">
                                       <span>{fmtDate(date)}</span>
@@ -24311,9 +24297,7 @@ export default function Home({
                             awayOdds: o.homeOdds,
                           });
                         });
-                        const byDate = upcoming.reduce<
-                          Record<string, typeof upcoming>
-                        >((acc, m) => {
+                        const byDate = upcoming.reduce((acc: any, m: any) => {
                           (acc[m.date] ??= []).push(m);
                           return acc;
                         }, {});
@@ -24384,7 +24368,7 @@ export default function Home({
                             <div className="space-y-3">
                               {Object.entries(byDate)
                                 .slice(0, 7)
-                                .map(([date, games]) => (
+                                .map(([date, games]: [string, any[]]) => (
                                   <div key={date}>
                                     <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-2">
                                       <span>{fmtDate(date)}</span>
@@ -24812,7 +24796,7 @@ export default function Home({
                     />
                   ) : (
                     <>
-                      <Dices className="text-red-600" size={28} />
+                      <Activity className="text-red-600" size={28} />
                       <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight mt-2">
                         {game.name}
                       </span>
@@ -24825,7 +24809,7 @@ export default function Home({
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="mb-4">
                     <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                      <Dices className="text-red-600" /> Cassino
+                      <Activity className="text-red-600" /> Cassino
                       {isSearching && casinoTotal > 0 && (
                         <span className="text-sm font-normal text-zinc-400 ml-1">
                           ({casinoTotal} jogos)
@@ -25044,7 +25028,7 @@ export default function Home({
                       onClick={() => setDepositModalOpen(true)}
                       className="flex items-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
                     >
-                      <ArrowUpCircle size={16} /> Levantar
+                      <ChevronUp size={16} /> Levantar
                     </button>
                   </div>
                 </div>
@@ -25052,7 +25036,7 @@ export default function Home({
                 {/* Transactions from bets */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
-                    <BarChart2 size={16} className="text-zinc-400" />
+                    <Activity size={16} className="text-zinc-400" />
                     <span className="font-semibold text-sm">
                       Histórico de Movimentos
                     </span>
@@ -25066,7 +25050,7 @@ export default function Home({
                     </div>
                   ) : myBets.length === 0 ? (
                     <div className="py-12 text-center text-zinc-500">
-                      <ArrowDownCircle
+                      <ChevronDown
                         className="mx-auto mb-3 opacity-20"
                         size={40}
                       />
@@ -25101,12 +25085,12 @@ export default function Home({
                                 className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isWon || isCO ? "bg-green-900/50" : "bg-red-900/30"}`}
                               >
                                 {isWon || isCO ? (
-                                  <ArrowDownCircle
+                                  <ChevronDown
                                     size={16}
                                     className="text-green-400"
                                   />
                                 ) : (
-                                  <ArrowUpCircle
+                                  <ChevronUp
                                     size={16}
                                     className="text-red-400"
                                   />
@@ -25186,7 +25170,7 @@ export default function Home({
             {activeTab === "mybets" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <h2 className="text-2xl font-black italic uppercase tracking-tight mb-5 flex items-center gap-2">
-                  <History className="text-red-600" /> Minhas Apostas
+                  <Clock className="text-red-600" /> Minhas Apostas
                 </h2>
 
                 {/* Tabs */}
@@ -25504,7 +25488,7 @@ export default function Home({
                                   if (outcome === "cashout") {
                                     leftIcon = (
                                       <div className="w-6 h-6 rounded-full bg-yellow-500/80 flex items-center justify-center shrink-0">
-                                        <CircleDollarSign
+                                        <Ticket
                                           size={11}
                                           className="text-white"
                                         />
@@ -25849,7 +25833,7 @@ export default function Home({
                                 bet.cashoutStatus === "available" ? (
                                   cashoutExpandedId === bet.id ? (
                                     <div className="mx-4 mb-4 rounded-2xl bg-green-600 px-5 py-4 flex items-center gap-3">
-                                      <CircleDollarSign
+                                      <Ticket
                                         size={20}
                                         className="text-white shrink-0"
                                       />
@@ -25985,7 +25969,7 @@ export default function Home({
                                     )}
                                     {isCashedOut && (
                                       <div className="inline-flex items-center gap-1.5 bg-yellow-400 text-yellow-950 text-[11px] font-bold px-3 py-1.5 rounded-full">
-                                        <CircleDollarSign size={13} /> Cash Out
+                                        <Ticket size={13} /> Cash Out
                                       </div>
                                     )}
                                   </div>
@@ -26131,7 +26115,7 @@ export default function Home({
                   border: "1px solid rgba(220,38,38,0.2)",
                 }}
               >
-                <Trash2 size={16} className="text-red-500" />
+                <X size={16} className="text-red-500" />
               </button>
             </div>
 
@@ -26531,7 +26515,7 @@ export default function Home({
           >
             <div className="pointer-events-auto max-w-lg mx-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl shadow-black/60 p-4 flex items-center gap-3">
               <div className="flex-shrink-0 w-11 h-11 bg-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-900/40">
-                <Smartphone size={22} className="text-white" />
+                <Radio size={22} className="text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-white leading-tight">
@@ -26893,7 +26877,7 @@ export default function Home({
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.85, y: 40 }}
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              onClick={(e: any) => e.stopPropagation()}
             >
               {promoNotif.type === "freebets10" && (
                 <>
@@ -27134,7 +27118,7 @@ export default function Home({
                 background:
                   "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)",
               }}
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              onClick={(e: any) => e.stopPropagation()}
             >
               <div
                 className="absolute inset-0 opacity-20"
@@ -27329,7 +27313,7 @@ function PromoCard3D({
   const [glare, setGlare] = useState({ x: 50, y: 50, opacity: 0 });
   const [hovered, setHovered] = useState(false);
 
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const onMove = (e: any) => {
     const r = cardRef.current?.getBoundingClientRect();
     if (!r) return;
     const x = (e.clientX - r.left) / r.width;
@@ -27801,7 +27785,7 @@ function CardDepositInlineForm({
   const elements = useElements();
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: any) {
     event.preventDefault();
     if (!stripe || !elements || submitting) return;
 
@@ -28353,7 +28337,7 @@ function DepositWithdrawModal({
             {mainTab === "deposit" ? (
               <Plus size={18} strokeWidth={3} />
             ) : (
-              <ArrowUpCircle size={18} />
+              <ChevronUp size={18} />
             )}
           </div>
           <div>
@@ -28397,7 +28381,7 @@ function DepositWithdrawModal({
             }}
             className={`flex items-center justify-center gap-2 py-3 text-xs font-bold transition-colors border-b-2 ${mainTab === "withdraw" ? "border-orange-500 text-white bg-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
           >
-            <ArrowUpCircle size={14} /> LEVANTAR
+            <ChevronUp size={14} /> LEVANTAR
           </button>
         </div>
 
@@ -28607,7 +28591,7 @@ function DepositWithdrawModal({
                   {loading ? (
                     <Loader2 className="animate-spin mr-2" size={16} />
                   ) : (
-                    <ArrowUpCircle size={16} className="mr-2" />
+                    <ChevronUp size={16} className="mr-2" />
                   )}
                   Solicitar Levantamento
                 </Button>

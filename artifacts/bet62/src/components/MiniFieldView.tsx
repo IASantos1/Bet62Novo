@@ -126,78 +126,142 @@ export default function MiniFieldView({
   homeTeam,
   awayTeam,
   liveClockLabel,
-  widgetUrl,
+  homeFormation,
+  awayFormation,
+  homeHalfTimeScore,
+  awayHalfTimeScore,
+  lineupConfirmed,
+  incidents,
 }: {
   sport?: string;
   homeTeam: string;
   awayTeam: string;
   liveClockLabel?: string | null;
-  // SportScore's own animated pitch/court widget (real ball/incident
-  // animation, e.g. "Shot On Target... 49' M.Vera") — when present, this
-  // replaces the static SVG diagram below, which was always just team
-  // names over field markings and could never show real match action
-  // since none of our data sources give ball/player position coordinates
-  // directly.
-  widgetUrl?: string;
+  homeFormation?: string | null;
+  awayFormation?: string | null;
+  homeHalfTimeScore?: number | null;
+  awayHalfTimeScore?: number | null;
+  lineupConfirmed?: boolean | null;
+  incidents?: Array<{ type: string; team: string; minute: number; player: string }>;
 }) {
   const kind = normalizeFieldSport(sport);
   const surface = SURFACE[kind];
   const Markings = surface.markings;
 
-  if (widgetUrl) {
-    return (
-      <div className="rounded-2xl overflow-hidden border border-zinc-800/70 bg-black" style={{ aspectRatio: "16/10" }}>
-        <iframe
-          src={widgetUrl}
-          className="w-full h-full"
-          style={{ border: 0 }}
-          loading="lazy"
-          title="Match tracker"
-          sandbox="allow-scripts allow-same-origin"
-        />
-      </div>
-    );
+  // Pull last goal incident (if any) to show as a small live badge above
+  // the pitch: makes the SVG feel "live" without needing an iframe.
+  let lastGoalText: string | null = null;
+  if (incidents && incidents.length > 0) {
+    for (let i = incidents.length - 1; i >= 0; i--) {
+      const inc = incidents[i]!;
+      if (!inc) continue;
+      if (
+        inc.type === "goal" ||
+        inc.type === "own_goal" ||
+        inc.type === "penalty"
+      ) {
+        const who = inc.team ? inc.team : inc.player ? inc.player : "";
+        const label =
+          inc.type === "own_goal"
+            ? "Gol contra"
+            : inc.type === "penalty"
+              ? "Gol (Pênalti)"
+              : "Gol";
+        lastGoalText = `${label} · ${inc.minute}' · ${who}`.trim();
+        if (lastGoalText.length > 58) lastGoalText = lastGoalText.slice(0, 57) + "…";
+        break;
+      }
+    }
   }
 
   return (
-    <div className="rounded-2xl overflow-hidden border border-zinc-800/70" style={{ background: "linear-gradient(160deg, #1a1a1f 0%, #0d0d10 100%)" }}>
-      <div className="flex items-center justify-between px-3 pt-2.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-          <span className="text-[10px] font-black text-zinc-300 truncate max-w-[110px]">{homeTeam}</span>
-        </div>
-        {liveClockLabel ? (
-          <span className="flex items-center gap-1.5 text-[10px] font-black text-red-400">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+    <div
+      className="rounded-2xl overflow-hidden border border-zinc-800/70"
+      style={{ background: "linear-gradient(160deg, #1a1a1f 0%, #0d0d10 100%)" }}
+    >
+      {/* Top bar: team names (outer edges) + central formations/score/HT */}
+      <div className="flex items-center justify-between px-3 pt-2.5 gap-2">
+        {/* Home side: name + formation */}
+        <div className="flex-1 min-w-0 flex flex-col items-start gap-0.5">
+          <div className="flex items-center gap-1.5 w-full min-w-0">
+            <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+            <span className="text-[10px] font-black text-zinc-300 truncate">{homeTeam}</span>
+          </div>
+          {homeFormation ? (
+            <span className="pl-3.5 text-[9px] font-bold uppercase tracking-widest text-blue-300/70">
+              {homeFormation}
             </span>
-            {liveClockLabel}
-          </span>
-        ) : (
-          <span
-            className="text-[9px] font-black uppercase tracking-widest"
-            style={{
-              backgroundImage: "linear-gradient(90deg,#facc15,#f97316,#dc2626)",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            {kind === "football" && "Campo"}
-            {kind === "tennis" && "Quadra"}
-            {kind === "basketball" && "Quadra"}
-            {kind === "hockey" && "Pista"}
-            {kind === "volleyball" && "Quadra"}
-            {kind === "baseball" && "Diamante"}
-          </span>
-        )}
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-black text-zinc-300 truncate max-w-[110px]">{awayTeam}</span>
-          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+          ) : null}
+        </div>
+
+        {/* CENTER — clock / formations confirmed / last-goal pill */}
+        <div className="flex flex-col items-center gap-1.5 shrink-0 px-1.5">
+          {liveClockLabel ? (
+            <span className="flex items-center gap-1.5 text-[10px] font-black text-red-400">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+              </span>
+              {liveClockLabel}
+            </span>
+          ) : (
+            <span
+              className="text-[9px] font-black uppercase tracking-widest"
+              style={{
+                backgroundImage: "linear-gradient(90deg,#facc15,#f97316,#dc2626)",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+              }}
+            >
+              {kind === "football" && "Campo"}
+              {kind === "tennis" && "Quadra"}
+              {kind === "basketball" && "Quadra"}
+              {kind === "hockey" && "Pista"}
+              {kind === "volleyball" && "Quadra"}
+              {kind === "baseball" && "Diamante"}
+            </span>
+          )}
+          {homeHalfTimeScore != null && awayHalfTimeScore != null && (
+            <span className="text-[9px] font-bold text-zinc-400/80 uppercase tracking-wider">
+              HT {homeHalfTimeScore} × {awayHalfTimeScore}
+            </span>
+          )}
+          {lineupConfirmed === true ? (
+            <span className="text-[8px] font-black text-emerald-400/80 uppercase tracking-widest">
+              Escalação confirmada
+            </span>
+          ) : lineupConfirmed === false ? (
+            <span className="text-[8px] font-black text-amber-400/80 uppercase tracking-widest">
+              Escalação provisória
+            </span>
+          ) : null}
+        </div>
+
+        {/* Away side: name + formation */}
+        <div className="flex-1 min-w-0 flex flex-col items-end gap-0.5">
+          <div className="flex items-center gap-1.5 w-full min-w-0 justify-end">
+            <span className="text-[10px] font-black text-zinc-300 truncate">{awayTeam}</span>
+            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+          </div>
+          {awayFormation ? (
+            <span className="pr-3.5 text-[9px] font-bold uppercase tracking-widest text-red-300/70">
+              {awayFormation}
+            </span>
+          ) : null}
         </div>
       </div>
 
+      {/* Last-goal banner */}
+      {lastGoalText ? (
+        <div className="px-3 pt-2">
+          <div className="mx-auto max-w-[360px] rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-amber-300 truncate">
+            🔥 {lastGoalText}
+          </div>
+        </div>
+      ) : null}
+
+      {/* SVG Pitch */}
       <div className="px-4 py-3">
         <div className="mx-auto w-full max-w-[360px]" style={{ aspectRatio: surface.ar }}>
           <svg viewBox={surface.viewBox} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
