@@ -38,8 +38,6 @@ import {
   getCachedFeed as getBetbyPublicFeedCache,
   getLastRefreshMs as getBetbyPublicRefreshMs,
 } from "../services/betby/publicScraperWithMapper.js";
-import { getLiveEvents } from "../services/betby/state.js";
-import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import { getStatpalTrackerForTeams } from "../services/statpal/liveTracker.js";
 import { getPulseScoreTrackerForTeams } from "../services/pulsescore/betbyTracker.js";
 import type { MatchTracker } from "../services/liveStream/trackerTypes.js";
@@ -20606,30 +20604,6 @@ export function broadcastBatchDelta(
   }
 }
 
-// Cross-matches each Statpal/SportsAPI-sourced live match against the
-// BetBY poller's already-resolved live events (services/betby/state.js)
-// by team name and attaches its stream (SMYTDRYT HLS — no equivalent
-// exists outside BetBY's own feed, so this is still needed for video).
-// Tracker is deliberately NOT sourced from here anymore — see
-// attachDirectTracker below, which resolves it straight from
-// StatScore/SportScore/Statpal/PulseScore against our own match, with no
-// BetBY indirection (BetBY's own naming for a fixture routinely diverges
-// from both Statpal's and SportScore's, which was silently blocking
-// Tracker resolution for matches BetBY simply named differently).
-// Cheap: getLiveEvents() reads from an in-memory cache, no network call.
-function attachBetbyTrackerAndStream(matches: LiveMatchState[]): void {
-  const betbyEvents = getLiveEvents().filter((e) => e.stream);
-  if (betbyEvents.length === 0) return;
-  for (const m of matches) {
-    const found = betbyEvents.find(
-      (e) => teamNamesMatch(m.home, e.home) && teamNamesMatch(m.away, e.away),
-    );
-    if (!found) continue;
-    m.betbyEventId = found.betbyEventId;
-    if (found.stream) m.betbyStream = found.stream;
-  }
-}
-
 // ── Direct Tracker Resolution (no BetBY dependency) ─────────────────────
 // Resolves Tracker data straight from OUR OWN live match list (Statpal-
 // sourced home/away names), cascading StatScore (manual mapping) ->
@@ -20802,7 +20776,6 @@ router.get("/live", async (req: Request, res: Response) => {
       limit > 0
         ? effectivePayload.matches.slice(0, limit)
         : effectivePayload.matches;
-    attachBetbyTrackerAndStream(matches);
     attachDirectTracker(matches);
     if (!lean) {
       res.json({ matches });
@@ -21052,18 +21025,14 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
       }
     }
 
-    // The main /live list route attaches stream (attachBetbyTrackerAndStream)
-    // and tracker (attachDirectTracker) data, but this single-match route
-    // builds its own response from scratch and never called either — so a
-    // match's card correctly showed the Tracker/Vídeo buttons (populated
-    // from the /live list), but the moment the frontend re-fetched this
-    // match individually (expandedMatch's live-sync effect, or a deep link
-    // straight to a match), that data was silently dropped and the UI fell
-    // back to the static field diagram / hid the buttons entirely.
-    if (match) {
-      attachBetbyTrackerAndStream([match as unknown as LiveMatchState]);
-      attachDirectTracker([match as unknown as LiveMatchState]);
-    }
+    // The main /live list route attaches tracker data via attachDirectTracker,
+    // but this single-match route builds its own response from scratch and
+    // never called it — so a match's card correctly showed the Tracker
+    // button (populated from the /live list), but the moment the frontend
+    // re-fetched this match individually (expandedMatch's live-sync effect,
+    // or a deep link straight to a match), that data was silently dropped
+    // and the UI fell back to the static field diagram / hid the button.
+    if (match) attachDirectTracker([match as unknown as LiveMatchState]);
 
     res.json({ match });
   } catch {
