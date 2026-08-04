@@ -24794,15 +24794,27 @@ export default function Home({
                     // overlay caption here, it only fought with that text
                     // and got cut off (see the reference screenshots the
                     // user marked up: overlapping/clipped title text).
-                    <img
-                      src={game.img}
-                      alt={game.name}
-                      className="absolute inset-0 w-full h-full object-cover"
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = "none";
-                      }}
-                    />
+                    // Source art is mostly square while the card is tall
+                    // (2/3), so object-cover was cropping the sides and
+                    // slicing the baked-in title. object-contain shows the
+                    // full art uncropped; a blurred copy fills the gaps.
+                    <>
+                      <img
+                        src={game.img}
+                        aria-hidden="true"
+                        className="absolute inset-0 w-full h-full object-cover blur-lg scale-110 opacity-50"
+                        loading="lazy"
+                      />
+                      <img
+                        src={game.img}
+                        alt={game.name}
+                        className="relative w-full h-full object-contain"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    </>
                   ) : (
                     <>
                       <Dices className="text-red-600" size={28} />
