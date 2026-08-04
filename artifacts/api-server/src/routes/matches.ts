@@ -21236,13 +21236,65 @@ function nameSimilarity(a: string, b: string): number {
 // "Deportivo Cali" vs "Deportivo Pasto" scores 0.73, safely below the 0.82
 // bar — including keeping identity-bearing words like "Real"/"United"/
 // "City" out of the strip list in the first place).
+// Statpal's tennis (and other individual-player sport) names come through
+// heavily abbreviated on bet62's own data — "E. Ruse", "Ruse E." or just
+// "Ruse, E." — while SportScore shows the player's full given name
+// ("Elena-Gabriela Ruse"). None of the checks above catch this: the surname
+// alone is far too short a shared prefix to clear the 0.82 fuzzy-similarity
+// bar once the full given name is factored in (verified: "e-ruse" vs
+// "elena-gabriela-ruse" scores well under it, same shape of failure as
+// "rapid-bucuresti" vs "rapid-1923" above). Parse out a surname (last
+// token) and given-name tokens (everything else, "Surname, Given" reordered
+// first), and accept a match when the surname is identical and every given
+// name token either matches exactly or one side is a single-letter initial
+// that prefixes the other's full token — i.e. an abbreviation of the same
+// name, not a different person who happens to share a surname.
+function parsePersonName(raw: string): { surname: string; given: string[] } | null {
+  let name = raw.trim();
+  const commaIdx = name.indexOf(",");
+  if (commaIdx >= 0) {
+    const last = name.slice(0, commaIdx).trim();
+    const first = name.slice(commaIdx + 1).trim();
+    name = first ? `${first} ${last}` : last;
+  }
+  const tokens = name
+    .split(/\s+/)
+    .map((t) => slugifyTeamName(t.replace(/\.$/, "")))
+    .filter(Boolean);
+  if (tokens.length === 0) return null;
+  return { surname: tokens[tokens.length - 1]!, given: tokens.slice(0, -1) };
+}
+
+function givenNameTokensCompatible(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return true; // one side is surname-only
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x === y) continue;
+    if (x.length === 1 && y.startsWith(x)) continue;
+    if (y.length === 1 && x.startsWith(y)) continue;
+    return false;
+  }
+  return true;
+}
+
+function abbreviatedPersonNameMatch(a: string, b: string): boolean {
+  const pa = parsePersonName(a);
+  const pb = parsePersonName(b);
+  if (!pa || !pb) return false;
+  if (!pa.surname || pa.surname !== pb.surname) return false;
+  return givenNameTokensCompatible(pa.given, pb.given);
+}
+
 function namesMatch(a: string, b: string): boolean {
   if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
   if (slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b)) return true;
   if (slugifyTeamNameExpanded(a) === slugifyTeamNameExpanded(b)) return true;
   if (slugifyTeamNameAliased(a) === slugifyTeamNameAliased(b)) return true;
   if (slugifyTeamNameSorted(a) === slugifyTeamNameSorted(b)) return true;
-  return nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82;
+  if (nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82) return true;
+  return abbreviatedPersonNameMatch(a, b);
 }
 
 async function findInLiveFixturesList(
