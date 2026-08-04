@@ -18200,6 +18200,7 @@ export default function Home({
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
                           awayTeam={teamNamePt(expandedMatch.away)}
+                          widgetUrl={expandedMatch.betbyTracker?.widgetUrl}
                           liveClockLabel={(() => {
                             if (!expandedMatch.isLive) return null;
                             // Minute/phase computation below is football-
