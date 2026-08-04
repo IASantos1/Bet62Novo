@@ -24933,7 +24933,7 @@ export default function Home({
                             </h3>
                             <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
                               {group.games.map((game) =>
-                                renderGameTile(game, "w-28 sm:w-32 flex-shrink-0"),
+                                renderGameTile(game, "w-[calc(50%-0.375rem)] sm:w-32 flex-shrink-0"),
                               )}
                             </div>
                           </div>
