@@ -44,6 +44,7 @@ import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
 import {
   findSportscoreFixture,
+  fetchSportscoreTracker,
   type SportscoreDiagStep,
   unknownStatpalMarkets,
   countryForLeagueName,
@@ -2268,7 +2269,10 @@ router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) 
     }
     const diag: SportscoreDiagStep[] = [];
     const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
-    res.json({ result: fixture, steps: diag });
+    const tracker = fixture?.id
+      ? await fetchSportscoreTracker(sport, fixture.id)
+      : { ok: false, error: "fixture sem id — só slug resolvido, tracker precisa do id numérico" };
+    res.json({ result: fixture, steps: diag, tracker });
   } catch (err) {
     logger.error({ err }, "POST /api/admin/sportscore-test error");
     res.status(500).json({
