@@ -42,6 +42,7 @@ import {
   ArrowLeft,
   ExternalLink,
   Radio,
+  Star,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -460,7 +461,7 @@ const TEAM_BANNERS: Record<string, string> = {
   "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
-type MainTab = "sports" | "live" | "casino" | "promos" | "mybets" | "wallet" | "profile";
+type MainTab = "home" | "sports" | "live" | "casino" | "promos" | "mybets" | "wallet" | "profile";
 
 type CasinoGame = {
   id: string;
@@ -529,6 +530,7 @@ function normalizeMainTabPath(path: string): string {
 }
 
 function getPathForMainTab(tab: MainTab): string {
+  if (tab === "home") return "/destaques";
   if (tab === "live") return "/ao-vivo";
   if (tab === "casino") return "/casino";
   if (tab === "promos") return "/promocoes";
@@ -4754,6 +4756,11 @@ export default function Home({
   const [casinoLaunchUrl, setCasinoLaunchUrl] = useState<string | null>(null);
   const [casinoLoadingGame, setCasinoLoadingGame] = useState<string | null>(null);
   const [casinoGames, setCasinoGames] = useState<CasinoGame[]>([]);
+  // Small independent preview for the "Destaques" tab — deliberately its own
+  // state/effect, never touches casinoGames/casinoGroups (the casino tab's
+  // own data), so this can't affect anything already working there.
+  const [homeCasinoPreview, setHomeCasinoPreview] = useState<CasinoGame[]>([]);
+  const [homeCasinoPreviewLoading, setHomeCasinoPreviewLoading] = useState(false);
   const [casinoProviders, setCasinoProviders] = useState<string[]>([]);
   const [casinoProvider, setCasinoProvider] = useState<string>("Todos");
   const [casinoSearch, setCasinoSearch] = useState("");
@@ -8883,6 +8890,21 @@ export default function Home({
       })
       .catch(() => {});
   }, [activeTab]);
+
+  // "Destaques" (home) tab — small real-games preview, fetched once per tab
+  // open. Fully separate from the casino tab's own casinoGames/casinoGroups.
+  useEffect(() => {
+    if (activeTab !== "home") return;
+    if (homeCasinoPreview.length > 0) return;
+    setHomeCasinoPreviewLoading(true);
+    fetch("/api/casino/games?limit=6")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.games)) setHomeCasinoPreview(data.games);
+      })
+      .catch(() => {})
+      .finally(() => setHomeCasinoPreviewLoading(false));
+  }, [activeTab, homeCasinoPreview.length]);
 
   // Flat grid — only used while searching (a handful of results split into
   // many 1-game franchise rows isn't useful). Browsing without a search
@@ -17862,6 +17884,7 @@ export default function Home({
             {/* Desktop inline nav — hidden on mobile (uses tab strip below) */}
             <div className="hidden lg:flex items-center ml-12 h-16">
               {[
+                { id: "home", icon: <Star size={15} />, label: "DESTAQUES" },
                 { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
                 { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
                 { id: "casino", icon: <Activity size={15} />, label: "CASSINO" },
@@ -18032,6 +18055,7 @@ export default function Home({
         {/* TABS — hidden on desktop (shown inline in header above) */}
         <div className="lg:hidden px-4 max-w-[1600px] mx-auto flex gap-6 overflow-x-auto no-scrollbar">
           {[
+            { id: "home", icon: <Star size={16} />, label: "DESTAQUES" },
             { id: "sports", icon: <Trophy size={16} />, label: "ESPORTES" },
             {
               id: "live",
@@ -21532,6 +21556,215 @@ export default function Home({
                     {renderMatchMarkets(expandedMatch)}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ── DESTAQUES (home dashboard) — new tab, fully independent from
+                the existing "sports" tab below (untouched). Reuses real,
+                already-fetched data: the live-matches localStorage snapshot
+                (same one the "Ao Vivo" tab warms in the background) and a
+                small dedicated casino games fetch — no fake/placeholder
+                data. */}
+            {!expandedMatch && activeTab === "home" && (
+              <div className="space-y-6 max-w-[1100px] mx-auto">
+                <div className="relative rounded-2xl overflow-hidden border border-zinc-800 bg-gradient-to-br from-red-950 via-zinc-950 to-zinc-950 p-6 sm:p-8">
+                  <p className="text-red-400 text-xs font-bold uppercase tracking-wider mb-2">
+                    Bónus de Boas-Vindas
+                  </p>
+                  <div className="text-4xl sm:text-5xl font-black text-white leading-none">
+                    100%
+                  </div>
+                  <div className="text-xl sm:text-2xl font-black text-white mt-1 mb-5">
+                    Até <span className="text-red-500">200€</span>
+                  </div>
+                  {auth.user ? (
+                    <button
+                      onClick={() => selectMainTab("wallet")}
+                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-lg transition-colors"
+                    >
+                      Fazer Depósito
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setAuthMode("register");
+                        setAuthModalOpen(true);
+                      }}
+                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-lg transition-colors"
+                    >
+                      Registre-se Agora
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  {[
+                    {
+                      label: "Ao Vivo",
+                      icon: <Activity size={18} />,
+                      badge: true,
+                      onClick: () => selectMainTab("live"),
+                    },
+                    {
+                      label: "Futebol",
+                      icon: <Trophy size={18} />,
+                      onClick: () => {
+                        setSelectedSport("football");
+                        setSelectedLeague(null);
+                        setSelectedCountry(null);
+                        setUpcomingSearchQuery("");
+                        selectMainTab("sports");
+                      },
+                    },
+                    {
+                      label: "Todos os Esportes",
+                      icon: <LayoutGrid size={18} />,
+                      onClick: () => {
+                        setSelectedSport("all");
+                        setSelectedLeague(null);
+                        setSelectedCountry(null);
+                        setUpcomingSearchQuery("");
+                        selectMainTab("sports");
+                      },
+                    },
+                    {
+                      label: "Cassino",
+                      icon: <Dices size={18} />,
+                      onClick: () => selectMainTab("casino"),
+                    },
+                    {
+                      label: "Promoções",
+                      icon: <Gift size={18} />,
+                      onClick: () => selectMainTab("promos", fetchCashback),
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={item.onClick}
+                      className="relative flex flex-col items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors py-3.5 px-2 text-zinc-400 hover:text-white"
+                    >
+                      {item.badge && (
+                        <span className="absolute top-2 right-2 flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+                        </span>
+                      )}
+                      {item.icon}
+                      <span className="text-[11px] font-bold text-center leading-tight">
+                        {item.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {(() => {
+                  const liveSnap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
+                  const previewMatches = (liveSnap?.value ?? [])
+                    .filter((m) => (m.sport ?? "football") === "football")
+                    .slice(0, 5);
+                  return (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Activity size={16} className="text-red-500" />
+                        <h2 className="font-black text-sm uppercase tracking-wide">
+                          Futebol Ao Vivo
+                        </h2>
+                        <button
+                          onClick={() => selectMainTab("live")}
+                          className="ml-auto text-red-500 text-xs font-bold flex items-center gap-0.5 hover:text-red-400"
+                        >
+                          Ver todos <ChevronRight size={13} />
+                        </button>
+                      </div>
+                      {previewMatches.length === 0 ? (
+                        <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
+                          Sem jogos ao vivo neste momento.
+                        </div>
+                      ) : (
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 overflow-hidden">
+                          {previewMatches.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => selectMainTab("live")}
+                              className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-800/60 transition-colors"
+                            >
+                              <span className="text-red-500 font-black text-xs w-9 shrink-0 tabular-nums">
+                                {m.minute}'
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] text-zinc-500 uppercase font-bold truncate">
+                                  {m.league}
+                                </div>
+                                <div className="text-sm font-bold text-white truncate">
+                                  {m.home}{" "}
+                                  <span className="text-zinc-600 font-normal">vs</span>{" "}
+                                  {m.away}
+                                </div>
+                              </div>
+                              <span className="font-black text-sm tabular-nums bg-zinc-800 px-2.5 py-1 rounded shrink-0">
+                                {m.homeScore} : {m.awayScore}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Dices size={16} className="text-red-500" />
+                    <h2 className="font-black text-sm uppercase tracking-wide">
+                      Cassino em Destaque
+                    </h2>
+                    <button
+                      onClick={() => selectMainTab("casino")}
+                      className="ml-auto text-red-500 text-xs font-bold flex items-center gap-0.5 hover:text-red-400"
+                    >
+                      Ver todos <ChevronRight size={13} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                    {homeCasinoPreviewLoading && homeCasinoPreview.length === 0
+                      ? Array.from({ length: 6 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="aspect-[3/4] rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
+                          />
+                        ))
+                      : homeCasinoPreview.map((game) => (
+                          <button
+                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
+                            disabled={casinoLoadingGame === game.id}
+                            onClick={() => launchCasinoGame(game)}
+                            title={game.name}
+                            aria-label={game.name}
+                            className="aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
+                          >
+                            {casinoLoadingGame === game.id ? (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <Loader2 className="animate-spin text-zinc-400" size={22} />
+                              </div>
+                            ) : game.img ? (
+                              <img
+                                src={game.img}
+                                alt={game.name}
+                                className="absolute inset-0 w-full h-full object-fill"
+                                loading="lazy"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <Dices className="text-red-600" size={22} />
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                  </div>
+                </div>
               </div>
             )}
 
