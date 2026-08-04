@@ -20667,27 +20667,51 @@ async function resolveDirectTracker(m: LiveMatchState): Promise<MatchTracker | n
   }
 }
 
+const directTrackerDebug = {
+  lastTickAt: 0,
+  lastTickMs: 0,
+  lastLiveCount: 0,
+  lastFoundCount: 0,
+  lastError: null as string | null,
+  lastStatuses: [] as Array<{ id: string; sport: string; status: string; home: string; away: string }>,
+};
+
 async function tickDirectTracker(): Promise<void> {
   if (directTrackerTicking) return;
   directTrackerTicking = true;
+  const startedAt = Date.now();
   try {
     const payload = await getLivePayloadCached();
+    directTrackerDebug.lastStatuses = payload.matches
+      .slice(0, 20)
+      .map((m) => ({ id: m.id, sport: m.sport, status: m.status, home: m.home, away: m.away }));
     const liveMatches = payload.matches.filter((m) => isLiveMatchStatus(m.status));
+    directTrackerDebug.lastLiveCount = liveMatches.length;
+    let found = 0;
     await Promise.all(
       liveMatches.map(async (m) => {
         const tr = await resolveDirectTracker(m);
-        if (tr) directTrackerCache.set(m.id, tr);
-        else directTrackerCache.delete(m.id);
+        if (tr) {
+          directTrackerCache.set(m.id, tr);
+          found++;
+        } else {
+          directTrackerCache.delete(m.id);
+        }
       }),
     );
+    directTrackerDebug.lastFoundCount = found;
+    directTrackerDebug.lastError = null;
     // Drop cache entries for matches no longer live (finished/removed).
     const liveIds = new Set(liveMatches.map((m) => m.id));
     for (const id of directTrackerCache.keys()) {
       if (!liveIds.has(id)) directTrackerCache.delete(id);
     }
   } catch (err) {
+    directTrackerDebug.lastError = err instanceof Error ? err.message : String(err);
     logger.error({ err }, "[direct-tracker] tick failed");
   } finally {
+    directTrackerDebug.lastTickAt = Date.now();
+    directTrackerDebug.lastTickMs = Date.now() - startedAt;
     directTrackerTicking = false;
   }
 }
@@ -20711,6 +20735,16 @@ function attachDirectTracker(matches: LiveMatchState[]): void {
 // updates using our own match id directly, no BetBY indirection. Pure
 // cache read (tickDirectTracker refreshes it on its own interval), so this
 // is safe to poll frequently without triggering new upstream calls.
+router.get("/tracker-debug", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.json({
+    ...directTrackerDebug,
+    lastTickAgoMs: directTrackerDebug.lastTickAt ? Date.now() - directTrackerDebug.lastTickAt : null,
+    cacheSize: directTrackerCache.size,
+    cachedMatchIds: Array.from(directTrackerCache.keys()),
+  });
+});
+
 router.get("/tracker/:matchId", (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const matchId = String(req.params["matchId"] ?? "");
