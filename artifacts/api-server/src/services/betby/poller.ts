@@ -4,6 +4,7 @@ import { fetchBetbyLiveEvents, getCachedExtractedVideo } from "./client.js";
 import { setLiveEvents, hydrateLiveEventsFromRedis } from "./state.js";
 import { ensureMapping, applyAutoExtractedVideo } from "../liveStream/mapping.js";
 import { getPulseScoreTrackerForTeams } from "../pulsescore/betbyTracker.js";
+import { getStatpalTrackerForTeams } from "../statpal/liveTracker.js";
 import { resolveStatscoreEventId } from "../statscore/resolver.js";
 import { getStatscoreTracker } from "../statscore/tracker.js";
 import { resolveVideoInfo } from "../smytdryt/resolver.js";
@@ -11,17 +12,19 @@ import { buildStreamUrl } from "../smytdryt/stream.js";
 import type { LiveEvent } from "./types.js";
 import type { MatchTracker } from "../liveStream/trackerTypes.js";
 
-// Resolução de Match Tracker em 2 CAMADAS — Statpal removida da cascata por
-// decisão do produto (não trabalhar mais com esse fornecedor); PulseScore
-// assume sozinha o papel de fallback automático para todos os esportes,
-// incluindo futebol (já tem cobertura própria via services/pulsescore/football.ts,
-// usada também no overlay de odds).
+// Resolução de Match Tracker em 3 CAMADAS — híbrido: Statpal é a fonte mais
+// rica para futebol (play-by-play, incidentes reais) e continua na cascata
+// (bug do 429/fallback já corrigido); PulseScore cobre tudo que a Statpal
+// não cobre (outros esportes) e serve de rede de segurança se as duas
+// primeiras falharem para um evento específico.
 //   1. StatScore — placar/minuto/incidentes AO VIVO.
 //      • Payload mais rico (minute, status, home/away score, incidents feed completo).
 //      • AUTENTICAÇÃO: header X-Auth + Referer widgets.statscore.com + query ?auth= (compat).
 //      • Requer mapeamento MANUAL admin (live_stream_mappings.statscore_event_id).
-//   2. PulseScore — Odds/Mercados, usada também como fallback automático de tracker.
-//      • RESPONSABILIDADE PRINCIPAL: Odds em tempo real / mercados agregados multi-bookmaker (ver matches.ts overlays).
+//   2. Statpal — estatísticas/eventos. **FUTEBOL APENAS**.
+//      • Play-by-play, cruza por nome de time (ZERO trabalho manual).
+//      • Cota: 300k/dia → cache rigoroso, polling nunca mais rápido que ~15s.
+//   3. PulseScore — Odds/Mercados, usada também como fallback automático de tracker.
 //      • Como TRACKER (fallback): best-effort scoreboard only (documentado schema garante só `score`;
 //        minute/clock/incidents se existirem no payload da casa são usados, senão vazios).
 //      • Cota ilimitada. WebSocket para tênis, REST para demais esportes (incl. futebol).
@@ -35,7 +38,21 @@ async function resolveTracker(event: LiveEvent): Promise<MatchTracker | null> {
     } catch (err) {
       logger.error(
         { err, betbyEventId: event.betbyEventId, statscoreEventId },
-        "[betby-poller] StatScore tracker fetch failed, falling back to PulseScore",
+        "[betby-poller] StatScore tracker fetch failed, falling back to Statpal",
+      );
+    }
+  }
+
+  const s = (event.sport || "").toLowerCase();
+  const statpalEligible = s.includes("soccer") || s.includes("football");
+  if (statpalEligible) {
+    try {
+      const tr = await getStatpalTrackerForTeams(event.home, event.away);
+      if (tr) return tr;
+    } catch (err) {
+      logger.error(
+        { err, betbyEventId: event.betbyEventId },
+        "[betby-poller] Statpal tracker fetch failed, falling back to PulseScore",
       );
     }
   }
