@@ -126,15 +126,38 @@ export default function MiniFieldView({
   homeTeam,
   awayTeam,
   liveClockLabel,
+  widgetUrl,
 }: {
   sport?: string;
   homeTeam: string;
   awayTeam: string;
   liveClockLabel?: string | null;
+  // SportScore's own animated pitch/court widget (real ball/incident
+  // animation, e.g. "Shot On Target... 49' M.Vera") — when present, this
+  // replaces the static SVG diagram below, which was always just team
+  // names over field markings and could never show real match action
+  // since none of our data sources give ball/player position coordinates
+  // directly.
+  widgetUrl?: string;
 }) {
   const kind = normalizeFieldSport(sport);
   const surface = SURFACE[kind];
   const Markings = surface.markings;
+
+  if (widgetUrl) {
+    return (
+      <div className="rounded-2xl overflow-hidden border border-zinc-800/70 bg-black" style={{ aspectRatio: "16/10" }}>
+        <iframe
+          src={widgetUrl}
+          className="w-full h-full"
+          style={{ border: 0 }}
+          loading="lazy"
+          title="Match tracker"
+          sandbox="allow-scripts allow-same-origin"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl overflow-hidden border border-zinc-800/70" style={{ background: "linear-gradient(160deg, #1a1a1f 0%, #0d0d10 100%)" }}>
