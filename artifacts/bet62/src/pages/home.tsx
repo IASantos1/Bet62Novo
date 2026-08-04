@@ -21698,76 +21698,76 @@ export default function Home({
                   )}
                 </div>
 
-                {/* Always 3 side-by-side columns, mobile included — no
-                    stacking on any viewport. Each card carries a small
-                    decorative icon (roulette/777, coin, LIVE badge)
-                    matching the reference design. */}
+                {/* Always 3 side-by-side columns, mobile included. Inside
+                    each card, text and image sit side by side (not
+                    stacked) — text on the left, real photo filling the
+                    right side of the card, matching the reference. */}
                 <div className="grid grid-cols-3 gap-2 sm:gap-3">
                   <button
                     onClick={() => selectMainTab("casino")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors flex items-stretch overflow-hidden"
                   >
-                    <img
-                      src="/promo-roulette.png"
-                      alt=""
-                      aria-hidden="true"
-                      className="self-end w-12 h-9 sm:w-16 sm:h-11 object-cover rounded-lg mb-1"
-                    />
-                    <div>
+                    <div className="flex-1 min-w-0 p-2.5 sm:p-4 flex flex-col justify-center">
                       <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                         Casino
                       </div>
-                      <div className="text-sm sm:text-base font-black text-white">+2000 Jogos</div>
+                      <div className="text-sm sm:text-base font-black text-white leading-tight">+2000 Jogos</div>
                       <div className="text-[10px] sm:text-xs text-zinc-400">As melhores slots!</div>
                       <div className="flex items-center gap-1 mt-2 text-red-400">
                         <Gift size={11} />
                         <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
                       </div>
                     </div>
+                    <img
+                      src="/promo-roulette.png"
+                      alt=""
+                      aria-hidden="true"
+                      className="w-16 sm:w-24 shrink-0 h-full object-cover"
+                    />
                   </button>
                   <button
                     onClick={() => {
                       setDepositModalOpen(true);
                       setActiveTab("wallet");
                     }}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors flex items-stretch overflow-hidden"
                   >
-                    <img
-                      src="/promo-coin.png"
-                      alt=""
-                      aria-hidden="true"
-                      className="self-end w-12 h-9 sm:w-16 sm:h-11 object-cover rounded-lg mb-1"
-                    />
-                    <div>
+                    <div className="flex-1 min-w-0 p-2.5 sm:p-4 flex flex-col justify-center">
                       <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
                         Depósito €10
                       </div>
-                      <div className="text-sm sm:text-base font-black text-amber-400">Ganhe €5</div>
+                      <div className="text-sm sm:text-base font-black text-amber-400 leading-tight">Ganhe €5</div>
                       <div className="text-[10px] sm:text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
                       <div className="flex items-center gap-1 mt-2 text-red-400">
                         <Gift size={11} />
                         <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
                       </div>
                     </div>
+                    <img
+                      src="/promo-coin.png"
+                      alt=""
+                      aria-hidden="true"
+                      className="w-16 sm:w-24 shrink-0 h-full object-cover"
+                    />
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors flex items-stretch overflow-hidden"
                   >
+                    <div className="flex-1 min-w-0 p-2.5 sm:p-4 flex flex-col justify-center">
+                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                        Aposte Ao Vivo
+                      </div>
+                      <div className="text-sm sm:text-base font-black text-white leading-tight">
+                        Emoção em tempo real
+                      </div>
+                    </div>
                     <img
                       src="/promo-live.png"
                       alt=""
                       aria-hidden="true"
-                      className="self-end w-12 h-9 sm:w-16 sm:h-11 object-cover rounded-lg mb-1"
+                      className="w-16 sm:w-24 shrink-0 h-full object-cover"
                     />
-                    <div>
-                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                        Aposte Ao Vivo
-                      </div>
-                      <div className="text-sm sm:text-base font-black text-white">
-                        Emoção em tempo real
-                      </div>
-                    </div>
                   </button>
                 </div>
 
