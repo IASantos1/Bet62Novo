@@ -7050,9 +7050,24 @@ export default function Home({
         const m = d?.match as Match | null | undefined;
         if (!m) return;
         writeSnapshot(matchSnapshotKey(id), m as any);
-        setExpandedMatch((prev) =>
-          prev && String(prev.id) === id ? (m as any) : prev,
-        );
+        setExpandedMatch((prev) => {
+          if (!prev || String(prev.id) !== id) return prev;
+          // This one-time full-detail fetch can race the backend's own
+          // BetBY poller (which resolves the SportScore/Statpal tracker
+          // asynchronously, on its own interval) — if this fetch lands
+          // before that resolution finishes, m.betbyTracker can be empty
+          // even though `prev` already had a good one from the periodic
+          // /live list sync. Never let a fetch that's simply "too early"
+          // permanently erase a tracker (and its SportScore widgetUrl)
+          // that's already showing.
+          const mm = m as any;
+          const pv = prev as any;
+          return {
+            ...mm,
+            betbyTracker: mm.betbyTracker ?? pv.betbyTracker,
+            betbyStream: mm.betbyStream ?? pv.betbyStream,
+          };
+        });
       })
       .catch(() => {})
       .finally(() => {
