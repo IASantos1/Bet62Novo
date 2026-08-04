@@ -4767,10 +4767,14 @@ export default function Home({
   // state/effect, real data from the existing /api/matches/upcoming
   // endpoint, never touches upcomingMatches (the sports tab's own data).
   // Typed as Match[] (not a narrower shape) so these feed directly into the
-  // site's own renderMatchCard — same official card as Ao Vivo/Esportes,
-  // team logos included, instead of a hand-rolled preview row.
+  // renders as a simple card (own preview row), not the full sports-tab
+  // event card — matches the reference design.
   const [homeUpcomingPreview, setHomeUpcomingPreview] = useState<Match[]>([]);
   const [homeUpcomingPreviewLoading, setHomeUpcomingPreviewLoading] = useState(false);
+  // Live matches for the Destaques preview — polled directly (not a one-time
+  // snapshot read) so minute/score stay current while the tab is open, same
+  // as the real Ao Vivo tab.
+  const [homeLiveRaw, setHomeLiveRaw] = useState<LiveMatchRaw[]>([]);
   const [casinoProviders, setCasinoProviders] = useState<string[]>([]);
   const [casinoProvider, setCasinoProvider] = useState<string>("Todos");
   const [casinoSearch, setCasinoSearch] = useState("");
@@ -8914,7 +8918,6 @@ export default function Home({
       "Gates of Olympus",
       "Fortune Tiger",
       "Aviator",
-      "Sweet Bonanza 1000",
       "Sweet Bonanza 2500",
       "Sweet Bonanza",
     ];
@@ -8944,19 +8947,53 @@ export default function Home({
 
   useEffect(() => {
     if (activeTab !== "home") return;
-    if (homeUpcomingPreview.length > 0) return;
-    setHomeUpcomingPreviewLoading(true);
-    fetch("/api/matches/upcoming?sport=football")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data?.matches))
-          setHomeUpcomingPreview(
-            data.matches.slice(0, 4).map((m: any) => ({ ...m, isLive: false })),
-          );
-      })
-      .catch(() => {})
-      .finally(() => setHomeUpcomingPreviewLoading(false));
-  }, [activeTab, homeUpcomingPreview.length]);
+    let cancelled = false;
+    const tick = (showSpinner: boolean) => {
+      if (showSpinner) setHomeUpcomingPreviewLoading(true);
+      fetch("/api/matches/upcoming?sport=football")
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          if (Array.isArray(data?.matches))
+            setHomeUpcomingPreview(
+              data.matches.slice(0, 4).map((m: any) => ({ ...m, isLive: false })),
+            );
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setHomeUpcomingPreviewLoading(false);
+        });
+    };
+    tick(true);
+    const interval = setInterval(() => tick(false), 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeTab]);
+
+  // Real-time live-matches polling for the "Esportes Ao Vivo" preview —
+  // fetches directly (not a one-time snapshot read) so minute/score keep
+  // updating while the Destaques tab is open, same cadence as the actual
+  // Ao Vivo tab.
+  useEffect(() => {
+    if (activeTab !== "home") return;
+    let cancelled = false;
+    const tick = () => {
+      fetch("/api/matches/live?lean=1&limit=500")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled && Array.isArray(data?.matches)) setHomeLiveRaw(data.matches);
+        })
+        .catch(() => {});
+    };
+    tick();
+    const interval = setInterval(tick, 8_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeTab]);
 
   // Flat grid — only used while searching (a handful of results split into
   // many 1-game franchise rows isn't useful). Browsing without a search
@@ -17939,7 +17976,7 @@ export default function Home({
                 { id: "home", icon: <Star size={15} />, label: "DESTAQUES" },
                 { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
                 { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
-                { id: "casino", icon: <Activity size={15} />, label: "CASSINO" },
+                { id: "casino", icon: <Activity size={15} />, label: "CASINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
               ].map((tab) => (
                 <button
@@ -18115,7 +18152,7 @@ export default function Home({
               label: "AO VIVO",
               badge: true,
             },
-            { id: "casino", icon: <Activity size={16} />, label: "CASSINO" },
+            { id: "casino", icon: <Activity size={16} />, label: "CASINO" },
             {
               id: "promos",
               icon: <Gift size={16} />,
@@ -21612,13 +21649,12 @@ export default function Home({
             )}
 
             {/* ── DESTAQUES (home dashboard) — new tab, fully independent from
-                the existing "sports" tab below (untouched). Reuses real,
-                already-fetched data: the live-matches localStorage snapshot
-                (same one the "Ao Vivo" tab warms in the background), a
-                curated real casino-games search, and the site's own
-                renderMatchCard for both live and upcoming previews — same
-                official card (odds, team logos) used on Ao Vivo/Esportes,
-                no hand-rolled duplicate UI. */}
+                the existing "sports" tab below (untouched). Casino games
+                curated by real title search; live matches polled directly
+                (own fetch+interval, not a one-time snapshot read) so they
+                stay current like the real Ao Vivo tab; live/upcoming render
+                as simple preview cards (not the full sports-tab event
+                card), per the reference design. */}
             {!expandedMatch && activeTab === "home" && (
               <div className="space-y-6 max-w-[1100px] mx-auto">
                 <div
@@ -21663,20 +21699,34 @@ export default function Home({
                 </div>
 
                 {/* Always 3 side-by-side columns, mobile included — no
-                    stacking on any viewport. */}
+                    stacking on any viewport. Each card carries a small
+                    decorative icon (roulette/777, coin, LIVE badge)
+                    matching the reference design. */}
                 <div className="grid grid-cols-3 gap-2 sm:gap-3">
                   <button
                     onClick={() => selectMainTab("casino")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
                   >
-                    <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                      Cassino
+                    <div
+                      className="self-end w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-[8px] sm:text-[9px] font-black text-white mb-1"
+                      style={{
+                        background:
+                          "conic-gradient(#dc2626 0deg 45deg, #18181b 45deg 90deg, #dc2626 90deg 135deg, #18181b 135deg 180deg, #dc2626 180deg 225deg, #18181b 225deg 270deg, #dc2626 270deg 315deg, #18181b 315deg 360deg)",
+                        boxShadow: "0 0 0 2px #27272a, 0 2px 6px rgba(0,0,0,0.5)",
+                      }}
+                    >
+                      777
                     </div>
-                    <div className="text-sm sm:text-base font-black text-white">+2000 Jogos</div>
-                    <div className="text-[10px] sm:text-xs text-zinc-400">As melhores slots!</div>
-                    <div className="flex items-center gap-1 mt-2 text-red-400">
-                      <Gift size={11} />
-                      <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
+                    <div>
+                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                        Casino
+                      </div>
+                      <div className="text-sm sm:text-base font-black text-white">+2000 Jogos</div>
+                      <div className="text-[10px] sm:text-xs text-zinc-400">As melhores slots!</div>
+                      <div className="flex items-center gap-1 mt-2 text-red-400">
+                        <Gift size={11} />
+                        <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
+                      </div>
                     </div>
                   </button>
                   <button
@@ -21684,31 +21734,43 @@ export default function Home({
                       setDepositModalOpen(true);
                       setActiveTab("wallet");
                     }}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
                   >
-                    <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                      Depósito €10
+                    <div
+                      className="self-end w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-sm sm:text-base font-black text-amber-900 mb-1"
+                      style={{
+                        background: "radial-gradient(circle at 35% 30%, #fde68a, #f0b429 55%, #b8860b 100%)",
+                        boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
+                      }}
+                    >
+                      €
                     </div>
-                    <div className="text-sm sm:text-base font-black text-amber-400">Ganhe €5</div>
-                    <div className="text-[10px] sm:text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
-                    <div className="flex items-center gap-1 mt-2 text-red-400">
-                      <Gift size={11} />
-                      <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
+                    <div>
+                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                        Depósito €10
+                      </div>
+                      <div className="text-sm sm:text-base font-black text-amber-400">Ganhe €5</div>
+                      <div className="text-[10px] sm:text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
+                      <div className="flex items-center gap-1 mt-2 text-red-400">
+                        <Gift size={11} />
+                        <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
+                      </div>
                     </div>
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
-                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4"
+                    className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-2.5 sm:p-4 flex flex-col justify-between"
                   >
-                    <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                      Aposte Ao Vivo
+                    <div className="self-end w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-red-600 flex items-center justify-center shadow-[0_0_0_2px_rgba(220,38,38,0.25)] mb-1">
+                      <span className="text-[7px] sm:text-[8px] font-black text-white tracking-tight">LIVE</span>
                     </div>
-                    <div className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
-                      Emoção em tempo real
-                      <span className="relative flex h-1.5 w-1.5 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
-                      </span>
+                    <div>
+                      <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
+                        Aposte Ao Vivo
+                      </div>
+                      <div className="text-sm sm:text-base font-black text-white">
+                        Emoção em tempo real
+                      </div>
                     </div>
                   </button>
                 </div>
@@ -21717,7 +21779,7 @@ export default function Home({
                   <div className="flex items-center gap-2 mb-3">
                     <Dices size={16} className="text-red-500" />
                     <h2 className="font-black text-sm uppercase tracking-wide">
-                      Cassino em Destaque
+                      Casino em Destaque
                     </h2>
                     <button
                       onClick={() => selectMainTab("casino")}
@@ -21793,9 +21855,8 @@ export default function Home({
                     "esports",
                     "horseracing",
                   ];
-                  const liveSnap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
                   const bySport = new Map<string, LiveMatchRaw[]>();
-                  for (const m of liveSnap?.value ?? []) {
+                  for (const m of homeLiveRaw) {
                     const sport = m.sport ?? "football";
                     if (!bySport.has(sport)) bySport.set(sport, []);
                     bySport.get(sport)!.push(m);
@@ -21820,10 +21881,6 @@ export default function Home({
                     if (!addedThisRound) break;
                     round++;
                   }
-                  const previewMatches: Match[] = balanced.map((m) => ({
-                    ...(m as any),
-                    isLive: true,
-                  }));
                   return (
                     <div>
                       <div className="flex items-center gap-2 mb-3">
@@ -21838,57 +21895,191 @@ export default function Home({
                           Ver todos <ChevronRight size={13} />
                         </button>
                       </div>
-                      {previewMatches.length === 0 ? (
+                      {balanced.length === 0 ? (
                         <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
                           Sem jogos ao vivo neste momento.
                         </div>
                       ) : (
-                        <div className="space-y-2">
-                          {previewMatches.map((match) => renderMatchCard(match))}
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 overflow-hidden">
+                          {balanced.map((m) => (
+                            <div
+                              key={m.id}
+                              className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3 hover:bg-zinc-800/60 transition-colors"
+                            >
+                              <button
+                                onClick={() => selectMainTab("live")}
+                                className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                              >
+                                <span className="text-red-500 font-black text-xs w-9 shrink-0 tabular-nums">
+                                  {m.minute}'
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[10px] text-zinc-500 uppercase font-bold truncate">
+                                    {m.league}
+                                  </div>
+                                  <div className="text-sm font-bold text-white truncate">
+                                    {m.home}{" "}
+                                    <span className="text-zinc-600 font-normal">vs</span>{" "}
+                                    {m.away}
+                                  </div>
+                                </div>
+                                <span className="font-black text-sm tabular-nums bg-zinc-800 px-2.5 py-1 rounded shrink-0">
+                                  {m.homeScore} : {m.awayScore}
+                                </span>
+                              </button>
+                              {m.odds && (m.odds.home > 1.01 || m.odds.away > 1.01) && (
+                                <button
+                                  onClick={() => selectMainTab("live")}
+                                  className="grid grid-cols-3 gap-1.5 sm:w-40 shrink-0 pl-12 sm:pl-0"
+                                >
+                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                    {m.odds.home.toFixed(2)}
+                                  </span>
+                                  {m.odds.draw > 1.01 ? (
+                                    <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                      {m.odds.draw.toFixed(2)}
+                                    </span>
+                                  ) : (
+                                    <span />
+                                  )}
+                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                    {m.odds.away.toFixed(2)}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
                   );
                 })()}
 
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <CalendarDays size={16} className="text-red-500" />
-                    <h2 className="font-black text-sm uppercase tracking-wide">
-                      Próximos Jogos em Destaque
-                    </h2>
-                    <button
-                      onClick={() => {
-                        setSelectedSport("football");
-                        setSelectedLeague(null);
-                        setSelectedCountry(null);
-                        setUpcomingSearchQuery("");
-                        selectMainTab("sports");
-                      }}
-                      className="ml-auto text-red-500 text-xs font-bold flex items-center gap-0.5 hover:text-red-400"
-                    >
-                      Ver todos <ChevronRight size={13} />
-                    </button>
-                  </div>
-                  {homeUpcomingPreviewLoading && homeUpcomingPreview.length === 0 ? (
-                    <div className="space-y-2">
-                      {Array.from({ length: 4 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className="h-24 rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
-                        />
-                      ))}
+                {(() => {
+                  const teamInitials = (name: string): string =>
+                    String(name ?? "")
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((w) => w[0])
+                      .join("")
+                      .toUpperCase() || "?";
+                  const teamColor = (name: string): string => {
+                    let h = 0;
+                    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+                    return `hsl(${h}, 55%, 38%)`;
+                  };
+                  const fmtWhen = (date?: string, time?: string): string => {
+                    if (!date) return time ?? "";
+                    const todayKey = new Date().toISOString().slice(0, 10);
+                    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+                    const label = date === todayKey ? "Hoje" : date === tomorrow ? "Amanhã" : date;
+                    return time ? `${label} · ${time}` : label;
+                  };
+                  return (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <CalendarDays size={16} className="text-red-500" />
+                        <h2 className="font-black text-sm uppercase tracking-wide">
+                          Próximos Jogos em Destaque
+                        </h2>
+                        <button
+                          onClick={() => {
+                            setSelectedSport("football");
+                            setSelectedLeague(null);
+                            setSelectedCountry(null);
+                            setUpcomingSearchQuery("");
+                            selectMainTab("sports");
+                          }}
+                          className="ml-auto text-red-500 text-xs font-bold flex items-center gap-0.5 hover:text-red-400"
+                        >
+                          Ver todos <ChevronRight size={13} />
+                        </button>
+                      </div>
+                      {homeUpcomingPreviewLoading && homeUpcomingPreview.length === 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          {Array.from({ length: 4 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="h-32 rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
+                            />
+                          ))}
+                        </div>
+                      ) : homeUpcomingPreview.length === 0 ? (
+                        <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
+                          Sem jogos agendados neste momento.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          {homeUpcomingPreview.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => {
+                                setSelectedSport("football");
+                                setSelectedLeague(null);
+                                setSelectedCountry(null);
+                                setUpcomingSearchQuery("");
+                                selectMainTab("sports");
+                              }}
+                              className="text-left rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors p-3.5"
+                            >
+                              <div className="flex items-baseline justify-between gap-2 mb-2">
+                                <span className="text-[11px] font-bold text-red-500">
+                                  {fmtWhen(m.date, m.time)}
+                                </span>
+                                <span className="text-[9px] font-bold text-zinc-500 uppercase truncate">
+                                  {m.league}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-center gap-3 py-2">
+                                <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
+                                  <span
+                                    className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black text-white shrink-0"
+                                    style={{ background: teamColor(m.home) }}
+                                  >
+                                    {teamInitials(m.home)}
+                                  </span>
+                                  <span className="text-[11px] font-bold text-center truncate w-full">
+                                    {m.home}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-black text-zinc-600">VS</span>
+                                <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
+                                  <span
+                                    className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black text-white shrink-0"
+                                    style={{ background: teamColor(m.away) }}
+                                  >
+                                    {teamInitials(m.away)}
+                                  </span>
+                                  <span className="text-[11px] font-bold text-center truncate w-full">
+                                    {m.away}
+                                  </span>
+                                </div>
+                              </div>
+                              {m.odds && (m.odds.home > 1.01 || m.odds.away > 1.01) && (
+                                <div className="grid grid-cols-3 gap-1.5 mt-1">
+                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                    {m.odds.home.toFixed(2)}
+                                  </span>
+                                  {m.odds.draw > 1.01 ? (
+                                    <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                      {m.odds.draw.toFixed(2)}
+                                    </span>
+                                  ) : (
+                                    <span />
+                                  )}
+                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                    {m.odds.away.toFixed(2)}
+                                  </span>
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ) : homeUpcomingPreview.length === 0 ? (
-                    <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
-                      Sem jogos agendados neste momento.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {homeUpcomingPreview.map((match) => renderMatchCard(match))}
-                    </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2 border-t border-zinc-800">
                   {[
