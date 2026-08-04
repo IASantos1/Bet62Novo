@@ -21718,12 +21718,15 @@ export default function Home({
                         <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
                       </div>
                     </div>
-                    <img
-                      src="/promo-roulette.png"
-                      alt=""
-                      aria-hidden="true"
-                      className="w-16 sm:w-24 shrink-0 h-full object-cover"
-                    />
+                    <div className="relative w-16 sm:w-40 shrink-0 h-full overflow-hidden">
+                      <img
+                        src="/promo-roulette.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="w-full h-full object-contain"
+                      />
+                      <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-zinc-900 to-transparent pointer-events-none" />
+                    </div>
                   </button>
                   <button
                     onClick={() => {
@@ -21743,12 +21746,15 @@ export default function Home({
                         <span className="text-[9px] font-bold uppercase tracking-wide">Oferta Especial</span>
                       </div>
                     </div>
-                    <img
-                      src="/promo-coin.png"
-                      alt=""
-                      aria-hidden="true"
-                      className="w-16 sm:w-24 shrink-0 h-full object-cover"
-                    />
+                    <div className="relative w-16 sm:w-40 shrink-0 h-full overflow-hidden">
+                      <img
+                        src="/promo-coin.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="w-full h-full object-contain"
+                      />
+                      <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-zinc-900 to-transparent pointer-events-none" />
+                    </div>
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
@@ -21762,12 +21768,15 @@ export default function Home({
                         Emoção em tempo real
                       </div>
                     </div>
-                    <img
-                      src="/promo-live.png"
-                      alt=""
-                      aria-hidden="true"
-                      className="w-16 sm:w-24 shrink-0 h-full object-cover"
-                    />
+                    <div className="relative w-16 sm:w-40 shrink-0 h-full overflow-hidden">
+                      <img
+                        src="/promo-live.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="w-full h-full object-contain"
+                      />
+                      <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-zinc-900 to-transparent pointer-events-none" />
+                    </div>
                   </button>
                 </div>
 
