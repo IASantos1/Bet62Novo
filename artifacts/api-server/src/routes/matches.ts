@@ -20667,6 +20667,27 @@ async function resolveDirectTracker(m: LiveMatchState): Promise<MatchTracker | n
   }
 }
 
+// Runs `fn` over `items` with at most `limit` in flight at once — used so
+// tickDirectTracker doesn't fire a Promise.all() across every live match
+// (which meant dozens of simultaneous outbound requests to SportScore/
+// Statpal/PulseScore every tick; a burst that size is a plausible reason
+// different matches "won" the lookup on different ticks rather than the
+// same ones consistently succeeding/failing).
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let idx = 0;
+  async function worker(): Promise<void> {
+    while (idx < items.length) {
+      const item = items[idx++]!;
+      await fn(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+}
+
 const directTrackerDebug = {
   lastTickAt: 0,
   lastTickMs: 0,
@@ -20688,17 +20709,15 @@ async function tickDirectTracker(): Promise<void> {
     const liveMatches = payload.matches.filter((m) => isLiveMatchStatus(m.status));
     directTrackerDebug.lastLiveCount = liveMatches.length;
     let found = 0;
-    await Promise.all(
-      liveMatches.map(async (m) => {
-        const tr = await resolveDirectTracker(m);
-        if (tr) {
-          directTrackerCache.set(m.id, tr);
-          found++;
-        } else {
-          directTrackerCache.delete(m.id);
-        }
-      }),
-    );
+    await mapWithConcurrency(liveMatches, 6, async (m) => {
+      const tr = await resolveDirectTracker(m);
+      if (tr) {
+        directTrackerCache.set(m.id, tr);
+        found++;
+      } else {
+        directTrackerCache.delete(m.id);
+      }
+    });
     directTrackerDebug.lastFoundCount = found;
     directTrackerDebug.lastError = null;
     // Drop cache entries for matches no longer live (finished/removed).
@@ -21445,6 +21464,18 @@ function namesMatch(a: string, b: string): boolean {
 // in hours. Cache the raw list per sport for a few seconds so all matches
 // resolved within the same polling tick reuse one fetch.
 const liveFixturesListCache = new Map<string, { matches: Record<string, unknown>[]; fetchedAt: number }>();
+// Tracks the in-flight fetch per sport (not just the resolved result) so
+// concurrent callers within the same tick — tickDirectTracker resolves
+// every live match via Promise.all(), and a busy tennis window alone can
+// mean a dozen matches all asking for sport="tennis" in the same instant —
+// await and share ONE real HTTP request instead of each independently
+// firing its own the moment they all see an empty/expired cache at once
+// (a classic cache-stampede: without this, N concurrent matches for the
+// same sport meant N simultaneous requests to the same URL, which is
+// wasted request budget at best and, if sportscore.com throttles bursts
+// from one IP, can make some of those N calls fail/timeout for reasons
+// that have nothing to do with whether the fixture itself exists).
+const liveFixturesListInFlight = new Map<string, Promise<Record<string, unknown>[]>>();
 const LIVE_FIXTURES_LIST_TTL_MS = 8_000;
 
 async function fetchLiveFixturesList(
@@ -21457,22 +21488,36 @@ async function fetchLiveFixturesList(
     diag.push({ step: "live-list", url, ok: true, status: 200, detail: `cached (${cached.matches.length} fixtures)` });
     return cached.matches;
   }
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!resp.ok) {
-      diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
-      return [];
-    }
-    const data = (await resp.json()) as Record<string, unknown>;
-    const matches = Array.isArray(data["matches"])
-      ? (data["matches"] as Record<string, unknown>[])
-      : [];
-    liveFixturesListCache.set(sport, { matches, fetchedAt: Date.now() });
+
+  const existing = liveFixturesListInFlight.get(sport);
+  if (existing) {
+    const matches = await existing;
+    diag.push({ step: "live-list", url, ok: true, status: 200, detail: `joined in-flight fetch (${matches.length} fixtures)` });
     return matches;
-  } catch (err) {
-    diag.push({ step: "live-list", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
-    return [];
   }
+
+  const fetchPromise = (async (): Promise<Record<string, unknown>[]> => {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) {
+        diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
+        return [];
+      }
+      const data = (await resp.json()) as Record<string, unknown>;
+      const matches = Array.isArray(data["matches"])
+        ? (data["matches"] as Record<string, unknown>[])
+        : [];
+      liveFixturesListCache.set(sport, { matches, fetchedAt: Date.now() });
+      return matches;
+    } catch (err) {
+      diag.push({ step: "live-list", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
+      return [];
+    } finally {
+      liveFixturesListInFlight.delete(sport);
+    }
+  })();
+  liveFixturesListInFlight.set(sport, fetchPromise);
+  return fetchPromise;
 }
 
 async function findInLiveFixturesList(
