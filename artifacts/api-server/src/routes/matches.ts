@@ -40,6 +40,8 @@ import {
 } from "../services/betby/publicScraperWithMapper.js";
 import { getLiveEvents } from "../services/betby/state.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
+import { getStatpalTrackerForTeams } from "../services/statpal/liveTracker.js";
+import { getPulseScoreTrackerForTeams } from "../services/pulsescore/betbyTracker.js";
 import type { MatchTracker } from "../services/liveStream/trackerTypes.js";
 
 // Inicia o scraper público BetBY em background (polling 20s) se a flag
@@ -49,6 +51,11 @@ import type { MatchTracker } from "../services/liveStream/trackerTypes.js";
 if (CONFIG.SCRAPER_BETBY_PUBLIC_PRIMARY) {
   startBetbyPublicPoller(CONFIG.SCRAPER_BETBY_PUBLIC_POLL_MS || 20_000);
 }
+
+// Resolves Match Tracker data directly against our own live matches
+// (StatScore -> SportScore -> Statpal -> PulseScore) — independent of the
+// BetBY-primary flag above, since it never depends on BetBY at all.
+startDirectTrackerPoller();
 
 const router: IRouter = Router();
 
@@ -20600,15 +20607,18 @@ export function broadcastBatchDelta(
 }
 
 // Cross-matches each Statpal/SportsAPI-sourced live match against the
-// BetBY poller's already-resolved live events (services/betby/state.js —
-// tracker via the StatScore→Statpal→PulseScore cascade, stream via
-// SMYTDRYT) by team name, and attaches whichever of tracker/stream it
-// found directly onto the match. Lets the frontend show a Tracker/Vídeo
-// button on the match's own card instead of a separate "Transmissões ao
-// vivo" list showing the same match twice under two different names.
+// BetBY poller's already-resolved live events (services/betby/state.js)
+// by team name and attaches its stream (SMYTDRYT HLS — no equivalent
+// exists outside BetBY's own feed, so this is still needed for video).
+// Tracker is deliberately NOT sourced from here anymore — see
+// attachDirectTracker below, which resolves it straight from
+// StatScore/SportScore/Statpal/PulseScore against our own match, with no
+// BetBY indirection (BetBY's own naming for a fixture routinely diverges
+// from both Statpal's and SportScore's, which was silently blocking
+// Tracker resolution for matches BetBY simply named differently).
 // Cheap: getLiveEvents() reads from an in-memory cache, no network call.
 function attachBetbyTrackerAndStream(matches: LiveMatchState[]): void {
-  const betbyEvents = getLiveEvents().filter((e) => e.tracker || e.stream);
+  const betbyEvents = getLiveEvents().filter((e) => e.stream);
   if (betbyEvents.length === 0) return;
   for (const m of matches) {
     const found = betbyEvents.find(
@@ -20616,10 +20626,123 @@ function attachBetbyTrackerAndStream(matches: LiveMatchState[]): void {
     );
     if (!found) continue;
     m.betbyEventId = found.betbyEventId;
-    if (found.tracker) m.betbyTracker = found.tracker;
     if (found.stream) m.betbyStream = found.stream;
   }
 }
+
+// ── Direct Tracker Resolution (no BetBY dependency) ─────────────────────
+// Resolves Tracker data straight from OUR OWN live match list (Statpal-
+// sourced home/away names), cascading StatScore (manual mapping) ->
+// SportScore (automatic, football/basketball/tennis/cricket/hockey) ->
+// Statpal (automatic, football safety net) -> PulseScore (last resort) —
+// same providers/order as services/betby/poller.ts's resolveTracker(),
+// just driven by our own match instead of a BetBY event, so a naming
+// mismatch on BetBY's side can never block this again.
+//
+// Runs on its own interval (not per-request) and caches results, since
+// resolving even one tier can mean a real network call — a client hitting
+// GET /live must never block on that. See tickDirectTracker/
+// startDirectTrackerPoller below.
+const directTrackerCache = new Map<string, MatchTracker>();
+let directTrackerTicking = false;
+
+function isLiveMatchStatus(status: string): boolean {
+  return !!status && status !== "Not Started" && status !== "Finished";
+}
+
+function sportscoreSportSlugForMatch(sport: string): string | null {
+  const s = (sport || "").toLowerCase();
+  if (s.includes("table")) return null; // table-tennis isn't covered
+  if (s.includes("soccer") || s.includes("football")) return "football";
+  if (s.includes("tennis")) return "tennis";
+  if (s.includes("basketball")) return "basketball";
+  if (s.includes("cricket")) return "cricket";
+  if (s.includes("hockey")) return "hockey";
+  return null;
+}
+
+async function resolveDirectTracker(m: LiveMatchState): Promise<MatchTracker | null> {
+  const sportscoreSport = sportscoreSportSlugForMatch(m.sport);
+  if (sportscoreSport) {
+    try {
+      const tr = await getSportscoreTrackerForTeams(sportscoreSport, m.home, m.away);
+      if (tr) return tr;
+    } catch (err) {
+      logger.warn({ err, id: m.id }, "[direct-tracker] SportScore fetch failed, falling back to Statpal");
+    }
+  }
+
+  const s = (m.sport || "").toLowerCase();
+  if (s.includes("soccer") || s.includes("football")) {
+    try {
+      const tr = await getStatpalTrackerForTeams(m.home, m.away);
+      if (tr) return tr;
+    } catch (err) {
+      logger.warn({ err, id: m.id }, "[direct-tracker] Statpal fetch failed, falling back to PulseScore");
+    }
+  }
+
+  try {
+    return await getPulseScoreTrackerForTeams(m.home, m.away, m.sport);
+  } catch (err) {
+    // Must not throw: runs inside Promise.all() over every live match in
+    // tickDirectTracker below — one match's failure must never stall the
+    // whole tick.
+    logger.warn({ err, id: m.id }, "[direct-tracker] PulseScore fetch failed");
+    return null;
+  }
+}
+
+async function tickDirectTracker(): Promise<void> {
+  if (directTrackerTicking) return;
+  directTrackerTicking = true;
+  try {
+    const payload = await getLivePayloadCached();
+    const liveMatches = payload.matches.filter((m) => isLiveMatchStatus(m.status));
+    await Promise.all(
+      liveMatches.map(async (m) => {
+        const tr = await resolveDirectTracker(m);
+        if (tr) directTrackerCache.set(m.id, tr);
+        else directTrackerCache.delete(m.id);
+      }),
+    );
+    // Drop cache entries for matches no longer live (finished/removed).
+    const liveIds = new Set(liveMatches.map((m) => m.id));
+    for (const id of directTrackerCache.keys()) {
+      if (!liveIds.has(id)) directTrackerCache.delete(id);
+    }
+  } catch (err) {
+    logger.error({ err }, "[direct-tracker] tick failed");
+  } finally {
+    directTrackerTicking = false;
+  }
+}
+
+let directTrackerTimer: ReturnType<typeof setInterval> | null = null;
+export function startDirectTrackerPoller(): void {
+  if (directTrackerTimer) return;
+  void tickDirectTracker();
+  directTrackerTimer = setInterval(() => void tickDirectTracker(), 20_000);
+}
+
+// Pure cache lookup — no network calls — safe to call per-request.
+function attachDirectTracker(matches: LiveMatchState[]): void {
+  for (const m of matches) {
+    const tr = directTrackerCache.get(m.id);
+    if (tr) m.betbyTracker = tr;
+  }
+}
+
+// GET /api/matches/tracker/:matchId — lets TrackerModal poll for live
+// updates using our own match id directly, no BetBY indirection. Pure
+// cache read (tickDirectTracker refreshes it on its own interval), so this
+// is safe to poll frequently without triggering new upstream calls.
+router.get("/tracker/:matchId", (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const matchId = String(req.params["matchId"] ?? "");
+  const tracker = matchId ? directTrackerCache.get(matchId) : undefined;
+  res.json(tracker ?? null);
+});
 
 router.get("/live", async (req: Request, res: Response) => {
   res.setHeader(
@@ -20680,6 +20803,7 @@ router.get("/live", async (req: Request, res: Response) => {
         ? effectivePayload.matches.slice(0, limit)
         : effectivePayload.matches;
     attachBetbyTrackerAndStream(matches);
+    attachDirectTracker(matches);
     if (!lean) {
       res.json({ matches });
       return;
@@ -20928,16 +21052,18 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
       }
     }
 
-    // The main /live list route attaches StatScore/SportScore/Statpal/
-    // PulseScore tracker+stream data via attachBetbyTrackerAndStream, but
-    // this single-match route builds its own response from scratch and
-    // never called it — so a match's card correctly showed the Tracker/
-    // Vídeo buttons (populated from the /live list), but the moment the
-    // frontend re-fetched this match individually (expandedMatch's live-
-    // sync effect, or a bookmark/deep-link straight to a match), the
-    // betbyTracker field was silently dropped and the UI fell back to the
-    // static field diagram / hid the buttons entirely.
-    if (match) attachBetbyTrackerAndStream([match as unknown as LiveMatchState]);
+    // The main /live list route attaches stream (attachBetbyTrackerAndStream)
+    // and tracker (attachDirectTracker) data, but this single-match route
+    // builds its own response from scratch and never called either — so a
+    // match's card correctly showed the Tracker/Vídeo buttons (populated
+    // from the /live list), but the moment the frontend re-fetched this
+    // match individually (expandedMatch's live-sync effect, or a deep link
+    // straight to a match), that data was silently dropped and the UI fell
+    // back to the static field diagram / hid the buttons entirely.
+    if (match) {
+      attachBetbyTrackerAndStream([match as unknown as LiveMatchState]);
+      attachDirectTracker([match as unknown as LiveMatchState]);
+    }
 
     res.json({ match });
   } catch {
@@ -21308,6 +21434,44 @@ function namesMatch(a: string, b: string): boolean {
   return abbreviatedPersonNameMatch(a, b);
 }
 
+// SportScore's free widget API is capped at ~10k req/day/IP. Without
+// sharing this fetch, every match on our own live list independently
+// re-fetches the same 50-item live list on every lookup — with a periodic
+// poller checking dozens of live matches every ~20s (see
+// tickDirectTracker below), that alone would burn through the daily quota
+// in hours. Cache the raw list per sport for a few seconds so all matches
+// resolved within the same polling tick reuse one fetch.
+const liveFixturesListCache = new Map<string, { matches: Record<string, unknown>[]; fetchedAt: number }>();
+const LIVE_FIXTURES_LIST_TTL_MS = 8_000;
+
+async function fetchLiveFixturesList(
+  sport: string,
+  diag: SportscoreDiagStep[],
+): Promise<Record<string, unknown>[]> {
+  const url = `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`;
+  const cached = liveFixturesListCache.get(sport);
+  if (cached && Date.now() - cached.fetchedAt < LIVE_FIXTURES_LIST_TTL_MS) {
+    diag.push({ step: "live-list", url, ok: true, status: 200, detail: `cached (${cached.matches.length} fixtures)` });
+    return cached.matches;
+  }
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) {
+      diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
+      return [];
+    }
+    const data = (await resp.json()) as Record<string, unknown>;
+    const matches = Array.isArray(data["matches"])
+      ? (data["matches"] as Record<string, unknown>[])
+      : [];
+    liveFixturesListCache.set(sport, { matches, fetchedAt: Date.now() });
+    return matches;
+  } catch (err) {
+    diag.push({ step: "live-list", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
+    return [];
+  }
+}
+
 async function findInLiveFixturesList(
   sport: string,
   homeTeam: string,
@@ -21316,15 +21480,7 @@ async function findInLiveFixturesList(
 ): Promise<SportscoreFixture | null> {
   const url = `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`;
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!resp.ok) {
-      diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
-      return null;
-    }
-    const data = (await resp.json()) as Record<string, unknown>;
-    const matches = Array.isArray(data["matches"])
-      ? (data["matches"] as Record<string, unknown>[])
-      : [];
+    const matches = await fetchLiveFixturesList(sport, diag);
 
     for (const m of matches) {
       const mHome = pickTeamName(m, "home");
@@ -21337,13 +21493,15 @@ async function findInLiveFixturesList(
       const id = pickStr(m, ["id", "matchId", "match_id"]);
       const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]) ?? slugFromMatchUrl(m);
       if (!id && !slug) continue;
-      diag.push({ step: "live-list", url, ok: true, status: resp.status, detail: `found in ${matches.length} fixtures ("${mHome}" vs "${mAway}")` });
+      diag.push({ step: "live-list", url, ok: true, status: 200, detail: `found in ${matches.length} fixtures ("${mHome}" vs "${mAway}")` });
       return {
         id: id ?? "",
         slug: slug ?? `${slugifyTeamName(mHome)}-vs-${slugifyTeamName(mAway)}`,
       };
     }
-    diag.push({ step: "live-list", url, ok: false, status: resp.status, detail: `not found among ${matches.length} live/recent fixtures` });
+    if (matches.length > 0) {
+      diag.push({ step: "live-list", url, ok: false, status: 200, detail: `not found among ${matches.length} live/recent fixtures` });
+    }
     return null;
   } catch (err) {
     diag.push({ step: "live-list", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
