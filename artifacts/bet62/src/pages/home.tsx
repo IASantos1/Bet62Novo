@@ -24782,15 +24782,21 @@ export default function Home({
                   key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
                   disabled={casinoLoadingGame === game.id}
                   onClick={() => launchCasinoGame(game)}
+                  title={game.name}
+                  aria-label={game.name}
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
                   className={`${sizeClass} casino-card-shine aspect-[2/3] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
                 >
                   {casinoLoadingGame === game.id ? (
                     <Loader2 className="animate-spin text-zinc-400" size={28} />
                   ) : game.img ? (
+                    // Game artwork already has its title baked in — no
+                    // overlay caption here, it only fought with that text
+                    // and got cut off (see the reference screenshots the
+                    // user marked up: overlapping/clipped title text).
                     <img
                       src={game.img}
-                      alt=""
+                      alt={game.name}
                       className="absolute inset-0 w-full h-full object-cover"
                       loading="lazy"
                       onError={(e) => {
@@ -24798,11 +24804,13 @@ export default function Home({
                       }}
                     />
                   ) : (
-                    <Dices className="text-red-600" size={28} />
+                    <>
+                      <Dices className="text-red-600" size={28} />
+                      <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight mt-2">
+                        {game.name}
+                      </span>
+                    </>
                   )}
-                  <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight bg-black/70 py-1 mt-auto w-full">
-                    {game.name}
-                  </span>
                 </button>
               );
 
