@@ -21604,11 +21604,19 @@ export function sportscoreMatchToTracker(
     }
   }
   const trackerObj = raw["tracker"];
-  const eventId =
-    trackerObj && typeof trackerObj === "object"
-      ? String((trackerObj as Record<string, unknown>)["id"] ?? "")
-      : "";
-  return { provider: "sportscore", eventId, status, minute, homeScore, awayScore, incidents };
+  let eventId = "";
+  let widgetUrl: string | undefined;
+  if (trackerObj && typeof trackerObj === "object") {
+    const t = trackerObj as Record<string, unknown>;
+    const widgetId = String(t["id"] ?? "");
+    const profile = String(t["profile"] ?? "");
+    const widgetSport = String(t["sport"] ?? "");
+    eventId = widgetId;
+    if (widgetId && profile && widgetSport) {
+      widgetUrl = `https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(widgetSport)}&id=${encodeURIComponent(widgetId)}&profile=${encodeURIComponent(profile)}&src=bet62.com`;
+    }
+  }
+  return { provider: "sportscore", eventId, status, minute, homeScore, awayScore, incidents, widgetUrl };
 }
 
 // End-to-end: resolve the fixture by team name, then fetch+map its tracker
