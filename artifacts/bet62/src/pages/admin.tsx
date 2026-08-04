@@ -827,6 +827,14 @@ export default function AdminPage() {
       detail: string;
     }>;
     tracker?: { ok: boolean; status?: number; raw?: unknown; error?: string };
+    mappedTracker?: {
+      provider: string;
+      status: string;
+      minute: string;
+      homeScore: number;
+      awayScore: number;
+      incidents: Array<{ type: string; team: string; minute: number; player: string }>;
+    } | null;
     error?: string;
     detail?: string;
   } | null>(null);
@@ -7069,12 +7077,36 @@ export default function AdminPage() {
                               className="text-xs font-bold"
                               style={{ color: sportscoreTestResult.tracker.ok ? "#34d399" : "#f87171" }}
                             >
-                              Tracker (/api/widget/tracker/):{" "}
+                              Tracker (/api/widget/match/):{" "}
                               {sportscoreTestResult.tracker.ok
                                 ? "resposta recebida"
                                 : sportscoreTestResult.tracker.error}
                             </span>
                           </div>
+
+                          {sportscoreTestResult.mappedTracker && (
+                            <div className="mb-3 p-3 rounded" style={{ background: "#052e21", border: "1px solid #065f46" }}>
+                              <div className="text-sm font-black mb-2" style={{ color: "#6ee7b7" }}>
+                                {sportscoreTestResult.mappedTracker.homeScore} - {sportscoreTestResult.mappedTracker.awayScore}
+                                {" · "}
+                                {sportscoreTestResult.mappedTracker.minute || sportscoreTestResult.mappedTracker.status}
+                              </div>
+                              {sportscoreTestResult.mappedTracker.incidents.length > 0 ? (
+                                <div className="space-y-1">
+                                  {sportscoreTestResult.mappedTracker.incidents.map((inc, i) => (
+                                    <div key={i} className="text-xs" style={{ color: "#a7f3d0" }}>
+                                      {inc.minute}' — {inc.type} ({inc.team}) — {inc.player}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-xs" style={{ color: "#71717a" }}>
+                                  Nenhum incidente ainda
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {sportscoreTestResult.tracker.raw != null && (
                             <pre
                               className="text-[10px] whitespace-pre-wrap break-all max-h-64 overflow-y-auto p-2 rounded"
