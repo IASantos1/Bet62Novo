@@ -21640,14 +21640,17 @@ export default function Home({
                     <div className="text-xs text-zinc-400">As melhores slots!</div>
                   </button>
                   <button
-                    onClick={() => selectMainTab("promos", fetchCashback)}
+                    onClick={() => {
+                      setDepositModalOpen(true);
+                      setActiveTab("wallet");
+                    }}
                     className="text-left rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-zinc-700 transition-colors p-4"
                   >
                     <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">
-                      Cashback Semanal
+                      Depósito €10
                     </div>
-                    <div className="text-base font-black text-amber-400">Até 10%</div>
-                    <div className="text-xs text-zinc-400">De volta sempre!</div>
+                    <div className="text-base font-black text-amber-400">Ganhe €5</div>
+                    <div className="text-xs text-zinc-400">Em free bets, já no 1.º depósito!</div>
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
@@ -21665,6 +21668,22 @@ export default function Home({
                     </div>
                   </button>
                 </div>
+
+                <button
+                  onClick={() => selectMainTab("promos", fetchCashback)}
+                  className="w-full text-left rounded-xl border border-red-900/40 bg-gradient-to-r from-red-950/40 via-zinc-900 to-zinc-900 hover:border-red-800/60 transition-colors p-4 flex items-center gap-3"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-red-600/15 text-red-500 flex items-center justify-center shrink-0">
+                    <Gift size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-black text-white">Ofertas Especiais</div>
+                    <div className="text-xs text-zinc-400">
+                      Aproveite os melhores bónus do mercado
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-zinc-500 shrink-0" />
+                </button>
 
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                   {[
