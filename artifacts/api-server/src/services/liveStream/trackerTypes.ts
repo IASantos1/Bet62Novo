@@ -11,4 +11,11 @@ export interface MatchTracker {
   homeScore: number;
   awayScore: number;
   incidents: Array<{ type: string; team: string; minute: number; player: string }>;
+  // SportScore only: a ready-to-embed iframe URL for their own animated
+  // pitch/court widget (3D stylized field with live event pop-ups) — see
+  // sportscoreMatchToTracker in routes/matches.ts. No odds/betting inside,
+  // purely visual; confirmed via a real captured session (not documented
+  // anywhere official, discovered from the "tracker":{id,profile,sport}
+  // object nested in the /api/widget/match/ response).
+  widgetUrl?: string;
 }

@@ -500,13 +500,16 @@ type CasinoGameGroup = { name: string; games: CasinoGame[] };
 // separate polling needed to see score/incidents); only rendered when a
 // BetBY event has a stream ready.
 type MatchTracker = {
-  provider: "statscore" | "pulsescore";
+  provider: "statscore" | "pulsescore" | "statpal" | "sportscore";
   eventId: string;
   status: string;
   minute: string;
   homeScore: number;
   awayScore: number;
   incidents: Array<{ type: string; team: string; minute: number; player: string }>;
+  // SportScore only: ready-to-embed iframe URL for their own animated
+  // pitch/court widget — no odds/betting, purely visual.
+  widgetUrl?: string;
 };
 type BetbyLiveEvent = {
   eventId?: string;
@@ -4586,6 +4589,21 @@ function TrackerModal({
                 {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
               </div>
             </div>
+            {tracker.widgetUrl && (
+              <div
+                className="mb-4 rounded-xl overflow-hidden border border-zinc-800 bg-black"
+                style={{ aspectRatio: "16/10" }}
+              >
+                <iframe
+                  src={tracker.widgetUrl}
+                  className="w-full h-full"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  title="Match tracker"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              </div>
+            )}
             <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
               Incidentes
             </div>
