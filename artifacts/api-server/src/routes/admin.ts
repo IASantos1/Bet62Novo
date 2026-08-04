@@ -45,6 +45,7 @@ import { replayEngine } from "../lib/replayEngine.js";
 import {
   findSportscoreFixture,
   fetchSportscoreTracker,
+  sportscoreMatchToTracker,
   type SportscoreDiagStep,
   unknownStatpalMarkets,
   countryForLeagueName,
@@ -2269,10 +2270,14 @@ router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) 
     }
     const diag: SportscoreDiagStep[] = [];
     const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
-    const tracker = fixture?.id
-      ? await fetchSportscoreTracker(sport, fixture.id)
-      : { ok: false, error: "fixture sem id — só slug resolvido, tracker precisa do id numérico" };
-    res.json({ result: fixture, steps: diag, tracker });
+    const tracker = fixture?.slug
+      ? await fetchSportscoreTracker(sport, fixture.slug)
+      : { ok: false, error: "fixture não encontrado — sem slug pra consultar o tracker" };
+    const mappedTracker =
+      tracker.ok && tracker.raw
+        ? sportscoreMatchToTracker(tracker.raw as Record<string, unknown>, homeTeam, awayTeam)
+        : null;
+    res.json({ result: fixture, steps: diag, tracker, mappedTracker });
   } catch (err) {
     logger.error({ err }, "POST /api/admin/sportscore-test error");
     res.status(500).json({

@@ -4,7 +4,7 @@
 // normalise into this exact shape so the frontend never needs to care
 // which one answered a given request.
 export interface MatchTracker {
-  provider: "statscore" | "statpal" | "pulsescore";
+  provider: "statscore" | "statpal" | "pulsescore" | "sportscore";
   eventId: string;
   status: string;
   minute: string;

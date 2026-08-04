@@ -21503,35 +21503,13 @@ async function findViaTeamSchedule(
   return null;
 }
 
-// The live-list endpoint (findInLiveFixturesList) never carries a numeric
-// id — only the slug extracted from its "url" field — so a fixture found
-// there always came back with id: "", which the Tracker endpoint can't use
-// (it requires the numeric id, not the slug). Backfill it with one extra
-// call to the single-match detail endpoint, which does return the id (same
-// call findByGuessedSlug already makes for its own candidates).
-async function backfillTrackerId(
-  sport: string,
-  slug: string,
-  diag: SportscoreDiagStep[],
-): Promise<string> {
-  const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!resp.ok) {
-      diag.push({ step: "backfill-id", url, ok: false, status: resp.status, detail: `HTTP ${resp.status}` });
-      return "";
-    }
-    const data = (await resp.json()) as Record<string, unknown>;
-    const m = (data["match"] ?? data) as Record<string, unknown>;
-    const id = pickStr(m, ["id", "matchId", "match_id"]) ?? "";
-    diag.push({ step: "backfill-id", url, ok: !!id, status: resp.status, detail: id ? `id "${id}"` : "no id in detail response either" });
-    return id;
-  } catch (err) {
-    diag.push({ step: "backfill-id", url, ok: false, detail: `network error: ${err instanceof Error ? err.message : String(err)}` });
-    return "";
-  }
-}
-
+// findInLiveFixturesList never carries a numeric id — only the slug
+// extracted from its "url" field. That's fine: the Tracker data comes from
+// GET /api/widget/match/?slug=... (see fetchSportscoreTracker below), which
+// only ever needed the slug, not a numeric id (a real captured response
+// confirmed /api/widget/match/ has no top-level numeric id field at all —
+// the only id-shaped value present is a separate, differently-formatted
+// match.tracker.id, unrelated to what the original docs implied).
 export async function findSportscoreFixture(
   sport: string,
   homeTeam: string,
@@ -21544,12 +21522,7 @@ export async function findSportscoreFixture(
   }
 
   const fromList = await findInLiveFixturesList(sport, homeTeam, awayTeam, diag);
-  if (fromList) {
-    if (!fromList.id && fromList.slug) {
-      fromList.id = await backfillTrackerId(sport, fromList.slug, diag);
-    }
-    return fromList;
-  }
+  if (fromList) return fromList;
 
   const fromGuess = await findByGuessedSlug(sport, homeTeam, awayTeam, diag);
   if (fromGuess) return fromGuess;
@@ -21557,27 +21530,100 @@ export async function findSportscoreFixture(
   return findViaTeamSchedule(sport, homeTeam, awayTeam, diag);
 }
 
-// Fetches SportScore's own Match Tracker payload (GET /api/widget/tracker/)
-// for a fixture already resolved via findSportscoreFixture — this endpoint
-// was documented in the comment above since the integration's early days
-// but never actually called anywhere; findSportscoreFixture only ever
-// resolved the id/slug and stopped there. Shape is intentionally read
-// defensively (no hard-coded field list) since this is the first real
-// sample of this endpoint's response seen by this codebase.
+// Fetches SportScore's own Match Tracker payload — confirmed via a real
+// captured response that GET /api/widget/match/?sport=X&slug=Y (the SAME
+// single-match detail endpoint already used to confirm a guessed slug)
+// already returns everything needed for our own Tracker: home_score/
+// away_score, status/status_text/live_minute, and a real incidents[] array
+// (goal/card type, side, minute, player name) — richer than StatScore or
+// Statpal ever gave us. The separately-documented /api/widget/tracker/
+// endpoint takes an opaque id nested at match.tracker.id (not the numeric
+// id the original docs implied) and was never confirmed to return anything
+// useful, so this deliberately doesn't call it — /api/widget/match/ alone
+// is enough.
 export async function fetchSportscoreTracker(
   sport: string,
-  trackerId: string,
+  slug: string,
 ): Promise<{ ok: boolean; status?: number; raw?: unknown; error?: string }> {
-  if (!trackerId) return { ok: false, error: "trackerId vazio" };
-  const url = `https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(trackerId)}&src=bet62.com`;
+  if (!slug) return { ok: false, error: "slug vazio" };
+  const url = `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`;
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
     if (!resp.ok) return { ok: false, status: resp.status, error: `HTTP ${resp.status}` };
-    const raw = await resp.json();
+    const data = (await resp.json()) as Record<string, unknown>;
+    const raw = (data["match"] ?? data) as Record<string, unknown>;
     return { ok: true, status: resp.status, raw };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+function sportscoreIncidentType(inc: Record<string, unknown>): string {
+  const t = String(inc["type"] ?? "").toLowerCase();
+  if (inc["is_goal"] || t.includes("goal")) {
+    if (t.includes("own")) return "own_goal";
+    if (t.includes("penalty")) return "penalty";
+    return "goal";
+  }
+  if (t.includes("yellow")) return t.includes("second") || t.includes("red") ? "yellow_red" : "yellow";
+  if (t.includes("red")) return "red_card";
+  if (t.includes("var")) return "var";
+  if (t.includes("sub")) return "substitution";
+  return "";
+}
+
+// Maps a raw /api/widget/match/ response into our own MatchTracker shape —
+// same normalized contract StatScore/Statpal/PulseScore already produce, so
+// the frontend/poller don't need to care which provider actually answered.
+export function sportscoreMatchToTracker(
+  raw: Record<string, unknown> | undefined,
+  homeTeamName: string,
+  awayTeamName: string,
+): MatchTracker | null {
+  if (!raw) return null;
+  const homeScore = Number(raw["home_score"]);
+  const awayScore = Number(raw["away_score"]);
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
+  const minute = String(raw["live_minute"] ?? raw["status_text"] ?? "").trim();
+  const status = String(raw["status_text"] ?? raw["status"] ?? "LIVE").trim() || "LIVE";
+  const incidents: MatchTracker["incidents"] = [];
+  const rawIncidents = raw["incidents"];
+  if (Array.isArray(rawIncidents)) {
+    for (const item of rawIncidents) {
+      if (!item || typeof item !== "object") continue;
+      const inc = item as Record<string, unknown>;
+      const type = sportscoreIncidentType(inc);
+      if (!type) continue;
+      const side = String(inc["side"] ?? "");
+      incidents.push({
+        type,
+        team: side === "home" ? homeTeamName : side === "away" ? awayTeamName : "",
+        minute: Number(inc["time"]) || 0,
+        player: String(inc["player"] ?? "").trim(),
+      });
+    }
+  }
+  const trackerObj = raw["tracker"];
+  const eventId =
+    trackerObj && typeof trackerObj === "object"
+      ? String((trackerObj as Record<string, unknown>)["id"] ?? "")
+      : "";
+  return { provider: "sportscore", eventId, status, minute, homeScore, awayScore, incidents };
+}
+
+// End-to-end: resolve the fixture by team name, then fetch+map its tracker
+// data — this is what the automatic cascade (poller.ts) calls.
+export async function getSportscoreTrackerForTeams(
+  sport: string,
+  homeTeam: string,
+  awayTeam: string,
+): Promise<MatchTracker | null> {
+  const diag: SportscoreDiagStep[] = [];
+  const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
+  if (!fixture?.slug) return null;
+  const tracker = await fetchSportscoreTracker(sport, fixture.slug);
+  if (!tracker.ok || !tracker.raw) return null;
+  return sportscoreMatchToTracker(tracker.raw as Record<string, unknown>, homeTeam, awayTeam);
 }
 
 router.get(
