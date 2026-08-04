@@ -24785,36 +24785,25 @@ export default function Home({
                   title={game.name}
                   aria-label={game.name}
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
-                  className={`${sizeClass} casino-card-shine aspect-[2/3] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
+                  className={`${sizeClass} casino-card-shine aspect-[4/5] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait`}
                 >
                   {casinoLoadingGame === game.id ? (
                     <Loader2 className="animate-spin text-zinc-400" size={28} />
                   ) : game.img ? (
                     // Game artwork already has its title baked in — no
                     // overlay caption here, it only fought with that text
-                    // and got cut off (see the reference screenshots the
-                    // user marked up: overlapping/clipped title text).
-                    // Source art is mostly square while the card is tall
-                    // (2/3), so object-cover was cropping the sides and
-                    // slicing the baked-in title. object-contain shows the
-                    // full art uncropped; a blurred copy fills the gaps.
-                    <>
-                      <img
-                        src={game.img}
-                        aria-hidden="true"
-                        className="absolute inset-0 w-full h-full object-cover blur-lg scale-110 opacity-50"
-                        loading="lazy"
-                      />
-                      <img
-                        src={game.img}
-                        alt={game.name}
-                        className="relative w-full h-full object-contain"
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    </>
+                    // and got cut off. aspect-[4/5] is close enough to the
+                    // source art's native ratio that object-cover fills the
+                    // card at full size without slicing the baked-in title.
+                    <img
+                      src={game.img}
+                      alt={game.name}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                      }}
+                    />
                   ) : (
                     <>
                       <Dices className="text-red-600" size={28} />
