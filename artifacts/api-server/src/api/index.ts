@@ -5,7 +5,6 @@ import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
-import { startBetbyPoller } from "../services/betby/poller.js";
 
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? "8080");
 
@@ -81,7 +80,12 @@ server.listen(port, () => {
 
   startPulseScoreTennisWs();
 
-  void startBetbyPoller();
+  // BetBY's poller stopped delivering anything the site actually uses:
+  // Tracker is now resolved directly against our own matches (SportScore-
+  // only, see routes/matches.ts's tickDirectTracker), and BetBY's own
+  // video/stream auto-extraction never found a real stream in production
+  // (confirmed empty via /api/live/auto-video-debug). Left running, it was
+  // 5-second-interval network calls for zero user-facing benefit.
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
