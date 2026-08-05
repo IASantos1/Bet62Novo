@@ -21,6 +21,7 @@ import * as net from "net";
 import {
   getPulseScoreFootballLive,
   findPulseScoreFootballOverride,
+  extractFootballOverride,
   pulseScoreEventScore,
   pulseScoreEventMinute,
 } from "../services/pulsescore/football.js";
@@ -19609,7 +19610,16 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
-    const override = findPulseScoreFootballOverride(home, away, events);
+    // Extract directly from `ev` — this loop is iterating PulseScore's own
+    // event list, so the override we want IS `ev`, not some other event that
+    // fuzzy-matches its team names. findPulseScoreFootballOverride() (an
+    // O(n) fuzzy Levenshtein scan per call) exists for cross-provider lookups
+    // (a Statpal/SportsAPI match hunting for its PulseScore counterpart) —
+    // using it here turned this loop O(n²) (up to ~20k fuzzy string
+    // comparisons for 200 live matches, redone every 1-2s broadcast tick),
+    // which was blocking the event loop long enough to freeze the live page
+    // and stall odds-market requests.
+    const override = extractFootballOverride(ev);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const markets: AdvancedMarkets = { ...baseMarkets };
     if (override?.totalGoals) {

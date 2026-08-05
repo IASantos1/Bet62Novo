@@ -158,7 +158,7 @@ function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
  * winner and total-goals markets. Returns an empty object (not null) when
  * the event has neither recognised yet — callers should only apply the
  * fields that are actually present. */
-function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootballOverride {
+export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootballOverride {
   const out: PulseScoreFootballOverride = {};
   for (const market of ev.markets ?? []) {
     if (isMatchWinnerMarket(market)) {
