@@ -10202,6 +10202,11 @@ export default function Home({
     const isNationalMatch = isSelectionMatch(match);
     const homeFlag = isNationalMatch ? getCountryFlagUrl(match.home.toLowerCase()) : null;
     const awayFlag = isNationalMatch ? getCountryFlagUrl(match.away.toLowerCase()) : null;
+    // Club badge for non-national matches — real logo if it resolves
+    // (SportsAPI ID, falling back to the local banner map), nothing
+    // otherwise (no placeholder circle/initials, same rule as Destaques).
+    const homeBadge = !isNationalMatch ? getTeamBadgeAsset(match, "home") : null;
+    const awayBadge = !isNationalMatch ? getTeamBadgeAsset(match, "away") : null;
     const dateStr =
       (match.scheduledDate ?? match.date)
         ? formatMatchDate(match.scheduledDate ?? match.date ?? "")
@@ -10975,9 +10980,11 @@ export default function Home({
                 <>
                   <div className="flex items-center gap-2 mb-1.5">
                     {rcH > 0 && <RcBadge count={rcH} />}
-                    {homeFlag && (
+                    {homeFlag ? (
                       <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
-                    )}
+                    ) : homeBadge?.src ? (
+                      <img src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                    ) : null}
                     <span className={`text-[13px] font-black leading-tight truncate flex-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
                     </span>
@@ -10987,9 +10994,11 @@ export default function Home({
                   </div>
                   <div className="flex items-center gap-2">
                     {rcA > 0 && <RcBadge count={rcA} />}
-                    {awayFlag && (
+                    {awayFlag ? (
                       <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
-                    )}
+                    ) : awayBadge?.src ? (
+                      <img src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                    ) : null}
                     <span className={`text-[12px] font-semibold leading-tight truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
                     </span>
@@ -11174,6 +11183,11 @@ export default function Home({
     const isNationalMatch = isSelectionMatch(match);
     const homeFlag = isNationalMatch ? getCountryFlagUrl(match.home.toLowerCase()) : null;
     const awayFlag = isNationalMatch ? getCountryFlagUrl(match.away.toLowerCase()) : null;
+    // Club badge for non-national matches — real logo if it resolves
+    // (SportsAPI ID, falling back to the local banner map), nothing
+    // otherwise (no placeholder circle/initials, same rule as Destaques).
+    const homeBadge = !isNationalMatch ? getTeamBadgeAsset(match, "home") : null;
+    const awayBadge = !isNationalMatch ? getTeamBadgeAsset(match, "away") : null;
     const isSuspendedMatch =
       match.isLive &&
       (match.marketSuspension?.["result"] != null &&
@@ -11426,17 +11440,21 @@ export default function Home({
               ) : (
                 <>
                   <div className="mb-1.5 flex items-center gap-1.5">
-                    {homeFlag && (
+                    {homeFlag ? (
                       <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
-                    )}
+                    ) : homeBadge?.src ? (
+                      <img src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                    ) : null}
                     <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {awayFlag && (
+                    {awayFlag ? (
                       <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
-                    )}
+                    ) : awayBadge?.src ? (
+                      <img src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                    ) : null}
                     <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
                     </span>
