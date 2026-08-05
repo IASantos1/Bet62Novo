@@ -81,7 +81,7 @@ class AppErrorBoundary extends Component<
 function Router() {
   return (
     <Switch>
-      <Route path="/">{() => <Home />}</Route>
+      <Route path="/">{() => <Home initialTab="home" />}</Route>
       <Route path="/destaques">{() => <Home initialTab="home" />}</Route>
       <Route path="/casino">{() => <Home initialTab="casino" />}</Route>
       <Route path="/promocoes">{() => <Home initialTab="promos" />}</Route>

@@ -7054,45 +7054,72 @@ export default function Home({
     }
     if (liveExpandedFullFetchRef.current === id) return;
     liveExpandedFullFetchRef.current = id;
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 12_000);
     const qs = expandedMatch.sport === "tennis" ? "?fresh=1" : "";
-    fetch(`/api/matches/live-match/${encodeURIComponent(id)}${qs}`, {
-      signal: ctrl.signal,
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const m = d?.match as Match | null | undefined;
-        if (!m) return;
-        writeSnapshot(matchSnapshotKey(id), m as any);
-        setExpandedMatch((prev) => {
-          if (!prev || String(prev.id) !== id) return prev;
-          // This one-time full-detail fetch can race the backend's own
-          // BetBY poller (which resolves the SportScore/Statpal tracker
-          // asynchronously, on its own interval) — if this fetch lands
-          // before that resolution finishes, m.betbyTracker can be empty
-          // even though `prev` already had a good one from the periodic
-          // /live list sync. Never let a fetch that's simply "too early"
-          // permanently erase a tracker (formations/HT score/incidents)
-          // that's already showing on this expanded card.
-          const mm = m as any;
-          const pv = prev as any;
-          return {
-            ...mm,
-            betbyTracker: mm.betbyTracker ?? pv.betbyTracker,
-            betbyStream: mm.betbyStream ?? pv.betbyStream,
-          };
-        });
+
+    let cancelled = false;
+    let currentCtrl: AbortController | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 6;
+
+    const runFetch = () => {
+      const ctrl = new AbortController();
+      currentCtrl = ctrl;
+      const tid = setTimeout(() => ctrl.abort(), 12_000);
+      fetch(`/api/matches/live-match/${encodeURIComponent(id)}${qs}`, {
+        signal: ctrl.signal,
       })
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(tid);
-        if (liveExpandedFullFetchRef.current === id)
-          liveExpandedFullFetchRef.current = null;
-      });
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const m = d?.match as Match | null | undefined;
+          if (!m) return false;
+          writeSnapshot(matchSnapshotKey(id), m as any);
+          setExpandedMatch((prev) => {
+            if (!prev || String(prev.id) !== id) return prev;
+            // This full-detail fetch can race the backend's own BetBY
+            // poller (which resolves the SportScore/Statpal tracker
+            // asynchronously, on its own interval) — if this fetch lands
+            // before that resolution finishes, m.betbyTracker can be empty
+            // even though `prev` already had a good one from the periodic
+            // /live list sync. Never let a fetch that's simply "too early"
+            // permanently erase a tracker (formations/HT score/incidents)
+            // that's already showing on this expanded card.
+            const mm = m as any;
+            const pv = prev as any;
+            return {
+              ...mm,
+              betbyTracker: mm.betbyTracker ?? pv.betbyTracker,
+              betbyStream: mm.betbyStream ?? pv.betbyStream,
+            };
+          });
+          return !!(m as any).markets;
+        })
+        .catch(() => false)
+        .finally(() => {
+          clearTimeout(tid);
+        })
+        .then((gotMarkets) => {
+          if (cancelled) return;
+          attempt += 1;
+          // This is a one-shot hydration fetch with no other retry path —
+          // a single transient timeout/error used to leave "A carregar
+          // mercados…" stuck forever for that match (never refetched).
+          // Retry a bounded number of times instead of giving up silently.
+          if (gotMarkets || attempt >= MAX_ATTEMPTS) {
+            liveExpandedFullFetchRef.current = null;
+            return;
+          }
+          retryTimer = setTimeout(runFetch, 5_000);
+        });
+    };
+
+    runFetch();
     return () => {
-      clearTimeout(tid);
-      ctrl.abort();
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      currentCtrl?.abort();
+      if (liveExpandedFullFetchRef.current === id)
+        liveExpandedFullFetchRef.current = null;
     };
   }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
