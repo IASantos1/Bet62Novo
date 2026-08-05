@@ -529,6 +529,7 @@ function normalizeMainTabPath(path: string): string {
 
 function getPathForMainTab(tab: MainTab): string {
   if (tab === "home") return "/destaques";
+  if (tab === "sports") return "/esportes";
   if (tab === "live") return "/ao-vivo";
   if (tab === "casino") return "/casino";
   if (tab === "promos") return "/promocoes";

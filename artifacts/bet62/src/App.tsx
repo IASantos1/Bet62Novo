@@ -83,6 +83,7 @@ function Router() {
     <Switch>
       <Route path="/">{() => <Home initialTab="home" />}</Route>
       <Route path="/destaques">{() => <Home initialTab="home" />}</Route>
+      <Route path="/esportes">{() => <Home initialTab="sports" />}</Route>
       <Route path="/casino">{() => <Home initialTab="casino" />}</Route>
       <Route path="/promocoes">{() => <Home initialTab="promos" />}</Route>
       <Route path="/carteira">{() => <Home initialTab="wallet" />}</Route>
