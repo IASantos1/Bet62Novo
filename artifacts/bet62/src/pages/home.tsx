@@ -10001,7 +10001,11 @@ export default function Home({
       return null;
     }
 
-    if (odd < 1.15 && market === "result") {
+    // Tennis excluded: this heuristic exists to hide football's "obvious
+    // blowout" late-game prices, but a low live tennis price for a big
+    // favorite is a legitimate, bettable market — hiding it just disables
+    // real markets.
+    if (odd < 1.15 && market === "result" && match.sport !== "tennis") {
       return (
         <div
           className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white") : "bg-zinc-800/40 border-zinc-700/30"}`}
@@ -10023,6 +10027,7 @@ export default function Home({
     const isObviousResult =
       match.isLive &&
       market === "result" &&
+      match.sport !== "tennis" &&
       (() => {
         if (odd <= 1.05) return true;
         const min = getDisplayMinute(match);

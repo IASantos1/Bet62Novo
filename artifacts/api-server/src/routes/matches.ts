@@ -19687,24 +19687,30 @@ const TENNIS_DISAPPEAR_GRACE_MS = 3 * 60_000;
 // provider, and the old Statpal-primary builder — buildTennisLiveMatches —
 // was already dead code, never called). Real moneyline odds come from
 // PulseScore (matched by team name via extractTennisOverride, already
-// confirmed against real /tennis/leagues data). The score field is best-
-// effort: PulseScoreEvent.score {home,away} is the confirmed shape for
-// football, and tennis uses the same shared envelope, but its meaning for
-// tennis specifically (sets won, most likely) has NOT been confirmed
-// against a real live tennis sample — only prematch data has been checked
-// so far. Treated as sets won since that's the standard bet365-style
-// live-tennis headline score; correct this one parse if a real sample shows
-// otherwise. No per-set/per-game/serving detail is populated — those would
-// need moreInfo field names that haven't been observed yet, and guessing
-// them risks the same repeated-rework this integration already went
-// through for football. markets is intentionally left as an empty stand-in
-// (same escape hatch F1/MMA use) rather than fabricating tennis-specific
-// markets from unconfirmed data.
-// _liveExtra.sets is populated from that same sets-won score so the
-// frontend's S1/PTS table actually renders (it ignores match-level
-// homeScore/awayScore for tennis) — currentPoints is a "0"/"0" placeholder,
-// matching what the upcoming-lag bridge below already shows for freshly-
-// started matches, since real per-point data isn't available here.
+// confirmed against real /tennis/leagues data).
+//
+// PulseScoreEvent.score {home,away} was initially assumed to be "sets won"
+// (the football-style headline score). Real live data proved that wrong the
+// same day: a WTA Toronto match (best-of-3, so 3 sets is impossible) showed
+// score {home:3, away:0}, and other matches showed values up to 7-0 — both
+// only make sense as a games count (current set, or cumulative match games;
+// still not confirmed which). Two things follow from that:
+//  1. It's still fine to show it as the live "games so far" column in the
+//     score table (rawScore below) — that's cosmetic.
+//  2. It must NOT be trusted as a proxy for "who is winning the match" —
+//     state.homeScore/awayScore feed finalizeStaleLiveMatch's finished-match
+//     record, which settlement.ts's resolveSelectionMarketFallback uses as
+//     an ft.home>ft.away last-resort winner call for the tennis moneyline
+//     market when it can't find a proper completed-sets breakdown (which it
+//     never will here, since we only ever have one live "current" number,
+//     never a real per-set history). Feeding it the real-but-mismeaning
+//     score would let that fallback silently declare the wrong winner on
+//     live tennis bets. So homeScore/awayScore stay pinned at 0/0 — the
+//     fallback then sees a tie, resolves nothing, and the bet correctly
+//     waits for manual review / times out to void instead of auto-paying
+//     the wrong side. markets is intentionally left as an empty stand-in
+//     (same escape hatch F1/MMA use) rather than fabricating tennis-specific
+//     markets from unconfirmed data.
 async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreTennisLive();
   const result: LiveMatchState[] = [];
@@ -19717,34 +19723,27 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const baseOdds = makeTennisBaseOdds(home, away);
     const homeScoreRaw = Number(ev.score?.home);
     const awayScoreRaw = Number(ev.score?.away);
-    const homeScore = Number.isFinite(homeScoreRaw) ? homeScoreRaw : 0;
-    const awayScore = Number.isFinite(awayScoreRaw) ? awayScoreRaw : 0;
+    const rawHome = Number.isFinite(homeScoreRaw) ? homeScoreRaw : 0;
+    const rawAway = Number.isFinite(awayScoreRaw) ? awayScoreRaw : 0;
     // Without a real per-match price, every live tennis match previously
     // fell back to the same flat neutral 1.85/1.85 baseOdds regardless of
     // who's actually ahead — both buttons showing an identical price reads
-    // as a bug (and is a worse price than we can offer given we do have the
-    // real sets-won score). Shift it by set score the same way the old
-    // started-upcoming bridge already did, only using the real provider
-    // price outright when one is available.
+    // as a bug. Nudge it using the games-in-play weight (not the much
+    // heavier sets-won weight — rawHome/rawAway aren't a reliable sets
+    // count, see comment above) so a big live lead moves the price without
+    // the swings being severe enough to trip the "obvious result, hide the
+    // button" heuristic. Real provider price is still used outright when
+    // available.
     const liveOddsState = computeTennisLiveOdds(
       baseOdds,
-      [],
-      homeScore,
-      awayScore,
+      [[rawHome, rawAway]],
+      0,
+      0,
       undefined,
       undefined,
       override.odds,
     );
     const odds = liveOddsState.odds;
-    // Frontend's tennis card (TennisScore in home.tsx) only reads
-    // _liveExtra.sets/currentPoints — match-level homeScore/awayScore are
-    // never shown for tennis, so without this the real sets-won score
-    // PulseScore gives us silently never renders (blank score area). Show it
-    // as the "current set" column since we don't have real per-set game
-    // scores; currentPoints stays a "0"/"0" placeholder (same one the
-    // upcoming-lag bridge below already uses) since per-point detail isn't
-    // available from this feed.
-    const currentSetNum = Math.max(1, homeScore + awayScore + 1);
     const id = `pulsescore-tennis-${ev.eventId}`;
     const state: LiveMatchState = {
       id,
@@ -19753,16 +19752,23 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       league: ev.league || "Ténis",
       country: "Internacional",
       sport: "tennis",
-      homeScore,
-      awayScore,
+      // Pinned at 0/0 on purpose — see settlement-safety note above.
+      homeScore: 0,
+      awayScore: 0,
       minute: 0,
-      status: tennisSetLabel(currentSetNum),
+      status: "Em Jogo",
       hasRealOdds: liveOddsState.hasRealOdds,
       odds,
       markets: {} as unknown as AdvancedMarkets,
       events: [],
+      // Cosmetic only — frontend's tennis card (TennisScore in home.tsx)
+      // reads _liveExtra.sets/currentPoints, never match-level
+      // homeScore/awayScore, so this is what actually makes the S1/PTS
+      // table render. currentPoints stays a "0"/"0" placeholder (same one
+      // the upcoming-lag bridge below already uses) since real per-point
+      // detail isn't available from this feed.
       _liveExtra: {
-        sets: [[homeScore, awayScore]],
+        sets: [[rawHome, rawAway]],
         currentPoints: ["0", "0"],
       },
     };
