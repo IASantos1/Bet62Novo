@@ -3216,7 +3216,13 @@ const OTHER_SPORTS: {
     key: "boxing",
     label: "Boxing",
     icon: "🥊",
-    leagues: ["UFC", "Bellator", "PFL", "ONE Championship", "Rizin"],
+    leagues: ["Bellator", "PFL", "ONE Championship", "Rizin"],
+  },
+  {
+    key: "mma",
+    label: "MMA",
+    icon: "🥋",
+    leagues: ["UFC"],
   },
   {
     key: "cricket",
@@ -3761,6 +3767,11 @@ type Match = {
   f1Extra?: {
     raceWinner: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
     podium: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
+  };
+  /** MMA only — real markets beyond the moneyline (odds.home/away) */
+  mmaExtra?: {
+    toDistance?: { yes: number; no: number };
+    totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
   };
   // Match Tracker resolved server-side directly against this match by team
   // name (see matches.ts's attachDirectTracker). Drives the inline Tracker
@@ -4349,6 +4360,7 @@ function sportEmoji(sport?: string): string {
   if (sport === "boxing") return "🥊";
   if (sport === "cricket") return "🏏";
   if (sport === "handball") return "🤾";
+  if (sport === "mma") return "🥋";
   return "⚽";
 }
 
@@ -11266,6 +11278,60 @@ export default function Home({
                   </span>
                 </div>
               )}
+              {/* ── MMA: "vai até o limite" + total de rounds, alongside the
+                  standard moneyline above (real PulseScore odds, no synthetic
+                  model) ── */}
+              {sport === "mma" && match.mmaExtra?.toDistance && (
+                <div className="flex gap-1 w-full mt-1">
+                  <OddsButton
+                    match={match}
+                    selection="yes"
+                    odd={match.mmaExtra.toDistance.yes}
+                    market="mma_distance"
+                    label="Vai ao Limite"
+                    grow
+                    variant="worldcup"
+                  />
+                  <OddsButton
+                    match={match}
+                    selection="no"
+                    odd={match.mmaExtra.toDistance.no}
+                    market="mma_distance"
+                    label="Não Vai ao Limite"
+                    grow
+                    variant="worldcup"
+                  />
+                </div>
+              )}
+              {sport === "mma" &&
+                (match.mmaExtra?.totalRoundsLines?.length ?? 0) > 0 &&
+                (() => {
+                  const mid = match.mmaExtra!.totalRoundsLines![
+                    Math.floor(match.mmaExtra!.totalRoundsLines!.length / 2)
+                  ]!;
+                  return (
+                    <div className="flex gap-1 w-full mt-1">
+                      <OddsButton
+                        match={match}
+                        selection={`over-${mid.line}`}
+                        odd={mid.over}
+                        market="mma_total_rounds"
+                        label={`Mais de ${mid.line} Rounds`}
+                        grow
+                        variant="worldcup"
+                      />
+                      <OddsButton
+                        match={match}
+                        selection={`under-${mid.line}`}
+                        odd={mid.under}
+                        market="mma_total_rounds"
+                        label={`Menos de ${mid.line} Rounds`}
+                        grow
+                        variant="worldcup"
+                      />
+                    </div>
+                  );
+                })()}
             </>
           )}
         </div>
@@ -22381,6 +22447,7 @@ export default function Home({
                   { key: "volleyball", emoji: "🏐", label: "Voleibol" },
                   { key: "baseball", emoji: "⚾", label: "Beisebol" },
                   { key: "boxing", emoji: "🥊", label: "Boxing" },
+                  { key: "mma", emoji: "🥋", label: "MMA" },
                   { key: "cricket", emoji: "🏏", label: "Críquete" },
                   { key: "formula1", emoji: "🏎️", label: "Fórmula 1" },
                   { key: "handball", emoji: "🤾", label: "Handebol" },

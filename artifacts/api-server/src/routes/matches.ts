@@ -33,6 +33,10 @@ import {
   pulseScoreVolleyball,
   type GenericMoneylineOverride,
 } from "../services/pulsescore/genericSportLive.js";
+import {
+  getPulseScoreMmaUpcoming,
+  extractMmaMarkets,
+} from "../services/pulsescore/mma.js";
 import { getStatpalTrackerForTeams } from "../services/statpal/liveTracker.js";
 import { getPulseScoreTrackerForTeams } from "../services/pulsescore/genericTracker.js";
 import type { MatchTracker } from "../services/liveStream/trackerTypes.js";
@@ -665,6 +669,8 @@ export type LiveMatchState = {
   };
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
+  /** MMA only — real markets beyond the moneyline (odds.home/away) */
+  mmaExtra?: MmaExtraData;
   // Match Tracker resolved directly against this match by team name (see
   // attachDirectTracker/resolveDirectTracker: StatScore -> SportScore ->
   // Statpal -> PulseScore). Lets the frontend show a Tracker button inline
@@ -676,6 +682,10 @@ export type F1DriverOdd = { name: string; shortName: string; team: string; pos: 
 export type F1ExtraData = {
   raceWinner: F1DriverOdd[];
   podium: F1DriverOdd[];
+};
+export type MmaExtraData = {
+  toDistance?: { yes: number; no: number };
+  totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
 };
 
 export type UpcomingMatch = {
@@ -710,6 +720,8 @@ export type UpcomingMatch = {
   awayImageVersion?: string;
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
+  /** MMA only — real markets beyond the moneyline (odds.home/away) */
+  mmaExtra?: MmaExtraData;
 };
 
 type SAPIMatchEvent = {
@@ -13258,6 +13270,66 @@ function buildExtraLiveV2(sport: ExtraV2Sport, events: SAPIV2Event[]): LiveMatch
   return result;
 }
 
+/** ISO startTime → the app's "DD.MM.YYYY"/"HH:MM" (Europe/Lisbon) pair —
+ * same formatting v2EventDateTime uses, just from an ISO string instead of
+ * a unix timestamp (PulseScore's MMA feed gives startTime as ISO). */
+function mmaEventDateTime(startTime: string): { date: string; time: string } {
+  const d = new Date(startTime);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+  return {
+    date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+    time: `${hh}:${p["minute"] ?? "00"}`,
+  };
+}
+
+// MMA — prematch only (PulseScore/unibetau, no live-events endpoint verified
+// yet — see services/pulsescore/mma.ts). Real odds throughout (moneyline +
+// to-go-the-distance + total rounds), no synthetic model needed since
+// PulseScore already prices every fight, unlike football's Elo/Poisson
+// fallback for matches without real odds.
+async function buildMmaUpcoming(): Promise<UpcomingMatch[]> {
+  const events = await getPulseScoreMmaUpcoming();
+  const result: UpcomingMatch[] = [];
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const extracted = extractMmaMarkets(ev);
+    if (!extracted.odds) continue; // no usable moneyline — nothing to show/bet on
+    const { date, time } = mmaEventDateTime(ev.startTime);
+    result.push({
+      id: `pulsescore-mma-${ev.eventId}`,
+      home,
+      away,
+      league: ev.league || "MMA",
+      country: "MMA",
+      time,
+      date,
+      sport: "mma",
+      hasRealOdds: true,
+      odds: { home: extracted.odds.home, draw: 0, away: extracted.odds.away },
+      markets: {} as unknown as AdvancedMarkets,
+      mmaExtra: {
+        toDistance: extracted.toDistance,
+        totalRoundsLines: extracted.totalRoundsLines,
+      },
+    } as UpcomingMatch);
+  }
+  return result;
+}
+
 // ─── Formula 1 — data types ──────────────────────────────────────────────────
 
 type F1DriverEntry = {
@@ -19455,10 +19527,11 @@ async function rebuildUpcomingCache(): Promise<void> {
       upHockey,
       upVolleyball,
       upBaseball,
-      upMma,
+      upBoxing,
       upCricket,
       upHandball,
       upFormula1,
+      upMma,
       // V5 prematch events — fetched in parallel, merged below
       v5Football,
       v5Basketball,
@@ -19473,10 +19546,14 @@ async function rebuildUpcomingCache(): Promise<void> {
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
       buildBaseballUpcoming().catch(() => empty),
+      // NOTE: this was previously (mis)named "upMma" despite being boxing —
+      // boxing is a distinct SportsAPI Pro category, unrelated to the real
+      // PulseScore-sourced MMA added below.
       getExtraUpcomingEventsV2("boxing").then((events) => buildExtraUpcomingV2("boxing", events)).catch(() => empty),
       getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
       getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
       getFormula1Upcoming().catch(() => empty),
+      buildMmaUpcoming().catch(() => empty),
       // V5 — 1xBet prematch feed (real odds: 1x2 + DC + totals + BTTS + DNB + handicap)
       buildV5Upcoming(1, 200).catch(() => empty), // football
       buildV5Upcoming(3, 100).catch(() => empty), // basketball
@@ -19508,10 +19585,11 @@ async function rebuildUpcomingCache(): Promise<void> {
       ...finalHockey,
       ...finalVolleyball,
       ...finalBaseball,
-      ...upMma,
+      ...upBoxing,
       ...upCricket,
       ...upHandball,
       ...upFormula1,
+      ...upMma,
     ]);
     // Upcoming order: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
     _allUpcomingCache = [
@@ -19521,10 +19599,11 @@ async function rebuildUpcomingCache(): Promise<void> {
       ...finalBasketball,
       ...finalVolleyball,
       ...finalBaseball,
-      ...upMma,
+      ...upBoxing,
       ...upCricket,
       ...upHandball,
       ...upFormula1,
+      ...upMma,
     ];
     _allUpcomingCacheBuiltAt = Date.now();
   } catch {
