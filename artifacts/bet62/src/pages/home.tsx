@@ -8182,8 +8182,15 @@ export default function Home({
         // Use ref so this callback is not recreated on every live-data update
         const hasMatches = liveMatchesRef.current.length > 0;
         if (snap && canUseSnap && !hasMatches) {
+          // The cached snapshot is written straight from the raw API
+          // response — unlike the live fetch path (processLiveData), it
+          // never goes through dedupeLiveMatches. A snapshot saved while
+          // the feed briefly had overlapping/duplicate entries would flash
+          // duplicates on screen until the fresh fetch below replaces it.
           setLiveMatches(
-            (snap.value as any[]).map((m) => ({ ...(m as any), isLive: true })),
+            dedupeLiveMatches(
+              (snap.value as any[]).map((m) => ({ ...(m as any), isLive: true })),
+            ),
           );
           setLiveLoading(false);
           setLiveTransport("cache");
