@@ -13888,6 +13888,28 @@ function isVirtualFootballLeague(name: string): boolean {
   );
 }
 
+// Explicit allowlist for PulseScore-sourced live football (buildFootballLiveFromPulseScore
+// below) — add league names here to show ONLY those leagues; every other real league gets
+// hidden (virtual/eSoccer stays blocked either way via isVirtualFootballLeague above).
+// Leave EMPTY to show every real league PulseScore sends (current behavior).
+// Matching is case-insensitive substring against the league name PulseScore sends
+// (the `league` field on each live event — e.g. "England: Premier League",
+// "Spain: LaLiga", "Brazil: Brasileirão Série A"). One entry per line, e.g.:
+//   "premier league",
+//   "laliga",
+//   "brasileirao serie a",
+const PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST: string[] = [
+  // Add the leagues you want to show here — leave empty for "show all".
+];
+
+function isAllowedFootballLeague(name: string): boolean {
+  if (PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.length === 0) return true;
+  const n = name.toLowerCase();
+  return PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.some((p) =>
+    n.includes(p.toLowerCase()),
+  );
+}
+
 /** Returns true for women's football leagues (kept but flagged for frontend). */
 function isWomensLeague(name: string): boolean {
   return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(
@@ -19629,6 +19651,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const away = ev.away?.trim();
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
+    if (!isAllowedFootballLeague(ev.league || "")) continue;
     // Extract directly from `ev` — this loop is iterating PulseScore's own
     // event list, so the override we want IS `ev`, not some other event that
     // fuzzy-matches its team names. findPulseScoreFootballOverride() (an
