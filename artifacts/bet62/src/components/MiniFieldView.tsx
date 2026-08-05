@@ -276,6 +276,57 @@ export default function MiniFieldView({
           </svg>
         </div>
       </div>
+
+      {/* Incidents timeline — the pitch graphic itself is static (no x/y
+          ball/player data exists in the source JSON), so this is what
+          actually reflects THIS match: every real goal/card/sub plotted at
+          its real minute, home side above the line / away side below. */}
+      {incidents && incidents.length > 0 && (
+        <div className="px-4 pb-3">
+          <div className="mx-auto max-w-[360px]">
+            {(() => {
+              const maxMinute = Math.max(90, ...incidents.map((i) => i.minute || 0));
+              const iconFor = (type: string): string => {
+                if (type === "goal") return "⚽";
+                if (type === "own_goal") return "🔴";
+                if (type === "penalty") return "🥅";
+                if (type === "yellow") return "🟨";
+                if (type === "yellow_red") return "🟨🟥";
+                if (type === "red_card") return "🟥";
+                if (type === "var") return "📺";
+                if (type === "substitution") return "🔄";
+                return "•";
+              };
+              return (
+                <div className="relative pt-3 pb-3">
+                  <div className="absolute left-0 right-0 top-1/2 h-px bg-zinc-800" />
+                  {incidents.map((inc, i) => {
+                    const pct = Math.min(100, Math.max(0, ((inc.minute || 0) / maxMinute) * 100));
+                    const isHome = inc.team === homeTeam;
+                    return (
+                      <div
+                        key={i}
+                        className="absolute flex flex-col items-center gap-0.5"
+                        style={{
+                          left: `${pct}%`,
+                          transform: "translateX(-50%)",
+                          top: isHome ? 0 : "auto",
+                          bottom: isHome ? "auto" : 0,
+                        }}
+                        title={`${inc.minute}' ${inc.player || ""}`.trim()}
+                      >
+                        {isHome && <span className="text-[11px] leading-none">{iconFor(inc.type)}</span>}
+                        <span className="text-[7px] font-bold text-zinc-500 leading-none">{inc.minute}'</span>
+                        {!isHome && <span className="text-[11px] leading-none">{iconFor(inc.type)}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
