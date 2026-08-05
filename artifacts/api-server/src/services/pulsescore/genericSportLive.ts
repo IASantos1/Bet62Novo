@@ -1,6 +1,6 @@
-// Generic REST-polled PulseScore live source for sports beyond football
-// (which has its own module for the total_goals mapping) and tennis (which
-// uses the one PRO-plan WebSocket slot instead — see tennisWs.ts).
+// Generic REST-polled PulseScore live source for sports beyond football and
+// tennis, which each have their own module (football.ts, tennis.ts) — tennis
+// shares football's bet365 bookmaker rather than getting a distinct one.
 //
 // Each sport here is deliberately assigned a *different* bookmaker prefix
 // (basketball → fanduel, ice-hockey → bwin, baseball → draftkings,

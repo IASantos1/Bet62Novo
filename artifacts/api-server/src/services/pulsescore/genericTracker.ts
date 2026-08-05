@@ -1,7 +1,7 @@
 // Match Tracker automatic fallback — PulseScore instead of Statpal
 // (explicit user decision: replace, not add). Reuses the same live-events
 // caches already kept warm by the odds-overlay feature (football.ts,
-// tennisWs.ts, genericSportLive.ts) rather than polling PulseScore again —
+// tennis.ts, genericSportLive.ts) rather than polling PulseScore again —
 // this is read-only against their in-memory state, so it costs nothing
 // beyond what the odds overlay already spends against the rate limit.
 //
@@ -14,7 +14,7 @@
 // when they're absent, the tracker still returns with a scoreboard only
 // (the historical accepted degradation vs StatScore / StatScore).
 import { getPulseScoreFootballLive } from "./football.js";
-import { getPulseScoreTennisLive } from "./tennisWs.js";
+import { getPulseScoreTennisLive } from "./tennis.js";
 import {
   pulseScoreBasketball,
   pulseScoreHockey,
@@ -47,7 +47,7 @@ async function liveEventsForSport(sport: string): Promise<PulseScoreEvent[]> {
   // will never find a table-tennis match by team name (PulseScore has no
   // table-tennis coverage under this integration; falls through to the
   // unmapped "return []" below, same end result but for the right reason).
-  if (s.includes("tennis") && !s.includes("table")) return Promise.resolve(getPulseScoreTennisLive());
+  if (s.includes("tennis") && !s.includes("table")) return getPulseScoreTennisLive();
   if (s.includes("basketball") || s.includes("basket")) return pulseScoreBasketball.getLive();
   if (s.includes("hockey")) return pulseScoreHockey.getLive();
   if (s.includes("baseball")) return pulseScoreBaseball.getLive();

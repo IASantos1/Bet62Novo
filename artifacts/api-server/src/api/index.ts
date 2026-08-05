@@ -4,7 +4,6 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
-import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
 
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? "8080");
 
@@ -77,8 +76,6 @@ server.listen(port, () => {
   // (or early in-play when the outcome is already determined).
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
-
-  startPulseScoreTennisWs();
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);

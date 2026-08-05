@@ -1,5 +1,6 @@
-// Football live odds from PulseScore, polled via REST (the WebSocket's one
-// PRO-plan connection is dedicated to tennis instead — see tennisWs.ts).
+// Football live odds from PulseScore, polled via REST. Tennis (tennis.ts)
+// shares this same bet365 bookmaker rather than the WebSocket originally
+// planned for it — see tennis.ts for why.
 // Same in-process cache + in-flight-dedup shape already used throughout
 // matches.ts for other ~1s live polls (e.g. TENNIS_LIVE_V1_TTL).
 import { CONFIG } from "../../lib/config.js";

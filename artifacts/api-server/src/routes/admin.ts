@@ -27,8 +27,8 @@ import {
 } from "../services/pulsescore/football.js";
 import {
   getPulseScoreTennisLive,
-  pulseScoreTennisWsStatus,
-} from "../services/pulsescore/tennisWs.js";
+  getPulseScoreTennisUsage,
+} from "../services/pulsescore/tennis.js";
 import {
   pulseScoreBasketball,
   pulseScoreHockey,
@@ -2287,24 +2287,23 @@ router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) 
 });
 
 // Read-only diagnostic for the PulseScore integration (real bookmaker odds).
-// Football/basketball/hockey/baseball/volleyball live odds are overlaid onto
-// the live tracker when a confident cross-provider team match is found (see
-// applyPulseScoreFootballOverlay/applyPulseScoreGenericOverlay in
-// matches.ts); tennis is overlaid the same way via the WebSocket client.
-// Football/basketball/hockey/baseball/volleyball come from a fresh REST
-// fetch each (different bookmaker prefixes — see genericSportLive.ts);
-// tennis comes from whatever the WebSocket's last ~1s frame cached, since
-// that connection is push-based rather than polled on demand.
+// Football/tennis/basketball/hockey/baseball/volleyball live odds are
+// overlaid onto the live tracker when a confident cross-provider team match
+// is found (see applyPulseScoreFootballOverlay/applyPulseScoreTennisOverlay/
+// applyPulseScoreGenericOverlay in matches.ts). All six now come from a
+// fresh REST fetch each — tennis shares football's bet365 bookmaker (see
+// tennis.ts for why), the rest use their own distinct bookmaker prefixes
+// (genericSportLive.ts).
 router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res) => {
   if (!CONFIG.PULSESCORE_API_KEY) {
     res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
     return;
   }
   try {
-    const [football, tennisStatus, basketball, hockey, baseball, volleyball] =
+    const [football, tennis, basketball, hockey, baseball, volleyball] =
       await Promise.all([
         getPulseScoreFootballLive(),
-        Promise.resolve(pulseScoreTennisWsStatus()),
+        getPulseScoreTennisLive(),
         pulseScoreBasketball.getLive(),
         pulseScoreHockey.getLive(),
         pulseScoreBaseball.getLive(),
@@ -2312,7 +2311,7 @@ router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res)
       ]);
     res.json({
       football: { count: football.length, events: football },
-      tennis: { ...tennisStatus, events: getPulseScoreTennisLive() },
+      tennis: { count: tennis.length, events: tennis },
       basketball: { count: basketball.length, events: basketball },
       hockey: { count: hockey.length, events: hockey },
       baseball: { count: baseball.length, events: baseball },
@@ -2338,7 +2337,7 @@ router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res)
   }
   res.json({
     football: getPulseScoreFootballUsage(),
-    tennis: pulseScoreTennisWsStatus(),
+    tennis: getPulseScoreTennisUsage(),
     basketball: pulseScoreBasketball.getUsage(),
     hockey: pulseScoreHockey.getUsage(),
     baseball: pulseScoreBaseball.getUsage(),
