@@ -4359,18 +4359,6 @@ function sportEmoji(sport?: string): string {
   return "⚽";
 }
 
-// Sports the user explicitly asked to show via the real SportScore tracker
-// iframe (https://sportscore.com/api/widget/tracker/?sport=X&id=Y), mirrors
-// the backend's sportscoreSportSlugForMatch() coverage for these 4 sports.
-function sportscoreIframeSportSlug(sport?: string): string | null {
-  const s = (sport || "").toLowerCase();
-  if (s.includes("soccer") || s.includes("football")) return "football";
-  if (s.includes("tennis")) return "tennis";
-  if (s.includes("basketball")) return "basketball";
-  if (s.includes("cricket")) return "cricket";
-  return null;
-}
-
 // Grand Prix circuit country → ISO flag code (mirrors backend F1_GP_COUNTRY_MAP)
 const F1_GP_COUNTRY_ISO: Record<string, string> = {
   "au": "au", "mc": "mc", "az": "az", "us": "us", "es": "es",
@@ -5965,19 +5953,6 @@ export default function Home({
   useEffect(() => {
     setShowFieldView(false);
   }, [expandedMatch?.id]);
-
-  // Real SportScore tracker iframe — user explicitly wants the SportScore-
-  // branded widget (https://sportscore.com/api/widget/tracker/?sport=X&id=Y)
-  // instead of our white-label MiniFieldView SVG, for the sports it covers.
-  // The SportScore tracker id is already resolved server-side and sitting on
-  // betbyTracker.eventId whenever the tracker's provider is "sportscore" —
-  // that's the very id already powering the incidents/formations shown
-  // elsewhere, so reuse it directly instead of re-resolving it (a separate
-  // lookup risked racing/mismatching the id already in use).
-  const sportscoreTrackerId =
-    expandedMatch?.betbyTracker?.provider === "sportscore" && expandedMatch.betbyTracker.eventId
-      ? expandedMatch.betbyTracker.eventId
-      : null;
 
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
@@ -18348,15 +18323,6 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        {sportscoreTrackerId && sportscoreIframeSportSlug(expandedMatch.sport) ? (
-                          <iframe
-                            key={sportscoreTrackerId}
-                            src={`https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(sportscoreIframeSportSlug(expandedMatch.sport)!)}&id=${encodeURIComponent(sportscoreTrackerId)}`}
-                            title="Tracker"
-                            className="w-full aspect-[4/3] rounded-xl border-0 bg-zinc-950"
-                            loading="lazy"
-                          />
-                        ) : (
                         <MiniFieldView
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
@@ -18391,7 +18357,6 @@ export default function Home({
                             return `${m}'`;
                           })()}
                         />
-                        )}
                       </div>
                     ) : (
                       <>
