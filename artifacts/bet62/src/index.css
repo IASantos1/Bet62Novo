@@ -464,3 +464,22 @@ input[type="submit"] {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
+
+/* Destaques promo banners: side by side inside the installed PWA, with
+   horizontal scroll when they don't all fit — stays stacked full-width
+   (one per row) on regular web/mobile browser tabs. */
+@media (display-mode: standalone) {
+  .destaques-promo-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+  }
+  .destaques-promo-row .destaques-promo-card {
+    flex: 0 0 auto;
+    width: 78%;
+    scroll-snap-align: start;
+  }
+}

@@ -4359,6 +4359,18 @@ function sportEmoji(sport?: string): string {
   return "⚽";
 }
 
+// Sports the user explicitly asked to show via the real SportScore tracker
+// iframe (https://sportscore.com/api/widget/tracker/?sport=X&id=Y), mirrors
+// the backend's sportscoreSportSlugForMatch() coverage for these 4 sports.
+function sportscoreIframeSportSlug(sport?: string): string | null {
+  const s = (sport || "").toLowerCase();
+  if (s.includes("soccer") || s.includes("football")) return "football";
+  if (s.includes("tennis")) return "tennis";
+  if (s.includes("basketball")) return "basketball";
+  if (s.includes("cricket")) return "cricket";
+  return null;
+}
+
 // Grand Prix circuit country → ISO flag code (mirrors backend F1_GP_COUNTRY_MAP)
 const F1_GP_COUNTRY_ISO: Record<string, string> = {
   "au": "au", "mc": "mc", "az": "az", "us": "us", "es": "es",
@@ -5953,6 +5965,29 @@ export default function Home({
   useEffect(() => {
     setShowFieldView(false);
   }, [expandedMatch?.id]);
+
+  // Real SportScore tracker iframe — user explicitly wants the SportScore-
+  // branded widget (https://sportscore.com/api/widget/tracker/?sport=X&id=Y)
+  // instead of our white-label MiniFieldView SVG, for the sports it covers.
+  const [sportscoreTrackerId, setSportscoreTrackerId] = useState<string | null>(null);
+  useEffect(() => {
+    setSportscoreTrackerId(null);
+    if (!expandedMatch) return;
+    const sportSlug = sportscoreIframeSportSlug(expandedMatch.sport);
+    if (!sportSlug) return;
+    let cancelled = false;
+    fetch(
+      `/api/matches/sportscore-id/${encodeURIComponent(sportSlug)}/${encodeURIComponent(String(expandedMatch.id))}?homeTeam=${encodeURIComponent(expandedMatch.home)}&awayTeam=${encodeURIComponent(expandedMatch.away)}`,
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.trackerId) setSportscoreTrackerId(String(data.trackerId));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedMatch?.id, expandedMatch?.sport, expandedMatch?.home, expandedMatch?.away]);
 
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
@@ -18323,6 +18358,15 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
+                        {sportscoreTrackerId && sportscoreIframeSportSlug(expandedMatch.sport) ? (
+                          <iframe
+                            key={sportscoreTrackerId}
+                            src={`https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(sportscoreIframeSportSlug(expandedMatch.sport)!)}&id=${encodeURIComponent(sportscoreTrackerId)}`}
+                            title="Tracker"
+                            className="w-full aspect-[4/3] rounded-xl border-0 bg-zinc-950"
+                            loading="lazy"
+                          />
+                        ) : (
                         <MiniFieldView
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
@@ -18357,6 +18401,7 @@ export default function Home({
                             return `${m}'`;
                           })()}
                         />
+                        )}
                       </div>
                     ) : (
                       <>
@@ -21699,11 +21744,14 @@ export default function Home({
                 </div>
 
                 {/* Full banner images (text already baked into the artwork) —
-                    shown whole, one per row, so the text stays legible. */}
-                <div className="grid grid-cols-1 gap-2 sm:gap-3">
+                    shown whole, stacked one per row on the web. Inside an
+                    installed PWA (display-mode: standalone) a CSS override
+                    in index.css turns this into a side-by-side scrollable
+                    row instead — see .destaques-promo-row. */}
+                <div className="destaques-promo-row grid grid-cols-1 gap-2 sm:gap-3">
                   <button
                     onClick={() => selectMainTab("casino")}
-                    className="rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1836/856]"
+                    className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1836/856]"
                   >
                     <img
                       src="/promo-casino-banner.png"
@@ -21716,7 +21764,7 @@ export default function Home({
                       setDepositModalOpen(true);
                       setActiveTab("wallet");
                     }}
-                    className="rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
+                    className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
                   >
                     <img
                       src="/promo-cashback-banner.png"
@@ -21726,7 +21774,7 @@ export default function Home({
                   </button>
                   <button
                     onClick={() => selectMainTab("live")}
-                    className="rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
+                    className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
                   >
                     <img
                       src="/promo-live-banner.png"
