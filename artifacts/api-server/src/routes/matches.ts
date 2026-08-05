@@ -19630,6 +19630,35 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const score = pulseScoreEventScore(ev);
     const country = countryForLeagueName(ev.league || "") ?? "Internacional";
     const id = `pulsescore-football-${ev.eventId}`;
+    const homeScore = score?.home ?? 0;
+    const awayScore = score?.away ?? 0;
+
+    // Goal-based market suspension — same trigger condition and delay table
+    // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
+    // footballSuspensionDelayMs, both provider-agnostic). PulseScore gives us
+    // no VAR/red-card signal, so only the goal trigger is covered here —
+    // narrower than before, but still closes the main window where a stale
+    // price could be backed right after a goal.
+    const existing = liveMatchState.get(id);
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const scored =
+      !!existing &&
+      (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (scored) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
+      );
+      suspensionReason = "GOLO!";
+    }
+
     const state: LiveMatchState = {
       id,
       home,
@@ -19637,14 +19666,16 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       league: ev.league || "Futebol",
       country,
       sport: "football",
-      homeScore: score?.home ?? 0,
-      awayScore: score?.away ?? 0,
+      homeScore,
+      awayScore,
       minute: pulseScoreEventMinute(ev),
       status: "LIVE",
       hasRealOdds: !!override?.odds,
       odds,
       markets,
       events: [],
+      marketSuspension,
+      _suspensionReason: suspensionReason,
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out
