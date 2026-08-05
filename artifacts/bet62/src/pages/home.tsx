@@ -5969,25 +5969,15 @@ export default function Home({
   // Real SportScore tracker iframe — user explicitly wants the SportScore-
   // branded widget (https://sportscore.com/api/widget/tracker/?sport=X&id=Y)
   // instead of our white-label MiniFieldView SVG, for the sports it covers.
-  const [sportscoreTrackerId, setSportscoreTrackerId] = useState<string | null>(null);
-  useEffect(() => {
-    setSportscoreTrackerId(null);
-    if (!expandedMatch) return;
-    const sportSlug = sportscoreIframeSportSlug(expandedMatch.sport);
-    if (!sportSlug) return;
-    let cancelled = false;
-    fetch(
-      `/api/matches/sportscore-id/${encodeURIComponent(sportSlug)}/${encodeURIComponent(String(expandedMatch.id))}?homeTeam=${encodeURIComponent(expandedMatch.home)}&awayTeam=${encodeURIComponent(expandedMatch.away)}`,
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled && data?.trackerId) setSportscoreTrackerId(String(data.trackerId));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [expandedMatch?.id, expandedMatch?.sport, expandedMatch?.home, expandedMatch?.away]);
+  // The SportScore tracker id is already resolved server-side and sitting on
+  // betbyTracker.eventId whenever the tracker's provider is "sportscore" —
+  // that's the very id already powering the incidents/formations shown
+  // elsewhere, so reuse it directly instead of re-resolving it (a separate
+  // lookup risked racing/mismatching the id already in use).
+  const sportscoreTrackerId =
+    expandedMatch?.betbyTracker?.provider === "sportscore" && expandedMatch.betbyTracker.eventId
+      ? expandedMatch.betbyTracker.eventId
+      : null;
 
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
@@ -18551,7 +18541,7 @@ export default function Home({
                       </>
                     )}
 
-                    {["football", "tennis", "basketball", "hockey", "volleyball", "baseball"].includes(expandedMatch.sport ?? "football") && (
+                    {["football", "tennis", "basketball", "hockey", "volleyball", "baseball", "cricket"].includes(expandedMatch.sport ?? "football") && (
                       <div className="flex items-center">
                         <button
                           onClick={() => setShowFieldView((v) => !v)}
