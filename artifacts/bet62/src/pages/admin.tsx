@@ -883,16 +883,10 @@ export default function AdminPage() {
   } | null>(null);
   const [statpalUsageLoading, setStatpalUsageLoading] = useState(false);
 
-  // PulseScore API usage (real bookmaker odds — football REST + tennis WS)
+  // PulseScore API usage (real bookmaker odds — football + tennis both REST-polled)
   const [pulsescoreUsage, setPulsescoreUsage] = useState<{
     football: { requestsToday: number; date: string };
-    tennis: {
-      connected: boolean;
-      lastFrameAgeMs: number | null;
-      liveCount: number;
-      framesToday: number;
-      date: string;
-    };
+    tennis: { requestsToday: number; date: string };
   } | null>(null);
   const [pulsescoreUsageLoading, setPulsescoreUsageLoading] = useState(false);
 
@@ -3153,23 +3147,25 @@ export default function AdminPage() {
                             <div className="text-xs text-zinc-400 mt-1">Data (UTC)</div>
                           </div>
 
-                          {/* Tennis — WS connection status */}
-                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
-                            <div className={`flex items-center gap-1.5 text-sm font-black ${pulsescoreUsage.tennis.connected ? "text-emerald-400" : "text-red-400"}`}>
-                              <span className={`inline-block w-2 h-2 rounded-full ${pulsescoreUsage.tennis.connected ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
-                              {pulsescoreUsage.tennis.connected ? "Conectado" : "Desconectado"}
-                            </div>
-                            <div className="text-xs text-zinc-400 mt-1">Tênis — WebSocket</div>
-                          </div>
-
-                          {/* Tennis — frames + live count */}
+                          {/* Tennis — request counter (REST poll, same pattern as football) */}
                           <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
                             <div className="text-3xl font-black text-orange-400 tabular-nums">
-                              {Number(pulsescoreUsage.tennis.framesToday).toLocaleString("pt-PT")}
+                              {Number(pulsescoreUsage.tennis.requestsToday).toLocaleString("pt-PT")}
                             </div>
-                            <div className="text-xs text-zinc-400 mt-1">
-                              Tênis — frames hoje · {pulsescoreUsage.tennis.liveCount} ao vivo
+                            <div className="text-xs text-zinc-400 mt-1">Tênis — pedidos hoje (REST)</div>
+                          </div>
+
+                          {/* Tennis — date */}
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-base font-black text-white tabular-nums">
+                              {pulsescoreUsage.tennis.date
+                                ? (() => {
+                                    const [y, m, d] = pulsescoreUsage.tennis.date.split("-");
+                                    return `${d}/${m}/${y}`;
+                                  })()
+                                : "—"}
                             </div>
+                            <div className="text-xs text-zinc-400 mt-1">Data (UTC)</div>
                           </div>
                         </div>
                       ) : (
