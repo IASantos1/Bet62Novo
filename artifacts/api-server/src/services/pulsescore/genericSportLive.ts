@@ -21,16 +21,19 @@
 // the mapping can grow from what each sport's real traffic actually sends.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { pulseScoreGet, type PulseScoreEvent } from "./client.js";
+import {
+  pulseScoreGet,
+  type PulseScoreEvent,
+  type PulseScoreLiveEventsResponse,
+} from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
 
 export type GenericMoneylineOverride = {
   odds?: { home: number; draw?: number; away: number };
 };
 
-function decimalToNumber(raw: string | undefined): number | null {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 1.0 ? n : null;
+function oddsToNumber(raw: number | undefined): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 1.0 ? raw : null;
 }
 
 function todayUtc(): string {
@@ -62,12 +65,15 @@ export function createPulseScoreRestSport(opts: {
     rollUsageDateIfNeeded();
     requestsToday += 1;
     try {
-      const data = await pulseScoreGet<PulseScoreEvent[]>(
-        `/live-events?sport=${encodeURIComponent(opts.sport)}`,
+      // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
+      // not a bare array — confirmed against a real bet365 call and
+      // documented by PulseScore as the same shape for every bookmaker.
+      const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+        `/live-events?sport=${encodeURIComponent(opts.sport)}&limit=200`,
         4_000,
         opts.bookmaker,
       );
-      return Array.isArray(data) ? data : [];
+      return Array.isArray(data?.events) ? data.events : [];
     } catch {
       return [];
     }
@@ -98,34 +104,44 @@ export function createPulseScoreRestSport(opts: {
   }
 
   function extractOverride(ev: PulseScoreEvent): GenericMoneylineOverride {
+    // "match_winner" was never observed in a real call (verified against
+    // bet365/football, 2026-08-05) — real data used canonicalMarket
+    // "MATCH_RESULT" or "OTHER" with rawName "Fulltime Result" instead. Not
+    // verified per-sport/per-bookmaker here, so match on FULL_TIME period +
+    // MATCH_RESULT first, falling back to the original assumption in case
+    // some bookmaker/sport combination genuinely does send "match_winner".
+    const isFulltime = (period: string) => (period || "").toUpperCase() === "FULL_TIME";
     const matchWinnerMarkets = (ev.markets ?? []).filter(
-      (m) => m.canonicalMarket === "match_winner",
+      (m) =>
+        isFulltime(m.period) &&
+        (m.canonicalMarket === "MATCH_RESULT" || m.canonicalMarket === "match_winner"),
     );
     for (const m of ev.markets ?? []) {
-      if (m.canonicalMarket === "match_winner") continue;
+      if (matchWinnerMarkets.includes(m)) continue;
       if (!seenUnknownMarkets.has(m.canonicalMarket)) {
         seenUnknownMarkets.add(m.canonicalMarket);
         logger.info(
-          { sport: opts.label, canonicalMarket: m.canonicalMarket },
+          { sport: opts.label, canonicalMarket: m.canonicalMarket, rawName: m.rawName },
           "[pulsescore] unmapped canonicalMarket seen — candidate to add to the override mapping",
         );
       }
     }
-    // Same caution as tennis: no per-sport example of how `period` is
-    // labelled here, so if more than one match_winner market shows up
-    // (e.g. per-period odds alongside the overall match), skip rather
-    // than risk mixing them up.
+    // If more than one match_winner-shaped market shows up (e.g. per-period
+    // odds alongside the overall match), skip rather than risk mixing them up.
     if (matchWinnerMarkets.length !== 1) return {};
     const market = matchWinnerMarkets[0]!;
     let home: number | null = null;
     let draw: number | null = null;
     let away: number | null = null;
     for (const sel of market.selections ?? []) {
-      const val = decimalToNumber(sel.decimal);
+      if (!sel.isActive) continue;
+      const val = oddsToNumber(sel.odds);
       if (val === null) continue;
-      if (teamNamesMatch(sel.name, ev.home)) home = val;
-      else if (teamNamesMatch(sel.name, ev.away)) away = val;
-      else draw = val;
+      if (sel.canonicalOutcome === "HOME") home = val;
+      else if (sel.canonicalOutcome === "AWAY") away = val;
+      else if (sel.canonicalOutcome === "DRAW") draw = val;
+      else if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+      else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
     }
     if (home === null || away === null) return {};
     return { odds: draw !== null ? { home, draw, away } : { home, away } };

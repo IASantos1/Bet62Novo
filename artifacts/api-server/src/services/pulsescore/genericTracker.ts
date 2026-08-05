@@ -60,6 +60,17 @@ async function liveEventsForSport(sport: string): Promise<PulseScoreEvent[]> {
 // this integration) — anything other than a plain "H-A" string is treated
 // as "no score yet" rather than risking a throw on unexpected input.
 function parseScore(raw: unknown): { home: number; away: number } | null {
+  // Real PulseScore data (verified against bet365/football, 2026-08-05)
+  // sends score as a {home, away} object, not the "H-A" string the docs'
+  // example implied — kept as a fallback in case some bookmaker/sport
+  // combination genuinely differs.
+  if (raw && typeof raw === "object") {
+    const obj = raw as { home?: unknown; away?: unknown };
+    const h = Number(obj.home);
+    const a = Number(obj.away);
+    if (Number.isFinite(h) && Number.isFinite(a)) return { home: h, away: a };
+    return null;
+  }
   if (typeof raw !== "string") return null;
   const m = /^(\d+)\s*-\s*(\d+)$/.exec(raw.trim());
   if (!m) return null;
@@ -123,17 +134,22 @@ export async function getPulseScoreTrackerForTeams(
   const score = parseScore(ev.score);
   if (!score) return null; // no usable score yet — same "not ready" behavior as before
   const anyEv = ev as PulseScoreEvent & Record<string, any>;
+  // Real bet365 data has no top-level minute/clock field — the live clock
+  // lives at moreInfo.TM (verified against real football data, 2026-08-05).
+  // Kept the original pick() fallbacks too since this runs for any
+  // sport/bookmaker and that hasn't been verified beyond football/bet365.
   const minute =
-    parseMinute(pick<any>(anyEv, ["minute", "clock", "elapsed", "statusMinute"])) || "";
+    parseMinute(ev.moreInfo?.TM) ||
+    parseMinute(pick<any>(anyEv, ["minute", "clock", "elapsed", "statusMinute"])) ||
+    "";
   const statusText = String(
-    pick<string>(anyEv, ["status", "status_text", "statusText", "state"]) ??
-      (ev.live ? "LIVE" : "FINISHED"),
+    pick<string>(anyEv, ["status", "status_text", "statusText", "state"]) ?? "LIVE",
   );
   const incidents = extractIncidents(anyEv);
   return {
     provider: "pulsescore",
     eventId: ev.eventId,
-    status: statusText || (ev.live ? "LIVE" : "FINISHED"),
+    status: statusText || "LIVE",
     minute,
     homeScore: score.home,
     awayScore: score.away,

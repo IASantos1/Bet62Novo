@@ -36,29 +36,64 @@ export async function pulseScoreGet<T>(
 }
 
 // ── Normalized schema shared by every bookmaker/sport ───────────────────────
+// Verified against a real authenticated GET /live-events?sport=soccer call
+// (2026-08-05) — the publicly published docs' example shapes were wrong on
+// several fields (a bare array vs. this paginated wrapper; a "H-A" score
+// string vs. this {home,away} object; selections' name/decimal vs. this
+// canonicalOutcome/odds). Trust this file over the docs for field names.
 
 export type PulseScoreSelection = {
-  name: string;
-  rawName?: string;
-  decimal: string;
+  canonicalOutcome: string; // "HOME" | "DRAW" | "AWAY" | "OVER" | "UNDER" | "OTHER" | ...
+  rawName: string;
+  odds: number;
+  isActive: boolean;
+  line?: number;
+  moreInfo?: Record<string, unknown>;
 };
 
 export type PulseScoreMarket = {
-  canonicalMarket: string;
-  period: string;
-  rawName?: string;
-  line?: string;
+  canonicalMarket: string; // seen in real data: "OTHER", "OVER_UNDER", "MATCH_RESULT",
+  // "EUROPEAN_HANDICAP", "ASIAN_HANDICAP", "CORNERS_OVER_UNDER", "TO_QUALIFY" — the
+  // docs only mention "match_winner"/"total_goals" but those were never observed;
+  // identify markets by rawName, not by assuming a specific canonicalMarket value.
+  rawName: string;
+  period: string; // "FULL_TIME" | "SECOND_HALF" | ... (uppercase snake-case, not the docs' lowercase)
+  isActive: boolean;
   selections: PulseScoreSelection[];
+  marketId: string;
 };
 
 export type PulseScoreEvent = {
   eventId: string;
   sport: string;
   league: string;
+  country?: string; // observed always "" in practice — don't rely on it
   home: string;
   away: string;
-  live: boolean;
-  startTime: string;
-  score?: string;
+  score?: { home: string; away: string };
   markets: PulseScoreMarket[];
+  // Raw bet365 fields preserved alongside the normalized ones. TM/TS are the
+  // only place the live clock is available (no normalized "minute" field
+  // exists) — TM = minutes elapsed, TS = seconds, both as string numbers.
+  // Confirmed against real live matches: TM values (92, 68, 45, 90, 71) line
+  // up exactly with plausible real match minutes.
+  moreInfo?: {
+    TM?: string;
+    TS?: string;
+    TT?: string;
+    SS?: string; // score string, e.g. "3-0" — redundant with `score`
+    updatedAtUTC?: number;
+    [key: string]: unknown;
+  };
+};
+
+export type PulseScoreLiveEventsResponse = {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+  sport: string;
+  events: PulseScoreEvent[];
 };

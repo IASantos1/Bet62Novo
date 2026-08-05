@@ -4,7 +4,12 @@
 // matches.ts for other ~1s live polls (e.g. TENNIS_LIVE_V1_TTL).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { pulseScoreGet, type PulseScoreEvent } from "./client.js";
+import {
+  pulseScoreGet,
+  type PulseScoreEvent,
+  type PulseScoreMarket,
+  type PulseScoreLiveEventsResponse,
+} from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
 
 const FOOTBALL_LIVE_TTL_MS = 1_000; // matches the PRO plan's 1 req/s rate limit
@@ -43,10 +48,15 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   rollUsageDateIfNeeded();
   requestsToday += 1;
   try {
-    const data = await pulseScoreGet<PulseScoreEvent[]>(
-      "/live-events?sport=soccer",
+    // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
+    // not a bare array as the public docs' example showed — confirmed via a
+    // real authenticated call. limit=200 comfortably covers real live-soccer
+    // volume (18 events observed) in a single request within the 1 req/s
+    // PRO-plan rate limit.
+    const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+      "/live-events?sport=soccer&limit=200",
     );
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data?.events) ? data.events : [];
   } catch {
     return [];
   }
@@ -116,46 +126,76 @@ function recordUnknownCanonicalMarket(canonicalMarket: string): void {
   );
 }
 
-function decimalToNumber(raw: string | undefined): number | null {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 1.0 ? n : null;
+function oddsToNumber(raw: number | undefined): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 1.0 ? raw : null;
 }
 
-/** Builds a market override from one PulseScore event's known canonical
- * markets (match_winner, total_goals — fulltime only). Returns an empty
- * object (not null) when the event has no fulltime markets recognised yet —
- * callers should only apply the fields that are actually present. */
+// Real bet365-normalized data (verified 2026-08-05) does NOT use the docs'
+// documented "match_winner"/"total_goals" canonicalMarket values at all — a
+// fulltime 1X2 market showed up as canonicalMarket "OTHER" with
+// rawName "Fulltime Result", and goal totals as canonicalMarket
+// "OVER_UNDER". Identify by rawName (case-insensitive) rather than trusting
+// canonicalMarket alone, per PulseScore's own documented fallback guidance.
+const MATCH_WINNER_RAW_NAMES = new Set([
+  "fulltime result",
+  "full time result",
+  "match result",
+  "1x2",
+]);
+
+function isMatchWinnerMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  if (market.canonicalMarket === "MATCH_RESULT") return true;
+  return MATCH_WINNER_RAW_NAMES.has((market.rawName || "").toLowerCase());
+}
+
+function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return market.canonicalMarket === "OVER_UNDER";
+}
+
+/** Builds a market override from one PulseScore event's fulltime match-
+ * winner and total-goals markets. Returns an empty object (not null) when
+ * the event has neither recognised yet — callers should only apply the
+ * fields that are actually present. */
 function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootballOverride {
   const out: PulseScoreFootballOverride = {};
   for (const market of ev.markets ?? []) {
-    if (market.period !== "fulltime") continue;
-    if (market.canonicalMarket === "match_winner") {
+    if (isMatchWinnerMarket(market)) {
       let home: number | null = null;
       let draw: number | null = null;
       let away: number | null = null;
       for (const sel of market.selections ?? []) {
-        const val = decimalToNumber(sel.decimal);
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        if (teamNamesMatch(sel.name, ev.home)) home = val;
-        else if (teamNamesMatch(sel.name, ev.away)) away = val;
-        else draw = val; // whatever's left over (usually literally "Draw")
+        if (sel.canonicalOutcome === "HOME") home = val;
+        else if (sel.canonicalOutcome === "AWAY") away = val;
+        else if (sel.canonicalOutcome === "DRAW") draw = val;
+        else if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
       }
       if (home !== null && draw !== null && away !== null) {
         out.odds = { home, draw, away };
       }
-    } else if (market.canonicalMarket === "total_goals") {
-      const lineKeys = market.line ? TOTAL_GOALS_LINE_KEYS[market.line] : undefined;
-      if (!lineKeys) continue;
-      let over: number | null = null;
-      let under: number | null = null;
+    } else if (isTotalGoalsMarket(market)) {
+      // `line` lives per-selection here (not per-market as the docs
+      // implied) — group selections by line, since one event can carry
+      // several O/U lines as separate market entries or within one.
+      const byLine = new Map<string, { over: number | null; under: number | null }>();
       for (const sel of market.selections ?? []) {
-        const val = decimalToNumber(sel.decimal);
+        if (!sel.isActive || sel.line === undefined) continue;
+        const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        const nameLow = sel.name.toLowerCase();
-        if (nameLow.startsWith("over")) over = val;
-        else if (nameLow.startsWith("under")) under = val;
+        const key = String(sel.line);
+        const entry = byLine.get(key) ?? { over: null, under: null };
+        if (sel.canonicalOutcome === "OVER") entry.over = val;
+        else if (sel.canonicalOutcome === "UNDER") entry.under = val;
+        byLine.set(key, entry);
       }
-      if (over !== null && under !== null) {
+      for (const [line, { over, under }] of byLine) {
+        const lineKeys = TOTAL_GOALS_LINE_KEYS[line];
+        if (!lineKeys || over === null || under === null) continue;
         out.totalGoals = {
           ...out.totalGoals,
           [lineKeys.over]: over,
@@ -185,4 +225,24 @@ export function findPulseScoreFootballOverride(
   if (!ev) return null;
   const override = extractFootballOverride(ev);
   return override.odds || override.totalGoals ? override : null;
+}
+
+/** Real match score, read from the {home,away} object (not the docs'
+ * assumed "H-A" string) — verified against a real live call 2026-08-05. */
+export function pulseScoreEventScore(
+  ev: PulseScoreEvent,
+): { home: number; away: number } | null {
+  const h = Number(ev.score?.home);
+  const a = Number(ev.score?.away);
+  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+  return { home: h, away: a };
+}
+
+/** Live clock in minutes, read from the raw bet365 moreInfo.TM field — no
+ * normalized "minute" field exists in this API. Confirmed against real live
+ * matches (TM values of 92/68/45/90/71 line up with plausible real match
+ * minutes); not documented anywhere, so treat as best-effort. */
+export function pulseScoreEventMinute(ev: PulseScoreEvent): number {
+  const tm = Number(ev.moreInfo?.TM);
+  return Number.isFinite(tm) && tm >= 0 ? Math.trunc(tm) : 0;
 }

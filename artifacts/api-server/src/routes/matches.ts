@@ -21,6 +21,8 @@ import * as net from "net";
 import {
   getPulseScoreFootballLive,
   findPulseScoreFootballOverride,
+  pulseScoreEventScore,
+  pulseScoreEventMinute,
 } from "../services/pulsescore/football.js";
 import { findPulseScoreTennisOverride } from "../services/pulsescore/tennisWs.js";
 import {
@@ -19590,37 +19592,31 @@ async function applyPulseScoreGenericOverlay(
 // every other market comes from our own Elo/Poisson model
 // (makeAdvancedMarketsFromTeams/makeOddsFromTeams — fully self-contained, no
 // external provider), same as it already does for matches with no real odds.
-// Known gaps vs the old Statpal/SportsAPI pipeline, left as-is rather than
-// guessed at: no parsed live clock/minute (PulseScore's score field format
-// was never verified against real sample data — best-effort parse below,
-// falls back to 0-0/no-minute rather than fabricate one), no red cards, no
-// competition-catalog filtering/market-tier system, no ground-truth kickoff
-// verification, no team/league logos, no odds-drift simulation.
-function parsePulseScoreScore(
-  raw: string | undefined,
-): { home: number; away: number } | null {
-  if (!raw) return null;
-  const m = raw.trim().match(/^(\d+)\s*[-:]\s*(\d+)/);
-  if (!m) return null;
-  return { home: Number(m[1]), away: Number(m[2]) };
-}
-
+// Score and minute are read via pulseScoreEventScore/pulseScoreEventMinute,
+// verified against a real authenticated live call (2026-08-05) — see
+// services/pulsescore/client.ts's PulseScoreEvent comment for what was
+// actually confirmed vs. assumed from the (partially wrong) public docs.
+// Known gaps vs the old Statpal/SportsAPI pipeline, accepted per explicit
+// decision: no red cards, no competition-catalog filtering/market-tier
+// system, no ground-truth kickoff verification, no team/league logos, no
+// odds-drift simulation, no half/period status (only "LIVE").
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
-  const psEvents = await getPulseScoreFootballLive();
-  const liveEvents = psEvents.filter((e) => e.live);
+  // GET /live-events?sport=soccer already returns only live events — no
+  // separate `live` boolean field exists on each event to filter by.
+  const events = await getPulseScoreFootballLive();
   const result: LiveMatchState[] = [];
-  for (const ev of liveEvents) {
+  for (const ev of events) {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
-    const override = findPulseScoreFootballOverride(home, away, liveEvents);
+    const override = findPulseScoreFootballOverride(home, away, events);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const markets: AdvancedMarkets = { ...baseMarkets };
     if (override?.totalGoals) {
       markets.totalGoals = { ...markets.totalGoals, ...override.totalGoals };
     }
     const odds = override?.odds ?? makeOddsFromTeams(home, away);
-    const score = parsePulseScoreScore(ev.score);
+    const score = pulseScoreEventScore(ev);
     const country = countryForLeagueName(ev.league || "") ?? "Internacional";
     result.push({
       id: `pulsescore-football-${ev.eventId}`,
@@ -19631,7 +19627,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore: score?.home ?? 0,
       awayScore: score?.away ?? 0,
-      minute: 0,
+      minute: pulseScoreEventMinute(ev),
       status: "LIVE",
       hasRealOdds: !!override?.odds,
       odds,

@@ -162,21 +162,27 @@ export type PulseScoreTennisOverride = { odds?: { home: number; away: number } }
 const seenUnknownMarkets = new Set<string>();
 const seenMatchWinnerPeriods = new Set<string>();
 
-function decimalToNumber(raw: string | undefined): number | null {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 1.0 ? n : null;
+function oddsToNumber(raw: number | undefined): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 1.0 ? raw : null;
 }
 
 function extractTennisOverride(ev: PulseScoreEvent): PulseScoreTennisOverride {
+  // "match_winner" was never observed in a real call (verified against
+  // bet365/football, 2026-08-05) — real data used canonicalMarket
+  // "MATCH_RESULT" or "OTHER" with rawName "Fulltime Result" instead. Not
+  // verified for tennis specifically, so keep both as candidates.
+  const isFulltime = (period: string) => (period || "").toUpperCase() === "FULL_TIME";
   const matchWinnerMarkets = (ev.markets ?? []).filter(
-    (m) => m.canonicalMarket === "match_winner",
+    (m) =>
+      isFulltime(m.period) &&
+      (m.canonicalMarket === "MATCH_RESULT" || m.canonicalMarket === "match_winner"),
   );
   for (const m of (ev.markets ?? [])) {
-    if (m.canonicalMarket === "match_winner") continue;
+    if (matchWinnerMarkets.includes(m)) continue;
     if (!seenUnknownMarkets.has(m.canonicalMarket)) {
       seenUnknownMarkets.add(m.canonicalMarket);
       logger.info(
-        { canonicalMarket: m.canonicalMarket },
+        { canonicalMarket: m.canonicalMarket, rawName: m.rawName },
         "[pulsescore] unmapped tennis canonicalMarket seen — candidate to add to the override mapping",
       );
     }
@@ -204,10 +210,13 @@ function extractTennisOverride(ev: PulseScoreEvent): PulseScoreTennisOverride {
   let home: number | null = null;
   let away: number | null = null;
   for (const sel of market.selections ?? []) {
-    const val = decimalToNumber(sel.decimal);
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
     if (val === null) continue;
-    if (teamNamesMatch(sel.name, ev.home)) home = val;
-    else if (teamNamesMatch(sel.name, ev.away)) away = val;
+    if (sel.canonicalOutcome === "HOME") home = val;
+    else if (sel.canonicalOutcome === "AWAY") away = val;
+    else if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+    else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
   }
   return home !== null && away !== null ? { odds: { home, away } } : {};
 }
