@@ -19715,13 +19715,27 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
     const override = extractTennisOverride(ev);
     const baseOdds = makeTennisBaseOdds(home, away);
-    const odds = override.odds
-      ? { home: override.odds.home, draw: 0, away: override.odds.away }
-      : baseOdds;
     const homeScoreRaw = Number(ev.score?.home);
     const awayScoreRaw = Number(ev.score?.away);
     const homeScore = Number.isFinite(homeScoreRaw) ? homeScoreRaw : 0;
     const awayScore = Number.isFinite(awayScoreRaw) ? awayScoreRaw : 0;
+    // Without a real per-match price, every live tennis match previously
+    // fell back to the same flat neutral 1.85/1.85 baseOdds regardless of
+    // who's actually ahead — both buttons showing an identical price reads
+    // as a bug (and is a worse price than we can offer given we do have the
+    // real sets-won score). Shift it by set score the same way the old
+    // started-upcoming bridge already did, only using the real provider
+    // price outright when one is available.
+    const liveOddsState = computeTennisLiveOdds(
+      baseOdds,
+      [],
+      homeScore,
+      awayScore,
+      undefined,
+      undefined,
+      override.odds,
+    );
+    const odds = liveOddsState.odds;
     // Frontend's tennis card (TennisScore in home.tsx) only reads
     // _liveExtra.sets/currentPoints — match-level homeScore/awayScore are
     // never shown for tennis, so without this the real sets-won score
@@ -19743,7 +19757,7 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       awayScore,
       minute: 0,
       status: tennisSetLabel(currentSetNum),
-      hasRealOdds: !!override.odds,
+      hasRealOdds: liveOddsState.hasRealOdds,
       odds,
       markets: {} as unknown as AdvancedMarkets,
       events: [],
