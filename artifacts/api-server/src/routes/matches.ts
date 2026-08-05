@@ -13871,6 +13871,23 @@ function isBlockedLeague(name: string): boolean {
   return false;
 }
 
+/** Simulated/eSoccer football (e.g. "Esoccer Battle Volta - 6 Mins Play",
+ * "Esoccer H2H GG League - 8 Mins Play") — not a real match, block outright.
+ * "X Mins Play" is included as a secondary signal since it's specific to
+ * these fast-paced virtual formats (real football is never labelled by a
+ * short fixed play length). */
+function isVirtualFootballLeague(name: string): boolean {
+  const n = name.toLowerCase();
+  return (
+    n.includes("esoccer") ||
+    n.includes("e-soccer") ||
+    n.includes("cyber football") ||
+    n.includes("virtual football") ||
+    n.includes("fifa virtual") ||
+    /\bmins?\s*play\b/.test(n)
+  );
+}
+
 /** Returns true for women's football leagues (kept but flagged for frontend). */
 function isWomensLeague(name: string): boolean {
   return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(
@@ -19611,6 +19628,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
+    if (isVirtualFootballLeague(ev.league || "")) continue;
     // Extract directly from `ev` — this loop is iterating PulseScore's own
     // event list, so the override we want IS `ev`, not some other event that
     // fuzzy-matches its team names. findPulseScoreFootballOverride() (an
