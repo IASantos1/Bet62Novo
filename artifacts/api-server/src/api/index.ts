@@ -80,13 +80,6 @@ server.listen(port, () => {
 
   startPulseScoreTennisWs();
 
-  // BetBY's poller stopped delivering anything the site actually uses:
-  // Tracker is now resolved directly against our own matches (SportScore-
-  // only, see routes/matches.ts's tickDirectTracker), and BetBY's own
-  // video/stream auto-extraction never found a real stream in production
-  // (confirmed empty via /api/live/auto-video-debug). Left running, it was
-  // 5-second-interval network calls for zero user-facing benefit.
-
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
 });

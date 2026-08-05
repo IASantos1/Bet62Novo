@@ -1,39 +1,18 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { getLiveEvents, getLiveEvent } from "../services/betby/state.js";
 import { resolveVideoInfo } from "../services/smytdryt/resolver.js";
 import { buildStreamUrl } from "../services/smytdryt/stream.js";
-import { listAllExtractedVideos } from "../services/betby/client.js";
 
 const router: IRouter = Router();
 
-// BET62 Live + Match Tracker + Streaming — BetBY (live events) + StatScore/
-// Statpal (Match Tracker — StatScore when an admin has mapped a
-// statscoreEventId, Statpal matched by team name as the automatic fallback
-// otherwise, see services/betby/poller.ts's resolveTracker) + SMYTDRYT (HLS
-// stream), no odds/markets/BetBY iframe. GET /api/live is the single source
-// of truth (tracker/stream embedded inline, refreshed every poll tick);
-// /tracker and /stream below just read the same cached state for a
-// single-event convenience fetch. See services/liveStream/mapping.ts for
-// why a videoMatchId may be absent on a given event (not yet mapped).
+// BET62 Live streaming — SMYTDRYT (HLS stream) resolved against the manual
+// admin mapping table (services/liveStream/mapping.ts). Match Tracker itself
+// (score/minute/incidents) is served from /api/matches — see
+// resolveDirectTracker/attachDirectTracker in routes/matches.ts.
 
-router.get("/live", (_req: Request, res: Response) => {
-  res.json(getLiveEvents());
-});
-
-router.get("/tracker/:betbyEventId", (req: Request, res: Response) => {
-  const betbyEventId = String(req.params["betbyEventId"]);
-  const event = getLiveEvent(betbyEventId);
-  if (!event?.tracker) {
-    res.status(404).json({ error: "Tracker indisponível para este evento." });
-    return;
-  }
-  res.json(event.tracker);
-});
-
-router.get("/stream/:betbyEventId", async (req: Request, res: Response) => {
-  const betbyEventId = String(req.params["betbyEventId"]);
+router.get("/stream/:id", async (req: Request, res: Response) => {
+  const id = String(req.params["id"]);
   try {
-    const video = await resolveVideoInfo(betbyEventId);
+    const video = await resolveVideoInfo(id);
     if (!video) {
       res.status(404).json({ error: "Transmissão ainda não associada a este evento." });
       return;
@@ -49,18 +28,6 @@ router.get("/stream/:betbyEventId", async (req: Request, res: Response) => {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
-});
-
-// Diagnostic only — lists every BetBY event for which client.ts's deep-scan
-// (extractVideoInfo/deepScanUrls) found a SMYTDRYT playlist URL embedded in
-// the raw feed chunk, i.e. auto-detected without any admin mapping. Empty
-// doesn't mean the scanner is broken — it means BetBY itself isn't
-// embedding video-stream data for any currently live event (no video
-// coverage on their end for those specific matches), which is the far more
-// common case for lower-tier fixtures.
-router.get("/live/auto-video-debug", (_req: Request, res: Response) => {
-  const videos = listAllExtractedVideos();
-  res.json({ count: videos.length, videos });
 });
 
 export default router;

@@ -1,4 +1,4 @@
-// BetBY Match Tracker automatic fallback — PulseScore instead of Statpal
+// Match Tracker automatic fallback — PulseScore instead of Statpal
 // (explicit user decision: replace, not add). Reuses the same live-events
 // caches already kept warm by the odds-overlay feature (football.ts,
 // tennisWs.ts, genericSportLive.ts) rather than polling PulseScore again —
@@ -35,11 +35,11 @@ function pick<T = unknown>(o: any, keys: string[]): T | undefined {
   return undefined;
 }
 
-// BetBY's own sport slug isn't confirmed for any real sport besides the one
-// virtual example seen ("eSoccer") — matched leniently by substring rather
-// than an exact enum, since guessing the wrong exact string would silently
-// send every football/tennis/etc event down the "unmapped" path.
-async function liveEventsForBetbySport(sport: string): Promise<PulseScoreEvent[]> {
+// Sport slugs aren't confirmed for every real sport besides the common
+// ones — matched leniently by substring rather than an exact enum, since
+// guessing the wrong exact string would silently send every football/
+// tennis/etc event down the "unmapped" path.
+async function liveEventsForSport(sport: string): Promise<PulseScoreEvent[]> {
   const s = (sport || "").toLowerCase();
   if (s.includes("soccer") || s.includes("football")) return getPulseScoreFootballLive();
   // "table-tennis" contains "tennis" as a substring — must be excluded
@@ -110,7 +110,7 @@ export async function getPulseScoreTrackerForTeams(
   away: string,
   sport: string,
 ): Promise<MatchTracker | null> {
-  const events = await liveEventsForBetbySport(sport);
+  const events = await liveEventsForSport(sport);
   if (events.length === 0) return null;
   const ev = events.find(
     (e) =>

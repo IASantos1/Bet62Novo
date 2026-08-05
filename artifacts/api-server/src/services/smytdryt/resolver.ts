@@ -18,8 +18,8 @@ export interface VideoInfo {
 // timestamp have no fallback — both confirmed via real testing to be
 // per-match/per-key values with no safe global default (see stream.ts:
 // the key is signed against this exact timestamp, not "now").
-export async function resolveVideoInfo(betbyEventId: string): Promise<VideoInfo | null> {
-  const mapping = await getMapping(betbyEventId);
+export async function resolveVideoInfo(eventId: string): Promise<VideoInfo | null> {
+  const mapping = await getMapping(eventId);
   if (
     !mapping?.videoMatchId ||
     !mapping.videoSportId ||

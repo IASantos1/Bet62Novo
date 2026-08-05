@@ -495,13 +495,10 @@ type MatchTracker = {
   awayHalfTimeScore?: number | null;
   lineupConfirmed?: boolean | null;
 };
-type BetbyLiveEvent = {
+type LiveTrackerEvent = {
   eventId?: string;
-  betbyEventId: string;
   // Our own match id (Statpal-sourced) — used to poll the Tracker directly
-  // (StatScore/SportScore/Statpal/PulseScore, no BetBY indirection) instead
-  // of betbyEventId, which is only ever set when BetBY separately has a
-  // matching stream for this fixture.
+  // (StatScore/SportScore/Statpal/PulseScore).
   matchId?: string;
   sport: string;
   league: string;
@@ -512,7 +509,6 @@ type BetbyLiveEvent = {
   minute?: string;
   score: { home: number; away: number };
   tracker?: MatchTracker;
-  stream?: { hls: string };
 };
 type CasinoBanner = {
   id: number;
@@ -3766,14 +3762,11 @@ type Match = {
     raceWinner: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
     podium: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
   };
-  // BetBY tracker/stream cross-matched server-side onto this match by team
-  // name (see matches.ts's attachBetbyTrackerAndStream) — present only when
-  // a live BetBY event was found for this match. Drives the inline
-  // Tracker/Vídeo buttons on the match card, replacing the old separate
-  // "Transmissões ao vivo" list that showed the same match twice.
-  betbyEventId?: string;
-  betbyTracker?: MatchTracker;
-  betbyStream?: { hls?: string };
+  // Match Tracker resolved server-side directly against this match by team
+  // name (see matches.ts's attachDirectTracker). Drives the inline Tracker
+  // button on the match card, replacing the old separate "Transmissões ao
+  // vivo" list that showed the same match twice.
+  tracker?: MatchTracker;
 };
 
 type BetSelection = {
@@ -4427,102 +4420,14 @@ function isWCMatch(league: string | null | undefined): boolean {
 
 function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
-// BET62 Live + Match Tracker + Streaming — HLS.js video (SMYTDRYT) +
-// polling Match Tracker (StatScore), self-contained so its lifecycle
-// (attach/detach HLS, start/stop tracker polling) doesn't entangle with the
-// rest of the page's state.
-// Video and Tracker are two independent entry points per event (each may be
-// available without the other — video needs SMYTDRYT admin mapping, tracker
-// resolves automatically via StatScore/PulseScore) — separate modals rather
-// than one combined view, per explicit request.
-function VideoStreamModal({
-  event,
-  onClose,
-}: {
-  event: BetbyLiveEvent;
-  onClose: () => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [videoError, setVideoError] = useState(false);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    const url = event.stream?.hls;
-    if (!video || !url) return;
-    setVideoError(false);
-    let hls: any | null = null;
-    let cancelled = false;
-
-    import("hls.js").then((mod) => {
-      const Hls: any = mod.default ?? mod;
-      if (cancelled) return;
-      if (Hls && typeof Hls.isSupported === "function" && Hls.isSupported()) {
-        hls = typeof Hls === "function" ? new Hls() : null;
-        if (hls && typeof hls.loadSource === "function") {
-          hls.loadSource(url);
-          hls.attachMedia(video);
-          const Events = (Hls as any).Events ?? (hls as any).Events ?? { ERROR: "hlsError" };
-          const onEv = typeof hls.on === "function" ? (e: string, cb: any) => hls.on(e, cb) : null;
-          if (onEv && typeof Events === "object" && Events.ERROR) {
-            onEv(Events.ERROR, (_evt: any, data: any) => {
-              if (data?.fatal) setVideoError(true);
-            });
-          }
-        } else {
-          setVideoError(true);
-        }
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url;
-      } else {
-        setVideoError(true);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      hls?.destroy();
-    };
-  }, [event.stream?.hls]);
-
-  return (
-    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-      <div
-        className="flex items-center justify-between px-3 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0 gap-2"
-        style={{ paddingTop: "env(safe-area-inset-top, 0px)", height: "calc(3.5rem + env(safe-area-inset-top, 0px))" }}
-      >
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-white truncate">
-            {event.home} vs {event.away}
-          </div>
-          <div className="text-[11px] text-zinc-500 truncate">{event.league}</div>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
-          aria-label="Fechar transmissão"
-        >
-          <X size={22} />
-        </button>
-      </div>
-
-      <div className="relative bg-black flex-1 min-h-0 flex items-center justify-center">
-        {videoError ? (
-          <div className="text-center text-zinc-500 text-sm p-6">
-            Não foi possível carregar a transmissão.
-          </div>
-        ) : (
-          <video ref={videoRef} controls autoPlay playsInline className="w-full h-full" />
-        )}
-      </div>
-    </div>
-  );
-}
-
+// Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
+// self-contained so its lifecycle (start/stop polling) doesn't entangle
+// with the rest of the page's state.
 function TrackerModal({
   event,
   onClose,
 }: {
-  event: BetbyLiveEvent;
+  event: LiveTrackerEvent;
   onClose: () => void;
 }) {
   const [tracker, setTracker] = useState<MatchTracker | null>(event.tracker ?? null);
@@ -4534,15 +4439,9 @@ function TrackerModal({
     // poll) — gating on it meant the tracker could get stuck on "A carregar
     // tracker..." forever if it simply wasn't ready yet at open time, even
     // once the backend resolved one moments later.
+    if (!event.matchId) return;
     let cancelled = false;
-    // Prefer our own match id (StatScore/SportScore/Statpal/PulseScore,
-    // resolved directly against our own match — no BetBY indirection).
-    // Falls back to the old BetBY-event-keyed endpoint only when this event
-    // genuinely has no matchId (shouldn't happen from matchToBetbyLiveEvent,
-    // kept for safety).
-    const url = event.matchId
-      ? `/api/matches/tracker/${encodeURIComponent(event.matchId)}`
-      : `/api/tracker/${encodeURIComponent(event.betbyEventId)}`;
+    const url = `/api/matches/tracker/${encodeURIComponent(event.matchId)}`;
     const poll = () => {
       fetch(url)
         .then((r) => (r.ok ? r.json() : null))
@@ -4557,7 +4456,7 @@ function TrackerModal({
       cancelled = true;
       clearInterval(id);
     };
-  }, [event.matchId, event.betbyEventId]);
+  }, [event.matchId]);
 
   return (
     <div className="fixed inset-0 z-[70] bg-black flex flex-col">
@@ -4794,8 +4693,7 @@ export default function Home({
   const CASINO_GROUPS_PAGE_SIZE = 12;
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
-  const [videoModalEvent, setVideoModalEvent] = useState<BetbyLiveEvent | null>(null);
-  const [trackerModalEvent, setTrackerModalEvent] = useState<BetbyLiveEvent | null>(null);
+  const [trackerModalEvent, setTrackerModalEvent] = useState<LiveTrackerEvent | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -7031,6 +6929,13 @@ export default function Home({
           ...anyUpdated,
           markets: anyUpdated.markets ?? anyPrev.markets,
           events: anyUpdated.events ?? anyPrev.events,
+          // The direct-tracker poller resolves on its own 20s interval —
+          // any single /live poll tick can transiently land between
+          // resolutions and simply not have this match's tracker yet, even
+          // though a good one already showed a moment ago. Without this
+          // fallback the mini campo flickered (visible, then gone, then
+          // back) every time that happened instead of just holding steady.
+          tracker: anyUpdated.tracker ?? anyPrev.tracker,
         };
       });
     }
@@ -7076,10 +6981,10 @@ export default function Home({
           writeSnapshot(matchSnapshotKey(id), m as any);
           setExpandedMatch((prev) => {
             if (!prev || String(prev.id) !== id) return prev;
-            // This full-detail fetch can race the backend's own BetBY
-            // poller (which resolves the SportScore/Statpal tracker
+            // This full-detail fetch can race the backend's own direct-
+            // tracker poller (which resolves the SportScore/Statpal tracker
             // asynchronously, on its own interval) — if this fetch lands
-            // before that resolution finishes, m.betbyTracker can be empty
+            // before that resolution finishes, m.tracker can be empty
             // even though `prev` already had a good one from the periodic
             // /live list sync. Never let a fetch that's simply "too early"
             // permanently erase a tracker (formations/HT score/incidents)
@@ -7088,8 +6993,7 @@ export default function Home({
             const pv = prev as any;
             return {
               ...mm,
-              betbyTracker: mm.betbyTracker ?? pv.betbyTracker,
-              betbyStream: mm.betbyStream ?? pv.betbyStream,
+              tracker: mm.tracker ?? pv.tracker,
             };
           });
           return !!(m as any).markets;
@@ -11207,24 +11111,22 @@ export default function Home({
     </div>
   );
 
-  // Builds the BetbyLiveEvent shape VideoStreamModal/TrackerModal expect,
-  // from the BetBY fields the backend cross-matched onto this Match by team
-  // name (see matches.ts's attachBetbyTrackerAndStream). Only called when
-  // match.betbyEventId is present.
-  const matchToBetbyLiveEvent = (match: Match): BetbyLiveEvent => ({
-    betbyEventId: match.betbyEventId!,
+  // Builds the LiveTrackerEvent shape TrackerModal expects, from the
+  // Tracker data resolved directly against this match by team name (see
+  // matches.ts's attachDirectTracker). Only called when match.tracker is
+  // present.
+  const matchToTrackerEvent = (match: Match): LiveTrackerEvent => ({
     matchId: String(match.id),
-    eventId: match.betbyTracker?.eventId,
+    eventId: match.tracker?.eventId,
     sport: match.sport ?? "football",
     league: match.league,
     country: match.country ?? "",
     home: match.home,
     away: match.away,
     status: match.isLive ? "LIVE" : "PREMATCH",
-    minute: match.betbyTracker?.minute,
+    minute: match.tracker?.minute,
     score: { home: match.homeScore ?? 0, away: match.awayScore ?? 0 },
-    tracker: match.betbyTracker,
-    stream: match.betbyStream?.hls ? { hls: match.betbyStream.hls } : undefined,
+    tracker: match.tracker,
   });
 
   const renderMatchCard = (match: Match) => {
@@ -11398,10 +11300,9 @@ export default function Home({
               {dateStr}{match.time ? ` · ${match.time}` : ""}
             </span>
           </div>
-          {/* ── BetBY tracker/vídeo, cross-matched onto this exact match by
-              team name (see attachBetbyTrackerAndStream in matches.ts) —
-              independent buttons, a match can have one without the other. */}
-          {(match.betbyTracker || match.betbyStream) && (
+          {/* Tracker, resolved directly onto this exact match by team name
+              (see attachDirectTracker in matches.ts). */}
+          {match.tracker && (
             <div
               className="flex gap-1.5 mb-2"
               onClick={stopCardOpen}
@@ -11412,22 +11313,12 @@ export default function Home({
               onPointerMove={stopCardOpen}
               onPointerUp={stopCardOpen}
             >
-              {match.betbyStream && (
-                <button
-                  onClick={() => setVideoModalEvent(matchToBetbyLiveEvent(match))}
-                  className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-red-600/15 hover:bg-red-600/25 border border-red-600/30 text-red-400 text-[10px] font-semibold transition-colors"
-                >
-                  <Radio size={10} /> Vídeo
-                </button>
-              )}
-              {match.betbyTracker && (
-                <button
-                  onClick={() => setTrackerModalEvent(matchToBetbyLiveEvent(match))}
-                  className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-                >
-                  <Activity size={10} /> Tracker
-                </button>
-              )}
+              <button
+                onClick={() => setTrackerModalEvent(matchToTrackerEvent(match))}
+                className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+              >
+                <Activity size={10} /> Tracker
+              </button>
             </div>
           )}
           {/* Teams + odds — side by side on sm+, stacked on mobile */}
@@ -18361,16 +18252,16 @@ export default function Home({
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
                           awayTeam={teamNamePt(expandedMatch.away)}
-                          homeFormation={expandedMatch.betbyTracker?.homeFormation}
-                          awayFormation={expandedMatch.betbyTracker?.awayFormation}
+                          homeFormation={expandedMatch.tracker?.homeFormation}
+                          awayFormation={expandedMatch.tracker?.awayFormation}
                           homeHalfTimeScore={
-                            expandedMatch.betbyTracker?.homeHalfTimeScore
+                            expandedMatch.tracker?.homeHalfTimeScore
                           }
                           awayHalfTimeScore={
-                            expandedMatch.betbyTracker?.awayHalfTimeScore
+                            expandedMatch.tracker?.awayHalfTimeScore
                           }
-                          lineupConfirmed={expandedMatch.betbyTracker?.lineupConfirmed}
-                          incidents={expandedMatch.betbyTracker?.incidents}
+                          lineupConfirmed={expandedMatch.tracker?.lineupConfirmed}
+                          incidents={expandedMatch.tracker?.incidents}
                           liveClockLabel={(() => {
                             if (!expandedMatch.isLive) return null;
                             // Minute/phase computation below is football-
@@ -27070,13 +26961,6 @@ export default function Home({
             allow="autoplay; fullscreen"
           />
         </div>
-      )}
-
-      {videoModalEvent && (
-        <VideoStreamModal
-          event={videoModalEvent}
-          onClose={() => setVideoModalEvent(null)}
-        />
       )}
 
       {trackerModalEvent && (

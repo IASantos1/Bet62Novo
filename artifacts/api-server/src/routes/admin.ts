@@ -56,7 +56,6 @@ import {
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
 import { listMappings, setMapping } from "../services/liveStream/mapping.js";
-import { getLiveEvents } from "../services/betby/state.js";
 import { memberAccountForUser } from "./casino.js";
 
 function escapeCsv(val: unknown): string {
@@ -2884,25 +2883,16 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
 });
 
 // ── BET62 Live + Match Tracker + Streaming — mapping admin ──────────────────
-// BetBY doesn't share an event id with StatScore or SMYTDRYT, so the poller
-// (services/betby/poller.ts) seeds one row per live BetBY event here with
-// only home/away/league filled in; an admin fills in statscoreEventId
-// (looked up on StatScore's own dashboard for the same fixture — real auth
-// confirmed, see CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to
-// complete the tracker/stream wiring. Leaving statscoreEventId unset is
+// An admin fills in statscoreEventId (looked up on StatScore's own
+// dashboard for the same fixture — real auth confirmed, see
+// CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to complete the
+// tracker/stream wiring for a match. Leaving statscoreEventId unset is
 // fine — the tracker automatically falls back to PulseScore, matched by
-// team name (see services/pulsescore/betbyTracker.ts).
+// team name (see services/pulsescore/genericTracker.ts).
 router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
-    const [mappings, liveEvents] = await Promise.all([listMappings(), Promise.resolve(getLiveEvents())]);
-    const liveById = new Map(liveEvents.map((e) => [e.betbyEventId, e]));
-    res.json({
-      mappings: mappings.map((m) => ({
-        ...m,
-        isLive: liveById.has(m.betbyEventId),
-        status: liveById.get(m.betbyEventId)?.status ?? null,
-      })),
-    });
+    const mappings = await listMappings();
+    res.json({ mappings });
   } catch (err) {
     logger.error({ err }, "GET /api/admin/live-stream/mappings error");
     res.status(500).json({ error: "Erro ao listar mapeamentos" });

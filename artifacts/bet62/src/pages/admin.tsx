@@ -241,8 +241,6 @@ type AdminLiveMapping = {
   videoBasePath: string | null;
   videoTimestamp: number | null;
   resolvedBy: "auto" | "manual";
-  isLive: boolean;
-  status: "LIVE" | "PREMATCH" | "FINISHED" | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -898,30 +896,6 @@ export default function AdminPage() {
   } | null>(null);
   const [pulsescoreUsageLoading, setPulsescoreUsageLoading] = useState(false);
 
-  // BetBY native WebSocket JWT (get_match_tracker/get_stream) — short-lived
-  // token captured manually from a real BetBY browser session, pasted here
-  // instead of requiring a redeploy every time it expires (~24-48h).
-  const [betbyJwtStatus, setBetbyJwtStatus] = useState<{
-    hasToken: boolean;
-    hoursLeft: number | null;
-    needsRefresh: boolean;
-    hasMatchTrackerFlag: boolean;
-    hasCashoutFlag: boolean;
-  } | null>(null);
-  const [betbyJwtStatusLoading, setBetbyJwtStatusLoading] = useState(false);
-  const [betbyJwtInput, setBetbyJwtInput] = useState("");
-  const [betbyJwtSaving, setBetbyJwtSaving] = useState(false);
-  const [betbyWsConnecting, setBetbyWsConnecting] = useState(false);
-  const [betbyWsConnectResult, setBetbyWsConnectResult] = useState<{
-    ok: boolean;
-    state?: { status: string; hostWs: string | null; modo: string };
-    message?: string;
-  } | null>(null);
-  const [betbyWsTestEventId, setBetbyWsTestEventId] = useState("");
-  const [betbyWsTrackerLoading, setBetbyWsTrackerLoading] = useState(false);
-  const [betbyWsStreamLoading, setBetbyWsStreamLoading] = useState(false);
-  const [betbyWsTrackerResult, setBetbyWsTrackerResult] = useState<unknown>(null);
-  const [betbyWsStreamResult, setBetbyWsStreamResult] = useState<unknown>(null);
 
   // Filters/UI
   const [userSearch, setUserSearch] = useState("");
@@ -944,8 +918,8 @@ export default function AdminPage() {
   const [casinoGamePage, setCasinoGamePage] = useState(1);
   const [casinoTxPage, setCasinoTxPage] = useState(1);
 
-  // Ao Vivo (BetBY + StatScore + SMYTDRYT) mapping tab — per-row edit
-  // buffer keyed by betbyEventId, only touched fields are sent on save.
+  // Ao Vivo (StatScore + SMYTDRYT) mapping tab — per-row edit buffer keyed
+  // by betbyEventId, only touched fields are sent on save.
   const [liveMappingEdits, setLiveMappingEdits] = useState<
     Record<string, Partial<{
       statscoreEventId: string;
@@ -961,7 +935,7 @@ export default function AdminPage() {
   const [liveMappingSaving, setLiveMappingSaving] = useState<Record<string, boolean>>({});
   const [liveMappingSearch, setLiveMappingSearch] = useState("");
   const [liveMappingStatusFilter, setLiveMappingStatusFilter] = useState<
-    "all" | "live" | "mapped" | "unmapped"
+    "all" | "mapped" | "unmapped"
   >("all");
 
   const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
@@ -1108,88 +1082,6 @@ export default function AdminPage() {
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchBetbyJwtStatus = useCallback(async () => {
-    if (!token) return;
-    setBetbyJwtStatusLoading(true);
-    try {
-      const res = await fetch("/api/betby/ws/jwt-status", { headers: authHeader });
-      if (res.ok) setBetbyJwtStatus(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setBetbyJwtStatusLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const submitBetbyJwt = useCallback(async () => {
-    if (!token || !betbyJwtInput.trim()) return;
-    setBetbyJwtSaving(true);
-    try {
-      const res = await fetch("/api/betby/ws/jwt", {
-        method: "POST",
-        headers: { ...authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify({ token: betbyJwtInput.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Token inválido");
-        return;
-      }
-      toast.success("JWT da BetBY instalado com sucesso");
-      setBetbyJwtInput("");
-      await fetchBetbyJwtStatus();
-    } catch {
-      toast.error("Erro de conexão");
-    } finally {
-      setBetbyJwtSaving(false);
-    }
-  }, [token, betbyJwtInput]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const testBetbyWsConnect = useCallback(async () => {
-    if (!token) return;
-    setBetbyWsConnecting(true);
-    setBetbyWsConnectResult(null);
-    try {
-      await fetch("/api/betby/ws/modo?modo=ws_nativo", { method: "POST", headers: authHeader });
-      const res = await fetch("/api/betby/ws/connect", { method: "POST", headers: authHeader });
-      const data = await res.json();
-      setBetbyWsConnectResult(data);
-      if (data.ok) toast.success("Conectado ao WebSocket nativo da BetBY");
-      else toast.error(data.message || "Falha ao conectar");
-    } catch {
-      toast.error("Erro de conexão");
-    } finally {
-      setBetbyWsConnecting(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const testBetbyWsTracker = useCallback(async () => {
-    if (!token || !betbyWsTestEventId.trim()) return;
-    setBetbyWsTrackerLoading(true);
-    setBetbyWsTrackerResult(null);
-    try {
-      const res = await fetch(`/api/betby/ws/tracker/${encodeURIComponent(betbyWsTestEventId.trim())}`, { headers: authHeader });
-      setBetbyWsTrackerResult(await res.json());
-    } catch (e) {
-      setBetbyWsTrackerResult({ ok: false, error: String(e) });
-    } finally {
-      setBetbyWsTrackerLoading(false);
-    }
-  }, [token, betbyWsTestEventId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const testBetbyWsStream = useCallback(async () => {
-    if (!token || !betbyWsTestEventId.trim()) return;
-    setBetbyWsStreamLoading(true);
-    setBetbyWsStreamResult(null);
-    try {
-      const res = await fetch(`/api/betby/ws/stream/${encodeURIComponent(betbyWsTestEventId.trim())}`, { headers: authHeader });
-      setBetbyWsStreamResult(await res.json());
-    } catch (e) {
-      setBetbyWsStreamResult({ ok: false, error: String(e) });
-    } finally {
-      setBetbyWsStreamLoading(false);
-    }
-  }, [token, betbyWsTestEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const usersQuery = useQuery({
     queryKey: ["admin", "users"],
@@ -1403,8 +1295,8 @@ export default function AdminPage() {
   const casinoBannersLoading = casinoBannersQuery.isLoading;
   const refetchCasinoBanners = casinoBannersQuery.refetch;
 
-  // Polls every 5s while the tab is open so newly-detected BetBY live
-  // events (auto-seeded blank rows) show up without a manual refresh.
+  // Polls every 5s while the tab is open so mapping edits made elsewhere
+  // (e.g. another admin) show up without a manual refresh.
   const liveMappingsQuery = useQuery({
     queryKey: ["admin", "live-stream", "mappings"],
     queryFn: async (): Promise<{ mappings: AdminLiveMapping[] }> => {
@@ -1421,7 +1313,6 @@ export default function AdminPage() {
 
   const filteredLiveMappings = liveMappings
     .filter((m) => {
-      if (liveMappingStatusFilter === "live") return m.isLive;
       if (liveMappingStatusFilter === "mapped") return m.resolvedBy === "manual";
       if (liveMappingStatusFilter === "unmapped") return m.resolvedBy !== "manual";
       return true;
@@ -1881,7 +1772,6 @@ export default function AdminPage() {
     if (activeTab === "dashboard") {
       fetchStatpalUsage();
       fetchPulsescoreUsage();
-      fetchBetbyJwtStatus();
     }
     else if (activeTab === "withdrawals") {
       fetchAuditLogs();
@@ -3287,132 +3177,6 @@ export default function AdminPage() {
                           Não foi possível obter dados da PulseScore.
                         </div>
                       )}
-                    </div>
-
-                    {/* ── BetBY WebSocket nativo (get_match_tracker / get_stream) ── */}
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
-                          <Activity size={16} className="text-blue-400" />
-                          BetBY WebSocket Nativo — JWT
-                        </h3>
-                        <button
-                          onClick={fetchBetbyJwtStatus}
-                          disabled={betbyJwtStatusLoading}
-                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                          title="Atualizar"
-                        >
-                          <RefreshCw size={14} className={betbyJwtStatusLoading ? "animate-spin" : ""} />
-                        </button>
-                      </div>
-
-                      {betbyJwtStatus && (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
-                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
-                            <div className={`flex items-center gap-1.5 text-sm font-black ${betbyJwtStatus.hasToken && !betbyJwtStatus.needsRefresh ? "text-emerald-400" : "text-red-400"}`}>
-                              <span className={`inline-block w-2 h-2 rounded-full ${betbyJwtStatus.hasToken && !betbyJwtStatus.needsRefresh ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
-                              {!betbyJwtStatus.hasToken ? "Sem token" : betbyJwtStatus.needsRefresh ? "Expirado" : "Válido"}
-                            </div>
-                            <div className="text-xs text-zinc-400 mt-1">Estado do token</div>
-                          </div>
-                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
-                            <div className="text-2xl font-black text-blue-400 tabular-nums">
-                              {betbyJwtStatus.hoursLeft != null ? betbyJwtStatus.hoursLeft.toFixed(1) : "—"}
-                            </div>
-                            <div className="text-xs text-zinc-400 mt-1">Horas restantes</div>
-                          </div>
-                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
-                            <div className="text-xs font-bold text-zinc-300 text-center">
-                              Tracker: {betbyJwtStatus.hasMatchTrackerFlag ? "✓" : "✗"} · Cashout: {betbyJwtStatus.hasCashoutFlag ? "✓" : "✗"}
-                            </div>
-                            <div className="text-xs text-zinc-400 mt-1">Flags da BetBY</div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="text"
-                          value={betbyJwtInput}
-                          onChange={(e) => setBetbyJwtInput(e.target.value)}
-                          placeholder="Cole aqui o JWT capturado de uma sessão real da BetBY (eyJ...)"
-                          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                        />
-                        <button
-                          onClick={submitBetbyJwt}
-                          disabled={betbyJwtSaving || !betbyJwtInput.trim()}
-                          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
-                        >
-                          {betbyJwtSaving ? "Instalando..." : "Instalar JWT"}
-                        </button>
-                      </div>
-                      <div className="text-xs text-zinc-500 mt-2">
-                        O token expira a cada ~24-48h — quando o estado mostrar "Expirado", capture um novo na sessão do navegador e cole aqui.
-                      </div>
-
-                      <div className="border-t border-zinc-800 mt-4 pt-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <button
-                            onClick={testBetbyWsConnect}
-                            disabled={betbyWsConnecting || !betbyJwtStatus?.hasToken}
-                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"
-                          >
-                            {betbyWsConnecting ? "Conectando..." : "1. Testar Conexão WS"}
-                          </button>
-                          {betbyWsConnectResult && (
-                            <span className={`text-xs font-bold ${betbyWsConnectResult.ok ? "text-emerald-400" : "text-red-400"}`}>
-                              {betbyWsConnectResult.ok
-                                ? `✓ ${betbyWsConnectResult.state?.status} (${betbyWsConnectResult.state?.hostWs})`
-                                : `✗ ${betbyWsConnectResult.message}`}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row gap-2 mb-3">
-                          <input
-                            type="text"
-                            value={betbyWsTestEventId}
-                            onChange={(e) => setBetbyWsTestEventId(e.target.value)}
-                            placeholder="2. betbyEventId de um jogo ao vivo (veja em /api/live)"
-                            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                          />
-                          <button
-                            onClick={testBetbyWsTracker}
-                            disabled={betbyWsTrackerLoading || !betbyWsTestEventId.trim()}
-                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
-                          >
-                            {betbyWsTrackerLoading ? "..." : "Testar Tracker"}
-                          </button>
-                          <button
-                            onClick={testBetbyWsStream}
-                            disabled={betbyWsStreamLoading || !betbyWsTestEventId.trim()}
-                            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
-                          >
-                            {betbyWsStreamLoading ? "..." : "Testar Stream"}
-                          </button>
-                        </div>
-
-                        {(betbyWsTrackerResult != null || betbyWsStreamResult != null) && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {betbyWsTrackerResult != null && (
-                              <div className="bg-zinc-800/60 rounded-lg p-3">
-                                <div className="text-xs font-bold text-zinc-400 mb-1">Resultado Tracker</div>
-                                <pre className="text-[10px] text-zinc-300 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-                                  {JSON.stringify(betbyWsTrackerResult, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {betbyWsStreamResult != null && (
-                              <div className="bg-zinc-800/60 rounded-lg p-3">
-                                <div className="text-xs font-bold text-zinc-400 mb-1">Resultado Stream</div>
-                                <pre className="text-[10px] text-zinc-300 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-                                  {JSON.stringify(betbyWsStreamResult, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -6256,7 +6020,7 @@ export default function AdminPage() {
               </motion.div>
             )}
 
-            {/* ── AO VIVO (BetBY + StatScore + SMYTDRYT) ── */}
+            {/* ── AO VIVO (StatScore + SMYTDRYT) ── */}
             {activeTab === "live" && (
               <motion.div
                 key="live"
@@ -6266,10 +6030,10 @@ export default function AdminPage() {
                 className="space-y-4"
               >
                 <div className="text-xs text-zinc-500 -mt-2">
-                  Eventos ao vivo detetados pela BetBY. O Match Tracker usa
-                  automaticamente o Statpal (por nome das equipas) até
-                  indicares um StatScore Event ID; a transmissão SMYTDRYT só
-                  aparece depois de preencheres os campos de vídeo.
+                  O Match Tracker resolve automaticamente (SportScore/Statpal/
+                  PulseScore, por nome das equipas) sem precisar de nenhum
+                  mapeamento aqui; a transmissão SMYTDRYT só aparece depois de
+                  preencheres os campos de vídeo abaixo, por evento.
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
@@ -6289,13 +6053,12 @@ export default function AdminPage() {
                     value={liveMappingStatusFilter}
                     onChange={(e) =>
                       setLiveMappingStatusFilter(
-                        e.target.value as "all" | "live" | "mapped" | "unmapped",
+                        e.target.value as "all" | "mapped" | "unmapped",
                       )
                     }
                     className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
                   >
                     <option value="all">Todos os estados</option>
-                    <option value="live">Ao vivo</option>
                     <option value="mapped">Mapeados</option>
                     <option value="unmapped">Por mapear</option>
                   </select>
@@ -6307,8 +6070,7 @@ export default function AdminPage() {
                   </div>
                 ) : liveMappings.length === 0 ? (
                   <div className="text-center py-16 text-zinc-500 text-sm">
-                    Nenhum evento ao vivo detetado ainda. Confirma que
-                    BETBY_API_BASE_URL/BETBY_BRAND_ID estão configurados.
+                    Nenhum mapeamento cadastrado ainda.
                   </div>
                 ) : filteredLiveMappings.length === 0 ? (
                   <div className="text-center py-16 text-zinc-500 text-sm">
@@ -6360,15 +6122,6 @@ export default function AdminPage() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-semibold text-white truncate">
                                   {m.home} <span className="text-zinc-500">vs</span> {m.away}
-                                </span>
-                                <span
-                                  className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                    m.isLive
-                                      ? "bg-red-600/20 text-red-400"
-                                      : "bg-zinc-800 text-zinc-500"
-                                  }`}
-                                >
-                                  {m.isLive ? `AO VIVO${m.status ? ` · ${m.status}` : ""}` : "Inativo"}
                                 </span>
                                 <span
                                   className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
