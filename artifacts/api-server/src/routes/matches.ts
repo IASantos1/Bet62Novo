@@ -28,6 +28,7 @@ import {
 import {
   getPulseScoreTennisLive,
   findPulseScoreTennisOverride,
+  extractTennisOverride,
 } from "../services/pulsescore/tennis.js";
 import {
   pulseScoreBasketball,
@@ -19679,6 +19680,87 @@ async function applyPulseScoreTennisOverlay(
   });
 }
 
+const TENNIS_DISAPPEAR_GRACE_MS = 3 * 60_000;
+
+// ── PulseScore-only tennis live builder (explicit user decision, 2026-08-06,
+// same rationale as football's Phase 1: SportsAPI Pro is rejected as a
+// provider, and the old Statpal-primary builder — buildTennisLiveMatches —
+// was already dead code, never called). Real moneyline odds come from
+// PulseScore (matched by team name via extractTennisOverride, already
+// confirmed against real /tennis/leagues data). The score field is best-
+// effort: PulseScoreEvent.score {home,away} is the confirmed shape for
+// football, and tennis uses the same shared envelope, but its meaning for
+// tennis specifically (sets won, most likely) has NOT been confirmed
+// against a real live tennis sample — only prematch data has been checked
+// so far. Treated as sets won since that's the standard bet365-style
+// live-tennis headline score; correct this one parse if a real sample shows
+// otherwise. No per-set/per-game/serving detail is populated — those would
+// need moreInfo field names that haven't been observed yet, and guessing
+// them risks the same repeated-rework this integration already went
+// through for football. markets is intentionally left as an empty stand-in
+// (same escape hatch F1/MMA use) rather than fabricating tennis-specific
+// markets from unconfirmed data.
+async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await getPulseScoreTennisLive();
+  const result: LiveMatchState[] = [];
+  const currentIds = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const override = extractTennisOverride(ev);
+    const baseOdds = makeTennisBaseOdds(home, away);
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : baseOdds;
+    const homeScoreRaw = Number(ev.score?.home);
+    const awayScoreRaw = Number(ev.score?.away);
+    const id = `pulsescore-tennis-${ev.eventId}`;
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Ténis",
+      country: "Internacional",
+      sport: "tennis",
+      homeScore: Number.isFinite(homeScoreRaw) ? homeScoreRaw : 0,
+      awayScore: Number.isFinite(awayScoreRaw) ? awayScoreRaw : 0,
+      minute: 0,
+      status: "LIVE",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets: {} as unknown as AdvancedMarkets,
+      events: [],
+    };
+    currentIds.add(id);
+    // Same liveMatchState wiring football needed from the start — settlement
+    // (ensureFinishedMatchResult / in-play resolution) and cash-out both
+    // read this map, and it's the ONLY thing that makes a match "exist" for
+    // those purposes now that nothing else populates it for tennis.
+    liveMatchState.set(id, state);
+    result.push(state);
+  }
+
+  // Same disappearance+grace-period finalization football uses — a fixed
+  // grace window here instead of football's league-priority-based one,
+  // since tennis has no equivalent tiering table.
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-tennis-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > TENNIS_DISAPPEAR_GRACE_MS) {
+      await finalizeStaleLiveMatch(state);
+      liveMatchState.delete(id);
+    }
+  }
+
+  return result;
+}
+
 // Same reasoning as applyPulseScoreFootballOverlay/applyPulseScoreTennisOverlay
 // above, generalised for the REST-polled sports in genericSportLive.ts
 // (each on its own bookmaker prefix, see that file's header comment for why).
@@ -19888,9 +19970,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     basketballEvents,
     hockeyEvents,
     baseballEvents,
-    tennisEvents,
     tennisTodayEvents,
-    tennisV1LivePart,
     mmaEvents,
     cricketEvents,
     handballEvents,
@@ -19903,9 +19983,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getBasketballLiveV2(),
     getHockeyLiveV2(),
     getBaseballLiveV2(),
-    getTennisLiveV2(),
     getTennisTodayV2(),
-    buildTennisLiveV1Cached(), // runs in parallel — does not depend on other results
     getExtraLiveEventsV2("boxing"),
     getExtraLiveEventsV2("cricket"),
     getExtraLiveEventsV2("handball"),
@@ -19922,166 +20000,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // Fire-and-forget odds cache warmers — don't block the broadcast path
   getTennisOdds().catch(() => {});
   getMLBOdds().catch(() => {});
-  // Tennis live: v2 feed (usually empty for tennis) + v1 native live + today fallback.
-  // The tennis API does not support v2 live/today endpoints (returns 404).
-  // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
-  // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
-  const tennisSourceRank = (m: LiveMatchState): number => {
-    const id = String(m.id);
-    const prefixRank = id.startsWith("tennis-v2-")
-      ? 4
-      : id.startsWith("tennis-v1-")
-        ? 3
-        : 1;
-    const realOddsRank = m.hasRealOdds ? 2 : 0;
-    const liveDetailRank =
-      (m._liveExtra?.currentPoints ? 1 : 0) +
-      Math.min(3, m._liveExtra?.sets?.length ?? 0);
-    return prefixRank * 100 + realOddsRank * 10 + liveDetailRank;
-  };
-  const dedupeTennisLiveMatches = (
-    matches: LiveMatchState[],
-  ): LiveMatchState[] => {
-    const bestByPair = new Map<string, LiveMatchState>();
-    for (const match of matches) {
-      const pairKey = _tennisPairKey(match.home, match.away);
-      const current = bestByPair.get(pairKey);
-      if (!current || tennisSourceRank(match) > tennisSourceRank(current)) {
-        bestByPair.set(pairKey, match);
-      }
-    }
-    return matches.filter(
-      (match) =>
-        bestByPair.get(_tennisPairKey(match.home, match.away)) === match,
-    );
-  };
-
-  const tennisV2Part = buildTennisLiveV2(tennisEvents);
-  const seededTennisLivePairs = new Set(
-    [...tennisV2Part, ...tennisV1LivePart].map((m) =>
-      _tennisPairKey(m.home, m.away),
-    ),
-  );
-  const allLiveIds = new Set(
-    [...tennisV2Part, ...tennisV1LivePart].map((m) => String(m.id)),
-  );
-  const todayStartedExtra = buildTennisLiveV2(
-    (tennisTodayEvents ?? []).filter(
-      (ev) => !allLiveIds.has(`tennis-v2-${ev.id}`),
-    ),
-  ).filter(
-    (m) =>
-      !allLiveIds.has(String(m.id)) &&
-      !seededTennisLivePairs.has(_tennisPairKey(m.home, m.away)),
-  );
-  const tennisLivePart = dedupeTennisLiveMatches([
-    ...tennisV2Part,
-    ...tennisV1LivePart,
-    ...todayStartedExtra,
-  ]);
-  const tennisLivePairKeys = new Set(
-    tennisLivePart.map((m) => _tennisPairKey(m.home, m.away)),
-  );
-  const startedUpcomingTennisCandidates = allUpcoming.filter((up) => {
-    if (up.sport !== "tennis") return false;
-    if (!up.id || !String(up.id).startsWith("tennis-v2-")) return false;
-    const id = String(up.id);
-    if (allLiveIds.has(id)) return false;
-    if (tennisLivePairKeys.has(_tennisPairKey(up.home, up.away))) return false;
-    const kickoffMs = parseUpcomingKickoffMs(up);
-    if (!kickoffMs) return false;
-    if (kickoffMs > now + 2 * 60_000) return false;
-    if (now - kickoffMs > 4 * 60 * 60_000) return false;
-    return !!up.home && !!up.away;
-  });
-  const startedUpcomingTennisDetails = new Map<
-    number,
-    TennisLiveDetailSnapshot
-  >();
-  await Promise.all(
-    startedUpcomingTennisCandidates.slice(0, 16).map(async (up) => {
-      const providerId = Number(String(up.id).replace(/^tennis-v2-/, ""));
-      if (!Number.isFinite(providerId)) return;
-      const detail = await getTennisMatchDetailV2(providerId).catch(() => null);
-      if (detail) startedUpcomingTennisDetails.set(providerId, detail);
-    }),
-  );
-  const startedUpcomingTennisPart = (() => {
-    const existing = new Set(tennisLivePart.map((m) => String(m.id)));
-    const out: LiveMatchState[] = [];
-    for (const up of startedUpcomingTennisCandidates) {
-      const id = String(up.id);
-      if (existing.has(id)) continue;
-      const providerId = Number(String(id).replace(/^tennis-v2-/, ""));
-      const detail = Number.isFinite(providerId)
-        ? startedUpcomingTennisDetails.get(providerId)
-        : undefined;
-      if (!detail || !detail.sets?.length) continue;
-      const sets: [number, number][] = detail.sets;
-      const currentPoints = detail?.currentPoints;
-      const serving = detail?.serving;
-      const currentSetNum = Math.max(1, sets.length);
-      const completedSets = Math.max(0, currentSetNum - 1);
-      const homeSetsWon = sets
-        .slice(0, completedSets)
-        .filter(([homeGames, awayGames]) => homeGames > awayGames).length;
-      const awaySetsWon = sets
-        .slice(0, completedSets)
-        .filter(([homeGames, awayGames]) => awayGames > homeGames).length;
-      const pairKey = _tennisPairKey(up.home, up.away);
-      const baseOdds = makeTennisBaseOdds(up.home, up.away);
-      const liveOddsState = computeTennisLiveOdds(
-        baseOdds,
-        sets,
-        homeSetsWon,
-        awaySetsWon,
-        currentPoints,
-        serving,
-        Number.isFinite(providerId)
-          ? _tennisLiveOddsCache.get(providerId)
-          : undefined,
-      );
-      const liveOdds = liveOddsState.odds;
-      const homeProb =
-        liveOdds.home > 0 && liveOdds.away > 0
-          ? 1 / liveOdds.home / (1 / liveOdds.home + 1 / liveOdds.away)
-          : 0.5;
-      out.push({
-        id,
-        home: up.home,
-        away: up.away,
-        league: up.league ?? "Tennis",
-        country: up.country ?? "",
-        sport: "tennis",
-        homeScore: homeSetsWon,
-        awayScore: awaySetsWon,
-        minute: currentSetNum * 20,
-        status: detail?.status ?? tennisSetLabel(currentSetNum),
-        hasRealOdds: liveOddsState.hasRealOdds,
-        odds: liveOdds,
-        markets: {
-          ...makeAdvancedMarketsFromTeams(up.home, up.away),
-          tennisExtra: computeLiveTennisExtras(
-            homeProb,
-            sets,
-            homeSetsWon,
-            awaySetsWon,
-            currentSetNum,
-            currentPoints,
-            serving,
-          ),
-        } as AdvancedMarkets,
-        events: [],
-        _liveExtra: {
-          sets,
-          ...(currentPoints ? { currentPoints } : {}),
-          ...(serving ? { serving } : {}),
-        },
-      });
-      if (out.length >= 60) break;
-    }
-    return out;
-  })();
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
   const footballLive = sportWithFallback(
@@ -20155,8 +20073,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ),
     pulseScoreVolleyball,
   );
-  const tennisLive = await applyPulseScoreTennisOverlay(
-    sportWithFallback("tennis", tennisLivePart),
+  const tennisLive = sportWithFallback(
+    "tennis",
+    await buildTennisLiveFromPulseScore(),
   );
   const boxingLive = sportWithFallback(
     "boxing",
@@ -20188,7 +20107,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ...cricketLive,
     ...boxingLive,
     ...formula1Live,
-    ...startedUpcomingTennisPart,
   ]);
 
   const liveIds = new Set(livePart.map((m) => String(m.id)));
@@ -20201,7 +20119,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     soccer: 3,   // só aparecem em "Em Breve" a ≤ 3 min do início
     basketball: 3,
     hockey: 3,
-    tennis: 3,   // jogos já iniciados são promovidos via startedUpcomingTennisCandidates
+    tennis: 3,
   };
   const DEFAULT_SOON_WINDOW = 3; // ≤ 3 min antes do início para todos os desportos
   const startingSoonCandidates = allUpcoming
