@@ -19637,14 +19637,18 @@ async function applyPulseScoreGenericOverlay(
 // services/pulsescore/client.ts's PulseScoreEvent comment for what was
 // actually confirmed vs. assumed from the (partially wrong) public docs.
 // Known gaps vs the old Statpal/SportsAPI pipeline, accepted per explicit
-// decision: no red cards, no competition-catalog filtering/market-tier
-// system, no ground-truth kickoff verification, no team/league logos, no
-// odds-drift simulation, no half/period status (only "LIVE").
+// decision: no red cards, no ground-truth kickoff verification, no
+// team/league logos, no odds-drift simulation, no half/period status (only
+// "LIVE"). Competition-catalog filtering and the market-tier system ARE
+// wired in below — both reuse the exact same tables the old pipeline used
+// (DOMESTIC_PRIORITY/footballLeagueAllowedStrict/footballMarketTier/
+// filterFootballMarketsByTier), so a league's tier/visibility doesn't
+// depend on which provider is currently sourcing football.
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   // GET /live-events?sport=soccer already returns only live events — no
   // separate `live` boolean field exists on each event to filter by.
   const events = await getPulseScoreFootballLive();
-  const result: LiveMatchState[] = [];
+  const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
   const currentIds = new Set<string>();
   for (const ev of events) {
     const home = ev.home?.trim();
@@ -19652,6 +19656,27 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
+
+    const leagueName = ev.league || "";
+    const isIntl = isIntlTournamentName(leagueName);
+    const countryKey = countryForLeagueName(leagueName);
+    // Curated competition catalog — same allow-list/priority table the old
+    // Statpal pipeline used (already tuned for BET62: which countries are
+    // shown, first-division-only countries, etc.). A league PulseScore sends
+    // that isn't in our table at all (countryKey null) is hidden rather than
+    // shown as generic "Internacional" — PulseScore does no catalog
+    // filtering of its own, so without this every obscure/regional league it
+    // happens to carry would show up in Ao Vivo.
+    if (
+      !isIntl &&
+      !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName))
+    )
+      continue;
+    const country = countryKey ?? "Internacional";
+    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
+    const prio = leaguePriority(prioKey, countryKey ?? undefined);
+    const tier = footballMarketTier(leagueName, country);
+
     // Extract directly from `ev` — this loop is iterating PulseScore's own
     // event list, so the override we want IS `ev`, not some other event that
     // fuzzy-matches its team names. findPulseScoreFootballOverride() (an
@@ -19663,13 +19688,13 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // and stall odds-market requests.
     const override = extractFootballOverride(ev);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const markets: AdvancedMarkets = { ...baseMarkets };
+    const rawMarkets: AdvancedMarkets = { ...baseMarkets };
     if (override?.totalGoals) {
-      markets.totalGoals = { ...markets.totalGoals, ...override.totalGoals };
+      rawMarkets.totalGoals = { ...rawMarkets.totalGoals, ...override.totalGoals };
     }
+    const markets = filterFootballMarketsByTier(rawMarkets, tier);
     const odds = override?.odds ?? makeOddsFromTeams(home, away);
     const score = pulseScoreEventScore(ev);
-    const country = countryForLeagueName(ev.league || "") ?? "Internacional";
     const id = `pulsescore-football-${ev.eventId}`;
     const homeScore = score?.home ?? 0;
     const awayScore = score?.away ?? 0;
@@ -19689,10 +19714,10 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       marketSuspension = Object.keys(active).length > 0 ? active : undefined;
     }
     let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
-    const scored =
+    const goalScored =
       !!existing &&
       (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
-    if (scored) {
+    if (goalScored) {
       const now = Date.now();
       marketSuspension = Object.fromEntries(
         FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
@@ -19714,6 +19739,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       hasRealOdds: !!override?.odds,
       odds,
       markets,
+      matchTier: tier,
       events: [],
       marketSuspension,
       _suspensionReason: suspensionReason,
@@ -19727,7 +19753,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // goal. Mirrors the same liveMatchState.set() every other sport's live
     // builder already does.
     liveMatchState.set(id, state);
-    result.push(state);
+    ranked.push({ state, prio });
   }
 
   // Garbage-collect: a match that was live and then disappears from
@@ -19752,7 +19778,11 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     }
   }
 
-  return result;
+  // Big leagues first — same priority ranking (DOMESTIC_PRIORITY /
+  // INTL_TOURNAMENTS) the catalog filter and market-tier calc above already
+  // use, so display order agrees with market depth/stake headroom.
+  ranked.sort((a, b) => a.prio - b.prio);
+  return ranked.map((r) => r.state);
 }
 
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
@@ -20878,7 +20908,17 @@ async function tickDirectTracker(): Promise<void> {
     directTrackerDebug.lastStatuses = payload.matches
       .slice(0, 20)
       .map((m) => ({ id: m.id, sport: m.sport, status: m.status, home: m.home, away: m.away }));
-    const liveMatches = payload.matches.filter((m) => isLiveMatchStatus(m.status));
+    // Match Tracker is reserved for Tier 1/2 football leagues — same tiering
+    // used for market depth/stake limits (BET62 tiering decision). Other
+    // sports (no tier system yet) stay untouched. This also cuts real
+    // outbound request volume: every match tracked here fires a SportScore/
+    // Statpal/PulseScore lookup on each 20s tick, so a lower-tier league
+    // that nobody's watching the mini-campo for was pure wasted budget.
+    const liveMatches = payload.matches.filter(
+      (m) =>
+        isLiveMatchStatus(m.status) &&
+        (m.sport !== "football" || (m.matchTier ?? 4) <= 2),
+    );
     directTrackerDebug.lastLiveCount = liveMatches.length;
     let found = 0;
     await mapWithConcurrency(liveMatches, 6, async (m) => {
