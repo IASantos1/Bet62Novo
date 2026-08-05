@@ -19606,6 +19606,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   // separate `live` boolean field exists on each event to filter by.
   const events = await getPulseScoreFootballLive();
   const result: LiveMatchState[] = [];
+  const currentIds = new Set<string>();
   for (const ev of events) {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
@@ -19628,8 +19629,9 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const odds = override?.odds ?? makeOddsFromTeams(home, away);
     const score = pulseScoreEventScore(ev);
     const country = countryForLeagueName(ev.league || "") ?? "Internacional";
-    result.push({
-      id: `pulsescore-football-${ev.eventId}`,
+    const id = `pulsescore-football-${ev.eventId}`;
+    const state: LiveMatchState = {
+      id,
       home,
       away,
       league: ev.league || "Futebol",
@@ -19643,8 +19645,41 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       odds,
       markets,
       events: [],
-    });
+    };
+    currentIds.add(id);
+    // liveMatchState is what settlement.ts (in-play resolution + cash-out
+    // suspension) and ensureFinishedMatchResult read from — this loop used to
+    // only return `result` without ever writing here, which meant no
+    // football bet placed since the PulseScore switch could ever be
+    // auto-settled (nothing marked matches as finished) or suspended after a
+    // goal. Mirrors the same liveMatchState.set() every other sport's live
+    // builder already does.
+    liveMatchState.set(id, state);
+    result.push(state);
   }
+
+  // Garbage-collect: a match that was live and then disappears from
+  // PulseScore's feed is treated as finished after a grace period, same
+  // disappearance-based pattern already used by the Statpal live pipelines
+  // (finalizeStaleLiveMatch + getFootballLiveDisappearGraceMs, reused as-is —
+  // both are sport-agnostic and only need the LiveMatchState shape, not a
+  // specific provider). This is what actually triggers settlement
+  // (enqueueMatchSettlement, called inside finalizeStaleLiveMatch) for
+  // PulseScore-sourced football matches once they end.
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+      await finalizeStaleLiveMatch(state);
+      liveMatchState.delete(id);
+    }
+  }
+
   return result;
 }
 
