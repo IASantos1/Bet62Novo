@@ -19700,6 +19700,11 @@ const TENNIS_DISAPPEAR_GRACE_MS = 3 * 60_000;
 // through for football. markets is intentionally left as an empty stand-in
 // (same escape hatch F1/MMA use) rather than fabricating tennis-specific
 // markets from unconfirmed data.
+// _liveExtra.sets is populated from that same sets-won score so the
+// frontend's S1/PTS table actually renders (it ignores match-level
+// homeScore/awayScore for tennis) — currentPoints is a "0"/"0" placeholder,
+// matching what the upcoming-lag bridge below already shows for freshly-
+// started matches, since real per-point data isn't available here.
 async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreTennisLive();
   const result: LiveMatchState[] = [];
@@ -19715,6 +19720,17 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       : baseOdds;
     const homeScoreRaw = Number(ev.score?.home);
     const awayScoreRaw = Number(ev.score?.away);
+    const homeScore = Number.isFinite(homeScoreRaw) ? homeScoreRaw : 0;
+    const awayScore = Number.isFinite(awayScoreRaw) ? awayScoreRaw : 0;
+    // Frontend's tennis card (TennisScore in home.tsx) only reads
+    // _liveExtra.sets/currentPoints — match-level homeScore/awayScore are
+    // never shown for tennis, so without this the real sets-won score
+    // PulseScore gives us silently never renders (blank score area). Show it
+    // as the "current set" column since we don't have real per-set game
+    // scores; currentPoints stays a "0"/"0" placeholder (same one the
+    // upcoming-lag bridge below already uses) since per-point detail isn't
+    // available from this feed.
+    const currentSetNum = Math.max(1, homeScore + awayScore + 1);
     const id = `pulsescore-tennis-${ev.eventId}`;
     const state: LiveMatchState = {
       id,
@@ -19723,14 +19739,18 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       league: ev.league || "Ténis",
       country: "Internacional",
       sport: "tennis",
-      homeScore: Number.isFinite(homeScoreRaw) ? homeScoreRaw : 0,
-      awayScore: Number.isFinite(awayScoreRaw) ? awayScoreRaw : 0,
+      homeScore,
+      awayScore,
       minute: 0,
-      status: "LIVE",
+      status: tennisSetLabel(currentSetNum),
       hasRealOdds: !!override.odds,
       odds,
       markets: {} as unknown as AdvancedMarkets,
       events: [],
+      _liveExtra: {
+        sets: [[homeScore, awayScore]],
+        currentPoints: ["0", "0"],
+      },
     };
     currentIds.add(id);
     // Same liveMatchState wiring football needed from the start — settlement
