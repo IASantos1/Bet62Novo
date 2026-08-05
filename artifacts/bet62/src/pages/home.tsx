@@ -5848,7 +5848,6 @@ export default function Home({
   const [matchViewTab, setMatchViewTab] = useState<
     | "markets"
     | "stats"
-    | "insight"
     | "standings"
     | "live"
     | "yesterday"
@@ -6934,8 +6933,16 @@ export default function Home({
     );
     if (updated) {
       setExpandedMatch((prev) => {
-        if (!prev || String(prev.id) !== String(updated.id))
-          return { ...updated };
+        // prev can be null here even though the effect's own `expandedMatch`
+        // guard above passed — this callback runs async relative to the
+        // closure that scheduled it, so a "Voltar" click (setExpandedMatch
+        // (null)) landing in between could already have cleared it. Respect
+        // that instead of silently reopening the match the user just closed
+        // — this was the reported "back button needs two clicks" bug: the
+        // first click closed it, this effect immediately reopened it, and
+        // only the second click (with no live update racing it) stuck.
+        if (!prev) return prev;
+        if (String(prev.id) !== String(updated.id)) return { ...updated };
         const anyUpdated = updated as any;
         const anyPrev = prev as any;
         return {
@@ -13138,6 +13145,7 @@ export default function Home({
                       ]
                     : [
                         { key: "todos", label: "Todos" },
+                        { key: "betbuilder", label: "Bet Builder", icon: "🧩" },
                         { key: "resultado", label: "Resultado" },
                         { key: "dupla", label: "Dupla Chance" },
                         { key: "gols", label: "Gols" },
@@ -13262,11 +13270,116 @@ export default function Home({
                           : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700"
                       }`}
                     >
+                      {(tab as any).icon && (
+                        <span className="mr-1">{(tab as any).icon}</span>
+                      )}
                       {tab.label}
                     </button>
                   ))}
                 </div>
               )}
+
+              {/* ── BET BUILDER (own tab, between Todos and Resultado) ── */}
+              {modalTab === "betbuilder" && (() => {
+                const _mk = match.markets;
+                const _ho = match.odds?.home ?? 0;
+                const _ao = match.odds?.away ?? 0;
+                const _do = match.odds?.draw ?? 0;
+                const _hn = teamNamePt(match.home);
+                const _an = teamNamePt(match.away);
+
+                // Build the conflict groups
+                const RES = ["home", "draw", "away"];
+                const DC  = ["homeOrDraw", "awayOrDraw", "homeOrAway"];
+                const O15 = ["o15", "u15"];
+                const O25 = ["o25", "u25"];
+                const O35 = ["o35", "u35"];
+                const BTS = ["bts-yes", "bts-no"];
+                const HT  = ["ht-home", "ht-draw", "ht-away"];
+
+                const conflictFor = (id: string): string[] => {
+                  // Resultado e Dupla Chance tratados como um único grupo: Dupla
+                  // Chance é uma combinação dos mesmos 3 resultados (home/draw/away),
+                  // então misturar "home" com "awayOrDraw" é contraditório e misturar
+                  // "home" com "homeOrDraw" é redundante — a Dupla Chance já cobre isso.
+                  const groups = [[...RES, ...DC], O15, O25, O35, BTS, HT];
+                  const out: string[] = [];
+                  for (const g of groups) {
+                    if (g.includes(id)) {
+                      for (const other of g) if (other !== id) out.push(other);
+                    }
+                  }
+                  return out;
+                };
+
+                const safe = (o: number) => o && o > 1.01 ? o : 0;
+
+                const builderMarkets: BuilderMarket[] = [
+                  // Resultado
+                  ...(safe(_ho) ? [{ id: "home",  label: `${_hn} — Vitória`,   market: "result", selection: "home",  odds: _ho, category: "Resultado",      conflictIds: conflictFor("home") }] : []),
+                  ...(safe(_do) ? [{ id: "draw",  label: "Empate",              market: "result", selection: "draw",  odds: _do, category: "Resultado",      conflictIds: conflictFor("draw") }] : []),
+                  ...(safe(_ao) ? [{ id: "away",  label: `${_an} — Vitória`,   market: "result", selection: "away",  odds: _ao, category: "Resultado",      conflictIds: conflictFor("away") }] : []),
+                  // Dupla Chance
+                  ...(_mk?.doubleChance?.homeOrDraw && safe(_mk.doubleChance.homeOrDraw) ? [{ id: "homeOrDraw", label: `${_hn} ou Empate`,     market: "dupla", selection: "homeOrDraw", odds: _mk.doubleChance.homeOrDraw, category: "Dupla Chance", conflictIds: conflictFor("homeOrDraw") }] : []),
+                  ...(_mk?.doubleChance?.awayOrDraw && safe(_mk.doubleChance.awayOrDraw) ? [{ id: "awayOrDraw", label: `${_an} ou Empate`,     market: "dupla", selection: "awayOrDraw", odds: _mk.doubleChance.awayOrDraw, category: "Dupla Chance", conflictIds: conflictFor("awayOrDraw") }] : []),
+                  ...(_mk?.doubleChance?.homeOrAway && safe(_mk.doubleChance.homeOrAway) ? [{ id: "homeOrAway", label: `${_hn} ou ${_an}`,     market: "dupla", selection: "homeOrAway", odds: _mk.doubleChance.homeOrAway, category: "Dupla Chance", conflictIds: conflictFor("homeOrAway") }] : []),
+                  // Total de Golos
+                  ...(_mk?.totalGoals?.over15 && safe(_mk.totalGoals.over15) ? [{ id: "o15", label: "Mais de 1.5 Golos",  market: "gols", selection: "o15", odds: _mk.totalGoals.over15,  category: "Total de Golos", conflictIds: conflictFor("o15") }] : []),
+                  ...(_mk?.totalGoals?.over25 && safe(_mk.totalGoals.over25) ? [{ id: "o25", label: "Mais de 2.5 Golos",  market: "gols", selection: "o25", odds: _mk.totalGoals.over25,  category: "Total de Golos", conflictIds: conflictFor("o25") }] : []),
+                  ...(_mk?.totalGoals?.over35 && safe(_mk.totalGoals.over35) ? [{ id: "o35", label: "Mais de 3.5 Golos",  market: "gols", selection: "o35", odds: _mk.totalGoals.over35,  category: "Total de Golos", conflictIds: conflictFor("o35") }] : []),
+                  ...(_mk?.totalGoals?.under25 && safe(_mk.totalGoals.under25) ? [{ id: "u25", label: "Menos de 2.5 Golos", market: "gols", selection: "u25", odds: _mk.totalGoals.under25, category: "Total de Golos", conflictIds: conflictFor("u25") }] : []),
+                  ...(_mk?.totalGoals?.under35 && safe(_mk.totalGoals.under35) ? [{ id: "u35", label: "Menos de 3.5 Golos", market: "gols", selection: "u35", odds: _mk.totalGoals.under35, category: "Total de Golos", conflictIds: conflictFor("u35") }] : []),
+                  // Ambas Marcam
+                  ...(_mk?.bothTeamsScore?.yes && safe(_mk.bothTeamsScore.yes) ? [{ id: "bts-yes", label: "Ambas Marcam — Sim", market: "dupla", selection: "bts-yes", odds: _mk.bothTeamsScore.yes, category: "Ambas Marcam", conflictIds: conflictFor("bts-yes") }] : []),
+                  ...(_mk?.bothTeamsScore?.no  && safe(_mk.bothTeamsScore.no)  ? [{ id: "bts-no",  label: "Ambas Marcam — Não", market: "dupla", selection: "bts-no",  odds: _mk.bothTeamsScore.no,  category: "Ambas Marcam", conflictIds: conflictFor("bts-no")  }] : []),
+                  // Intervalo
+                  ...(_mk?.halfTime?.home && safe(_mk.halfTime.home) ? [{ id: "ht-home", label: `${_hn} Vence 1º Tempo`, market: "halftime", selection: "ht-home", odds: _mk.halfTime.home, category: "Intervalo", conflictIds: conflictFor("ht-home") }] : []),
+                  ...(_mk?.halfTime?.draw && safe(_mk.halfTime.draw) ? [{ id: "ht-draw", label: "Empate ao Intervalo",    market: "halftime", selection: "ht-draw", odds: _mk.halfTime.draw, category: "Intervalo", conflictIds: conflictFor("ht-draw") }] : []),
+                  ...(_mk?.halfTime?.away && safe(_mk.halfTime.away) ? [{ id: "ht-away", label: `${_an} Vence 1º Tempo`, market: "halftime", selection: "ht-away", odds: _mk.halfTime.away, category: "Intervalo", conflictIds: conflictFor("ht-away") }] : []),
+                  // Golos por Equipa
+                  ...(((_mk as any)?.teamGoals?.homeOver15 ?? 0) > 1.01 ? [{ id: "h-o15", label: `${_hn} Marca 2+`, market: "teamgoals", selection: "h-o15", odds: (_mk as any).teamGoals.homeOver15 as number, category: "Golos por Equipa", conflictIds: [] }] : []),
+                  ...(((_mk as any)?.teamGoals?.awayOver05 ?? 0) > 1.01 ? [{ id: "a-o05", label: `${_an} Marca`,    market: "teamgoals", selection: "a-o05", odds: (_mk as any).teamGoals.awayOver05 as number, category: "Golos por Equipa", conflictIds: [] }] : []),
+                  // Escanteios
+                  ...(_mk?.corners?.o85 && safe(_mk.corners.o85) ? [{ id: "cn-85",  label: "Escanteios +8.5",  market: "corners", selection: "cn-85",  odds: _mk.corners.o85,  category: "Escanteios", conflictIds: [] }] : []),
+                  ...(_mk?.corners?.o95 && safe(_mk.corners.o95) ? [{ id: "cn-95",  label: "Escanteios +9.5",  market: "corners", selection: "cn-95",  odds: _mk.corners.o95,  category: "Escanteios", conflictIds: [] }] : []),
+                  ...(_mk?.corners?.o105 && safe(_mk.corners.o105) ? [{ id: "cn-105", label: "Escanteios +10.5", market: "corners", selection: "cn-105", odds: _mk.corners.o105, category: "Escanteios", conflictIds: [] }] : []),
+                ];
+
+                if (builderMarkets.length === 0) {
+                  return (
+                    <div className="mt-4 text-center py-10 text-zinc-500">
+                      <div className="text-3xl mb-3">🧩</div>
+                      <div className="text-sm font-medium">
+                        Bet Builder não disponível para esta partida.
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="mt-2">
+                    <BetBuilderPanel
+                      match={{
+                        id: String(match.id),
+                        home: match.home,
+                        away: match.away,
+                        league: match.league,
+                        country: match.country,
+                        sport: match.sport,
+                        date: match.date,
+                        time: match.time,
+                        scheduledDate: (match as any).scheduledDate,
+                        scheduledTime: (match as any).scheduledTime,
+                      }}
+                      markets={builderMarkets}
+                      bets={bets}
+                      setBets={setBets}
+                      setBetMode={setBetMode}
+                      setBetSlipOpenMobile={setBetSlipOpenMobile}
+                    />
+                  </div>
+                );
+              })()}
 
               {/* ── SUSPENSION BANNER (modal) ── */}
               {((match.marketSuspension &&
@@ -18461,15 +18574,6 @@ export default function Home({
                             </span>
                           </div>
                         )}
-                        {(!expandedMatch.sport || expandedMatch.sport === "football") && (
-                          <button
-                            onClick={() => setMatchViewTab(matchViewTab === "insight" ? "markets" : "insight")}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "insight" ? "bg-orange-950/60 border-orange-600/60 text-orange-200 shadow-[0_0_8px_rgba(249,115,22,0.35)]" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
-                          >
-                            <span className="text-[13px] leading-none" style={{ filter: "drop-shadow(0 0 4px rgba(249,115,22,0.9)) drop-shadow(0 2px 3px rgba(239,68,68,0.7))" }}>🔥</span>
-                            Previsão
-                          </button>
-                        )}
                         <button
                           onClick={() => setMatchViewTab(matchViewTab === "stats" ? "markets" : "stats")}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "stats" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
@@ -18628,328 +18732,6 @@ export default function Home({
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
                   />
-                )}
-
-                {/* Insight/Previsão panel */}
-                {matchViewTab === "insight" && (
-                  <div className="mb-2 animate-in fade-in duration-200 space-y-3">
-                    {(() => {
-                      if (!matchStats) return null;
-                      const { avgStats } = matchStats;
-
-                      // ── Both-team market preview cards ────────────────────────
-                      const mk = expandedMatch?.markets;
-                      const homeOdd = expandedMatch.odds?.home ?? 0;
-                      const awayOdd = expandedMatch.odds?.away ?? 0;
-
-                      const bttsOdds = mk?.bothTeamsScore?.yes && mk.bothTeamsScore.yes > 1.01
-                        ? mk.bothTeamsScore.yes
-                        : +(Math.max(1.30, 1 / (Math.max(35, avgStats.btts) / 100) * 0.95)).toFixed(2);
-
-                      const o25Odds = mk?.totalGoals?.over25 && mk.totalGoals.over25 > 1.01
-                        ? mk.totalGoals.over25
-                        : +(Math.max(1.20, 1 / (Math.max(42, avgStats.over25) / 100) * 0.95)).toFixed(2);
-
-                      if (!expandedMatch || (homeOdd <= 1.01 && awayOdd <= 1.01)) {
-                        return (
-                          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center text-zinc-500 text-sm">
-                            Dados insuficientes para gerar previsões.
-                          </div>
-                        );
-                      }
-
-                      // ── Múltiplas de previsão — SEMPRE do mesmo evento (expandedMatch).
-                      // Cada combo junta 2 mercados sobre a MESMA equipa (não pode
-                      // misturar mercados de resultado de equipas opostas — seriam
-                      // contraditórios). O comboTag permite que hasDuplicateMatches
-                      // trate estas seleções como uma múltipla válida em vez de forçar
-                      // "Simples", mantendo essa exceção só para combos de previsão.
-                      const homeDcOdds = mk?.doubleChance?.homeOrDraw && mk.doubleChance.homeOrDraw > 1.01
-                        ? mk.doubleChance.homeOrDraw
-                        : +(Math.max(1.05, homeOdd * 0.65)).toFixed(2);
-                      const awayDcOdds = mk?.doubleChance?.awayOrDraw && mk.doubleChance.awayOrDraw > 1.01
-                        ? mk.doubleChance.awayOrDraw
-                        : +(Math.max(1.05, awayOdd * 0.65)).toFixed(2);
-
-                      type ComboSel = { label: string; selection: string; market: string; odds: number };
-                      type Combo = {
-                        id: string; name: string; emoji: string;
-                        tagColor: string; borderClass: string; badgeClass: string;
-                        sels: ComboSel[];
-                      };
-
-                      const calcComboOdds = (sels: ComboSel[]) =>
-                        +(sels.reduce((acc: any, s: any) => acc * s.odds, 1) * 0.98).toFixed(2);
-
-                      // 2 previsões da equipa da casa + 2 previsões da equipa visitante
-                      const combos: Combo[] = [
-                        {
-                          id: "home-safe",
-                          name: `Dupla ${teamNamePt(expandedMatch.home)}`,
-                          emoji: "🏠",
-                          tagColor: "text-emerald-400",
-                          borderClass: "border-emerald-500/30",
-                          badgeClass: "bg-emerald-500/10",
-                          sels: [
-                            { label: `${teamNamePt(expandedMatch.home)} — Vitória`, selection: "home", market: "result", odds: homeOdd },
-                            { label: "Acima de 2.5 Golos", selection: "o25", market: "gols", odds: o25Odds },
-                          ],
-                        },
-                        {
-                          id: "away-safe",
-                          name: `Dupla ${teamNamePt(expandedMatch.away)}`,
-                          emoji: "✈️",
-                          tagColor: "text-blue-400",
-                          borderClass: "border-blue-500/30",
-                          badgeClass: "bg-blue-500/10",
-                          sels: [
-                            { label: `${teamNamePt(expandedMatch.away)} — Vitória`, selection: "away", market: "result", odds: awayOdd },
-                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
-                          ],
-                        },
-                        {
-                          id: "home-jogo-seguro",
-                          name: `Jogo Seguro — ${teamNamePt(expandedMatch.home)}`,
-                          emoji: "🛡️",
-                          tagColor: "text-orange-400",
-                          borderClass: "border-orange-500/20",
-                          badgeClass: "bg-orange-500/10",
-                          sels: [
-                            { label: `${teamNamePt(expandedMatch.home)} ou Empate`, selection: "homeOrDraw", market: "dupla", odds: homeDcOdds },
-                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
-                          ],
-                        },
-                        {
-                          id: "away-jogo-seguro",
-                          name: `Jogo Seguro — ${teamNamePt(expandedMatch.away)}`,
-                          emoji: "🛡️",
-                          tagColor: "text-sky-400",
-                          borderClass: "border-sky-500/20",
-                          badgeClass: "bg-sky-500/10",
-                          sels: [
-                            { label: `${teamNamePt(expandedMatch.away)} ou Empate`, selection: "awayOrDraw", market: "dupla", odds: awayDcOdds },
-                            { label: "Acima de 2.5 Golos", selection: "o25", market: "gols", odds: o25Odds },
-                          ],
-                        },
-                      ].filter((c) => c.sels.every((s) => s.odds > 1.01));
-
-                      return (
-                        <div className="space-y-4">
-                          {/* ── Múltiplas de previsão — sempre do mesmo evento ── */}
-                          {combos.length > 0 && (
-                            <div>
-                              <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-1">Múltiplas Sugeridas</div>
-                              <div
-                                className="-mx-4 px-4 flex gap-3 pb-2 snap-x snap-mandatory"
-                                style={{ overflowX: "scroll", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
-                              >
-                                {combos.map((combo, ci) => {
-                                  const comboOdds = calcComboOdds(combo.sels);
-                                  const comboTag = `pred-${expandedMatch.id}-${combo.id}`;
-                                  const isActive = combo.sels.every((sel) =>
-                                    bets.some(
-                                      (b) =>
-                                        String(b.matchId) === String(expandedMatch.id) &&
-                                        b.market === sel.market &&
-                                        b.selection === sel.selection &&
-                                        b.comboTag === comboTag,
-                                    ),
-                                  );
-                                  return (
-                                    <motion.div
-                                      key={combo.id}
-                                      initial={{ opacity: 0, x: 10 }}
-                                      animate={{ opacity: 1, x: 0 }}
-                                      transition={{ delay: ci * 0.08 }}
-                                      className={`snap-start shrink-0 w-[220px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
-                                    >
-                                      {/* Header: combo name + múltipla tag + combined odd */}
-                                      <div className="flex items-center justify-between mb-1">
-                                        <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${combo.badgeClass}`}>
-                                          <span className="text-[13px] leading-none">{combo.emoji}</span>
-                                          <span className={`text-[9px] font-black uppercase tracking-wider ${combo.tagColor}`}>{combo.name}</span>
-                                        </div>
-                                        <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest border border-zinc-700 rounded px-1.5 py-0.5">Múltipla</span>
-                                      </div>
-
-                                      {/* Combined odds */}
-                                      <div className="flex items-baseline gap-1 mb-3">
-                                        <span className="text-[22px] font-black text-white leading-none">{comboOdds}</span>
-                                        <span className="text-[9px] text-zinc-500">odd combinada</span>
-                                      </div>
-
-                                      {/* Selections — ambas do mesmo jogo */}
-                                      <div className="space-y-2 mb-3">
-                                        {combo.sels.map((sel, si) => (
-                                          <div key={si} className="flex items-center justify-between gap-2">
-                                            <div className="flex items-center gap-1.5 min-w-0">
-                                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${combo.tagColor.replace("text-", "bg-")}`} />
-                                              <span className="text-[10px] text-zinc-300 leading-tight truncate">{sel.label}</span>
-                                            </div>
-                                            <span className="text-[10px] font-black text-zinc-200 shrink-0">{sel.odds.toFixed(2)}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-
-                                      {/* Add/remove combo — bypassa toggleBet; comboTag permite a
-                                          múltipla mesmo com 2 mercados do mesmo evento. Só um combo
-                                          de previsão pode estar ativo por jogo (senão comboTags
-                                          diferentes no mesmo matchId forçam "Simples"). */}
-                                      <button
-                                        onClick={() => {
-                                          const matchComboPrefix = `pred-${expandedMatch.id}-`;
-                                          if (isActive) {
-                                            // Toggle off: remove só este combo
-                                            setBets((prev) => prev.filter((b) => b.comboTag !== comboTag));
-                                            return;
-                                          }
-                                          setBets((prev) => {
-                                            // Remove qualquer combo de previsão anterior deste jogo
-                                            const withoutThisCombo = prev.filter(
-                                              (b) => !(b.comboTag && b.comboTag.startsWith(matchComboPrefix)),
-                                            );
-                                            return [
-                                              ...withoutThisCombo,
-                                              ...combo.sels.map((sel) => ({
-                                                matchId: expandedMatch.id,
-                                                matchTitle: `${expandedMatch.home} vs ${expandedMatch.away}`,
-                                                league: expandedMatch.league,
-                                                country: expandedMatch.country,
-                                                sport: expandedMatch.sport,
-                                                date: expandedMatch.date,
-                                                time: expandedMatch.time,
-                                                scheduledDate: (expandedMatch as any).scheduledDate,
-                                                scheduledTime: (expandedMatch as any).scheduledTime,
-                                                selection: sel.selection,
-                                                odd: sel.odds,
-                                                originalOdd: sel.odds,
-                                                market: sel.market,
-                                                label: sel.label,
-                                                comboTag,
-                                              })),
-                                            ];
-                                          });
-                                          setBetMode("multipla");
-                                          if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
-                                        }}
-                                        className={`w-full py-2 rounded-xl text-[11px] font-black text-white transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)] ${
-                                          isActive
-                                            ? "bg-zinc-800 border border-red-500/60"
-                                            : "bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80"
-                                        }`}
-                                      >
-                                        {isActive ? "Múltipla Adicionada" : "Adicionar Múltipla"}
-                                      </button>
-                                    </motion.div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* ── Bet Builder / Same Game Combo ── */}
-                    {(!expandedMatch.sport || expandedMatch.sport === "football") && (() => {
-                      const _mk = expandedMatch?.markets;
-                      const _ho = expandedMatch.odds?.home ?? 0;
-                      const _ao = expandedMatch.odds?.away ?? 0;
-                      const _do = expandedMatch.odds?.draw ?? 0;
-                      const _hn = teamNamePt(expandedMatch.home);
-                      const _an = teamNamePt(expandedMatch.away);
-
-                      // Build the conflict groups
-                      const RES = ["home", "draw", "away"];
-                      const DC  = ["homeOrDraw", "awayOrDraw", "homeOrAway"];
-                      const O15 = ["o15", "u15"];
-                      const O25 = ["o25", "u25"];
-                      const O35 = ["o35", "u35"];
-                      const BTS = ["bts-yes", "bts-no"];
-                      const HT  = ["ht-home", "ht-draw", "ht-away"];
-
-                      const conflictFor = (id: string): string[] => {
-                        // Resultado e Dupla Chance tratados como um único grupo: Dupla
-                        // Chance é uma combinação dos mesmos 3 resultados (home/draw/away),
-                        // então misturar "home" com "awayOrDraw" é contraditório e misturar
-                        // "home" com "homeOrDraw" é redundante — a Dupla Chance já cobre isso.
-                        const groups = [[...RES, ...DC], O15, O25, O35, BTS, HT];
-                        const out: string[] = [];
-                        for (const g of groups) {
-                          if (g.includes(id)) {
-                            for (const other of g) if (other !== id) out.push(other);
-                          }
-                        }
-                        return out;
-                      };
-
-                      const safe = (o: number) => o && o > 1.01 ? o : 0;
-
-                      const builderMarkets: BuilderMarket[] = [
-                        // Resultado
-                        ...(safe(_ho) ? [{ id: "home",  label: `${_hn} — Vitória`,   market: "result", selection: "home",  odds: _ho, category: "Resultado",      conflictIds: conflictFor("home") }] : []),
-                        ...(safe(_do) ? [{ id: "draw",  label: "Empate",              market: "result", selection: "draw",  odds: _do, category: "Resultado",      conflictIds: conflictFor("draw") }] : []),
-                        ...(safe(_ao) ? [{ id: "away",  label: `${_an} — Vitória`,   market: "result", selection: "away",  odds: _ao, category: "Resultado",      conflictIds: conflictFor("away") }] : []),
-                        // Dupla Chance
-                        ...(_mk?.doubleChance?.homeOrDraw && safe(_mk.doubleChance.homeOrDraw) ? [{ id: "homeOrDraw", label: `${_hn} ou Empate`,     market: "dupla", selection: "homeOrDraw", odds: _mk.doubleChance.homeOrDraw, category: "Dupla Chance", conflictIds: conflictFor("homeOrDraw") }] : []),
-                        ...(_mk?.doubleChance?.awayOrDraw && safe(_mk.doubleChance.awayOrDraw) ? [{ id: "awayOrDraw", label: `${_an} ou Empate`,     market: "dupla", selection: "awayOrDraw", odds: _mk.doubleChance.awayOrDraw, category: "Dupla Chance", conflictIds: conflictFor("awayOrDraw") }] : []),
-                        ...(_mk?.doubleChance?.homeOrAway && safe(_mk.doubleChance.homeOrAway) ? [{ id: "homeOrAway", label: `${_hn} ou ${_an}`,     market: "dupla", selection: "homeOrAway", odds: _mk.doubleChance.homeOrAway, category: "Dupla Chance", conflictIds: conflictFor("homeOrAway") }] : []),
-                        // Total de Golos
-                        ...(_mk?.totalGoals?.over15 && safe(_mk.totalGoals.over15) ? [{ id: "o15", label: "Mais de 1.5 Golos",  market: "gols", selection: "o15", odds: _mk.totalGoals.over15,  category: "Total de Golos", conflictIds: conflictFor("o15") }] : []),
-                        ...(_mk?.totalGoals?.over25 && safe(_mk.totalGoals.over25) ? [{ id: "o25", label: "Mais de 2.5 Golos",  market: "gols", selection: "o25", odds: _mk.totalGoals.over25,  category: "Total de Golos", conflictIds: conflictFor("o25") }] : []),
-                        ...(_mk?.totalGoals?.over35 && safe(_mk.totalGoals.over35) ? [{ id: "o35", label: "Mais de 3.5 Golos",  market: "gols", selection: "o35", odds: _mk.totalGoals.over35,  category: "Total de Golos", conflictIds: conflictFor("o35") }] : []),
-                        ...(_mk?.totalGoals?.under25 && safe(_mk.totalGoals.under25) ? [{ id: "u25", label: "Menos de 2.5 Golos", market: "gols", selection: "u25", odds: _mk.totalGoals.under25, category: "Total de Golos", conflictIds: conflictFor("u25") }] : []),
-                        ...(_mk?.totalGoals?.under35 && safe(_mk.totalGoals.under35) ? [{ id: "u35", label: "Menos de 3.5 Golos", market: "gols", selection: "u35", odds: _mk.totalGoals.under35, category: "Total de Golos", conflictIds: conflictFor("u35") }] : []),
-                        // Ambas Marcam
-                        ...(_mk?.bothTeamsScore?.yes && safe(_mk.bothTeamsScore.yes) ? [{ id: "bts-yes", label: "Ambas Marcam — Sim", market: "dupla", selection: "bts-yes", odds: _mk.bothTeamsScore.yes, category: "Ambas Marcam", conflictIds: conflictFor("bts-yes") }] : []),
-                        ...(_mk?.bothTeamsScore?.no  && safe(_mk.bothTeamsScore.no)  ? [{ id: "bts-no",  label: "Ambas Marcam — Não", market: "dupla", selection: "bts-no",  odds: _mk.bothTeamsScore.no,  category: "Ambas Marcam", conflictIds: conflictFor("bts-no")  }] : []),
-                        // Intervalo
-                        ...(_mk?.halfTime?.home && safe(_mk.halfTime.home) ? [{ id: "ht-home", label: `${_hn} Vence 1º Tempo`, market: "halftime", selection: "ht-home", odds: _mk.halfTime.home, category: "Intervalo", conflictIds: conflictFor("ht-home") }] : []),
-                        ...(_mk?.halfTime?.draw && safe(_mk.halfTime.draw) ? [{ id: "ht-draw", label: "Empate ao Intervalo",    market: "halftime", selection: "ht-draw", odds: _mk.halfTime.draw, category: "Intervalo", conflictIds: conflictFor("ht-draw") }] : []),
-                        ...(_mk?.halfTime?.away && safe(_mk.halfTime.away) ? [{ id: "ht-away", label: `${_an} Vence 1º Tempo`, market: "halftime", selection: "ht-away", odds: _mk.halfTime.away, category: "Intervalo", conflictIds: conflictFor("ht-away") }] : []),
-                        // Golos por Equipa
-                        ...(((_mk as any)?.teamGoals?.homeOver15 ?? 0) > 1.01 ? [{ id: "h-o15", label: `${_hn} Marca 2+`, market: "teamgoals", selection: "h-o15", odds: (_mk as any).teamGoals.homeOver15 as number, category: "Golos por Equipa", conflictIds: [] }] : []),
-                        ...(((_mk as any)?.teamGoals?.awayOver05 ?? 0) > 1.01 ? [{ id: "a-o05", label: `${_an} Marca`,    market: "teamgoals", selection: "a-o05", odds: (_mk as any).teamGoals.awayOver05 as number, category: "Golos por Equipa", conflictIds: [] }] : []),
-                        // Escanteios
-                        ...(_mk?.corners?.o85 && safe(_mk.corners.o85) ? [{ id: "cn-85",  label: "Escanteios +8.5",  market: "corners", selection: "cn-85",  odds: _mk.corners.o85,  category: "Escanteios", conflictIds: [] }] : []),
-                        ...(_mk?.corners?.o95 && safe(_mk.corners.o95) ? [{ id: "cn-95",  label: "Escanteios +9.5",  market: "corners", selection: "cn-95",  odds: _mk.corners.o95,  category: "Escanteios", conflictIds: [] }] : []),
-                        ...(_mk?.corners?.o105 && safe(_mk.corners.o105) ? [{ id: "cn-105", label: "Escanteios +10.5", market: "corners", selection: "cn-105", odds: _mk.corners.o105, category: "Escanteios", conflictIds: [] }] : []),
-                      ];
-
-                      if (builderMarkets.length < 4) return null;
-
-                      return (
-                        <div className="border-t border-zinc-800/40 pt-3 mt-1">
-                          <BetBuilderPanel
-                            match={{
-                              id: String(expandedMatch.id),
-                              home: expandedMatch.home,
-                              away: expandedMatch.away,
-                              league: expandedMatch.league,
-                              country: expandedMatch.country,
-                              sport: expandedMatch.sport,
-                              date: expandedMatch.date,
-                              time: expandedMatch.time,
-                              scheduledDate: (expandedMatch as any).scheduledDate,
-                              scheduledTime: (expandedMatch as any).scheduledTime,
-                            }}
-                            markets={builderMarkets}
-                            bets={bets}
-                            setBets={setBets}
-                            setBetMode={setBetMode}
-                            setBetSlipOpenMobile={setBetSlipOpenMobile}
-                          />
-                        </div>
-                      );
-                    })()}
-
-                    <div className="flex items-start gap-2 px-1 pt-1">
-                      <Circle size={8} className="text-zinc-600 mt-1 shrink-0" />
-                      <p className="text-[10px] text-zinc-600 leading-relaxed">
-                        As previsões são geradas automaticamente com base em dados históricos e odds de mercado. Aposte de forma responsável.
-                      </p>
-                    </div>
-                  </div>
                 )}
 
                 {/* Standings panel */}
