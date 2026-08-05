@@ -11169,6 +11169,36 @@ export default function Home({
     tracker: match.tracker,
   });
 
+  // Goal/card markers for the Momentum chart, from the Match Tracker's
+  // incident list (attachDirectTracker: StatScore → SportScore → Statpal →
+  // PulseScore) rather than _liveExtra.football — the tracker is the one
+  // source that's actually populated for PulseScore-only football matches,
+  // where _liveExtra doesn't exist at all. Moved out of the mini-campo's own
+  // timeline strip per explicit request: goals/cards should show on the
+  // Momentum graph, not duplicated below the field.
+  const trackerFootballExtra = (
+    match: Pick<Match, "home" | "tracker">,
+  ): { goals: any[]; cards: any[] } => {
+    const goals: any[] = [];
+    const cards: any[] = [];
+    for (const inc of match.tracker?.incidents ?? []) {
+      const isHome =
+        inc.team.toLowerCase() === "home" ||
+        teamNamePt(inc.team) === teamNamePt(match.home);
+      const team = isHome ? "home" : "away";
+      if (inc.type === "goal" || inc.type === "penalty") {
+        goals.push({ team, minute: inc.minute, playerName: inc.player, penalty: inc.type === "penalty" });
+      } else if (inc.type === "own_goal") {
+        goals.push({ team, minute: inc.minute, playerName: inc.player, ownGoal: true });
+      } else if (inc.type === "yellow") {
+        cards.push({ team, minute: inc.minute, playerName: inc.player, cardType: "yellow" });
+      } else if (inc.type === "red_card" || inc.type === "yellow_red") {
+        cards.push({ team, minute: inc.minute, playerName: inc.player, cardType: "red" });
+      }
+    }
+    return { goals, cards };
+  };
+
   const renderMatchCard = (match: Match) => {
     const matchKey = String(match.id);
     const sport = match.sport ?? "football";
@@ -18364,7 +18394,11 @@ export default function Home({
                             expandedMatch.tracker?.awayHalfTimeScore
                           }
                           lineupConfirmed={expandedMatch.tracker?.lineupConfirmed}
-                          incidents={expandedMatch.tracker?.incidents}
+                          // Incidents timeline intentionally NOT passed here
+                          // anymore — goals/cards now show on the Momentum
+                          // chart instead (see trackerFootballExtra above),
+                          // per explicit request not to duplicate them under
+                          // the mini-campo.
                           liveClockLabel={(() => {
                             if (!expandedMatch.isLive) return null;
                             // Minute/phase computation below is football-
@@ -18579,7 +18613,17 @@ export default function Home({
                       toggleBet(expandedMatch, market, odds, "insight", market);
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
-                    liveExtra={(expandedMatch as any)._liveExtra}
+                    liveExtra={(() => {
+                      const base = (expandedMatch as any)._liveExtra;
+                      const tracked = trackerFootballExtra(expandedMatch);
+                      return {
+                        ...base,
+                        football: {
+                          goals: tracked.goals.length > 0 ? tracked.goals : base?.football?.goals,
+                          cards: tracked.cards.length > 0 ? tracked.cards : base?.football?.cards,
+                        },
+                      };
+                    })()}
                     homeScore={expandedMatch.homeScore}
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
