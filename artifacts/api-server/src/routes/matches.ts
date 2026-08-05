@@ -19584,6 +19584,64 @@ async function applyPulseScoreGenericOverlay(
   });
 }
 
+// ── PulseScore-only football live builder (Phase 1 of the Statpal/SportsAPI
+// Pro removal — explicit user decision, 2026-08-05) ─────────────────────────
+// Real 1X2 + total-goals odds come from PulseScore (matched by team name);
+// every other market comes from our own Elo/Poisson model
+// (makeAdvancedMarketsFromTeams/makeOddsFromTeams — fully self-contained, no
+// external provider), same as it already does for matches with no real odds.
+// Known gaps vs the old Statpal/SportsAPI pipeline, left as-is rather than
+// guessed at: no parsed live clock/minute (PulseScore's score field format
+// was never verified against real sample data — best-effort parse below,
+// falls back to 0-0/no-minute rather than fabricate one), no red cards, no
+// competition-catalog filtering/market-tier system, no ground-truth kickoff
+// verification, no team/league logos, no odds-drift simulation.
+function parsePulseScoreScore(
+  raw: string | undefined,
+): { home: number; away: number } | null {
+  if (!raw) return null;
+  const m = raw.trim().match(/^(\d+)\s*[-:]\s*(\d+)/);
+  if (!m) return null;
+  return { home: Number(m[1]), away: Number(m[2]) };
+}
+
+async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const psEvents = await getPulseScoreFootballLive();
+  const liveEvents = psEvents.filter((e) => e.live);
+  const result: LiveMatchState[] = [];
+  for (const ev of liveEvents) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const override = findPulseScoreFootballOverride(home, away, liveEvents);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    if (override?.totalGoals) {
+      markets.totalGoals = { ...markets.totalGoals, ...override.totalGoals };
+    }
+    const odds = override?.odds ?? makeOddsFromTeams(home, away);
+    const score = parsePulseScoreScore(ev.score);
+    const country = countryForLeagueName(ev.league || "") ?? "Internacional";
+    result.push({
+      id: `pulsescore-football-${ev.eventId}`,
+      home,
+      away,
+      league: ev.league || "Futebol",
+      country,
+      sport: "football",
+      homeScore: score?.home ?? 0,
+      awayScore: score?.away ?? 0,
+      minute: 0,
+      status: "LIVE",
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets,
+      events: [],
+    });
+  }
+  return result;
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
@@ -19600,7 +19658,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
   const [
-    footballEvents,
     basketballEvents,
     hockeyEvents,
     baseballEvents,
@@ -19616,7 +19673,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     volleyballLiveTournaments,
     nhlLiveTournaments,
   ] = await Promise.all([
-    getFootballLiveV2(),
     getBasketballLiveV2(),
     getHockeyLiveV2(),
     getBaseballLiveV2(),
@@ -19801,8 +19857,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   })();
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
-  const footballLive = await applyPulseScoreFootballOverlay(
-    sportWithFallback("football", await buildFootballLiveV2(footballEvents)),
+  const footballLive = sportWithFallback(
+    "football",
+    await buildFootballLiveFromPulseScore(),
   );
   // Basketball live: merge Statpal NBA livescores + SportsAPI V2.
   // Statpal wins when it has quarter detail (q1–q4, OT).
