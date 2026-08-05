@@ -167,15 +167,18 @@ function oddsToNumber(raw: number | undefined): number | null {
 }
 
 function extractTennisOverride(ev: PulseScoreEvent): PulseScoreTennisOverride {
-  // "match_winner" was never observed in a real call (verified against
-  // bet365/football, 2026-08-05) — real data used canonicalMarket
-  // "MATCH_RESULT" or "OTHER" with rawName "Fulltime Result" instead. Not
-  // verified for tennis specifically, so keep both as candidates.
+  // Verified against a real GET /tennis/leagues call (2026-08-05): tennis's
+  // match-winner market uses canonicalMarket "DRAW_NO_BET" (makes sense —
+  // no draw outcome in tennis), rawName is just "main" (not a useful
+  // identifier). "match_winner"/"MATCH_RESULT" kept as fallbacks in case a
+  // different tennis market (e.g. a live/in-play one) uses them instead.
   const isFulltime = (period: string) => (period || "").toUpperCase() === "FULL_TIME";
   const matchWinnerMarkets = (ev.markets ?? []).filter(
     (m) =>
       isFulltime(m.period) &&
-      (m.canonicalMarket === "MATCH_RESULT" || m.canonicalMarket === "match_winner"),
+      (m.canonicalMarket === "DRAW_NO_BET" ||
+        m.canonicalMarket === "MATCH_RESULT" ||
+        m.canonicalMarket === "match_winner"),
   );
   for (const m of (ev.markets ?? [])) {
     if (matchWinnerMarkets.includes(m)) continue;
