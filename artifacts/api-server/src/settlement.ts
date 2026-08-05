@@ -19,7 +19,6 @@ import {
   ensureFinishedMatchResult,
   finishedMatchResults,
   liveMatchState,
-  scanDailyForFinished,
   scanVolleyballForFinished,
   scanTennisV1ForFinished,
   scanNHLForFinished,
@@ -5586,13 +5585,20 @@ async function expireStalePendingBets(): Promise<void> {
  * Start the background settlement worker.
  *
  * Each cycle (every ~60 s):
- *   1. scanDailyForFinished()       — football v1/v2 daily feed
- *   2. scanNHLForFinished()         — NHL finished matches (Statpal live + daily)
+ *   1. scanNHLForFinished()         — NHL finished matches (Statpal live + daily)
  *      scanNBAForFinished()         — NBA finished matches (Statpal live + daily)
  *      scanMLBForFinished()         — MLB finished matches (Statpal live + daily)
- *   3. scanVolleyballForFinished()  — volleyball finished matches from live feed
- *   4. autoSettlePendingBets()      — settle bets with known results
- *   5. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *   2. scanVolleyballForFinished()  — volleyball finished matches from live feed
+ *   3. autoSettlePendingBets()      — settle bets with known results
+ *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *
+ * Football is NOT scanned here anymore — since the PulseScore migration
+ * (2026-08-05), football matches carry "pulsescore-football-*" ids, not
+ * Statpal's main_id, so scanDailyForFinished() (which keyed off main_id) had
+ * become dead weight: it never matched any bet's matchId, just burned
+ * Statpal quota. Football settlement is instead triggered directly inside
+ * buildFootballLiveFromPulseScore()'s disappearance-based GC (matches.ts),
+ * via the same finalizeStaleLiveMatch()/enqueueMatchSettlement() path.
  *
  * Uses self-scheduling setTimeout (not setInterval) so each cycle only starts
  * after the previous one completes — prevents overlap on slow DB/API cycles.
@@ -5646,9 +5652,10 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: Statpal-only — football, volleyball, tennis, NHL, NBA, MLB
+      // Parallel scan: Statpal-only — volleyball, tennis, NHL, NBA, MLB.
+      // Football is no longer scanned here — see startSettlementWorker's
+      // doc comment above for why.
       await Promise.allSettled([
-        scanDailyForFinished(),       // football (Statpal daily)
         scanVolleyballForFinished(),   // volleyball (Statpal live)
         scanTennisV1ForFinished(),     // tennis (Statpal V1)
         scanNHLForFinished(),          // hockey (Statpal live + daily)
