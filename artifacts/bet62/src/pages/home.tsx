@@ -21863,19 +21863,6 @@ export default function Home({
                 })()}
 
                 {(() => {
-                  const teamInitials = (name: string): string =>
-                    String(name ?? "")
-                      .split(/\s+/)
-                      .filter(Boolean)
-                      .slice(0, 2)
-                      .map((w) => w[0])
-                      .join("")
-                      .toUpperCase() || "?";
-                  const teamColor = (name: string): string => {
-                    let h = 0;
-                    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-                    return `hsl(${h}, 55%, 38%)`;
-                  };
                   const fmtWhen = (date?: string, time?: string): string => {
                     if (!date) return time ?? "";
                     const todayKey = new Date().toISOString().slice(0, 10);
@@ -21918,7 +21905,10 @@ export default function Home({
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                          {homeUpcomingPreview.map((m) => (
+                          {homeUpcomingPreview.map((m) => {
+                            const homeBadge = getTeamBadgeAsset(m, "home");
+                            const awayBadge = getTeamBadgeAsset(m, "away");
+                            return (
                             <button
                               key={m.id}
                               onClick={() => {
@@ -21940,24 +21930,38 @@ export default function Home({
                               </div>
                               <div className="flex items-center justify-center gap-3 py-2">
                                 <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                                  <span
-                                    className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black text-white shrink-0"
-                                    style={{ background: teamColor(m.home) }}
-                                  >
-                                    {teamInitials(m.home)}
-                                  </span>
+                                  {homeBadge.src && (
+                                    <span
+                                      className={`w-8 h-8 rounded-full bg-white border border-zinc-200 flex items-center justify-center overflow-hidden shrink-0 ${homeBadge.padded ? "p-1" : ""}`}
+                                    >
+                                      <img
+                                        src={homeBadge.src}
+                                        alt={m.home}
+                                        className={`w-full h-full ${homeBadge.fit === "contain" ? "object-contain" : "object-cover"}`}
+                                        loading="lazy"
+                                        decoding="async"
+                                      />
+                                    </span>
+                                  )}
                                   <span className="text-[11px] font-bold text-center truncate w-full">
                                     {m.home}
                                   </span>
                                 </div>
                                 <span className="text-[10px] font-black text-zinc-600">VS</span>
                                 <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                                  <span
-                                    className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black text-white shrink-0"
-                                    style={{ background: teamColor(m.away) }}
-                                  >
-                                    {teamInitials(m.away)}
-                                  </span>
+                                  {awayBadge.src && (
+                                    <span
+                                      className={`w-8 h-8 rounded-full bg-white border border-zinc-200 flex items-center justify-center overflow-hidden shrink-0 ${awayBadge.padded ? "p-1" : ""}`}
+                                    >
+                                      <img
+                                        src={awayBadge.src}
+                                        alt={m.away}
+                                        className={`w-full h-full ${awayBadge.fit === "contain" ? "object-contain" : "object-cover"}`}
+                                        loading="lazy"
+                                        decoding="async"
+                                      />
+                                    </span>
+                                  )}
                                   <span className="text-[11px] font-bold text-center truncate w-full">
                                     {m.away}
                                   </span>
@@ -21981,7 +21985,8 @@ export default function Home({
                                 </div>
                               )}
                             </button>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
