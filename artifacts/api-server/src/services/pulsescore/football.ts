@@ -241,8 +241,19 @@ export function pulseScoreEventScore(
 /** Live clock in minutes, read from the raw bet365 moreInfo.TM field — no
  * normalized "minute" field exists in this API. Confirmed against real live
  * matches (TM values of 92/68/45/90/71 line up with plausible real match
- * minutes); not documented anywhere, so treat as best-effort. */
+ * minutes); not documented anywhere, so treat as best-effort.
+ *
+ * bet365 sends stoppage time as "45+2"/"90+3" — plain Number() on that is
+ * NaN, which silently froze the clock at 0 for whichever matches happened
+ * to be in injury time (reported as "some clocks not working", since it's
+ * only whichever matches are mid-stoppage-time at any given moment). Only
+ * the base minute is taken; the "+N" part isn't surfaced separately since
+ * the frontend clock just needs a monotonically increasing number. */
 export function pulseScoreEventMinute(ev: PulseScoreEvent): number {
-  const tm = Number(ev.moreInfo?.TM);
-  return Number.isFinite(tm) && tm >= 0 ? Math.trunc(tm) : 0;
+  const raw = ev.moreInfo?.TM;
+  if (raw == null) return 0;
+  const m = /^(\d+)/.exec(String(raw).trim());
+  if (!m) return 0;
+  const tm = Number(m[1]);
+  return Number.isFinite(tm) && tm >= 0 ? tm : 0;
 }

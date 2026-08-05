@@ -7170,6 +7170,15 @@ export default function Home({
 
   useEffect(() => {
     if (!expandedMatch) return;
+    // PulseScore-sourced football (Phase 1) has no statistics endpoint —
+    // SportsAPI Pro rejects its match id format and liveMatchState never
+    // gets populated for these matches, so this fetch can never succeed.
+    // Without this guard it retried every 30s forever, showing a permanent
+    // loading spinner instead of settling on "not available".
+    if (String(expandedMatch.id).startsWith("pulsescore-")) {
+      if (v2StatsGroups === null) setV2StatsGroups([]);
+      return;
+    }
     if (v2StatsLoading) return;
     if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 30000) return;
     const rawId = getProviderMatchId(expandedMatch.id);
@@ -7208,6 +7217,15 @@ export default function Home({
   useEffect(() => {
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
+    // Same PulseScore gap as the statistics fetch above — no incidents
+    // (goals/cards/corners timeline) endpoint exists for these matches, and
+    // this poll runs every 3s, so leaving it unguarded was the main source
+    // of "fica tentando carregar" (plus wasted requests every 3s per open
+    // match).
+    if (String(expandedMatch.id).startsWith("pulsescore-")) {
+      if (v2Incidents === null) setV2Incidents([]);
+      return;
+    }
     if (v2IncidentsLoading) return;
     if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 3000)
       return;
