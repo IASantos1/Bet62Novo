@@ -19583,100 +19583,20 @@ function getUpcomingPreMatchOdds(
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
-  const empty: UpcomingMatch[] = [];
   try {
-    // Fetch tennis odds first so refreshTennisV2LeagueCache populates city→ATP/WTA tier labels
-    // before buildTennisUpcoming() runs (enrichTennisV1League depends on the cache).
-    const tennisOdds = await getTennisOdds().catch(
-      () => [] as TennisOddsEntry[],
-    );
-    const [
-      upFootball,
-      upTennisBase,
-      upBasketball,
-      upHockey,
-      upVolleyball,
-      upBaseball,
-      upBoxing,
-      upCricket,
-      upHandball,
-      upFormula1,
-      upMma,
-      // V5 prematch events — fetched in parallel, merged below. Football is
-      // NOT here anymore: it's sourced entirely from PulseScore now (see
-      // finalFootball below) — explicit user decision, 2026-08-06.
-      v5Basketball,
-      v5Hockey,
-      v5Tennis,
-      v5Baseball,
-      v5Volleyball,
-    ] = await Promise.all([
-      buildFootballUpcomingFromPulseScore().catch(() => empty),
-      buildTennisUpcoming().catch(() => empty),
-      buildBasketballUpcoming().catch(() => empty),
-      buildHockeyUpcoming().catch(() => empty),
-      buildVolleyballUpcoming().catch(() => empty),
-      buildBaseballUpcoming().catch(() => empty),
-      // NOTE: this was previously (mis)named "upMma" despite being boxing —
-      // boxing is a distinct SportsAPI Pro category, unrelated to the real
-      // PulseScore-sourced MMA added below.
-      getExtraUpcomingEventsV2("boxing").then((events) => buildExtraUpcomingV2("boxing", events)).catch(() => empty),
-      getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
-      getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
-      getFormula1Upcoming().catch(() => empty),
-      buildMmaUpcoming().catch(() => empty),
-      // V5 — 1xBet prematch feed (real odds: 1x2 + DC + totals + BTTS + DNB + handicap)
-      buildV5Upcoming(3, 100).catch(() => empty), // basketball
-      buildV5Upcoming(2, 80).catch(() => empty),  // hockey
-      buildV5Upcoming(4, 80).catch(() => empty),  // tennis
-      buildV5Upcoming(5, 80).catch(() => empty),  // baseball
-      buildV5Upcoming(6, 60).catch(() => empty),  // volleyball
-    ]);
-    const upTennis = mergeTennisUpcomingSources(
-      upTennisBase,
-      buildTennisUpcomingFromOddsEntries(tennisOdds),
-    );
-
-    // Merge V5 events into each sport's V1 list
-    // — matching events get real V5 odds injected
-    // — new V5-only events are appended
-    // Football: no V5 merge — PulseScore already carries its own real odds
-    // (extractFootballOverride), and V5 is SportsAPI-sourced.
-    const finalFootball   = upFootball;
-    const finalBasketball = mergeV5IntoUpcoming(upBasketball, v5Basketball);
-    const finalHockey     = mergeV5IntoUpcoming(upHockey,     v5Hockey);
-    const finalTennis     = mergeV5IntoUpcoming(upTennis,     v5Tennis);
-    const finalBaseball   = mergeV5IntoUpcoming(upBaseball,   v5Baseball);
-    const finalVolleyball = mergeV5IntoUpcoming(upVolleyball, v5Volleyball);
-
-    rememberUpcomingFootballEligibility(finalFootball);
-    rememberUpcomingEligibility([
-      ...finalFootball,
-      ...finalTennis,
-      ...finalBasketball,
-      ...finalHockey,
-      ...finalVolleyball,
-      ...finalBaseball,
-      ...upBoxing,
-      ...upCricket,
-      ...upHandball,
-      ...upFormula1,
-      ...upMma,
-    ]);
-    // Upcoming order: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
-    _allUpcomingCache = [
-      ...finalFootball,
-      ...finalTennis,
-      ...finalHockey,
-      ...finalBasketball,
-      ...finalVolleyball,
-      ...finalBaseball,
-      ...upBoxing,
-      ...upCricket,
-      ...upHandball,
-      ...upFormula1,
-      ...upMma,
-    ];
+    // ── ALL sports data providers disconnected from pré-jogo too, every
+    // sport ─────────────────────────────────────────────────────────────
+    // Same explicit user decision as the live-side disconnect above
+    // (2026-08-06): Statpal, SportsAPI Pro (V1/V2/V5) and PulseScore are all
+    // disconnected from the prematch listing as well, pending a from-scratch
+    // rebuild sport by sport against real confirmed API samples. None of the
+    // underlying builder functions (buildFootballUpcomingFromPulseScore,
+    // buildTennisUpcoming, buildV5Upcoming, etc.) were deleted — only this
+    // call site was short-circuited to skip fetching them at all, so
+    // re-enabling a sport later is a small, reviewable change.
+    rememberUpcomingFootballEligibility([]);
+    rememberUpcomingEligibility([]);
+    _allUpcomingCache = [];
     _allUpcomingCacheBuiltAt = Date.now();
   } catch {
     /* keep stale */
@@ -20155,35 +20075,25 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // sportWithFallback do what it already does for a temporarily-empty
   // upstream response — serve the last good snapshot for just that sport —
   // while every other sport keeps updating normally.
-  let footballLiveRaw: LiveMatchState[] = [];
-  try {
-    footballLiveRaw = await buildFootballLiveFromPulseScore();
-  } catch (err) {
-    logger.error(
-      { err },
-      "[pulsescore] buildFootballLiveFromPulseScore failed this tick",
-    );
-  }
-  const footballLive = sportWithFallback("football", footballLiveRaw);
-  // Basketball/hockey/baseball/volleyball: no live source left (Statpal +
-  // SportsAPI V2, their only providers, are both removed). Each becomes a
-  // real live sport again once migrated to PulseScore individually.
+  // ── ALL sports data providers disconnected from live, every sport ──────────
+  // Explicit user decision, 2026-08-06: after repeated live-page issues that
+  // survived several rounds of fixes, the user asked to disconnect every
+  // sports data provider entirely (Statpal, SportsAPI Pro, PulseScore) —
+  // including PulseScore, despite it being independently confirmed still
+  // returning correct real-time data (verified via direct API response
+  // during diagnosis) — and rebuild the sports-data layer from scratch,
+  // sport by sport, against real confirmed API samples. Ao Vivo intentionally
+  // shows zero matches for every sport until that rebuild happens. None of
+  // the underlying builder functions were deleted (buildFootballLiveFromPulseScore,
+  // buildTennisLiveFromPulseScore, etc. are untouched) — only their call
+  // sites here were short-circuited, so re-enabling a sport later is a
+  // small, reviewable change rather than rewriting this function again.
+  const footballLive: LiveMatchState[] = [];
   const basketballLive: LiveMatchState[] = [];
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
   const volleyballLiveItems: LiveMatchState[] = [];
-  let tennisLiveRaw: LiveMatchState[] = [];
-  try {
-    tennisLiveRaw = await buildTennisLiveFromPulseScore();
-  } catch (err) {
-    logger.error(
-      { err },
-      "[pulsescore] buildTennisLiveFromPulseScore failed this tick",
-    );
-  }
-  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
-  // Boxing/cricket/handball/Formula 1: same reasoning as basketball/hockey/
-  // baseball/volleyball above — Statpal (their only provider) is removed.
+  const tennisLive: LiveMatchState[] = [];
   const boxingLive: LiveMatchState[] = [];
   const cricketLive: LiveMatchState[] = [];
   const handballLive: LiveMatchState[] = [];
@@ -23546,78 +23456,26 @@ function hasRecentUpcomingEligibility(
 }
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
-  const empty: UpcomingMatch[] = [];
-  const [
-    footballV1,
-    tennisBase,
-    tennisOdds,
-    basketball,
-    hockey,
-    volleyball,
-    baseball,
-    boxing,
-    cricket,
-    handball,
-    formula1,
-    v5Basketball,
-    v5Hockey,
-    v5Tennis,
-    v5Baseball,
-    v5Volleyball,
-  ] = await Promise.all([
-    buildFootballUpcomingFromPulseScore().catch(() => empty),
-    buildTennisUpcoming().catch(() => empty),
-    getTennisOdds().catch(() => [] as TennisOddsEntry[]),
-    buildBasketballUpcoming().catch(() => empty),
-    buildHockeyUpcoming().catch(() => empty),
-    buildVolleyballUpcoming().catch(() => empty),
-    buildBaseballUpcoming().catch(() => empty),
-    getExtraUpcomingEventsV2("boxing").then((events) => buildExtraUpcomingV2("boxing", events)).catch(() => empty),
-    getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
-    getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
-    getFormula1Upcoming().catch(() => empty),
-    buildV5Upcoming(3, 200).catch(() => empty),
-    buildV5Upcoming(2, 200).catch(() => empty),
-    buildV5Upcoming(4, 200).catch(() => empty),
-    buildV5Upcoming(5, 200).catch(() => empty),
-    buildV5Upcoming(6, 200).catch(() => empty),
-  ]);
-  const tennis = mergeTennisUpcomingSources(
-    tennisBase,
-    buildTennisUpcomingFromOddsEntries(tennisOdds),
-  );
-  // Football: no V5 merge — PulseScore already carries its own real odds
-  // (extractFootballOverride), and V5 is SportsAPI-sourced.
-  const football = footballV1;
-  const basketballMerged = mergeV5IntoUpcoming(basketball, v5Basketball);
-  const hockeyMerged = mergeV5IntoUpcoming(hockey, v5Hockey);
-  const tennisMerged = mergeV5IntoUpcoming(tennis, v5Tennis);
-  const volleyballMerged = mergeV5IntoUpcoming(volleyball, v5Volleyball);
-  const baseballMerged = mergeV5IntoUpcoming(baseball, v5Baseball);
-  rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([
-    ...football,
-    ...tennisMerged,
-    ...basketballMerged,
-    ...hockeyMerged,
-    ...volleyballMerged,
-    ...baseballMerged,
-      ...boxing,
-    ...cricket,
-    ...handball,
-    ...formula1,
-  ]);
+  // ── ALL sports data providers disconnected from pré-jogo too, every sport
+  // ────────────────────────────────────────────────────────────────────────
+  // Same explicit user decision as rebuildUpcomingCache above (2026-08-06):
+  // Statpal, SportsAPI Pro (V1/V2/V5) and PulseScore all disconnected here
+  // too, pending a from-scratch rebuild sport by sport against real
+  // confirmed API samples. Underlying builders untouched — only this call
+  // site short-circuited.
+  rememberUpcomingFootballEligibility([]);
+  rememberUpcomingEligibility([]);
   upcomingTopCache = {
-    football,
-    tennis: tennisMerged,
-    basketball: basketballMerged,
-    hockey: hockeyMerged,
-    volleyball: volleyballMerged,
-    baseball: baseballMerged,
-    boxing,
-    cricket,
-    handball,
-    formula1,
+    football: [],
+    tennis: [],
+    basketball: [],
+    hockey: [],
+    volleyball: [],
+    baseball: [],
+    boxing: [],
+    cricket: [],
+    handball: [],
+    formula1: [],
     fetchedAt: Date.now(),
   };
   return upcomingTopCache;
@@ -26055,15 +25913,12 @@ router.get("/upcoming", async (req: Request, res: Response) => {
 });
 
 router.get("/", async (_req: Request, res: Response) => {
-  try {
-    const [live, upcoming] = await Promise.all([
-      buildLiveMatches(),
-      buildFootballUpcomingFromPulseScore(),
-    ]);
-    res.json({ live, upcoming });
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar partidas" });
-  }
+  // All sports data providers disconnected here too (explicit user decision,
+  // 2026-08-06) — see rebuildUpcomingCache/buildLivePayload for the full
+  // rationale. This legacy route isn't used by the frontend's actual live
+  // (/live) or prematch (/upcoming) pages, so it's just short-circuited
+  // rather than left calling Statpal/PulseScore for a response nothing reads.
+  res.json({ live: [], upcoming: [] });
 });
 
 // ─── Stats endpoint ───────────────────────────────────────────────────────────
