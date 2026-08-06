@@ -19750,22 +19750,22 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       override.odds,
     );
     const odds = liveOddsState.odds;
-    const homeProb =
-      odds.home > 0 && odds.away > 0
-        ? 1 / odds.home / (1 / odds.home + 1 / odds.away)
-        : 0.5;
-    const markets: AdvancedMarkets = {
-      ...makeAdvancedMarketsFromTeams(home, away),
-      tennisExtra: computeLiveTennisExtras(
-        homeProb,
-        sets,
-        override.homeSetsWon,
-        override.awaySetsWon,
-        sets.length,
-        override.currentPoints,
-        override.serving,
-      ),
-    };
+    // Deliberately NOT computing tennisExtra here (computeLiveTennisExtras
+    // is a heavy, many-step probability model) — this function reruns for
+    // EVERY live tennis match on EVERY 1s broadcast tick
+    // (LIVE_UPDATE_INTERVAL), so with 15-30+ concurrent tennis matches that
+    // was 15-30+ full recomputations a second, server-side, plus a much
+    // bigger JSON payload pushed to every connected client every second —
+    // the real cause of the live page freezing after today's earlier fix.
+    // makeAdvancedMarketsFromTeams alone already satisfies the actual
+    // requirement (a fully-shaped AdvancedMarkets so the modal's generic
+    // m.handicap.homeMinusOne-style unguarded reads never crash); the
+    // tennis-specific market groups (set handicap, game handicap, etc.)
+    // fall back to their existing "not available" state instead of populating
+    // for now — computing tennisExtra lazily, only for the one match a user
+    // actually opens, is the right follow-up, not doing it for all of them
+    // every second.
+    const markets: AdvancedMarkets = makeAdvancedMarketsFromTeams(home, away);
     const id = `pulsescore-tennis-${ev.eventId}`;
     const state: LiveMatchState = {
       id,
