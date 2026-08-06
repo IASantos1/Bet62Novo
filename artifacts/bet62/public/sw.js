@@ -1,4 +1,4 @@
-const VERSION = "v2026-06-27-1";
+const VERSION = "v2026-08-06-1";
 const SHELL_CACHE = `bet62-shell-${VERSION}`;
 const ASSET_CACHE = `bet62-assets-${VERSION}`;
 const DATA_CACHE = `bet62-data-${VERSION}`;
@@ -119,7 +119,14 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (isLiveApi(url)) {
-    event.respondWith(fetch(request));
+    // Never let the passthrough fetch reject straight into respondWith —
+    // that's what produces the "FetchEvent resulted in a network error
+    // response: the promise was rejected" + "Uncaught (in promise)" console
+    // spam every time a live-stream connection drops (e.g. during a server
+    // deploy restart). The page's own EventSource already auto-reconnects
+    // on its own, so this only needs to resolve to a network-error Response
+    // instead of leaving the promise rejected.
+    event.respondWith(fetch(request).catch(() => Response.error()));
     return;
   }
 
