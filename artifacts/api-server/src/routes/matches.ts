@@ -19700,9 +19700,20 @@ const TENNIS_DISAPPEAR_GRACE_MS = 3 * 60_000;
 // ever matched the prematch snapshot; live events use a different "To Win"
 // shape entirely). homeSetsWon/awaySetsWon feed state.homeScore/awayScore —
 // see the type comment on PulseScoreTennisOverride for why that specifically
-// matters for settlement, not just display. markets is intentionally left as
-// an empty stand-in (same escape hatch F1/MMA use) rather than fabricating
-// tennis-specific markets from unconfirmed data.
+// matters for settlement, not just display.
+//
+// markets is NOT the bare `{} as unknown as AdvancedMarkets` stand-in F1/MMA
+// use — the modal's generic multi-sport market-tabs UI (unlike F1/MMA's own
+// dedicated rendering) reads real AdvancedMarkets sub-fields like
+// `m.handicap.homeMinusOne` unguarded for every sport including tennis, so a
+// bare `{}` crashed the whole app (AppErrorBoundary) the instant a tennis
+// match was opened. makeAdvancedMarketsFromTeams gives a fully-shaped,
+// crash-safe base (same helper the old started-upcoming tennis bridge used
+// for exactly this reason before it was removed), and tennisExtra is
+// computed for real from the same live sets/points/serving data above —
+// same pattern that bridge used too — so the tennis-specific market groups
+// (set handicap, game handicap, etc.) actually populate instead of always
+// falling to "not available".
 async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreTennisLive();
   const result: LiveMatchState[] = [];
@@ -19729,6 +19740,22 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       override.odds,
     );
     const odds = liveOddsState.odds;
+    const homeProb =
+      odds.home > 0 && odds.away > 0
+        ? 1 / odds.home / (1 / odds.home + 1 / odds.away)
+        : 0.5;
+    const markets: AdvancedMarkets = {
+      ...makeAdvancedMarketsFromTeams(home, away),
+      tennisExtra: computeLiveTennisExtras(
+        homeProb,
+        sets,
+        override.homeSetsWon,
+        override.awaySetsWon,
+        sets.length,
+        override.currentPoints,
+        override.serving,
+      ),
+    };
     const id = `pulsescore-tennis-${ev.eventId}`;
     const state: LiveMatchState = {
       id,
@@ -19743,7 +19770,7 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       status: tennisSetLabel(Math.max(1, sets.length)),
       hasRealOdds: liveOddsState.hasRealOdds,
       odds,
-      markets: {} as unknown as AdvancedMarkets,
+      markets,
       events: [],
       _liveExtra: {
         sets,

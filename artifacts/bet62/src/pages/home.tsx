@@ -2007,7 +2007,6 @@ function getTeamBadgeAsset(
   >,
   side: "home" | "away",
 ): { src?: string; fit: "cover" | "contain"; padded: boolean } {
-  const teamName = side === "home" ? match.home : match.away;
   const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
   const imageVersion =
     side === "home" ? match.homeImageVersion : match.awayImageVersion;
@@ -2017,8 +2016,12 @@ function getTeamBadgeAsset(
     imageVersion,
   );
   if (officialLogo) return { src: officialLogo, fit: "contain", padded: true };
-  const localBanner = getTeamBanner(teamName, match.country);
-  if (localBanner) return { src: localBanner, fit: "cover", padded: false };
+  // No local-banner fallback here on purpose — TEAM_BANNERS holds wide
+  // promotional photos (getMatchBanner's card-background art), not circular
+  // crest logos. Cropping one into the small round badge slot showed a
+  // zoomed-in photo blob instead of a logo, which is exactly what this badge
+  // must never do (same "real logo or just the name, no placeholder" rule
+  // already applied to small-league team logos).
   return { fit: "cover", padded: false };
 }
 
