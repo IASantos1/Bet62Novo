@@ -21561,11 +21561,11 @@ export default function Home({
                 </div>
 
                 {/* Full banner images (text already baked into the artwork) —
-                    shown whole, stacked one per row on the web. Inside an
-                    installed PWA (display-mode: standalone) a CSS override
-                    in index.css turns this into a side-by-side scrollable
-                    row instead — see .destaques-promo-row. */}
-                <div className="destaques-promo-row grid grid-cols-1 gap-2 sm:gap-3">
+                    side by side (3-up) on the web. Inside an installed PWA
+                    (display-mode: standalone) a CSS override in index.css
+                    turns this into a side-by-side scrollable row instead —
+                    see .destaques-promo-row. */}
+                <div className="destaques-promo-row grid grid-cols-3 gap-2 sm:gap-3">
                   <button
                     onClick={() => selectMainTab("casino")}
                     className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1836/856]"
