@@ -19719,6 +19719,7 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
   for (const ev of events) {
+   try {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
@@ -19785,6 +19786,20 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // those purposes now that nothing else populates it for tennis.
     liveMatchState.set(id, state);
     result.push(state);
+   } catch (err) {
+    // computeLiveTennisExtras (and everything feeding it) is a large,
+    // arithmetic-heavy model that, before today, was only ever exercised by
+    // dead code — a single real live event with an edge-case shape it
+    // doesn't expect must never be allowed to throw out of this loop: since
+    // buildLivePayload() awaits every sport's builder in the same call,
+    // an uncaught error here previously broke the ENTIRE live feed (every
+    // sport, not just tennis) for as long as that one match stayed live.
+    // Skip just this event and keep going.
+    logger.error(
+      { err, eventId: ev.eventId, home: ev.home, away: ev.away },
+      "[pulsescore] tennis live event failed to process — skipped",
+    );
+   }
   }
 
   // Same disappearance+grace-period finalization football uses — a fixed
