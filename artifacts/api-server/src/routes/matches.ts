@@ -24,6 +24,7 @@ import {
   extractFootballOverride,
   pulseScoreEventScore,
   pulseScoreEventMinute,
+  getPulseScoreFootballUpcoming,
 } from "../services/pulsescore/football.js";
 import {
   getPulseScoreTennisLive,
@@ -16628,6 +16629,94 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+/** ISO-datetime equivalent of v2EventDateTime — PulseScore's `startTime` is a
+ * real ISO string, not SportsAPI V2's UNIX-seconds `startTimestamp`. */
+function pulseScoreEventDateTime(startTime: string): { date: string; time: string } {
+  const d = new Date(startTime);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+  const mm = p["minute"] ?? "00";
+  return {
+    date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+    time: `${hh}:${mm}`,
+  };
+}
+
+/**
+ * Football prematch, sourced entirely from PulseScore (getPulseScoreFootballUpcoming)
+ * — replaces the old SportsAPI V2 buildUpcomingMatches() per explicit user decision,
+ * 2026-08-06 ("Sim, tirar SportsAPI do futebol também"). Reuses the exact catalog
+ * filtering (isVirtualFootballLeague/isAllowedFootballLeague/footballLeagueAllowedStrict/
+ * leaguePriority) and odds extraction (extractFootballOverride) already proven in
+ * buildFootballLiveFromPulseScore(), and the same `pulsescore-football-${eventId}` id
+ * scheme so a match's card doesn't change identity when it goes live.
+ */
+async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreFootballUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    if (isVirtualFootballLeague(ev.league || "")) continue;
+    if (!isAllowedFootballLeague(ev.league || "")) continue;
+
+    const leagueName = ev.league || "";
+    const isIntl = isIntlTournamentName(leagueName);
+    const countryKey = countryForLeagueName(leagueName);
+    if (!isIntl && !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName)))
+      continue;
+    const country = countryKey ?? "Internacional";
+    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
+    const prio = leaguePriority(prioKey, countryKey ?? undefined);
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractFootballOverride(ev);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = override?.totalGoals
+      ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
+      : baseMarkets;
+    const odds = override?.odds ?? baseOdds;
+    const isWomens = isWomensLeague(leagueName);
+
+    results.push({
+      id: `pulsescore-football-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country,
+      time,
+      date,
+      sport: "football",
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets,
+      isWomens,
+      isPriorityLeague: prio > 0,
+    });
+  }
+  return results;
+}
+
 /**
  * Returns true if the match's scheduled date+time is already in the past.
  * Handles both DD.MM.YYYY and YYYY-MM-DD date formats.
@@ -19513,15 +19602,16 @@ async function rebuildUpcomingCache(): Promise<void> {
       upHandball,
       upFormula1,
       upMma,
-      // V5 prematch events — fetched in parallel, merged below
-      v5Football,
+      // V5 prematch events — fetched in parallel, merged below. Football is
+      // NOT here anymore: it's sourced entirely from PulseScore now (see
+      // finalFootball below) — explicit user decision, 2026-08-06.
       v5Basketball,
       v5Hockey,
       v5Tennis,
       v5Baseball,
       v5Volleyball,
     ] = await Promise.all([
-      buildUpcomingMatches().catch(() => empty),
+      buildFootballUpcomingFromPulseScore().catch(() => empty),
       buildTennisUpcoming().catch(() => empty),
       buildBasketballUpcoming().catch(() => empty),
       buildHockeyUpcoming().catch(() => empty),
@@ -19536,7 +19626,6 @@ async function rebuildUpcomingCache(): Promise<void> {
       getFormula1Upcoming().catch(() => empty),
       buildMmaUpcoming().catch(() => empty),
       // V5 — 1xBet prematch feed (real odds: 1x2 + DC + totals + BTTS + DNB + handicap)
-      buildV5Upcoming(1, 200).catch(() => empty), // football
       buildV5Upcoming(3, 100).catch(() => empty), // basketball
       buildV5Upcoming(2, 80).catch(() => empty),  // hockey
       buildV5Upcoming(4, 80).catch(() => empty),  // tennis
@@ -19551,7 +19640,9 @@ async function rebuildUpcomingCache(): Promise<void> {
     // Merge V5 events into each sport's V1 list
     // — matching events get real V5 odds injected
     // — new V5-only events are appended
-    const finalFootball   = mergeV5IntoUpcoming(upFootball,   v5Football);
+    // Football: no V5 merge — PulseScore already carries its own real odds
+    // (extractFootballOverride), and V5 is SportsAPI-sourced.
+    const finalFootball   = upFootball;
     const finalBasketball = mergeV5IntoUpcoming(upBasketball, v5Basketball);
     const finalHockey     = mergeV5IntoUpcoming(upHockey,     v5Hockey);
     const finalTennis     = mergeV5IntoUpcoming(upTennis,     v5Tennis);
@@ -23439,14 +23530,13 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     cricket,
     handball,
     formula1,
-    v5Football,
     v5Basketball,
     v5Hockey,
     v5Tennis,
     v5Baseball,
     v5Volleyball,
   ] = await Promise.all([
-    buildUpcomingMatches().catch(() => empty),
+    buildFootballUpcomingFromPulseScore().catch(() => empty),
     buildTennisUpcoming().catch(() => empty),
     getTennisOdds().catch(() => [] as TennisOddsEntry[]),
     buildBasketballUpcoming().catch(() => empty),
@@ -23457,7 +23547,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
     getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
     getFormula1Upcoming().catch(() => empty),
-    buildV5Upcoming(1, 200).catch(() => empty),
     buildV5Upcoming(3, 200).catch(() => empty),
     buildV5Upcoming(2, 200).catch(() => empty),
     buildV5Upcoming(4, 200).catch(() => empty),
@@ -23468,7 +23557,9 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     tennisBase,
     buildTennisUpcomingFromOddsEntries(tennisOdds),
   );
-  const football = mergeV5IntoUpcoming(footballV1, v5Football);
+  // Football: no V5 merge — PulseScore already carries its own real odds
+  // (extractFootballOverride), and V5 is SportsAPI-sourced.
+  const football = footballV1;
   const basketballMerged = mergeV5IntoUpcoming(basketball, v5Basketball);
   const hockeyMerged = mergeV5IntoUpcoming(hockey, v5Hockey);
   const tennisMerged = mergeV5IntoUpcoming(tennis, v5Tennis);
@@ -25938,7 +26029,7 @@ router.get("/", async (_req: Request, res: Response) => {
   try {
     const [live, upcoming] = await Promise.all([
       buildLiveMatches(),
-      buildUpcomingMatches(),
+      buildFootballUpcomingFromPulseScore(),
     ]);
     res.json({ live, upcoming });
   } catch (err) {

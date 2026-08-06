@@ -258,3 +258,110 @@ export function pulseScoreEventMinute(ev: PulseScoreEvent): number {
   const tm = Number(m[1]);
   return Number.isFinite(tm) && tm >= 0 ? tm : 0;
 }
+
+// ── Prematch (leagues catalog) ──────────────────────────────────────────────
+// Verified against a real authenticated GET /api/v3/bet365/leagues call
+// (2026-08-06) — this is the FOOTBALL leagues endpoint despite the bare path
+// (no "football"/"soccer" segment in the URL, unlike tennis's /tennis/leagues
+// or MMA's /mma/leagues) — confirmed by the Swagger description itself
+// ("Veja todas as ligas de futebol") and every league/event in the real
+// sample carrying sport:"soccer". Same paginated-leagues-with-nested-events
+// envelope already confirmed for tennis/MMA (total/page/limit/totalPages/
+// hasNextPage/leagues[]). league is "Country||League" (e.g. "Australia||
+// Australia Queensland Premier League 3") — same format already handled by
+// the live builder's countryForLeagueName/footballLeagueAllowedStrict, reused
+// as-is here rather than writing a second parser.
+//
+// Events carry `startTime` (ISO) and `live` (bool) that the live-events
+// PulseScoreEvent shape doesn't — extending it here rather than duplicating
+// the whole type, so extractFootballOverride/the catalog filters all work on
+// this unchanged. live:true events embedded in this catalog always showed
+// markets:[] in the real sample (only /live-events carries live odds,
+// already used above) — this endpoint is prematch-only in practice.
+export type PulseScorePrematchEvent = PulseScoreEvent & {
+  startTime: string;
+  live: boolean;
+};
+
+type PulseScoreLeague = {
+  name: string;
+  sport: string;
+  events: PulseScorePrematchEvent[];
+  league: string;
+  moreInfo?: {
+    type?: string;
+    live?: number;
+    tournament?: string;
+    leagueName?: string;
+    updatedAtUTC?: number;
+  };
+  oddsSig?: string;
+};
+
+type PulseScoreLeaguesResponse = {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+  leagues: PulseScoreLeague[];
+};
+
+// Prematch doesn't need second-level freshness like the live poller — a
+// multi-minute cache keeps this well clear of bet365's shared 1 req/s budget.
+const FOOTBALL_UPCOMING_TTL_MS = 5 * 60_000;
+let upcomingCache: { events: PulseScorePrematchEvent[]; fetchedAt: number } | null = null;
+let upcomingInFlight: Promise<PulseScorePrematchEvent[]> | null = null;
+
+async function fetchAllFootballLeagues(): Promise<PulseScoreLeague[]> {
+  const leagues: PulseScoreLeague[] = [];
+  let page = 1;
+  // Real sample: total 289 leagues at limit=30 (the documented max) -> ~10
+  // pages. Paced 1.1s apart to share bet365's 1 req/s PRO-plan budget with
+  // the live poller without tripping 429s — this whole fetch only runs once
+  // per FOOTBALL_UPCOMING_TTL_MS, not per page-request, so the ~11s it takes
+  // to fully page through costs nothing user-facing (served from cache).
+  for (let i = 0; i < 15; i++) {
+    const data = await pulseScoreGet<PulseScoreLeaguesResponse>(
+      `/leagues?page=${page}&limit=30`,
+    );
+    if (Array.isArray(data?.leagues)) leagues.push(...data.leagues);
+    if (!data?.hasNextPage) break;
+    page += 1;
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+  }
+  return leagues;
+}
+
+async function fetchFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
+  try {
+    const leagues = await fetchAllFootballLeagues();
+    // live:true entries here never carry markets (see comment above) —
+    // getPulseScoreFootballLive() already covers those; keep this prematch-only.
+    return leagues.flatMap((l) => l.events ?? []).filter((ev) => !ev.live);
+  } catch {
+    return [];
+  }
+}
+
+/** Upcoming football fixtures from PulseScore (bet365), each carrying its
+ * MATCH_RESULT prematch odds when bet365 has priced it yet. Empty array if
+ * PULSESCORE_API_KEY isn't configured or the upstream call fails. */
+export async function getPulseScoreFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
+  if (!CONFIG.PULSESCORE_API_KEY) return [];
+  const now = Date.now();
+  if (upcomingCache && now - upcomingCache.fetchedAt < FOOTBALL_UPCOMING_TTL_MS)
+    return upcomingCache.events;
+  if (!upcomingInFlight) {
+    upcomingInFlight = fetchFootballUpcoming()
+      .then((events) => {
+        upcomingCache = { events, fetchedAt: Date.now() };
+        return events;
+      })
+      .finally(() => {
+        upcomingInFlight = null;
+      });
+  }
+  return upcomingInFlight;
+}
