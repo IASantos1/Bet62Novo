@@ -20063,38 +20063,23 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const allUpcoming = _allUpcomingCache;
 
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
-  const [
-    basketballEvents,
-    hockeyEvents,
-    baseballEvents,
-    tennisTodayEvents,
-    mmaEvents,
-    cricketEvents,
-    handballEvents,
-    formula1Fresh,
-    mlbLiveTournaments,
-    nbaLiveTournaments,
-    volleyballLiveTournaments,
-    nhlLiveTournaments,
-  ] = await Promise.all([
-    getBasketballLiveV2(),
-    getHockeyLiveV2(),
-    getBaseballLiveV2(),
-    getTennisTodayV2(),
-    getExtraLiveEventsV2("boxing"),
-    getExtraLiveEventsV2("cricket"),
-    getExtraLiveEventsV2("handball"),
-    getFormula1Live(),
-    getMLBLive(),          // Statpal /v1/mlb/livescores — innings, hits, errors, outs
-    getNBALive(),          // Statpal /v1/nba/livescores — quarter-by-quarter scores
-    getVolleyballLive(),   // Statpal /v1/volleyball/livescores
-    getNHLLive(),          // Statpal /v1/nhl/livescores — periods, goals, shots
-  ]);
+  // Statpal and SportsAPI Pro were removed from the live pipeline entirely
+  // (explicit user decision, 2026-08-06) — basketball, hockey, baseball,
+  // volleyball, boxing, cricket, handball, and Formula 1 all sourced their
+  // live data from one or the other and now have none, until each is
+  // migrated to PulseScore individually (needs a real authenticated live
+  // sample per sport first — same discipline football/tennis went through,
+  // not guessed). Football and tennis are unaffected, both already 100%
+  // PulseScore. getTennisTodayV2() is kept — it only feeds prematch tennis
+  // league labels, unrelated to live data or Statpal/SportsAPI.
+  const tennisTodayEvents = await getTennisTodayV2();
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
     refreshTennisV2LeagueCache(tennisTodayEvents);
   }
-  // Fire-and-forget odds cache warmers — don't block the broadcast path
+  // Fire-and-forget prematch odds cache warmers — unrelated to the live
+  // pipeline above (these feed prematch tennis/baseball listings, which
+  // weren't part of today's live-only removal), don't block the broadcast path
   getTennisOdds().catch(() => {});
   getMLBOdds().catch(() => {});
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
@@ -20121,73 +20106,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
-  // Basketball live: merge Statpal NBA livescores + SportsAPI V2.
-  // Statpal wins when it has quarter detail (q1–q4, OT).
-  // SportsAPI V2 fills games not yet flipped to live by Statpal.
-  const statpalNBALive = buildNBALiveMatches(nbaLiveTournaments);
-  const sapiv2NBALive = await buildBasketballLiveV2(basketballEvents);
-  const statpalNBAPairs = new Set(
-    statpalNBALive.map((m) => `${m.home}|${m.away}`),
-  );
-  const mergedBasketballLive = [
-    ...statpalNBALive,
-    ...sapiv2NBALive.filter(
-      (m) => !statpalNBAPairs.has(`${m.home}|${m.away}`),
-    ),
-  ];
-  const basketballLive = await applyPulseScoreGenericOverlay(
-    sportWithFallback("basketball", mergedBasketballLive),
-    pulseScoreBasketball,
-  );
-  // Hockey live: merge Statpal NHL livescores + SportsAPI V2, same pattern as
-  // basketball/baseball above. Previously this was SportsAPI V2 only — under
-  // CONFIG.STATPAL_ONLY (the default, and Statpal is documented as "the
-  // primary and only live data source") getHockeyLiveV2() always returns an
-  // empty cache it never populates, so hockey had NO real live source wired
-  // in at all despite buildNHLLiveMatches/getNHLLive already existing (only
-  // reachable via the standalone /hockey-livescores debug route).
-  const statpalNHLLive = buildNHLLiveMatches(nhlLiveTournaments);
-  const sapiv2NHLLive = buildHockeyLiveV2(hockeyEvents);
-  const statpalNHLPairs = new Set(
-    statpalNHLLive.map((m) => `${m.home}|${m.away}`),
-  );
-  const mergedHockeyLive = [
-    ...statpalNHLLive,
-    ...sapiv2NHLLive.filter(
-      (m) => !statpalNHLPairs.has(`${m.home}|${m.away}`),
-    ),
-  ];
-  const hockeyLive = await applyPulseScoreGenericOverlay(
-    sportWithFallback("hockey", mergedHockeyLive),
-    pulseScoreHockey,
-  );
-  // Baseball live: merge SportsAPI V2 + Statpal livescores.
-  // Statpal wins when it has inning detail (innings, hits, errors, outs).
-  // SportsAPI V2 wins for games Statpal hasn't yet flipped to live (sticky guard).
-  const statpalMLBLive = buildMLBLiveMatches(mlbLiveTournaments);
-  const sapiv2MLBLive = buildBaseballLiveV2(baseballEvents);
-  // Deduplicate: a game seen in both feeds → prefer the Statpal entry (richer
-  // inning data).  Games only in SportsAPI V2 are kept as fallback.
-  const statpalMLBPairs = new Set(
-    statpalMLBLive.map((m) => `${m.home}|${m.away}`),
-  );
-  const mergedBaseballLive = [
-    ...statpalMLBLive,
-    ...sapiv2MLBLive.filter(
-      (m) => !statpalMLBPairs.has(`${m.home}|${m.away}`),
-    ),
-  ];
-  const baseballLive = await applyPulseScoreGenericOverlay(
-    sportWithFallback("baseball", mergedBaseballLive),
-    pulseScoreBaseball,
-  );
-  const volleyballLiveItems = await applyPulseScoreGenericOverlay(
-    sportWithFallback(
-      "volleyball",
-      buildVolleyballLiveMatches(volleyballLiveTournaments),
-    ),
-    pulseScoreVolleyball,
-  );
+  // Basketball/hockey/baseball/volleyball: no live source left (Statpal +
+  // SportsAPI V2, their only providers, are both removed). Each becomes a
+  // real live sport again once migrated to PulseScore individually.
+  const basketballLive: LiveMatchState[] = [];
+  const hockeyLive: LiveMatchState[] = [];
+  const baseballLive: LiveMatchState[] = [];
+  const volleyballLiveItems: LiveMatchState[] = [];
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
     tennisLiveRaw = await buildTennisLiveFromPulseScore();
@@ -20198,19 +20123,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
-  const boxingLive = sportWithFallback(
-    "boxing",
-    buildExtraLiveV2("boxing", mmaEvents),
-  );
-  const cricketLive = sportWithFallback(
-    "cricket",
-    buildExtraLiveV2("cricket", cricketEvents),
-  );
-  const handballLive = sportWithFallback(
-    "handball",
-    buildExtraLiveV2("handball", handballEvents),
-  );
-  const formula1Live = sportWithFallback("formula1", formula1Fresh);
+  // Boxing/cricket/handball/Formula 1: same reasoning as basketball/hockey/
+  // baseball/volleyball above — Statpal (their only provider) is removed.
+  const boxingLive: LiveMatchState[] = [];
+  const cricketLive: LiveMatchState[] = [];
+  const handballLive: LiveMatchState[] = [];
+  const formula1Live: LiveMatchState[] = [];
 
   // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
   // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
