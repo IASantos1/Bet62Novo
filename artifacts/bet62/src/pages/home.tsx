@@ -7698,7 +7698,13 @@ export default function Home({
         }>;
         // Stable merge: update existing cards in-place, add new ones at the
         // end, drop gone ones — prevents visible layout shift on re-fetch.
+        // A genuinely empty response is far more likely a transient backend
+        // hiccup (cold cache right after a deploy restart, a slow upstream
+        // tick) than "there are truly zero upcoming games" — keep showing
+        // the last good list instead of wiping the whole prematch/Destaques
+        // view blank until the next successful poll.
         setUpcomingMatches((prev) => {
+          if (matches.length === 0 && prev.length > 0) return prev;
           if (prev.length === 0)
             return pruneUpcomingMatches(
               matches.map((m) => ({ ...m, isLive: false })),
