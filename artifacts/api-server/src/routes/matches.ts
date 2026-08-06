@@ -20099,10 +20099,28 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   getMLBOdds().catch(() => {});
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
-  const footballLive = sportWithFallback(
-    "football",
-    await buildFootballLiveFromPulseScore(),
-  );
+  //
+  // buildFootballLiveFromPulseScore/buildTennisLiveFromPulseScore are each
+  // wrapped in their own try/catch below — this whole function is awaited
+  // as a single unit by refreshLivePayloadInBackground(), with no catch of
+  // its own (see that function's header), so an uncaught exception from
+  // EITHER would previously abort the entire buildLivePayload() call —
+  // freezing every other sport's odds too, not just the one that actually
+  // failed, since none of them would ever reach their own sportWithFallback
+  // call. Catching here and falling through with an empty array lets
+  // sportWithFallback do what it already does for a temporarily-empty
+  // upstream response — serve the last good snapshot for just that sport —
+  // while every other sport keeps updating normally.
+  let footballLiveRaw: LiveMatchState[] = [];
+  try {
+    footballLiveRaw = await buildFootballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildFootballLiveFromPulseScore failed this tick",
+    );
+  }
+  const footballLive = sportWithFallback("football", footballLiveRaw);
   // Basketball live: merge Statpal NBA livescores + SportsAPI V2.
   // Statpal wins when it has quarter detail (q1–q4, OT).
   // SportsAPI V2 fills games not yet flipped to live by Statpal.
@@ -20170,10 +20188,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ),
     pulseScoreVolleyball,
   );
-  const tennisLive = sportWithFallback(
-    "tennis",
-    await buildTennisLiveFromPulseScore(),
-  );
+  let tennisLiveRaw: LiveMatchState[] = [];
+  try {
+    tennisLiveRaw = await buildTennisLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildTennisLiveFromPulseScore failed this tick",
+    );
+  }
+  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
   const boxingLive = sportWithFallback(
     "boxing",
     buildExtraLiveV2("boxing", mmaEvents),
