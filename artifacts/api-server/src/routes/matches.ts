@@ -18392,7 +18392,16 @@ async function buildBasketballLiveV2(
     if (!id.startsWith("bball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
     if (!currentIds.has(id) || tooOld) {
-      await finalizeStaleLiveMatch(state);
+      // Same reasoning as the football/tennis disappearance loops — this is
+      // on buildLivePayload()'s hot path for every sport.
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error(
+          { err, id },
+          "[pulsescore] basketball finalizeStaleLiveMatch failed",
+        );
+      }
       liveMatchState.delete(id);
     }
   }
@@ -19814,7 +19823,22 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       continue;
     }
     if (Date.now() - missingSince > TENNIS_DISAPPEAR_GRACE_MS) {
-      await finalizeStaleLiveMatch(state);
+      // Same reasoning as the per-event try/catch above: this awaits
+      // DB/settlement writes, and buildLivePayload() awaits this whole
+      // function — an uncaught failure here (not just a bad live event)
+      // would just as easily freeze every sport's odds, not only tennis's.
+      // Deletes either way (same as before this try/catch existed) — a
+      // record that fails once here isn't retried forever, since the
+      // underlying cause is almost always something about that specific
+      // match's data, not a transient one.
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error(
+          { err, id },
+          "[pulsescore] tennis finalizeStaleLiveMatch failed",
+        );
+      }
       liveMatchState.delete(id);
     }
   }
@@ -20000,7 +20024,19 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       continue;
     }
     if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
-      await finalizeStaleLiveMatch(state);
+      // buildLivePayload() awaits this whole function — an uncaught failure
+      // here would freeze live odds for every sport, not just football,
+      // until the next tick (or, without the global unhandledRejection
+      // guard added in api/index.ts, crash the process entirely). Deletes
+      // either way, same as before this try/catch existed.
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error(
+          { err, id },
+          "[pulsescore] football finalizeStaleLiveMatch failed",
+        );
+      }
       liveMatchState.delete(id);
     }
   }
