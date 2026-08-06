@@ -7280,45 +7280,13 @@ setInterval(() => {
   broadcastLive().catch(() => {});
 }, CONFIG.LIVE_UPDATE_INTERVAL);
 
-// ─── Volleyball score delta poller ────────────────────────────────────────────
-// Polls volleyball live every 3 s and immediately broadcasts score/status deltas
-// via broadcastMatchDelta — same as the WS path for football/basketball/hockey/tennis.
-const _prevVolleyScores = new Map<string, { home: number; away: number; status: string }>();
-setInterval(async () => {
-  if (sseClients.size === 0 && wsLiveClients.size === 0) return;
-  try {
-    const tournaments = await getVolleyballLive();
-    const now = Date.now();
-    for (const t of tournaments) {
-      const matches = statpalList(t.match);
-      for (const m of matches) {
-        if (!m.home?.name || !m.away?.name) continue;
-        const matchId = m.id ? `volley-${m.id}` : `volley-${t.id}-${m.home.name}`;
-        const homeScore = Math.trunc(Number(m.home?.totalscore) || 0);
-        const awayScore = Math.trunc(Number(m.away?.totalscore) || 0);
-        const status = String(m.status ?? "");
-        const prev = _prevVolleyScores.get(matchId);
-        const changed = !prev || prev.home !== homeScore || prev.away !== awayScore || prev.status !== status;
-        if (changed) {
-          _prevVolleyScores.set(matchId, { home: homeScore, away: awayScore, status });
-          if (prev) {
-            // only broadcast once we have a baseline; prevents spurious deltas on startup
-            logger.info(
-              { matchId, prev, homeScore, awayScore, status },
-              "[volley-delta] volleyball score changed — broadcasting delta",
-            );
-            broadcastMatchDelta(matchId, { homeScore, awayScore, status });
-          }
-        }
-      }
-    }
-    // Cleanup entries older than 4 hours to avoid unbounded growth
-    if (_prevVolleyScores.size > 500) {
-      const keys = [..._prevVolleyScores.keys()];
-      for (const k of keys.slice(0, 100)) _prevVolleyScores.delete(k);
-    }
-  } catch { /* silently ignore network errors */ }
-}, 3_000);
+// ─── Volleyball score delta poller — REMOVED ──────────────────────────────────
+// Used to poll Statpal's volleyball live endpoint every 3s independently of
+// buildLivePayload (so removing volleyball from the live pipeline didn't stop
+// this — it kept calling Statpal on its own timer). Volleyball has no live
+// data source at all now (explicit user decision, 2026-08-06: PulseScore-only
+// on the live page); removed outright rather than left polling a provider
+// with nothing to broadcast to.
 
 // Proactively keep the live payload cache warm even with no SSE/WS clients
 // connected (e.g. right after a server restart, or while everyone is on the
@@ -20184,9 +20152,20 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     )
     .slice(0, 50);
 
-  // Promote tennis "Em Breve" matches that started >2 min ago into the live feed.
-  // The Statpal /live endpoint can lag 5-15 min for Challenger events; this bridges
-  // the gap by showing them as live (0-0, "1st set") until real data arrives.
+  // Both bridges below used to promote an "Em Breve" (prematch/SportsAPI-
+  // sourced) candidate straight into the live section with a fabricated
+  // 0-0 / "Em Jogo" / "1st set" placeholder whenever the real live feed
+  // hadn't picked the match up yet — for tennis specifically, that was a
+  // stand-in for PulseScore lag that no longer exists now that tennis has
+  // its own real PulseScore live builder; for every other sport it was
+  // fabricating a "live" match out of prematch data from a provider
+  // (Statpal/SportsAPI) that's since been removed from the live pipeline
+  // entirely. Removed outright (explicit user decision, 2026-08-06: only
+  // PulseScore-sourced data belongs on the live page) — a match now only
+  // ever appears live once PulseScore's own feed actually reports it live,
+  // no fabricated bridge. promotedTennis stays declared (always empty) since
+  // syncLiveCompetitionCatalog/getCompetitionCatalogDecisions below still
+  // reference it structurally.
   const promotedTennis: LiveMatchState[] = [];
   const startingSoonFinal: LiveMatchState[] = [];
   for (const m of startingSoonCandidates) {
@@ -20195,97 +20174,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       0,
       Math.round(realStartsIn <= 2 ? 0 : realStartsIn),
     );
-    if (m.sport === "tennis") {
-      const providerStatusGroup = m.providerStatusGroup;
-      const providerStatusText = m.providerStatusText ?? "";
-      const winnerKnown = m.providerWinnerKnown === true;
-      const tennisFinished =
-        winnerKnown || isTennisFinishedStatusText(providerStatusText);
-      if (tennisFinished) continue;
-
-      if (providerStatusGroup === 1) {
-        promotedTennis.push({
-          id: m.id,
-          home: m.home,
-          away: m.away,
-          league: m.league,
-          country: m.country,
-          sport: m.sport,
-          homeScore: 0,
-          awayScore: 0,
-          minute: 20,
-          status: providerStatusText || "Em Jogo",
-          hasRealOdds: m.hasRealOdds,
-          odds: m.odds,
-          markets: m.markets,
-          events: [],
-          _liveExtra: { sets: [[0, 0]], currentPoints: ["0", "0"] },
-        });
-        continue;
-      }
-
-      if (providerStatusGroup !== undefined && providerStatusGroup !== 2)
-        continue;
-
-      if (startsIn === 0) {
-        if (
-          isFinite(realStartsIn) &&
-          realStartsIn < -2 &&
-          realStartsIn > -240
-        ) {
-          promotedTennis.push({
-            id: m.id,
-            home: m.home,
-            away: m.away,
-            league: m.league,
-            country: m.country,
-            sport: m.sport,
-            homeScore: 0,
-            awayScore: 0,
-            minute: 20,
-            status: "1st set",
-            hasRealOdds: m.hasRealOdds,
-            odds: m.odds,
-            markets: m.markets,
-            events: [],
-            _liveExtra: { sets: [[0, 0]], currentPoints: ["0", "0"] },
-          });
-          continue;
-        }
-      }
-    }
-    // ── API-lag bridge for non-tennis sports ──────────────────────────────────
-    // If a match started >10 min ago but is still absent from every live feed
-    // (liveIds + liveTeamPairs filtered it out above), promote it to the live
-    // section with a 0-0 placeholder so it never silently vanishes from the UI.
-    // Cap at 180 min (the outer window) so truly-unlisted matches eventually go.
-    if (
-      m.sport !== "tennis" &&
-      startsIn === 0 &&
-      isFinite(realStartsIn) &&
-      realStartsIn < -10 &&
-      realStartsIn > -180
-    ) {
-      const elapsedMin = Math.min(120, Math.round(Math.abs(realStartsIn)));
-      promotedTennis.push({
-        id: m.id,
-        home: m.home,
-        away: m.away,
-        league: m.league,
-        country: m.country,
-        sport: m.sport,
-        homeScore: 0,
-        awayScore: 0,
-        minute: elapsedMin,
-        status: "Em Jogo",
-        hasRealOdds: m.hasRealOdds,
-        odds: m.odds,
-        markets: m.markets,
-        events: [],
-      });
-      continue;
-    }
-
     startingSoonFinal.push({
       id: m.id,
       home: m.home,
