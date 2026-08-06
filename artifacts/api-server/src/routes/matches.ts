@@ -21135,6 +21135,35 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     // and the UI fell back to the static field diagram / hid the button.
     if (match) attachDirectTracker([match as unknown as LiveMatchState]);
 
+    // On-demand tennis market enrichment. computeLiveTennisExtras() (set/game
+    // handicap, total games, set-correct-score) was removed from the ~1s
+    // broadcast hot path in buildTennisLiveFromPulseScore — running it for
+    // every live tennis match on every tick was what froze the live page
+    // with 15-30+ concurrent matches. Computing it here instead, only for
+    // the single match a user actually opens (this route), restores those
+    // market groups without paying that per-tick cost for matches nobody is
+    // looking at.
+    if (match && match.sport === "tennis" && !match.markets?.tennisExtra) {
+      const liveExtra = match._liveExtra;
+      const sets = liveExtra?.sets ?? [[0, 0] as [number, number]];
+      const homeSetsWon = match.homeScore ?? 0;
+      const awaySetsWon = match.awayScore ?? 0;
+      const liveHomeP =
+        match.odds.home > 0 && match.odds.away > 0
+          ? 1 / match.odds.home / (1 / match.odds.home + 1 / match.odds.away)
+          : 0.5;
+      const tennisExtra = computeLiveTennisExtras(
+        liveHomeP,
+        sets,
+        homeSetsWon,
+        awaySetsWon,
+        sets.length,
+        liveExtra?.currentPoints,
+        liveExtra?.serving,
+      );
+      match = { ...match, markets: { ...match.markets, tennisExtra } };
+    }
+
     res.json({ match });
   } catch {
     const fallback = getLivePayloadFallback();

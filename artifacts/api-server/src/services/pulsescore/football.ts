@@ -318,10 +318,17 @@ async function fetchAllFootballLeagues(): Promise<PulseScoreLeague[]> {
   const leagues: PulseScoreLeague[] = [];
   let page = 1;
   // Real sample: total 289 leagues at limit=30 (the documented max) -> ~10
-  // pages. Paced 1.1s apart to share bet365's 1 req/s PRO-plan budget with
-  // the live poller without tripping 429s — this whole fetch only runs once
-  // per FOOTBALL_UPCOMING_TTL_MS, not per page-request, so the ~11s it takes
-  // to fully page through costs nothing user-facing (served from cache).
+  // pages. This shares bet365's rate budget with the live pollers (football
+  // live 1 req/s + tennis live ~0.67 req/s on their own already), so pacing
+  // this at 1.1s apart — as first written — meant it alone consumed nearly
+  // an entire extra req/s for ~16s every FOOTBALL_UPCOMING_TTL_MS, on top of
+  // that already-committed live traffic: exactly the kind of burst that
+  // starves the live pollers into 429s/timeouts, which buildLivePayload()
+  // then has no choice but to paper over with sportWithFallback's stale
+  // snapshot — i.e. odds/score look frozen. Paced far slower here instead:
+  // this fetch only runs once per FOOTBALL_UPCOMING_TTL_MS in the
+  // background and nothing user-facing waits on it (served from its own
+  // cache), so taking longer wall-clock time to finish costs nothing.
   for (let i = 0; i < 15; i++) {
     const data = await pulseScoreGet<PulseScoreLeaguesResponse>(
       `/leagues?page=${page}&limit=30`,
@@ -329,7 +336,7 @@ async function fetchAllFootballLeagues(): Promise<PulseScoreLeague[]> {
     if (Array.isArray(data?.leagues)) leagues.push(...data.leagues);
     if (!data?.hasNextPage) break;
     page += 1;
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
   }
   return leagues;
 }
