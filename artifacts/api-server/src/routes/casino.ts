@@ -20,12 +20,13 @@ import {
 
 const router: IRouter = Router();
 
-// Catalog lives in Postgres (casino_games table). SilentAPI is no longer
-// used — /games and /providers below only ever return source="palace"
-// rows (seeded via `pnpm run seed:palace-casino`, a live sync against
-// Palace Casino's own API); the SilentAPI /launch route and callback
-// further down are kept as dormant code, not deleted, in case that
-// decision changes, but nothing in the active catalog reaches them. The
+// Catalog lives in Postgres (casino_games table). Palace Casino is
+// suspended — /games and /providers below only ever return source="silentapi"
+// rows (seeded via `pnpm run seed:casino`, from the static catalog snapshot
+// at ../data/casinoGames.json — SilentAPI has no live "list all games"
+// endpoint); the Palace Casino /palace/launch route and /palace/callback
+// further down are kept as dormant code, not deleted, in case that decision
+// changes again, but nothing in the active catalog reaches them. The
 // front-end pages through the catalog 24 games at a time and never talks
 // to either aggregator directly for listing.
 const GAMES_CACHE_TTL_SECONDS = 300;
@@ -73,12 +74,12 @@ router.get("/games", async (req: Request, res: Response) => {
     return;
   }
 
-  // Palace Casino only — SilentAPI is no longer used (kept as dormant code,
-  // not deleted, in case that decision changes; explicitly filtered out
+  // SilentAPI only — Palace Casino is suspended (kept as dormant code, not
+  // deleted, in case that decision changes again; explicitly filtered out
   // here rather than relying on its catalog happening to be empty).
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, "palace"),
+    eq(casinoGamesTable.source, "silentapi"),
   ];
   if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
@@ -90,10 +91,6 @@ router.get("/games", async (req: Request, res: Response) => {
         id: casinoGamesTable.gameUid,
         name: casinoGamesTable.name,
         provider: casinoGamesTable.provider,
-        // For source="palace" rows this doubles as the provider_id needed
-        // by /palace/launch (see seedPalaceCasinoGames.ts) - not a real
-        // "vendor code" for that source, but reusing the column avoids a
-        // schema change just for this.
         vendorCode: casinoGamesTable.vendorCode,
         category: casinoGamesTable.category,
         img: casinoGamesTable.img,
@@ -140,7 +137,7 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
 
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, "palace"),
+    eq(casinoGamesTable.source, "silentapi"),
   ];
   if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
 
@@ -202,7 +199,7 @@ router.get("/providers", async (_req: Request, res: Response) => {
   const rows = await db
     .selectDistinct({ provider: casinoGamesTable.provider })
     .from(casinoGamesTable)
-    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, "palace")))
+    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, "silentapi")))
     .orderBy(asc(casinoGamesTable.provider));
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });

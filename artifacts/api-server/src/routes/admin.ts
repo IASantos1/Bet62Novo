@@ -2458,6 +2458,11 @@ const CASINO_LEDGER_KINDS = [
   "casino_palace_bet",
   "casino_palace_win",
   "casino_palace_cancel",
+  // SilentAPI settles bet+win as one net-delta callback per round (see
+  // app.ts's /api/casino/callback), unlike Palace's three separate kinds —
+  // included here too so "allTime" GGR still covers whichever aggregator
+  // was active during any given period, not just the currently-active one.
+  "casino_round_settlement",
 ] as const;
 
 router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) => {
@@ -2473,11 +2478,11 @@ router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) 
             active: sql<number>`count(*) filter (where ${casinoGamesTable.isActive})`,
           })
           .from(casinoGamesTable)
-          .where(eq(casinoGamesTable.source, "palace")),
+          .where(eq(casinoGamesTable.source, "silentapi")),
         db
           .select({ total: sql<number>`count(distinct ${casinoGamesTable.provider})` })
           .from(casinoGamesTable)
-          .where(and(eq(casinoGamesTable.source, "palace"), eq(casinoGamesTable.isActive, true))),
+          .where(and(eq(casinoGamesTable.source, "silentapi"), eq(casinoGamesTable.isActive, true))),
         db
           .select({ net: sum(ledgerEntriesTable.amount) })
           .from(ledgerEntriesTable)
@@ -2514,7 +2519,7 @@ router.get("/casino/games", adminMiddleware, async (req: AdminRequest, res) => {
     const page = Math.max(1, Number(req.query["page"]) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 30));
 
-    const conditions = [eq(casinoGamesTable.source, "palace")];
+    const conditions = [eq(casinoGamesTable.source, "silentapi")];
     if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
     if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
     const where = and(...conditions);
