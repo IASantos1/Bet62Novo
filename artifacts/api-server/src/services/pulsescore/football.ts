@@ -49,23 +49,22 @@ export function getPulseScoreFootballUsage(): {
 async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   rollUsageDateIfNeeded();
   requestsToday += 1;
-  try {
-    // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
-    // not a bare array as the public docs' example showed — confirmed via a
-    // real authenticated call. limit=200 comfortably covers real live-soccer
-    // volume (18 events observed) in a single request within the 1 req/s
-    // PRO-plan rate limit.
-    const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
-      "/live-events?sport=soccer&limit=200",
-    );
-    return Array.isArray(data?.events) ? data.events : [];
-  } catch {
-    return [];
-  }
+  // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
+  // not a bare array as the public docs' example showed — confirmed via a
+  // real authenticated call. limit=200 comfortably covers real live-soccer
+  // volume (18 events observed) in a single request within the 1 req/s
+  // PRO-plan rate limit. Lets errors (429s from the shared bet365 budget,
+  // timeouts, ...) propagate — see getPulseScoreFootballLive's .catch()
+  // for why swallowing them here was a real bug, not a safety net.
+  const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+    "/live-events?sport=soccer&limit=200",
+  );
+  return Array.isArray(data?.events) ? data.events : [];
 }
 
 /** Live football odds from PulseScore (bet365, normalized). Empty array if
- * PULSESCORE_API_KEY isn't configured yet or the upstream call fails. */
+ * PULSESCORE_API_KEY isn't configured yet, or the upstream call fails on
+ * the very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
@@ -77,6 +76,19 @@ export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
       .then((events) => {
         cache = { events, fetchedAt: Date.now() };
         return events;
+      })
+      .catch((err) => {
+        // This used to swallow the error and return [] unconditionally —
+        // a transient 429 (bet365's shared 1 req/s budget collides with
+        // tennis's REST fallback, or a background prematch page fetch)
+        // silently wiped the live football feed to "0 matches" with zero
+        // trace anywhere. Log it and keep serving the last good cache
+        // instead — only genuinely empty right after boot (cache null).
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[pulsescore] football live fetch failed — serving stale cache",
+        );
+        return cache?.events ?? [];
       })
       .finally(() => {
         inFlight = null;

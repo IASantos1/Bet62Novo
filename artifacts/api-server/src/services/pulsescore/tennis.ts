@@ -69,14 +69,15 @@ export function getPulseScoreTennisUsage(): { requestsToday: number; date: strin
 async function fetchTennisLive(): Promise<PulseScoreEvent[]> {
   rollUsageDateIfNeeded();
   requestsToday += 1;
-  try {
-    const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
-      "/live-events?sport=tennis&limit=200",
-    );
-    return Array.isArray(data?.events) ? data.events : [];
-  } catch {
-    return [];
-  }
+  // Lets errors propagate — see getPulseScoreTennisLiveRest's .catch() for
+  // why silently swallowing them here (the previous behavior) was a real
+  // bug: a 429 from the shared bet365 budget (collides with football's own
+  // 1000ms poll) silently wiped tennis's REST-fallback data to empty with
+  // no trace anywhere.
+  const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+    "/live-events?sport=tennis&limit=200",
+  );
+  return Array.isArray(data?.events) ? data.events : [];
 }
 
 async function getPulseScoreTennisLiveRest(): Promise<PulseScoreEvent[]> {
@@ -88,6 +89,13 @@ async function getPulseScoreTennisLiveRest(): Promise<PulseScoreEvent[]> {
       .then((events) => {
         cache = { events, fetchedAt: Date.now() };
         return events;
+      })
+      .catch((err) => {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[pulsescore] tennis REST-fallback live fetch failed — serving stale cache",
+        );
+        return cache?.events ?? [];
       })
       .finally(() => {
         inFlight = null;
