@@ -43,10 +43,6 @@ import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
 import {
-  findSportscoreFixture,
-  fetchSportscoreTracker,
-  sportscoreMatchToTracker,
-  type SportscoreDiagStep,
   unknownStatpalMarkets,
   countryForLeagueName,
 } from "./matches.js";
@@ -2251,38 +2247,6 @@ router.delete("/sportscore-map/:id", adminMiddleware, async (req: AdminRequest, 
   } catch (err) {
     logger.error({ err }, "DELETE /api/admin/sportscore-map/:id error");
     res.status(500).json({ error: "Erro ao remover mapeamento do SportScore" });
-  }
-});
-
-// Diagnostic: runs the exact same automatic-matching logic used live, but
-// returns every step it tried (fetched URL, HTTP status, why it accepted
-// or rejected each candidate) instead of just null — so a failure can be
-// explained from the admin panel without needing server log access.
-router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) => {
-  try {
-    const sport = String(req.body?.sport ?? "").trim().toLowerCase();
-    const homeTeam = String(req.body?.homeTeam ?? "").trim();
-    const awayTeam = String(req.body?.awayTeam ?? "").trim();
-    if (!sport || !homeTeam || !awayTeam) {
-      res.status(400).json({ error: "sport, homeTeam e awayTeam são obrigatórios" });
-      return;
-    }
-    const diag: SportscoreDiagStep[] = [];
-    const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam, diag);
-    const tracker = fixture?.slug
-      ? await fetchSportscoreTracker(sport, fixture.slug, { id: fixture.id || null })
-      : { ok: false as const, error: "fixture não encontrado — sem slug pra consultar o tracker", url: "" };
-    const mappedTracker =
-      tracker.ok && tracker.raw
-        ? sportscoreMatchToTracker(tracker.raw as Record<string, unknown>, homeTeam, awayTeam)
-        : null;
-    res.json({ result: fixture, steps: diag, tracker, mappedTracker });
-  } catch (err) {
-    logger.error({ err }, "POST /api/admin/sportscore-test error");
-    res.status(500).json({
-      error: "Erro ao testar casamento com a SportScore",
-      detail: err instanceof Error ? err.message : String(err),
-    });
   }
 });
 
