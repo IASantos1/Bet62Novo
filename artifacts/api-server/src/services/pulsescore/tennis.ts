@@ -21,6 +21,7 @@ import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
   pulseScoreGet,
+  pulseScoreGetWithRetry,
   type PulseScoreEvent,
   type PulseScoreMarket,
   type PulseScoreLiveEventsResponse,
@@ -351,11 +352,12 @@ async function fetchAllTennisEvents(): Promise<PulseScoreTennisPrematchEvent[]> 
   // only runs once per TENNIS_UPCOMING_TTL_MS in the background, nothing
   // user-facing waits on it).
   for (let i = 0; i < 15; i++) {
-    const data = await pulseScoreGet<PulseScoreTennisEventsResponse>(
+    const data = await pulseScoreGetWithRetry<PulseScoreTennisEventsResponse>(
       `/tennis/events?page=${page}&limit=30`,
     );
-    if (Array.isArray(data?.events)) events.push(...data.events);
-    if (!data?.hasNextPage) break;
+    if (!data) break; // out of retries — keep whatever was already collected
+    if (Array.isArray(data.events)) events.push(...data.events);
+    if (!data.hasNextPage) break;
     page += 1;
     await new Promise((resolve) => setTimeout(resolve, 4_000));
   }

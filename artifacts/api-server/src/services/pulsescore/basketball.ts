@@ -7,7 +7,11 @@
 // path can be wired up without guessing.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { pulseScoreGet, type PulseScoreEvent, type PulseScoreMarket } from "./client.js";
+import {
+  pulseScoreGetWithRetry,
+  type PulseScoreEvent,
+  type PulseScoreMarket,
+} from "./client.js";
 
 function oddsToNumber(raw: number | undefined): number | null {
   return typeof raw === "number" && Number.isFinite(raw) && raw > 1.0 ? raw : null;
@@ -171,11 +175,12 @@ async function fetchAllBasketballLeagues(): Promise<PulseScoreBasketballLeague[]
   // live pollers, and nothing user-facing waits on it (served from its own
   // cache), so there's no cost to keeping the same conservative pacing.
   for (let i = 0; i < 15; i++) {
-    const data = await pulseScoreGet<PulseScoreBasketballLeaguesResponse>(
+    const data = await pulseScoreGetWithRetry<PulseScoreBasketballLeaguesResponse>(
       `/basketball/leagues?page=${page}&limit=30`,
     );
-    if (Array.isArray(data?.leagues)) leagues.push(...data.leagues);
-    if (!data?.hasNextPage) break;
+    if (!data) break; // out of retries — keep whatever was already collected
+    if (Array.isArray(data.leagues)) leagues.push(...data.leagues);
+    if (!data.hasNextPage) break;
     page += 1;
     await new Promise((resolve) => setTimeout(resolve, 4_000));
   }

@@ -5,6 +5,7 @@
 // is /api/{bookmaker} with no version segment — bookmakerPrefix() below is
 // the one place that quirk needs to be known.
 import { CONFIG } from "../../lib/config.js";
+import { logger } from "../../lib/logger.js";
 
 export function bookmakerPrefix(bookmaker: string = CONFIG.PULSESCORE_BOOKMAKER): string {
   return bookmaker === "bet365" ? "v3/bet365" : bookmaker;
@@ -33,6 +34,40 @@ export async function pulseScoreGet<T>(
     throw new Error(`[pulsescore] ${resp.status} on ${path}`);
   }
   return (await resp.json()) as T;
+}
+
+// Football/tennis live pollers hit bet365 at ~1 req/s continuously, which is
+// the PRO plan's entire budget for that bookmaker (confirmed against the
+// docs: "1 requisição/seg" per bookmaker, shared across every consumer, not
+// per sport/endpoint). Prematch's paginated fetches (fetchAllFootballLeagues/
+// fetchAllTennisEvents/fetchAllBasketballLeagues) are a second consumer of
+// that SAME budget, running in the background every few minutes — a single
+// page request landing in the same second as a live poll gets a 429 and,
+// without this, the whole prematch fetch for that sport silently returns
+// nothing (its outer try/catch just gives up). Retrying with backoff gives a
+// starved page request more chances to land in a gap between live polls
+// instead of losing the entire "Em Breve" list to one unlucky collision.
+export async function pulseScoreGetWithRetry<T>(
+  path: string,
+  opts?: { timeoutMs?: number; bookmaker?: string; retries?: number; retryDelayMs?: number },
+): Promise<T | null> {
+  const retries = opts?.retries ?? 3;
+  const baseDelayMs = opts?.retryDelayMs ?? 2000;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await pulseScoreGet<T>(path, opts?.timeoutMs, opts?.bookmaker);
+    } catch (err) {
+      if (attempt === retries) {
+        logger.warn(
+          { err, path },
+          "[pulsescore] giving up on this page after retries — likely rate-limited by the live poller sharing the same bet365 budget",
+        );
+        return null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+    }
+  }
+  return null;
 }
 
 // ── Normalized schema shared by every bookmaker/sport ───────────────────────
