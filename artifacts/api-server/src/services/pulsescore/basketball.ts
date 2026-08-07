@@ -188,20 +188,16 @@ async function fetchAllBasketballLeagues(): Promise<PulseScoreBasketballLeague[]
 }
 
 async function fetchBasketballUpcoming(): Promise<PulseScoreBasketballPrematchEvent[]> {
-  try {
-    const leagues = await fetchAllBasketballLeagues();
-    // live:true entries here never carry markets (see file header) — keep
-    // this prematch-only until a real live-events sample is confirmed.
-    return leagues.flatMap((l) => l.events ?? []).filter((ev) => !ev.live);
-  } catch {
-    return [];
-  }
+  const leagues = await fetchAllBasketballLeagues();
+  // live:true entries here never carry markets (see file header) — keep
+  // this prematch-only until a real live-events sample is confirmed.
+  return leagues.flatMap((l) => l.events ?? []).filter((ev) => !ev.live);
 }
 
 /** Upcoming basketball fixtures from PulseScore (bet365), each carrying its
  * Money Line / Spread / Total prematch odds when bet365 has priced it yet.
- * Empty array if PULSESCORE_API_KEY isn't configured or the upstream call
- * fails. */
+ * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
+ * fails on the very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreBasketballUpcoming(): Promise<PulseScoreBasketballPrematchEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
@@ -212,6 +208,20 @@ export async function getPulseScoreBasketballUpcoming(): Promise<PulseScoreBaske
       .then((events) => {
         upcomingCache = { events, fetchedAt: Date.now() };
         return events;
+      })
+      .catch((err) => {
+        // Used to swallow the error and overwrite upcomingCache with []
+        // unconditionally — a single transient failure across the ~10-page
+        // paginated /leagues fetch (429 collision with the live pollers'
+        // shared bet365 budget, a timeout, ...) wiped 5 minutes of prematch
+        // listings to empty, which is exactly what shows up on the site as
+        // matches "appearing and disappearing". Log it and keep serving
+        // whatever was cached instead.
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[pulsescore] basketball upcoming fetch failed — serving stale cache",
+        );
+        return upcomingCache?.events ?? [];
       })
       .finally(() => {
         upcomingInFlight = null;

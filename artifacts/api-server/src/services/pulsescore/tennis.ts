@@ -392,19 +392,16 @@ async function fetchAllTennisEvents(): Promise<PulseScoreTennisPrematchEvent[]> 
 }
 
 async function fetchTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
-  try {
-    const events = await fetchAllTennisEvents();
-    // Docs say this endpoint already only returns non-live events; filter
-    // defensively anyway rather than trust that unconditionally.
-    return events.filter((ev) => !ev.live);
-  } catch {
-    return [];
-  }
+  const events = await fetchAllTennisEvents();
+  // Docs say this endpoint already only returns non-live events; filter
+  // defensively anyway rather than trust that unconditionally.
+  return events.filter((ev) => !ev.live);
 }
 
 /** Upcoming tennis fixtures from PulseScore (bet365), each carrying its
  * MATCH_RESULT prematch odds when bet365 has priced it yet. Empty array if
- * PULSESCORE_API_KEY isn't configured or the upstream call fails. */
+ * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
+ * very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
@@ -415,6 +412,20 @@ export async function getPulseScoreTennisUpcoming(): Promise<PulseScoreTennisPre
       .then((events) => {
         upcomingCache = { events, fetchedAt: Date.now() };
         return events;
+      })
+      .catch((err) => {
+        // Used to swallow the error and overwrite upcomingCache with []
+        // unconditionally — a single transient failure across the ~10-page
+        // paginated /tennis/events fetch (429 collision with the live
+        // pollers' shared bet365 budget, a timeout, ...) wiped 5 minutes of
+        // prematch listings to empty, which is exactly what shows up on the
+        // site as matches "appearing and disappearing". Log it and keep
+        // serving whatever was cached instead.
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[pulsescore] tennis upcoming fetch failed — serving stale cache",
+        );
+        return upcomingCache?.events ?? [];
       })
       .finally(() => {
         upcomingInFlight = null;

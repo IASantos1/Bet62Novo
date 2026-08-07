@@ -10768,6 +10768,18 @@ let _allUpcomingCacheBuiltAt = 0;
 const UPCOMING_CACHE_TTL_MS = 30_000;
 let _upcomingRebuildInProgress = false;
 
+// Last good per-sport slice — kept separately from _allUpcomingCache so a
+// single sport's builder throwing (a bug in the per-event transform, not
+// just a network hiccup — the underlying getPulseScoreXUpcoming() fetchers
+// already fall back to their own stale cache on error, see football.ts/
+// tennis.ts/basketball.ts) doesn't wipe that sport's "Em Breve" listings to
+// empty for this whole 30s cache window. That wipe-then-refill cycle is
+// exactly what showed up on the site as prematch matches "appearing and
+// disappearing".
+let _lastGoodFootballUpcoming: UpcomingMatch[] = [];
+let _lastGoodTennisUpcoming: UpcomingMatch[] = [];
+let _lastGoodBasketballUpcoming: UpcomingMatch[] = [];
+
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
@@ -10779,32 +10791,38 @@ async function rebuildUpcomingCache(): Promise<void> {
     // are all back on PulseScore, each confirmed against a real /leagues
     // sample. Every other sport's prematch remains disconnected pending its
     // own real confirmed sample.
-    let football: UpcomingMatch[] = [];
+    let football: UpcomingMatch[];
     try {
       football = await buildFootballUpcomingFromPulseScore();
+      _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle",
+        "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
       );
+      football = _lastGoodFootballUpcoming;
     }
-    let tennis: UpcomingMatch[] = [];
+    let tennis: UpcomingMatch[];
     try {
       tennis = await buildTennisUpcomingFromPulseScore();
+      _lastGoodTennisUpcoming = tennis;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle",
+        "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
       );
+      tennis = _lastGoodTennisUpcoming;
     }
-    let basketball: UpcomingMatch[] = [];
+    let basketball: UpcomingMatch[];
     try {
       basketball = await buildBasketballUpcomingFromPulseScore();
+      _lastGoodBasketballUpcoming = basketball;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle",
+        "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
       );
+      basketball = _lastGoodBasketballUpcoming;
     }
     const all = [...football, ...tennis, ...basketball];
     rememberUpcomingFootballEligibility(football);
