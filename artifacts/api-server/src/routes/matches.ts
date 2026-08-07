@@ -11022,6 +11022,13 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   for (const ev of events) {
    try {
+    // Second layer of defense against sport-tag contamination (see
+    // tennisWs.ts's applyFrame for the full story — the WS connection is
+    // shared/multiplexed and has leaked football/esoccer/ebasketball
+    // events tagged with the wrong or missing sport). Checking here too,
+    // not just at the WS layer, means this loop is safe regardless of
+    // whether a bad event slipped in via WS or REST.
+    if (ev.sport !== "tennis") continue;
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
