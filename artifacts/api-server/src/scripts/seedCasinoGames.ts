@@ -9,11 +9,21 @@
 // Re-run after refreshing that JSON to pick up new/renamed games — existing
 // rows are upserted by (provider, game_uid, source) in a single bulk
 // statement, never duplicated.
+//
+// Read at runtime (not a static `import ... with { type: "json" }`) so a
+// missing/not-yet-provided catalog file doesn't break the build or
+// typecheck — it only fails when this script actually runs without one.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { sql } from "drizzle-orm";
 import { db, casinoGamesTable, initDb } from "@workspace/db";
-import casinoGamesData from "../data/casinoGames.json" with { type: "json" };
 
 const SOURCE = "silentapi";
+const CATALOG_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../data/casinoGames.json",
+);
 
 type SourceGame = {
   id: string;
@@ -25,12 +35,23 @@ type SourceGame = {
 };
 
 async function main() {
+  let raw: string;
+  try {
+    raw = readFileSync(CATALOG_PATH, "utf8");
+  } catch {
+    console.error(
+      `No catalog file at ${CATALOG_PATH} — drop the SilentAPI games JSON there (array of ` +
+        `{id, name, provider, vendorCode, category, img}) before running this seed.`,
+    );
+    process.exit(1);
+  }
+  const games = JSON.parse(raw) as SourceGame[];
+
   // This script can run standalone (e.g. `railway run ... seed:casino`)
   // without the main server ever having booted, so it can't assume
   // initDb() already created the table — ensure it here first.
   await initDb();
 
-  const games = casinoGamesData as SourceGame[];
   const now = new Date();
 
   // Several titles are relisted under more than one "provider" label by the
