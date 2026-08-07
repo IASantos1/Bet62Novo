@@ -31,6 +31,10 @@ import {
   getPulseScoreTennisUpcoming,
   extractTennisPrematchExtra,
 } from "../services/pulsescore/tennis.js";
+import {
+  getPulseScoreBasketballUpcoming,
+  extractBasketballOverride,
+} from "../services/pulsescore/basketball.js";
 
 const router: IRouter = Router();
 
@@ -10673,6 +10677,77 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+/**
+ * Basketball prematch, sourced entirely from PulseScore (getPulseScoreBasketballUpcoming).
+ * Confirmed against a real GET /api/v3/bet365/basketball/leagues sample (2026-08-07) —
+ * same envelope as football's/tennis's /leagues, league is a bare string (no
+ * "Country||League"/"Tour||League" prefix), so no catalog/league filtering is
+ * applied and country is hardcoded "Internacional" — mirrors tennis's
+ * no-catalog approach since there's no existing basketball country table to
+ * reuse. Money Line / Spread / Total all confirmed real (extractBasketballOverride);
+ * quarter-level markets (basketballExtra) stay synthetic-only — no real
+ * per-quarter sample seen yet. Same `pulsescore-basketball-${eventId}` id
+ * scheme as football/tennis so a match's identity doesn't change if a live
+ * pipeline is added later.
+ */
+async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreBasketballUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const leagueName = ev.league || "Basquetebol";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractBasketballOverride(ev);
+    const baseMarkets = makeBasketballMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    if (override.spread) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.spread.home,
+        awayPlusOne: override.spread.away,
+      };
+      markets._spread = -override.spread.line;
+      markets._spreadLine = -override.spread.line;
+    }
+    if (override.total) {
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over25: override.total.over,
+        under25: override.total.under,
+      };
+      markets._total = override.total.line;
+    }
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
+
+    results.push({
+      id: `pulsescore-basketball-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "basketball",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+    });
+  }
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -10689,12 +10764,12 @@ async function rebuildUpcomingCache(): Promise<void> {
   _upcomingRebuildInProgress = true;
   try {
     // ── Sports data providers still disconnected from pré-jogo, except
-    // football and tennis ───────────────────────────────────────────────
+    // football, tennis and basketball ─────────────────────────────────────
     // Same rebuild-from-scratch effort as the live side: football
-    // (2026-08-07) and tennis (2026-08-07) prematch are both back on
-    // PulseScore, each confirmed against a real /leagues sample. Every
-    // other sport's prematch remains disconnected pending its own real
-    // confirmed sample.
+    // (2026-08-07), tennis (2026-08-07) and basketball (2026-08-07) prematch
+    // are all back on PulseScore, each confirmed against a real /leagues
+    // sample. Every other sport's prematch remains disconnected pending its
+    // own real confirmed sample.
     let football: UpcomingMatch[] = [];
     try {
       football = await buildFootballUpcomingFromPulseScore();
@@ -10713,7 +10788,16 @@ async function rebuildUpcomingCache(): Promise<void> {
         "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle",
       );
     }
-    const all = [...football, ...tennis];
+    let basketball: UpcomingMatch[] = [];
+    try {
+      basketball = await buildBasketballUpcomingFromPulseScore();
+    } catch (err) {
+      logger.error(
+        { err },
+        "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle",
+      );
+    }
+    const all = [...football, ...tennis, ...basketball];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
@@ -12191,10 +12275,11 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // ── Sports data providers still disconnected from pré-jogo, except
-  // football and tennis ───────────────────────────────────────────────────
-  // Same rebuild-from-scratch effort as rebuildUpcomingCache above: football
-  // and tennis back on PulseScore (both 2026-08-07), every other sport
-  // pending its own real confirmed sample before being rebuilt the same way.
+  // football, tennis and basketball ─────────────────────────────────────────
+  // Same rebuild-from-scratch effort as rebuildUpcomingCache above: football,
+  // tennis and basketball all back on PulseScore (all 2026-08-07), every
+  // other sport pending its own real confirmed sample before being rebuilt
+  // the same way.
   let football: UpcomingMatch[] = [];
   try {
     football = await buildFootballUpcomingFromPulseScore();
@@ -12213,12 +12298,21 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle",
     );
   }
+  let basketball: UpcomingMatch[] = [];
+  try {
+    basketball = await buildBasketballUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle",
+    );
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball]);
   upcomingTopCache = {
     football,
     tennis,
-    basketball: [],
+    basketball,
     hockey: [],
     volleyball: [],
     baseball: [],
