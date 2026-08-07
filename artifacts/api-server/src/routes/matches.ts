@@ -29,6 +29,7 @@ import {
   getPulseScoreTennisLive,
   extractTennisOverride,
   getPulseScoreTennisUpcoming,
+  extractTennisPrematchExtra,
 } from "../services/pulsescore/tennis.js";
 
 const router: IRouter = Router();
@@ -10632,6 +10633,28 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       : baseOdds;
     const isWomens = leagueName.toLowerCase().includes("wta");
 
+    // Real tennis-specific prematch markets beyond the moneyline (set
+    // winner, total games, exact set score) — see extractTennisPrematchExtra
+    // for exactly which markets these come from and why gameHandicap/
+    // setHandicap/set2/set3 stay zeroed (no safe HOME/AWAY attribution or no
+    // real data available at all). Zero is this codebase's existing
+    // "not priced" signal (same convention already used for football's
+    // Em Breve markets) — the frontend already hides/disables a market
+    // whose odds are 0.
+    const prematchExtra = extractTennisPrematchExtra(ev);
+    const tennisExtra: NonNullable<AdvancedMarkets["tennisExtra"]> = {
+      firstSet: prematchExtra.firstSet ?? { home: 0, away: 0 },
+      set2: { home: 0, away: 0 },
+      set3: { home: 0, away: 0 },
+      exactSets: prematchExtra.exactSets ?? { h20: 0, h21: 0, a02: 0, a12: 0 },
+      setHandicap: { home: 0, away: 0 },
+      totalGames: prematchExtra.totalGames ?? { line: 0, over: 0, under: 0 },
+      totalGamesLines: prematchExtra.totalGamesLines ?? [],
+      set1Games: prematchExtra.set1Games ?? { line: 0, over: 0, under: 0 },
+      gameHandicap: { line: 0, home: 0, away: 0 },
+    };
+    const markets: AdvancedMarkets = { ...baseMarkets, tennisExtra };
+
     results.push({
       id: `pulsescore-tennis-${ev.eventId}`,
       home,
@@ -10643,7 +10666,7 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       sport: "tennis",
       hasRealOdds: !!override?.odds,
       odds,
-      markets: baseMarkets,
+      markets,
       isWomens,
     });
   }

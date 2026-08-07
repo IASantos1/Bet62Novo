@@ -61,6 +61,14 @@ export type PulseScoreMarket = {
   isActive: boolean;
   selections: PulseScoreSelection[];
   marketId: string;
+  // Confirmed real (2026-08-07, GET /tennis/events): a market can carry its
+  // own top-level moreInfo distinct from each selection's — e.g. SET_BETTING
+  // markets use moreInfo.subMarket to name which player that specific
+  // market's odds belong to (SET_BETTING splits into one market PER PLAYER,
+  // unlike every HOME/AWAY-attributed 2-way market elsewhere in this API).
+  marketFI?: string;
+  moreInfo?: Record<string, unknown>;
+  updatedAt?: string;
 };
 
 export type PulseScoreEvent = {
