@@ -14878,5 +14878,4013 @@
     "vendorCode": null,
     "category": "slots",
     "img": "https://providers.gambllyapi.com/assets/providers/galaxsys/turbo-mines.jpg"
+  },
+  {
+    "id": "b4a28fec2334682ca1de26990c1d97e9",
+    "name": "Baccarat",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Baccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "39dad490397e78fd4e5602540e4228e7",
+    "name": "DragonTiger",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=DragonTiger&background=random&color=fff&size=256"
+  },
+  {
+    "id": "91f11654eeb5c0504491e2c06e3ea700",
+    "name": "Game lobby",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Game+lobby&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3137200a61755b66ded41b26e5fa668f",
+    "name": "Roulette",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Roulette&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9533f9dc88cc9e30bd49fb421cc67d83",
+    "name": "Sicbo",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sicbo&background=random&color=fff&size=256"
+  },
+  {
+    "id": "GB_booongo_15_dragon_pearls",
+    "name": "15 Dragon Pearls",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/15_dragon_pearls_banner_ezukj.jpg"
+  },
+  {
+    "id": "GB_booongo_3_coins",
+    "name": "3 Coins",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/3_coins_banner_crnpa.jpg"
+  },
+  {
+    "id": "GB_booongo_3_coins_egypt",
+    "name": "3 Coins: Egypt",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/3_coins_egypt_banner_iobov.jpg"
+  },
+  {
+    "id": "GB_booongo_3_hot_chillies",
+    "name": "3 Hot Chillies",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/3_hot_chillies_banner_yjcoc.jpg"
+  },
+  {
+    "id": "GB_booongo_777_coins",
+    "name": "777 Coins",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/777_coins_banner_uwcok.jpg"
+  },
+  {
+    "id": "GB_booongo_aztec_fire",
+    "name": "Aztec Fire",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/aztec_fire_banner_bjomk.jpg"
+  },
+  {
+    "id": "GB_booongo_aztec_sun",
+    "name": "Aztec Sun",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/aztec_sun_banner_bejoc.jpg"
+  },
+  {
+    "id": "GB_booongo_big_heist",
+    "name": "Big Heist",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/big_heist_banner_efqes.jpg"
+  },
+  {
+    "id": "GB_booongo_black_wolf",
+    "name": "Black Wolf",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/black_wolf_banner_kodrk.jpg"
+  },
+  {
+    "id": "GB_booongo_black_wolf_2",
+    "name": "Black Wolf 2",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/black_wolf_2_banner_pihet.png"
+  },
+  {
+    "id": "GB_booongo_book_of_sun_multichance",
+    "name": "Book of Sun Multichance",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/book_of_sun_multichance_banner_GIehvui.jpg"
+  },
+  {
+    "id": "GB_booongo_boom_boom_gold",
+    "name": "Boom! Boom! Gold!",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/boom_gold_banner_zjqjo.jpg"
+  },
+  {
+    "id": "GB_booongo_candy_boom",
+    "name": "Candy Boom",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/candy_boom_banner_rkebf.jpg"
+  },
+  {
+    "id": "GB_booongo_crystal_scarabs",
+    "name": "Crystal Scarabs",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/crystal_scarabs_banner_uotbd.jpg"
+  },
+  {
+    "id": "GB_booongo_dragon_pearls_hold_and_win",
+    "name": "Dragon Pearls: Hold and Win",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/dragon_pearls_banner_TCt0sbA.jpg"
+  },
+  {
+    "id": "GB_booongo_dragon_wealth",
+    "name": "Dragon Wealth",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/dragon_wealth_banner_gmscn.jpg"
+  },
+  {
+    "id": "GB_booongo_egypt_fire",
+    "name": "Egypt Fire",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/egypt_fire_banner_lsegp.jpg"
+  },
+  {
+    "id": "GB_booongo_forest_spirit",
+    "name": "Forest Spirit",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/forest_spirit_banner_kifxe.jpg"
+  },
+  {
+    "id": "GB_booongo_goddess_of_egypt",
+    "name": "Goddess of Egypt",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/goddess_of_egypt_banner_cyhcz.jpg"
+  },
+  {
+    "id": "GB_booongo_gold_express",
+    "name": "Gold Express",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/gold-express-1.jpg"
+  },
+  {
+    "id": "GB_booongo_golden_dancing_lion",
+    "name": "Golden Dancing Lion",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/golden_dancing_lion.jpg"
+  },
+  {
+    "id": "GB_booongo_grab_more_gold",
+    "name": "Grab more Gold!",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/grab_more_gold_banner_gwcza.jpg"
+  },
+  {
+    "id": "GB_booongo_grab_the_gold",
+    "name": "Grab the Gold!",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/grab_the_gold_banner_yxvbq.jpg"
+  },
+  {
+    "id": "GB_booongo_great_panda_hold_and_win",
+    "name": "Great Panda: Hold and Win",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/great_panda_banner_uzjak.jpg"
+  },
+  {
+    "id": "GB_booongo_green_chilli",
+    "name": "Green Chilli",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/green_chilli_banner_wbdal.jpg"
+  },
+  {
+    "id": "GB_booongo_green_chilli_2",
+    "name": "Green Chilli 2",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/green_chilli_2_banner_qdelm.jpg"
+  },
+  {
+    "id": "GB_booongo_happy_fish",
+    "name": "Happy Fish",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/happy_fish_banner_xkude.jpg"
+  },
+  {
+    "id": "GB_booongo_hit_more_gold",
+    "name": "Hit more Gold!",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/hit_more_gold_banner_zcfzf.jpg"
+  },
+  {
+    "id": "GB_booongo_hit_the_gold",
+    "name": "Hit the Gold!",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/hit_the_gold_banner_smciy.jpg"
+  },
+  {
+    "id": "GB_booongo_lady_fortune",
+    "name": "Lady Fortune",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/lady_fortune_banner_mdvsp.jpg"
+  },
+  {
+    "id": "GB_booongo_little_farm",
+    "name": "Little Farm",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/little_farm_banner_jbybv.jpg"
+  },
+  {
+    "id": "GB_booongo_lotus_charm",
+    "name": "Lotus Charm",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/lotus_charm_banner_fcoyx.jpg"
+  },
+  {
+    "id": "GB_booongo_magic_apple",
+    "name": "Magic Apple",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/magic_apple_banner_lqepi.jpg"
+  },
+  {
+    "id": "GB_booongo_magic_apple_2",
+    "name": "Magic Apple 2",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/magic_apple_2_banner_xypvj.jpg"
+  },
+  {
+    "id": "GB_booongo_maya_sun",
+    "name": "Maya Sun",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/maya_sun_banner_gizub.jpg"
+  },
+  {
+    "id": "GB_booongo_moon_sisters",
+    "name": "Moon Sisters",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/moon_sisters_banner_trqom.jpg"
+  },
+  {
+    "id": "GB_booongo_more_magic_apple",
+    "name": "More Magic Apple",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/more_magic_apple_banner_qsbqe.jpg"
+  },
+  {
+    "id": "GB_booongo_olympian_gods",
+    "name": "Olympian Gods",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/olympian_gods_banner_tugbt.jpg"
+  },
+  {
+    "id": "GB_booongo_pearl_diver_2_treasure_chest",
+    "name": "Pearl Diver 2: Treasure Chest",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/pearl_diver_2_banner_mrbnk.jpg"
+  },
+  {
+    "id": "GB_booongo_queen_of_the_sun",
+    "name": "Queen Of The Sun",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/queen_of_the_sun_banner_emsjb.jpg"
+  },
+  {
+    "id": "GB_booongo_rio_gems",
+    "name": "Rio Gems",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/rio_gems_banner_gkiok.png"
+  },
+  {
+    "id": "GB_booongo_scarab_boost",
+    "name": "Scarab Boost",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/scarab_boost_banner_yavgj.jpg"
+  },
+  {
+    "id": "GB_booongo_scarab_riches",
+    "name": "Scarab Riches",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/scarab_riches.jpg"
+  },
+  {
+    "id": "GB_booongo_scarab_temple",
+    "name": "Scarab Temple",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/scarab_temple_banner_xaweu.jpg"
+  },
+  {
+    "id": "GB_booongo_sun_of_egypt_2",
+    "name": "Sun of Egypt 2",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/sun_of_egypt_2_banner_vnyic.jpg"
+  },
+  {
+    "id": "GB_booongo_sun_of_egypt_3",
+    "name": "Sun of Egypt 3",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/sun_of_egypt_3_banner_xobfo.jpg"
+  },
+  {
+    "id": "GB_booongo_sun_of_egypt_hold_and_win",
+    "name": "Sun of Egypt: Hold and Win",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/sun_of_egypt_banner_zbrok.jpg"
+  },
+  {
+    "id": "GB_booongo_sunlight_princess",
+    "name": "Sunlight Princess",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/sunlight_princess_banner_naann.jpg"
+  },
+  {
+    "id": "GB_booongo_thunder_of_olympus",
+    "name": "Thunder of Olympus",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/thunder_of_olympus_banner_kdzsf.jpg"
+  },
+  {
+    "id": "GB_booongo_tiger_gems",
+    "name": "Tiger Gems",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/tiger_gems_banner_lyyjr.jpg"
+  },
+  {
+    "id": "GB_booongo_tiger_jungle",
+    "name": "Tiger Jungle",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/tiger_jungle_banner_ufniw.jpg"
+  },
+  {
+    "id": "GB_booongo_tiger_stone",
+    "name": "Tiger Stone",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/tiger_stone_banner_mdgay.jpg"
+  },
+  {
+    "id": "GB_booongo_tiger_s_gold",
+    "name": "Tiger's Gold",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/tigers_gold_banner_fgflt.jpg"
+  },
+  {
+    "id": "GB_booongo_wolf_night",
+    "name": "Wolf Night",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/wolf_night_banner_nwkpk.jpg"
+  },
+  {
+    "id": "GB_booongo_wolf_saga",
+    "name": "Wolf Saga",
+    "provider": "Booongo",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://assets.bd34fgabh.com/img/bng/wolf_saga_banner_xwaqa.jpg"
+  },
+  {
+    "id": "3444d0cbdef09302ab610602cc174463",
+    "name": "Baccarat",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Baccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d599786dcc5cc9d5172138f72c60996d",
+    "name": "BG大仙捕鱼",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=BG%E5%A4%A7%E4%BB%99%E6%8D%95%E9%B1%BC&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2ba4e1d54aa9fcbe809e4a9798c7cf71",
+    "name": "BG捕鱼大师",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=BG%E6%8D%95%E9%B1%BC%E5%A4%A7%E5%B8%88&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1b2aae777c836637ddd8faba9693c515",
+    "name": "BG西游捕鱼",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=BG%E8%A5%BF%E6%B8%B8%E6%8D%95%E9%B1%BC&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f3db60ee69761943846e6437d36679e5",
+    "name": "BG银河夺宝",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=BG%E9%93%B6%E6%B2%B3%E5%A4%BA%E5%AE%9D&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1c846b69dcf187d86b65f66497c6d80b",
+    "name": "BullBull",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=BullBull&background=random&color=fff&size=256"
+  },
+  {
+    "id": "af9fa7910abb97ee587fd5cb6b0a073c",
+    "name": "CasinoWar",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=CasinoWar&background=random&color=fff&size=256"
+  },
+  {
+    "id": "7523bfae690fc172d232cf88e2680f2d",
+    "name": "Dragontiger",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dragontiger&background=random&color=fff&size=256"
+  },
+  {
+    "id": "73ab1237d41a21fb97a9a72bcaafdf06",
+    "name": "FullColorBaccarat",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=FullColorBaccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d194e8482eda0ffee04b44a9f343e450",
+    "name": "MiCardBaccarat",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=MiCardBaccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b71c1d5c51d1f5afc95cebfd543e8a11",
+    "name": "RedBlack",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=RedBlack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3c9eef89b54762d35a8236dbdd8b8f97",
+    "name": "Roulette",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Roulette&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f47fd83d18b32c711d6b5ac1506ac105",
+    "name": "SeDie",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=SeDie&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f388ce4122b336b1bb8ab2e4f428aa98",
+    "name": "Sicbo",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sicbo&background=random&color=fff&size=256"
+  },
+  {
+    "id": "de7aa8b488a6cb21bbd91625bfd5103c",
+    "name": "SpeedBaccarat",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=SpeedBaccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3b0549812c22610021316e5f35641b1d",
+    "name": "SpeedSicBo",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=SpeedSicBo&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3f6fd903398733b231d238df607a1168",
+    "name": "WinThreeCards",
+    "provider": "BigGaming",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=WinThreeCards&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b46d315d49c7ba8bd9be41235414b08c",
+    "name": "15 Dragon Pearls",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=15+Dragon+Pearls&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9301226771ddc4e55ab52bcb049c5871",
+    "name": "3 African Drums",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+African+Drums&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a592337224dc98465a3bfe2f7293b1d5",
+    "name": "3 Carts of Gold",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Carts+of+Gold&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0ba9b0e9614c96ecf7a1dbcc64186c4f",
+    "name": "3 Chillies and Joker: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Chillies+and+Joker%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "8bcd327841f028a109c7706ef63560fb",
+    "name": "3 China Pots",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+China+Pots&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f12f8a6227e73123a2dd731b4b78cc77",
+    "name": "3 Clover Pots",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Clover+Pots&background=random&color=fff&size=256"
+  },
+  {
+    "id": "aac9aee1b601830cc22f50d6147c8467",
+    "name": "3 Clover Pots Extra",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Clover+Pots+Extra&background=random&color=fff&size=256"
+  },
+  {
+    "id": "62bdd197cbcbe5bea67b00744b634d8f",
+    "name": "3 Coins",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Coins&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9cbcb3079913faed43b53e679db12054",
+    "name": "3 Coins: Egypt",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Coins%3A+Egypt&background=random&color=fff&size=256"
+  },
+  {
+    "id": "417656f2f7a1515bfedc35ebacf0f891",
+    "name": "3 Egypt Chests",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Egypt+Chests&background=random&color=fff&size=256"
+  },
+  {
+    "id": "84397000846bb5f1d9be2a85498dde55",
+    "name": "3 Fortune Trees",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Fortune+Trees&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f10e21f02ab02cdd97f3709cc6514b51",
+    "name": "3 Gates of Pyramid",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Gates+of+Pyramid&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2e8e95b73f860194cffce0872a6835dd",
+    "name": "3 Hot Teapots: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Hot+Teapots%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0983fe50c1cacc385729496954f6b93a",
+    "name": "3 Hungry Pandas",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Hungry+Pandas&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ff1670d857f35e070f56af509ccf40d3",
+    "name": "3 Magic Lamps: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Magic+Lamps%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "6b4f88c4aa7d388feff86a212d2927a3",
+    "name": "3 Pirate Barrels: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Pirate+Barrels%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "fab4a5fc613f3b08f6b63fe3039821a2",
+    "name": "3 Pots of Egypt",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Pots+of+Egypt&background=random&color=fff&size=256"
+  },
+  {
+    "id": "dbeded96c32d7f9bc1dd2c60fd2dfd31",
+    "name": "3 Pots Riches Extra: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Pots+Riches+Extra%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b1e8d4893d25e8258296036ebba128af",
+    "name": "3 Pots Riches: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Pots+Riches%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f42dfb4a8f20639d8e66431c8911d2f4",
+    "name": "3 Royal Coins: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Royal+Coins%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "76fd9e6e8fe85e075a38541331a86eaa",
+    "name": "3 Super Coin Volcanoes: Hit the Bonus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Super+Coin+Volcanoes%3A+Hit+the+Bonus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0c9c23eae409e499d2bf5e9662806724",
+    "name": "3 Super Hot Chillies : Hold",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Super+Hot+Chillies+%3A+Hold&background=random&color=fff&size=256"
+  },
+  {
+    "id": "237a9abde0107684ef4a170dd84a1490",
+    "name": "3x Catchs",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3x+Catchs&background=random&color=fff&size=256"
+  },
+  {
+    "id": "94f869acf175a0b6ae2f28aad3374408",
+    "name": "4 Pots of Egypt: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=4+Pots+of+Egypt%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c22f3aa1524ff13f1b2d0b85d139069c",
+    "name": "777 Coins",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=777+Coins&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d8aa309f2bf9001606d96ca46a67437e",
+    "name": "African Spirit Sticky Wilds",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=African+Spirit+Sticky+Wilds&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2a7b5e7fc98749ce3c495adb98dce9cc",
+    "name": "Arizona Heist: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Arizona+Heist%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "593f0d4969a2bfff2834a731a8f3cb34",
+    "name": "Aztec Sun",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Aztec+Sun&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2f09791f9fc7655410414e1031872a8d",
+    "name": "Big Heist",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Big+Heist&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2fe12f3d2d2109af0c10afc586097496",
+    "name": "Bluffy Cat",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Bluffy+Cat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f80b12969aed789dcd7cf0757e61dc1b",
+    "name": "Book of Sun: Multichance",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Book+of+Sun%3A+Multichance&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1045f8974dd64fd22e7793a9896d1df0",
+    "name": "Buffalo Power 2: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Buffalo+Power+2%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9633d9fde350b74656ee0b593101222b",
+    "name": "Buffalo Power Megaways",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Buffalo+Power+Megaways&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ba86d26f99b3c4612c99900220f51b13",
+    "name": "Candy Boom",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Candy+Boom&background=random&color=fff&size=256"
+  },
+  {
+    "id": "621d21f62fb8f2dddcaf701a6d5e17c3",
+    "name": "Cash Volcano",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Cash+Volcano&background=random&color=fff&size=256"
+  },
+  {
+    "id": "97b2d7c3c399b9755080a7b763833241",
+    "name": "Charge the Clovers: Hit The Bonus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Charge+the+Clovers%3A+Hit+The+Bonus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "4efa2ac563b7ae6f99fe0e11e6df9f58",
+    "name": "China Festival",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=China+Festival&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f54f430705e55ee3f530497c47304f87",
+    "name": "Clover Charm: Hit the Bonus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Clover+Charm%3A+Hit+the+Bonus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "18d2ca49820914e3f1b3ca88610a16d6",
+    "name": "Coin Lamp",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Coin+Lamp&background=random&color=fff&size=256"
+  },
+  {
+    "id": "547e24fb7113e6dabebd79944eefb30c",
+    "name": "Coin Volcano 2: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Coin+Volcano+2%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "80a4ceb98fc2bbaee06d5d8a97ef5af4",
+    "name": "Cookies: Hit the Bonus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Cookies%3A+Hit+the+Bonus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "500fd885fe835348b92971b0f2760c5d",
+    "name": "Crown and Diamonds: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Crown+and+Diamonds%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3245f2e822d759869511a0d05020c5a0",
+    "name": "Crown Strike: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Crown+Strike%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d7c1d4df446af83339e8f5b41d54928a",
+    "name": "Crystal Scarabs",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Crystal+Scarabs&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b0d2f93e42948182d1c78c54ad4b6ddc",
+    "name": "Dancing Joker",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dancing+Joker&background=random&color=fff&size=256"
+  },
+  {
+    "id": "aa65dd1a487183d1f2e62cb719491333",
+    "name": "Diamonds Power XXL: Hold and win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Diamonds+Power+XXL%3A+Hold+and+win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "41b08038555e6f7d643b177653f4dc98",
+    "name": "Dragon Pearls",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dragon+Pearls&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ec253493644df4a1af5ee39834f92bee",
+    "name": "Dragon Wealth",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dragon+Wealth&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b2805813a78ba0ee3957d1d531920777",
+    "name": "Egypt Fire 2: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Egypt+Fire+2%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1de1c69d6058967097eec76a5373bd3f",
+    "name": "Egypt Power x1000",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Egypt+Power+x1000&background=random&color=fff&size=256"
+  },
+  {
+    "id": "4474df7c609514d8329a841f9569168c",
+    "name": "Energy Coins: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Energy+Coins%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2f23cebb7849d3c38e3088bd31b57c8e",
+    "name": "Fire Coins: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fire+Coins%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ef938e06ea96112998eb555e1c597e73",
+    "name": "Fire Temple: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fire+Temple%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0b1e27a005cd3d46d18128277cba9ad2",
+    "name": "Flaming Bells: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Flaming+Bells%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "54313af29dd605b2e20c55a0a4f77420",
+    "name": "Flash Joker : Fever",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Flash+Joker+%3A+Fever&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9124408508309fa92ce05afc1616fe19",
+    "name": "Forest Spirit",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Forest+Spirit&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9bf78a7a35c8eaa6315e1d07b93f010b",
+    "name": "Forge of Vulcan",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Forge+of+Vulcan&background=random&color=fff&size=256"
+  },
+  {
+    "id": "db8712a0c53069ad38db5d6cc042d0c0",
+    "name": "Fortune Globe",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fortune+Globe&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2cb83192cce2be9790e1f2e89afb07c3",
+    "name": "Fruits & Joker: Fever",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fruits+%26+Joker%3A+Fever&background=random&color=fff&size=256"
+  },
+  {
+    "id": "80a459df90ff7aa8cf4f330000026c8b",
+    "name": "Fruits & Sevens: Fever",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fruits+%26+Sevens%3A+Fever&background=random&color=fff&size=256"
+  },
+  {
+    "id": "02efe146f4106a240df01ed4f921339a",
+    "name": "Fruits Fever 5 lines",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fruits+Fever+5+lines&background=random&color=fff&size=256"
+  },
+  {
+    "id": "872155586cf761e80df010fd38058b2c",
+    "name": "Goddess of Egypt",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Goddess+of+Egypt&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f527e42c6b7b1084399040df31e4f845",
+    "name": "Gold Express",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Gold+Express&background=random&color=fff&size=256"
+  },
+  {
+    "id": "5db228344e2a69073981507adcd13718",
+    "name": "Gold Nuggets",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Gold+Nuggets&background=random&color=fff&size=256"
+  },
+  {
+    "id": "778852dd4e78cadbe8a0489e6a10ae05",
+    "name": "Golden Dancing Lion",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Golden+Dancing+Lion&background=random&color=fff&size=256"
+  },
+  {
+    "id": "149f1b48a734b6425592bee71e5cc3de",
+    "name": "Golden Penny x1000",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Golden+Penny+x1000&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ed9a1b43a68e35fd68b12b2956b45250",
+    "name": "Golden Teapot",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Golden+Teapot&background=random&color=fff&size=256"
+  },
+  {
+    "id": "97aad25a816bfa3cd7ba10166c6417ff",
+    "name": "Grab more Gold!",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Grab+more+Gold%21&background=random&color=fff&size=256"
+  },
+  {
+    "id": "830594e296506000e87c43a12fb634c8",
+    "name": "Grab the Gold!",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Grab+the+Gold%21&background=random&color=fff&size=256"
+  },
+  {
+    "id": "78216eae8dfb5a821549d68130242919",
+    "name": "Great Panda",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Great+Panda&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2e66fd182be145a86ab77c634a659cbe",
+    "name": "Green Chilli",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Green+Chilli&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1b9b09595e83a6acfcda32321673ad94",
+    "name": "Green Chilli 2",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Green+Chilli+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1cb340b490fe1893b691ce6f3d343ed3",
+    "name": "Happy Fish",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Happy+Fish&background=random&color=fff&size=256"
+  },
+  {
+    "id": "88e999e8df5e2a70ec8a0481ea33b9f2",
+    "name": "Hawaii Riches",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hawaii+Riches&background=random&color=fff&size=256"
+  },
+  {
+    "id": "40109eee3d546e0a3a1bbe96bacd7f3a",
+    "name": "Hit more Gold",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hit+more+Gold&background=random&color=fff&size=256"
+  },
+  {
+    "id": "fab8529f51cac472de6a637704b6f85c",
+    "name": "Hit the Gold",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hit+the+Gold&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d915e07c1f9bf435545d3490f47d9e42",
+    "name": "Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c3f92480c9411e817e5fdd3d19d90fba",
+    "name": "Hot Chilli Joker",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hot+Chilli+Joker&background=random&color=fff&size=256"
+  },
+  {
+    "id": "dae33a1828602bf49c76ada0a4db5add",
+    "name": "Hot Fire Fruits",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hot+Fire+Fruits&background=random&color=fff&size=256"
+  },
+  {
+    "id": "8a791d166a6f0841e0a12080ed3d03cf",
+    "name": "King of the Sky: Hit the Bonus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=King+of+the+Sky%3A+Hit+the+Bonus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "330d984535d95d3d8bcdd680a0d14343",
+    "name": "Lady Fortune",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lady+Fortune&background=random&color=fff&size=256"
+  },
+  {
+    "id": "661e5162fc87e9085c15b394313a916f",
+    "name": "Lamp of Wonder",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lamp+of+Wonder&background=random&color=fff&size=256"
+  },
+  {
+    "id": "828e96e0b6c1a630f073f029e302dc85",
+    "name": "Lava Coins",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lava+Coins&background=random&color=fff&size=256"
+  },
+  {
+    "id": "6e53e6ab2cd50216bfd2e22bc8fbc230",
+    "name": "Lava Coins 2: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lava+Coins+2%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "8ac78e7bb7cb880c03a9aa754e108837",
+    "name": "Legend of Cleopatra Megaways",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Legend+of+Cleopatra+Megaways&background=random&color=fff&size=256"
+  },
+  {
+    "id": "96e8a53300cb8db059e3d306746594e8",
+    "name": "Lion Coins",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lion+Coins&background=random&color=fff&size=256"
+  },
+  {
+    "id": "4dff452480050929e309bbc104f53905",
+    "name": "Lion Gems 3 Pots: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lion+Gems+3+Pots%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0eaf21f013bd18fb8c91da231fa33fc2",
+    "name": "Lion Gems: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lion+Gems%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "465db13ea441c620a1d8e186c129c836",
+    "name": "Little Farm",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Little+Farm&background=random&color=fff&size=256"
+  },
+  {
+    "id": "61a07f3c3a80f57b5ba2f5dee58de3ad",
+    "name": "Lotus Charm",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lotus+Charm&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a2da6132ead534376530a0cca05208ca",
+    "name": "Lucky Penny",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lucky+Penny&background=random&color=fff&size=256"
+  },
+  {
+    "id": "56bcf8ce0e2b3eeae92f5065146a1618",
+    "name": "Lucky Penny 2",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lucky+Penny+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "468dbda7854233766b10a17e016ea7ce",
+    "name": "Luxor Gold: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Luxor+Gold%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "165ea500252e86e516e04b5c60d5e768",
+    "name": "Magic Apple",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Magic+Apple&background=random&color=fff&size=256"
+  },
+  {
+    "id": "519940e9de34471301d505e0c3e27bc3",
+    "name": "Magic Apple 2",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Magic+Apple+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9976052b79710468b25cc3bf49d603ab",
+    "name": "Magic Clovers: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Magic+Clovers%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "4bc7f49c1b59861792c1151368e8f361",
+    "name": "Mammoth Peak: Hold & Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Mammoth+Peak%3A+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "604cab5d83cdd0b469469853aa417235",
+    "name": "Mariachi Lock",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Mariachi+Lock&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c433923addc200f1c65ed3946003e463",
+    "name": "Maya Sun",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Maya+Sun&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9e833c88f8ca82e4f1c4669e7b18a697",
+    "name": "Moon Sisters",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Moon+Sisters&background=random&color=fff&size=256"
+  },
+  {
+    "id": "45174f7d65af3780f8ac85984e8b863b",
+    "name": "More Energy Coins: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=More+Energy+Coins%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0672f4d6f0053d6889ed8f0eb3b88ef7",
+    "name": "More Magic Apple",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=More+Magic+Apple&background=random&color=fff&size=256"
+  },
+  {
+    "id": "35a395e2aa2638d2d025541cd0272852",
+    "name": "Nights of Fire",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Nights+of+Fire&background=random&color=fff&size=256"
+  },
+  {
+    "id": "44e6c9744d9518a80c2f98dfd1306991",
+    "name": "Olympian Gods",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Olympian+Gods&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d2b46f5408188ff4bd0bf1ba9179dec5",
+    "name": "Pearl Ocean: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pearl+Ocean%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "641437c7f757422a63074d7873197586",
+    "name": "Pig Up",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pig+Up&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d69cebfd1f2c06aaf0950b4547db349b",
+    "name": "Piggy Power: Hit the Bonus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Piggy+Power%3A+Hit+the+Bonus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "fd1b1fdc7bf3624a410eeb67d5230986",
+    "name": "Pink Joker: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pink+Joker%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0e8d4970ff63be7837d110cd5eb7f334",
+    "name": "Pirate Chest: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pirate+Chest%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f05a8e7dd49bf6d97fd73e266e092a47",
+    "name": "Power Crown: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Power+Crown%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "39e1ead756386f7c4494078d2f16148a",
+    "name": "Power Sun XXL: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Power+Sun+XXL%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "cf850797c069431ff5a0d1c512083c19",
+    "name": "Queen of the Sun",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Queen+of+the+Sun&background=random&color=fff&size=256"
+  },
+  {
+    "id": "aad89c012611340502a5f105ca2dde40",
+    "name": "Rocket Wins",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Rocket+Wins&background=random&color=fff&size=256"
+  },
+  {
+    "id": "eaf87a578033509864dbd068bf632661",
+    "name": "Royal Express: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Royal+Express%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c647432be835c78bd5a797a6a4f341c1",
+    "name": "Scarab Boost",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Scarab+Boost&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0fbc47f2ab26fa6a5a721b42048bd16f",
+    "name": "Scarab Riches",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Scarab+Riches&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d9059b4ab34f7f3db33197a99c12a511",
+    "name": "Scarab Temple",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Scarab+Temple&background=random&color=fff&size=256"
+  },
+  {
+    "id": "cc3719c9d0308d9efc5b993257f57eb1",
+    "name": "Sherwood Coins: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sherwood+Coins%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b15df829f4c65a6d31c2b834519f443a",
+    "name": "Sky Coins",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sky+Coins&background=random&color=fff&size=256"
+  },
+  {
+    "id": "6885c1d517aab1988ff8d0b3052f0c62",
+    "name": "Sky Pearls",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sky+Pearls&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c4ab8950e8945ca3c4e7626708b589ff",
+    "name": "Solar Queen",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Solar+Queen&background=random&color=fff&size=256"
+  },
+  {
+    "id": "276a39995bf47ffc7c76254012cd462c",
+    "name": "Solar Temple",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Solar+Temple&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9bcbc6a2e7809d6f0b3b5a3ce24bbdca",
+    "name": "Space Coins: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Space+Coins%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "7553295566a5552550c29c80c6a2cb88",
+    "name": "Sun of Egypt",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sun+of+Egypt&background=random&color=fff&size=256"
+  },
+  {
+    "id": "366dd1f2071847e620e23567e0fbac10",
+    "name": "Sun of Egypt 2",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sun+of+Egypt+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d98e5c6301edbcc6f1cefb96c55ff88a",
+    "name": "Sun of Egypt 3",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sun+of+Egypt+3&background=random&color=fff&size=256"
+  },
+  {
+    "id": "94ca4998d75e3a2d9e86a5a2ae657409",
+    "name": "Sun of Egypt 4",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sun+of+Egypt+4&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3671e4e835658d5ccb9892a2cbff9fa1",
+    "name": "Sun of Egypt 5: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sun+of+Egypt+5%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "472fc11f004fe0996a9f8c4ad0be365f",
+    "name": "Sunlight Princess",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sunlight+Princess&background=random&color=fff&size=256"
+  },
+  {
+    "id": "7482b8d0ae75e81563dd081878c7d6c7",
+    "name": "Super China Pots: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Super+China+Pots%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "4aa6d31f8bdf2dc44405c2dd985b55e4",
+    "name": "Super Hot Chilli",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Super+Hot+Chilli&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9f65821e7f47f9d442e8f8e47cb7247e",
+    "name": "Super Hot Teapots",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Super+Hot+Teapots&background=random&color=fff&size=256"
+  },
+  {
+    "id": "cfe3a2fc74b795f51ab910e74a79adb3",
+    "name": "Super Pink Joker: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Super+Pink+Joker%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0c627b51bb9815660a05fbe92182ddcb",
+    "name": "Supercharged Clovers: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Supercharged+Clovers%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "7ad90b3fd54333012c8d7850f9645a4e",
+    "name": "Thunder Coins XXL: Hold and Win",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Thunder+Coins+XXL%3A+Hold+and+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2af796e10b525050662b8a3ef04d7c99",
+    "name": "Thunder of Olympus",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Thunder+of+Olympus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f6668123b9128123a67b06cab274fe15",
+    "name": "Tiger Jungle",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Tiger+Jungle&background=random&color=fff&size=256"
+  },
+  {
+    "id": "43d5849550520632db69539717d42393",
+    "name": "Tiger Stone",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Tiger+Stone&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a5780ab96e7fd8cfa2c399bc94b96cbb",
+    "name": "Tiger’s Gold",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Tiger%E2%80%99s+Gold&background=random&color=fff&size=256"
+  },
+  {
+    "id": "af0dac39ff8b27637044bac2cf16373e",
+    "name": "Treasures of Fire: Scatter pays",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Treasures+of+Fire%3A+Scatter+pays&background=random&color=fff&size=256"
+  },
+  {
+    "id": "4bbc2cdd2cf79ed7c71a1e8c8a5ccb51",
+    "name": "Wild Cats Fire",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Wild+Cats+Fire&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1b9cf5e44f1041ab1ff69e0eabece2a5",
+    "name": "Wolf Night",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Wolf+Night&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b625b5838d827bb05d4f3ff0389e85e5",
+    "name": "Wolf Power Megaways",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Wolf+Power+Megaways&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ed663aa7d01d50f48041c38c8a96231e",
+    "name": "Zeus Power",
+    "provider": "BNG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Zeus+Power&background=random&color=fff&size=256"
+  },
+  {
+    "id": "206b98759b35412a1ecf0cc0fa42b29a",
+    "name": "3 Kings Scratch",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/3-kings-scratch-b46bbe99.jpg"
+  },
+  {
+    "id": "9bd5c93faac22d4814d5ffd9c052d0bb",
+    "name": "Adventures",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Adventures&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a946620a26ac3819d528bf0bab838034",
+    "name": "Alice WonderLuck",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/alice-wonderluck-9292aa03.png"
+  },
+  {
+    "id": "32bb0d3d65638efaf0e5efe17728bff9",
+    "name": "Alien Fruits",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/alien-fruits-1db838b7.png"
+  },
+  {
+    "id": "8e672d4494c81a04d183d02c0ac928d8",
+    "name": "Alien Fruits 2",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/alien-fruits-2-790e89a0.png"
+  },
+  {
+    "id": "89466068cc6e5065bf222278d9ea1bdc",
+    "name": "All Lucky Clover",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=All+Lucky+Clover&background=random&color=fff&size=256"
+  },
+  {
+    "id": "7723adf189a94b9c0a97cb8785997be8",
+    "name": "All Lucky Clover100",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=All+Lucky+Clover100&background=random&color=fff&size=256"
+  },
+  {
+    "id": "e27a808ff485ba80516f60c178ccdb78",
+    "name": "All Lucky Clover20",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=All+Lucky+Clover20&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3697ff14e65f3e9c48d5865fe786f727",
+    "name": "All Lucky Clover40",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=All+Lucky+Clover40&background=random&color=fff&size=256"
+  },
+  {
+    "id": "bb30828ba1b2666d7b5c24f9a0566bf5",
+    "name": "All Lucky Clover5",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=All+Lucky+Clover5&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9d3b395c382da05c442cd4a9207d80e0",
+    "name": "All-Star Fruits",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/all-star-fruits-c83d34ff.png"
+  },
+  {
+    "id": "0130408795db8977e89b3780debe7ed6",
+    "name": "Aloha King Elvis",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aloha-king-elvis-68149c36.jpg"
+  },
+  {
+    "id": "c09ee87db5618c173f783a282ef0a141",
+    "name": "Always Up!",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Always+Up%21&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c1f8c17562f9e24de0318d57d4255602",
+    "name": "American Roulette",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/american-roulette-fb1c1799.jpg"
+  },
+  {
+    "id": "82529ab37ac1c56c317f453f428b0061",
+    "name": "Arrow Slot",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/arrow-slot-f51a3b80.png"
+  },
+  {
+    "id": "d30ad267baefa5c0366bf47909b74a9c",
+    "name": "Avalon: The Lost Kingdom",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/avalon-the-lost-kingdom-77d36adc.jpg"
+  },
+  {
+    "id": "d3c7985229b2e4651fa7889445a5bfd8",
+    "name": "Aviamasters",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aviamasters-932a172a.png"
+  },
+  {
+    "id": "868039d91b7a3986d04f0178fbadefe2",
+    "name": "Aviamasters 2",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aviamasters-2-e73311f2.png"
+  },
+  {
+    "id": "3456adfa0634790de65d5edbb0ebd9a4",
+    "name": "Aviamasters X-mas",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aviamasters-x-mas-862513e9.png"
+  },
+  {
+    "id": "ebdc5bc54ce398aa8d1a7466a4e68d21",
+    "name": "Aztec Clusters",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aztec-clusters-993832de.png"
+  },
+  {
+    "id": "9ba70f6585cc9f2a63629bae2f3c4c6a",
+    "name": "Aztec Magic Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aztec-magic-bonanza-9e519cc0.jpg"
+  },
+  {
+    "id": "313e50780d6faa5245dbb2e1f56d6250",
+    "name": "Aztec Magic Deluxe",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aztec-magic-deluxe-b08584b7.jpg"
+  },
+  {
+    "id": "bee501170b0ca23237863675aa164c7c",
+    "name": "Aztec Magic Megaways",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aztec-magic-megaways-23866e47.jpg"
+  },
+  {
+    "id": "107be31f7f1acd063a3848d9ab8faaab",
+    "name": "Aztec's Claw Wild Dice",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/aztec-s-claw-wild-dice-2060f174.png"
+  },
+  {
+    "id": "d78d7c0bb2467908d3aeee9c8ecc2ccf",
+    "name": "Balloon Mania",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/balloon-mania-293b6225.png"
+  },
+  {
+    "id": "354e70824d5468eae2ae3f629c22deca",
+    "name": "Beast Band",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/beast-band-674a8907.jpg"
+  },
+  {
+    "id": "ba016ab1146511e9a071fc1f358e8103",
+    "name": "Beer Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/beer-bonanza-aa1e7feb.jpg"
+  },
+  {
+    "id": "a290e7d0adc3f98fb3020ac6f260d704",
+    "name": "Big Atlantis Frenzy",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/big-atlantis-frenzy-576d8a93.jpg"
+  },
+  {
+    "id": "50d2e52c1c086d78e9c821949508e67d",
+    "name": "Big Boat Big Catch",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Big+Boat+Big+Catch&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ff980d64c382ed55c1b07e4de82abb20",
+    "name": "Big Bucks Saloon",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/big-bucks-saloon-3eaadb14.png"
+  },
+  {
+    "id": "4cd0f7f460f45dafbcbc18cfecafe149",
+    "name": "Blackbeards Bounty",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Blackbeards+Bounty&background=random&color=fff&size=256"
+  },
+  {
+    "id": "639eccc52bcdb002b4718d6b94d311eb",
+    "name": "Blazing Fire Pots Hold & Spin",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Blazing+Fire+Pots+Hold+%26+Spin&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b501a4676ec6334c28b5ed9f7628577b",
+    "name": "Bonanza Billion",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/bonanza-billion-9804f830.png"
+  },
+  {
+    "id": "9a8eb718d5489673e4948b870334cec8",
+    "name": "Bonanza Trillion",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/bonanza-trillion-4c33806b.png"
+  },
+  {
+    "id": "7d05837c55942cf0f36e2597b7e0ae76",
+    "name": "Bone Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/bone-bonanza-0ae1aa3f.jpg"
+  },
+  {
+    "id": "6d28e412a45a2d9dfcd3dfcdc26ca89c",
+    "name": "Book of Cats",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/book-of-cats-97f87bb5.jpg"
+  },
+  {
+    "id": "a296a0daa935a213165679d34e8a0522",
+    "name": "Book of Cats Megaways",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/book-of-cats-megaways-59a80f54.jpg"
+  },
+  {
+    "id": "431eb425b953b75fc4c9162c72bbc8b2",
+    "name": "Book of Kemet",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/book-of-kemet-544bf6e9.jpg"
+  },
+  {
+    "id": "81c648af2d38be5fd6bd735f672f35b6",
+    "name": "Book of Panda Megaways",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/book-of-panda-megaways-b403b026.jpg"
+  },
+  {
+    "id": "e084f88df2eff2de5fda7331d6ac1bcd",
+    "name": "Book of Pyramids",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/book-of-pyramids-b8d9386f.jpg"
+  },
+  {
+    "id": "8f5601adfc12e006ff12cd626e994b2a",
+    "name": "Burning Chilli 243",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/burning-chilli-243-a8317ff2.png"
+  },
+  {
+    "id": "070a0e2b5c08f1181160cae8ddacea5b",
+    "name": "Burning Chilli X",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/burning-chilli-x-e9c5c14b.png"
+  },
+  {
+    "id": "0365a29dce7b1b0aeef2746222eca571",
+    "name": "Candy Monsta",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/candy-monsta-df0476f5.png"
+  },
+  {
+    "id": "1709447d71bc8e313f35ba35b0033845",
+    "name": "Capymania Green",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/capymania-green-33e6d8a5.jpg"
+  },
+  {
+    "id": "02207f5732e5b39e0c1fbe435ebb1b26",
+    "name": "Capymania Orange",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/capymania-orange-3ceba39f.jpg"
+  },
+  {
+    "id": "7e4b004c6fc0c64537050447e2965ef9",
+    "name": "Capymania Yellow",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/capymania-yellow-2805ad5e.jpg"
+  },
+  {
+    "id": "3872e9e145ed83caabc13a45fb731eaa",
+    "name": "Carnival Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/carnival-bonanza-9a60841b.png"
+  },
+  {
+    "id": "1b767ea3e2e44ca4de9ee97357a86dac",
+    "name": "Cat's Soup",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/cat-s-soup-135dabab.png"
+  },
+  {
+    "id": "c15396a5ca8b7bb0336d9823e7d70599",
+    "name": "Catch the Gold Hold and Win",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/catch-the-gold-hold-and-win-38f3b710.png"
+  },
+  {
+    "id": "384b3a3daaea2fa88474b0ada8ad1ef2",
+    "name": "Catdiana",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/catdiana-7d9cc7aa.png"
+  },
+  {
+    "id": "7df9dde49a097fe9b62222ba12f606df",
+    "name": "Chicken Rush",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/chicken-rush-9da13c27.jpg"
+  },
+  {
+    "id": "f5b2a42e82eb53ad69f7d562cfa10baa",
+    "name": "Classic Multihand Blackjack",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Classic+Multihand+Blackjack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "6fc7ef26506ef3b13198d4bd96982dec",
+    "name": "Clover Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/clover-bonanza-db24cb81.jpg"
+  },
+  {
+    "id": "33db732152834e3753f56c854fcd7752",
+    "name": "Clucking Hell",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/clucking-hell-0f82f7a2.png"
+  },
+  {
+    "id": "1d752cf7d57dc93e28a923dbb54483ca",
+    "name": "Crystal Clusters",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/crystal-clusters-afbf8a37.png"
+  },
+  {
+    "id": "1b1f7e3a2654f0c36b58c0b12151bef2",
+    "name": "Deep Sea",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/deep-sea-72d97d3f.jpg"
+  },
+  {
+    "id": "163940b133daf4662a23ac3642698eea",
+    "name": "Diamond of Jungle",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/diamond-of-jungle-21916686.jpg"
+  },
+  {
+    "id": "7806e2ca21a05eb927da4afad816fdeb",
+    "name": "Dice Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dice-bonanza-e37e3a3f.jpg"
+  },
+  {
+    "id": "46ffd224ee8960ceb02d5d7cb6c3ec88",
+    "name": "Dice Clash",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dice-clash-dc3c6f37.png"
+  },
+  {
+    "id": "7caaf05ebb3220afa82d1282ebb32599",
+    "name": "Dice Million",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dice-million-fbf7928c.jpg"
+  },
+  {
+    "id": "1cf4882a138653735ae2d841472f5574",
+    "name": "Dig Dig Digger",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dig-dig-digger-5ee78e1a.jpg"
+  },
+  {
+    "id": "89caee27264db78d1833de7446bdf0a7",
+    "name": "Disco Party",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/disco-party-c540c6a5.png"
+  },
+  {
+    "id": "910ccefc4b2847a8cd73bca5d9be5ea5",
+    "name": "Divine Queen: Heart of Ice",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/divine-queen-heart-of-ice-e2cf2392.png"
+  },
+  {
+    "id": "875d5e9c681d6149d94593b72d2d9069",
+    "name": "Domnitor's Treasure",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/domnitor-s-treasure-bf219724.jpg"
+  },
+  {
+    "id": "2fef3a48c2e3fd0ef1f7d09f5bc2ea33",
+    "name": "Doomsday Saloon",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/doomsday-saloon-f74a20f3.png"
+  },
+  {
+    "id": "300cc204eb151ef25e59a5ae5e30bc35",
+    "name": "Dragon Age Hold & Win (Dragon Age)",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dragon+Age+Hold+%26+Win+%28Dragon+Age%29&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c57deae72a50bf1e00d254693bea7434",
+    "name": "Dragon Queen MEGAWAYS",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dragon-queen-megaways-ec34a7f6.png"
+  },
+  {
+    "id": "fc81d13da9be4741f1897b7142c1e43a",
+    "name": "Dragon's Crash",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dragon-s-crash-56846a31.png"
+  },
+  {
+    "id": "ba6960ff34c8119ea91250827df81ca4",
+    "name": "Dragon's Gold 100",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/dragon-s-gold-100-377a6903.jpg"
+  },
+  {
+    "id": "bd04425acaf41195a31a2950e6ab006e",
+    "name": "Easter Heist",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/easter-heist-5c21c9b9.jpg"
+  },
+  {
+    "id": "4f0f7204c7aa6d5ff46f151a4449774f",
+    "name": "Easter Plinko",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/easter-plinko-8f136971.jpg"
+  },
+  {
+    "id": "1d11b2535ca4d3da2c326de0e0919765",
+    "name": "Elvis Frog in Vegas",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/elvis-frog-in-vegas-c297b4d3.jpg"
+  },
+  {
+    "id": "6a9ccecd930dd79a75fddefa78e55bf3",
+    "name": "Elvis Frog TRUEWAYS",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/elvis-frog-trueways-ba06dea8.jpg"
+  },
+  {
+    "id": "9d6ce0c274b50e7f243e07af7e8a22a7",
+    "name": "European Roulette",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/european-roulette-c3c3bf1f.jpg"
+  },
+  {
+    "id": "07912c58687a05d19760038a3faae6d0",
+    "name": "Face Off",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/face-off-695009fb.png"
+  },
+  {
+    "id": "11caaa917826376ab59096e73d5d4ad4",
+    "name": "Fiesta Clusters",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/fiesta-clusters-5ec7f8ce.png"
+  },
+  {
+    "id": "d4a162045682e5787abd11d3ad9b2a81",
+    "name": "Fire Lightning",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/fire-lightning-44efe775.jpg"
+  },
+  {
+    "id": "1a6331cb34de981ca1e88592ef06c752",
+    "name": "Fishing Club",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/fishing-club-5bf172de.png"
+  },
+  {
+    "id": "3b77ed31d1dd01c9a000f7710c166e03",
+    "name": "Football Plinko",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Football+Plinko&background=random&color=fff&size=256"
+  },
+  {
+    "id": "5692803026f0040a9d205b5f2859303d",
+    "name": "Forgotten",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/forgotten-99ed4b5a.png"
+  },
+  {
+    "id": "096cff957fbb194d2b6600af093d32bb",
+    "name": "Fortuna TRUEWAYS",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/fortuna-trueways-d8e168d0.png"
+  },
+  {
+    "id": "e7de9a522a3d51e4aebd7a0f9e6c9a29",
+    "name": "Fortune Bells",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/fortune-bells-7e11efcb.png"
+  },
+  {
+    "id": "b7341435d9e77a9fc4f30b966e5107fe",
+    "name": "Fortune Spin",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fortune+Spin&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f47d7fec5e314d740c193b9bafedced8",
+    "name": "Forty Fruity Million",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/forty-fruity-million-93eb3309.jpg"
+  },
+  {
+    "id": "da83c32ee026a2e4fe3b9e498e7ed12a",
+    "name": "Four Lucky Clover",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/four-lucky-clover-e4a69d50.jpg"
+  },
+  {
+    "id": "676edaa48653759173ace53d4b3ba020",
+    "name": "Four Lucky Diamonds",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/four-lucky-diamonds-ad383238.jpg"
+  },
+  {
+    "id": "a9d50e65a8e5d1298f376e1850c353b5",
+    "name": "French Roulette",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/french-roulette-b24a9648.jpg"
+  },
+  {
+    "id": "d62e9db2cf3d15d7c777a0850fa0e38f",
+    "name": "Frozen Fruit",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/frozen-fruit-e453f8a4.png"
+  },
+  {
+    "id": "bcb695d70d160959fa9889627fcde5e1",
+    "name": "Fruit Million",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/fruit-million-b76f64d1.png"
+  },
+  {
+    "id": "29ff279423340a546adb2d452162b565",
+    "name": "Gangsterz",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gangsterz-d000bd3c.jpg"
+  },
+  {
+    "id": "732eeaaa34330f7d4b3629c0e1f717d6",
+    "name": "Gemhalla",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gemhalla-99ca8313.png"
+  },
+  {
+    "id": "3f61a021f0d55f041ff714d16bc4ac17",
+    "name": "Gemza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gemza-4086ff4e.jpg"
+  },
+  {
+    "id": "0dcf130d571ab41d0cf1e4236daaa041",
+    "name": "Gift Rush",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gift-rush-c9a0a0fa.jpg"
+  },
+  {
+    "id": "e0a7754ad24321587b40915d6f391070",
+    "name": "Gift X",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gift-x-0c4df258.jpg"
+  },
+  {
+    "id": "0a8bae754cd2dba41b5998fcce9d5b37",
+    "name": "God of Wealth Hold And Win",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/god-of-wealth-hold-and-win-17845b87.jpg"
+  },
+  {
+    "id": "4330b56250e3e12d42a333a54cf53252",
+    "name": "Gold Magnate",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gold-magnate-990186ea.png"
+  },
+  {
+    "id": "33017959e334dc1c7b0b1b5436951838",
+    "name": "Gold of Minos",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gold-of-minos-ab5a6fd9.png"
+  },
+  {
+    "id": "c85996149a518981e5ec641bd33936c9",
+    "name": "Gold Rush with Johnny Cash",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/gold-rush-with-johnny-cash-b2723e4b.jpg"
+  },
+  {
+    "id": "49bd94aeb4ce7c0b024d2b74b594b41c",
+    "name": "Golden Paw Hold & Win",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Golden+Paw+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "bf32001416811e34b7770c60e8965fb1",
+    "name": "Golden Pinata Hold and Win",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/golden-pinata-hold-and-win-4a375c71.png"
+  },
+  {
+    "id": "8f40c8ef8402c35f0489c2e867307365",
+    "name": "Golden Pride",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/golden-pride-4cebff68.png"
+  },
+  {
+    "id": "38a4d04f3cf9dbd5529857eaac6be3fd",
+    "name": "Grand Mustang",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/grand-mustang-c0881ca3.png"
+  },
+  {
+    "id": "1de21a609d4ff294a2dcf5b54f11247e",
+    "name": "Grand Patron",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/grand-patron-ed0b8b6d.png"
+  },
+  {
+    "id": "3a62ca00bf4534a60c74efe380ebe307",
+    "name": "Halloween Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/halloween-bonanza-97d346f9.jpg"
+  },
+  {
+    "id": "acf9940b57dfc5c17dae1683546254f8",
+    "name": "Haunted Reels",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/haunted-reels-d36aacf0.png"
+  },
+  {
+    "id": "dd2a0948e157ed7329b5c084b2ad9a9f",
+    "name": "Heads and Tails",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/heads-and-tails-6e481ac7.jpg"
+  },
+  {
+    "id": "863bb7621c9909ef5483108f85750b39",
+    "name": "Heads and Tails XY",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/heads-and-tails-xy-54941738.jpg"
+  },
+  {
+    "id": "a68354c6f9edcd754619f993638c2c9f",
+    "name": "Hit The Route",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/hit-the-route-85f32c00.jpg"
+  },
+  {
+    "id": "288450a790da0c5f80c32d5fdabac2b8",
+    "name": "Hot Chilli Bells",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/hot-chilli-bells-9b7fe641.png"
+  },
+  {
+    "id": "12e4e7a8c9a62688ea726aad2a0b489d",
+    "name": "Hot Chilli Bells 100",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Hot+Chilli+Bells+100&background=random&color=fff&size=256"
+  },
+  {
+    "id": "9568278f10bfbb78253db073bb816e4f",
+    "name": "Hottest 666",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/hottest-666-ec410712.jpg"
+  },
+  {
+    "id": "e51c959e79559583f491fcfea1ab68b7",
+    "name": "Ice Scratch Bronze",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/ice-scratch-bronze-3055c0f4.jpg"
+  },
+  {
+    "id": "a01aa8b7e5d3058d109db68af8ac4bd0",
+    "name": "Ice Scratch Gold",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/ice-scratch-gold-7a38ef66.jpg"
+  },
+  {
+    "id": "b596d059279938f1ab74ed3eaeebdc8e",
+    "name": "Ice Scratch Silver",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/ice-scratch-silver-a4bf45be.jpg"
+  },
+  {
+    "id": "0ae34d612c95cbd3a33d02b86a88a083",
+    "name": "Infinity Pull",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/infinity-pull-057fc21c.png"
+  },
+  {
+    "id": "3c2b79b7b29a90e2ded84265c7f8fb44",
+    "name": "Jewel Boom Super Drop",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/jewel-boom-super-drop-8aa797e4.png"
+  },
+  {
+    "id": "d580c3edeb9c33046a4edaaa3c15ff9d",
+    "name": "Jogo Do Bicho",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/jogo-do-bicho-6bbb5b2e.jpg"
+  },
+  {
+    "id": "a4cda8d6ff561bfd261e66f0a3ab1128",
+    "name": "Jogo Do Bicho Simple",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Jogo+Do+Bicho+Simple&background=random&color=fff&size=256"
+  },
+  {
+    "id": "fb3076decdcb1278e12331ed94b9a61e",
+    "name": "Johnny Cash",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/johnny-cash-4941fbc4.jpg"
+  },
+  {
+    "id": "5f2a21d29552a20346014fe0f4406334",
+    "name": "Joker Queen",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/joker-queen-d21e4163.jpg"
+  },
+  {
+    "id": "27fb714e20b72367e3ec1eb5ae7a5798",
+    "name": "Joker vs Joker",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/joker-vs-joker-771fc926.png"
+  },
+  {
+    "id": "e8c653572f1d81a0a68757cc6a4f3761",
+    "name": "Joker X Love",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/joker-x-love-ed19775e.png"
+  },
+  {
+    "id": "cb7a8d367630a47a402dcc4d98015446",
+    "name": "Jokers Million",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Jokers+Million&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b4be581561b48f8bea5183720ff70d46",
+    "name": "Jungle Queen",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/jungle-queen-799ace32.png"
+  },
+  {
+    "id": "e85b9a6b6d7bf1f41ba0e4a320585d62",
+    "name": "Keepers Of The Secret",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/keepers-of-the-secret-12ebb2e5.jpg"
+  },
+  {
+    "id": "f798b5e34e30ec1d707bbad93275de66",
+    "name": "Kraken's Hunger",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/kraken-s-hunger-431fad4a.png"
+  },
+  {
+    "id": "2476ecdd70cc6d10eeb1b9240d3582aa",
+    "name": "Lady Lucky Gun",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lady+Lucky+Gun&background=random&color=fff&size=256"
+  },
+  {
+    "id": "af937ed4d220a8e123bdabe1d978a2d7",
+    "name": "Lady Wolf Moon",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lady-wolf-moon-0e3d3679.jpg"
+  },
+  {
+    "id": "994b39d2a09a9adef5a4a906cae22ce5",
+    "name": "Lady Wolf Moon Megaways",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lady-wolf-moon-megaways-0dcbd51c.jpg"
+  },
+  {
+    "id": "30d87795acb9b55c740eb99699fcb0ea",
+    "name": "Limbo XY",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/limbo-xy-eb87b378.jpg"
+  },
+  {
+    "id": "c58f8d8db10c281727bc9607c3ce781b",
+    "name": "Loki Loot",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Loki+Loot&background=random&color=fff&size=256"
+  },
+  {
+    "id": "171528b4e159244dff9de7e537708a99",
+    "name": "Luck & Magic",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Luck+%26+Magic&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ef0998245805a6a32a910a6667ad7c6c",
+    "name": "Luck & Magic Scratch",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Luck+%26+Magic+Scratch&background=random&color=fff&size=256"
+  },
+  {
+    "id": "e8a2fedff5f5941e2ebebf6cb8ae10f1",
+    "name": "Lucky 8 Merge Up",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-8-merge-up-24cf5f1a.png"
+  },
+  {
+    "id": "ce7ce12fc51d197681ec98b8fd51fc3e",
+    "name": "Lucky Crew",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-crew-3442b948.jpg"
+  },
+  {
+    "id": "3c3d16bd5de830f417e9dc0fe453031b",
+    "name": "Lucky Dama Muerta",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-dama-muerta-5c86386b.jpg"
+  },
+  {
+    "id": "1f580513685cdfd29b3c6cd1493211a8",
+    "name": "Lucky Dragon MultiDice X",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-dragon-multidice-x-49236ed1.jpg"
+  },
+  {
+    "id": "dc8ea25297973df93c68689ec997b1e4",
+    "name": "Lucky Ducky",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-ducky-23d0fd06.png"
+  },
+  {
+    "id": "1edbe3106d1fe0183b8b5b7ac8905bbb",
+    "name": "Lucky Ducky",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-ducky-2d3605e9.png"
+  },
+  {
+    "id": "a0fb85138588c143d2a496dd018b8874",
+    "name": "Lucky Farm Bonanza",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-farm-bonanza-4e229f5a.png"
+  },
+  {
+    "id": "670fea32c1726d48aea782c42bb82188",
+    "name": "Lucky Lady's Clover",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-lady-s-clover-729e14e3.jpg"
+  },
+  {
+    "id": "2b2880bc87a1d93f44142ce1deaf3355",
+    "name": "Lucky Lager x9990",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-lager-x9990-37241225.png"
+  },
+  {
+    "id": "5848bfd9f3eea357d89822c568873553",
+    "name": "Lucky Lu",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-lu-e1942868.png"
+  },
+  {
+    "id": "248e5efc4ef196ae0544413d919153f6",
+    "name": "Lucky Oak",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/lucky-oak-49738563.jpg"
+  },
+  {
+    "id": "05d6232a3336a2b4bb2ee83b4b6bcf7d",
+    "name": "Maneki 88 Fortunes",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/maneki-88-fortunes-9cff9693.jpg"
+  },
+  {
+    "id": "7ad352371599bf26cdb06088fe5a79ab",
+    "name": "Maneki 88 Gold",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/maneki-88-gold-195e3653.jpg"
+  },
+  {
+    "id": "b4a62dee8b5391e0c6780d778bb93b4b",
+    "name": "Mechanical Clover",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/mechanical-clover-23abdcd3.jpg"
+  },
+  {
+    "id": "22aeab95aef5b3f01b7b7f563dc36ac7",
+    "name": "Merge Up",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/merge-up-f4ea9427.png"
+  },
+  {
+    "id": "eb970b3068b73d4c9b4f76cd808816de",
+    "name": "Merge Up 2",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/merge-up-2-d045ba5a.png"
+  },
+  {
+    "id": "0ccaaa45143d186f7ef3311989bb018a",
+    "name": "Mice & Magic Wonder Spin",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Mice+%26+Magic+Wonder+Spin&background=random&color=fff&size=256"
+  },
+  {
+    "id": "caf101eea60fb8976d2b08cbc4ac57db",
+    "name": "Mine Gems",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/mine-gems-f634ad1a.png"
+  },
+  {
+    "id": "307b1ea5fb296d2e23e0d56eae875333",
+    "name": "Minesweeper",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/minesweeper-3d03281a.jpg"
+  },
+  {
+    "id": "0ff664578bfb50141faf64a66c348c7e",
+    "name": "Minesweeper XY",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/minesweeper-xy-e87c7166.jpg"
+  },
+  {
+    "id": "b99dcebc4914fb3ee188ccb553c56609",
+    "name": "Miss Cherry Fruits",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/miss-cherry-fruits-1f7ced74.jpg"
+  },
+  {
+    "id": "e8b58f6c315f13ca2656c8223b424c83",
+    "name": "Miss Cherry Fruits Jackpot Party",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/miss-cherry-fruits-jackpot-party-dae1c87e.jpg"
+  },
+  {
+    "id": "eff2df94539988f3468e687a7d7cea30",
+    "name": "Monster Hunt",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/monster-hunt-9e5cea83.jpg"
+  },
+  {
+    "id": "408c5496fc987c122efda2db45225b29",
+    "name": "Multihand Blackjack",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/multihand-blackjack-f72de66a.jpg"
+  },
+  {
+    "id": "ca382c6fb34221994a9b39251c7c32c0",
+    "name": "Multihand Blackjack Pro",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/multihand-blackjack-pro-810e4a30.jpg"
+  },
+  {
+    "id": "b6384dbf8b67d61543789864a0ff75b6",
+    "name": "Multihand Blackjack Pro 2",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/multihand-blackjack-pro-2-fea36b85.png"
+  },
+  {
+    "id": "4afaea9e17bbc75d26d92cc7c7d2ec65",
+    "name": "Mummy's Gold",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/mummy-s-gold-853493b4.jpg"
+  },
+  {
+    "id": "d1f67794a6a23fe46cbdb04f27722dab",
+    "name": "Mystery Garden",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/mystery-garden-0b7b3583.png"
+  },
+  {
+    "id": "ae268d75d9d5f7ee2f93b473631f6160",
+    "name": "Mystery Heist",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/mystery-heist-6a01d731.png"
+  },
+  {
+    "id": "eb89206576f5cad558e0dc5853a7a7e9",
+    "name": "Olympus TRUEWAYS",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Olympus+TRUEWAYS&background=random&color=fff&size=256"
+  },
+  {
+    "id": "96da7b41a5092a2ba6d80c02d54d8e4e",
+    "name": "OOF The Goldmine Planet",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/oof-the-goldmine-planet-a13140c9.jpg"
+  },
+  {
+    "id": "b99a67ab0200f30b0b6eb4a66c8ad964",
+    "name": "Open It!",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/open-it-be0d815b.png"
+  },
+  {
+    "id": "ae09663fb727565cc8754b6b33637b4d",
+    "name": "Panda Luck",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/panda-luck-7c43ed54.jpg"
+  },
+  {
+    "id": "9df741a8256a7d2a11d6c9e3be618195",
+    "name": "Penalty Duel",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/penalty-duel-09e78c6e.png"
+  },
+  {
+    "id": "064f8c5df69877fd0aba492071151248",
+    "name": "Penny Pelican",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/penny-pelican-56b0b14f.jpg"
+  },
+  {
+    "id": "f2ee57d8231e3229d13a698c63f0ac26",
+    "name": "Platinum Lightning",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/platinum-lightning-8cd11ca9.jpg"
+  },
+  {
+    "id": "a80b179957b6cb518cd26664fd5e4ab3",
+    "name": "Platinum Lightning Deluxe",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/platinum-lightning-deluxe-65a8d1e5.jpg"
+  },
+  {
+    "id": "a96dfb1480cef6d6674b7bfb18c26c9a",
+    "name": "Plinko",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/plinko-2381f580.jpg"
+  },
+  {
+    "id": "8ba9650ac64b99202e9ecbda761d92c1",
+    "name": "Plinko 2",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/plinko-2-a2e79013.png"
+  },
+  {
+    "id": "8e5a2fd3f6766fe1aaeef2a921aefe87",
+    "name": "Plinko 2 Halloween",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/plinko-2-halloween-716ce40f.png"
+  },
+  {
+    "id": "538f2edc211771749b64250e35d78192",
+    "name": "Plinko XY",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/plinko-xy-421270d3.jpg"
+  },
+  {
+    "id": "fe31a3383c140b2389eec2c09b95f641",
+    "name": "Pop Zen",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/pop-zen-51588e68.jpg"
+  },
+  {
+    "id": "46ab8a26c3c1e89ea3a42c50eafb6b73",
+    "name": "Potion Spells",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/potion-spells-be7923ef.jpg"
+  },
+  {
+    "id": "36a2e12039e4cbd1f2f1af2d306f44b2",
+    "name": "Retro Trader",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/retro-trader-06217162.png"
+  },
+  {
+    "id": "07eebacc4d38cc64ff241aa7bbb44ced",
+    "name": "Road 2 Riches",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/road-2-riches-7e70bd30.png"
+  },
+  {
+    "id": "21dbf27bf1926124b306bc5659c47883",
+    "name": "Robospin",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/robospin-3f43c2f0.png"
+  },
+  {
+    "id": "a658fb5632d81e6f0a2cbea638839903",
+    "name": "Rocket Dice",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/rocket-dice-bb1d9abe.png"
+  },
+  {
+    "id": "433d2d917da4c87ffabecc17d4cea2ee",
+    "name": "Rocket Dice XY",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/rocket-dice-xy-c157d70f.png"
+  },
+  {
+    "id": "312e294c95f438e0c2a53edc16f42dd1",
+    "name": "Rotating Element",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/rotating-element-7af0a7b3.png"
+  },
+  {
+    "id": "9c85548c5a5682fb75b97d93f9bf6ba1",
+    "name": "Royal Fruits MultiLines",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/royal-fruits-multilines-0ed3ca02.png"
+  },
+  {
+    "id": "958d6a70afac2422d0f97fc81bea4c15",
+    "name": "Royal High-Road",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/royal-high-road-1d1559e6.jpg"
+  },
+  {
+    "id": "07fedcb179802ee8bd4e5f5c178c85d0",
+    "name": "Sakura Riches 60",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/sakura-riches-60-bd3f0f21.png"
+  },
+  {
+    "id": "91c359dcfe71d0390fc39a2b6b6ded66",
+    "name": "Savage Buffalo Spirit",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/savage-buffalo-spirit-222757e2.jpg"
+  },
+  {
+    "id": "042f069ea08ab7fb50af2027b2d93725",
+    "name": "Savage Buffalo Spirit Megaways",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/savage-buffalo-spirit-megaways-929110c9.jpg"
+  },
+  {
+    "id": "8664b8269de1a8b4a91d45fb375bcfb0",
+    "name": "Scratch Alpaca Bronze",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/scratch-alpaca-bronze-fad79cb6.jpg"
+  },
+  {
+    "id": "a584912bbe94b034018b3f7dc9794d9e",
+    "name": "Scratch Alpaca Gold",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/scratch-alpaca-gold-aac057ff.jpg"
+  },
+  {
+    "id": "58e06f5e2ce49a695a51e1636f4095bf",
+    "name": "Scratch Alpaca Silver",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/scratch-alpaca-silver-f09b7a90.jpg"
+  },
+  {
+    "id": "cf694ba4fab3d1537c1e4dc4ea21d1e4",
+    "name": "Scratch Dice",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/scratch-dice-6d996126.jpg"
+  },
+  {
+    "id": "de10c5031eba2a70c3ef056df6a301a0",
+    "name": "Secret Bar Multidice X",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/secret-bar-multidice-x-9b693c95.png"
+  },
+  {
+    "id": "2ade52905d4104a302def8149910b664",
+    "name": "Slot Machine",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/machine-b7470f16.jpg"
+  },
+  {
+    "id": "42c10ec14f7bed81dd8948bcc9ff3d79",
+    "name": "Snoop Dogg Dollars",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/snoop-dogg-dollars-9b470938.png"
+  },
+  {
+    "id": "7686d2d00e23ca7e3e93ac01ec779c15",
+    "name": "Soccermania",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/soccermania-f1b99fd2.jpg"
+  },
+  {
+    "id": "7cdeb5f832384a97e6544ca86e918734",
+    "name": "Space XY",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/space-xy-96c6a950.png"
+  },
+  {
+    "id": "c2bf1b6911d6a0c0cb34292a37fa4648",
+    "name": "Spin And Spell",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/spin-and-spell-e35358f5.jpg"
+  },
+  {
+    "id": "634875f2598be4204a3f4a1ae8c7363b",
+    "name": "Star Trek The Next Generation",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/star-trek-the-next-generation-c228bee4.png"
+  },
+  {
+    "id": "c1bde325f7f9ebb6dd8eb8bdc2701e89",
+    "name": "Street Power",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/street-power-d028fa43.png"
+  },
+  {
+    "id": "32215bc896d03c8e3c8cf3fec2134083",
+    "name": "Sugar Mix",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/sugar-mix-96c07f89.png"
+  },
+  {
+    "id": "d4ddeb54e12721e85968794aa36e2935",
+    "name": "Surrender Multihand Blackjack",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/surrender-multihand-blackjack-81c4576e.png"
+  },
+  {
+    "id": "110431082a41df5e51d0abc773886d79",
+    "name": "Sweet Rush Megaways",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/sweet-rush-megaways-8e07461b.jpg"
+  },
+  {
+    "id": "825d2733fb62278c486dfcacbbb16a6d",
+    "name": "Tile Master",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/tile-master-eacee4e9.png"
+  },
+  {
+    "id": "2eceb69abe28088ebd587e3d20e42132",
+    "name": "Top Eagle",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/top-eagle-294df5a6.png"
+  },
+  {
+    "id": "f893dc44f02fe5a909e7f461304c7306",
+    "name": "Totally Hot",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/totally-hot-58237b37.png"
+  },
+  {
+    "id": "7d9fcac036458ee987df0963fa23fbe0",
+    "name": "Train to Rio Grande",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/train-to-rio-grande-59b9b23c.png"
+  },
+  {
+    "id": "0c8fffd494b172256607a79ec4fb7acd",
+    "name": "Tramp Day",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/tramp-day-cee304f3.jpg"
+  },
+  {
+    "id": "c4f6add472cac2894c54ea7a9c1feb67",
+    "name": "Tramp Day TRUEWAYS",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/tramp-day-trueways-684203c1.png"
+  },
+  {
+    "id": "ea23b11e603c0feca79511c605f46f69",
+    "name": "Treasure Explorer",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/treasure-explorer-92e8ae45.png"
+  },
+  {
+    "id": "bdf4b36fa3b73913a110d884dd03adbc",
+    "name": "Treasure of Anubis",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/treasure-of-anubis-efd83c59.png"
+  },
+  {
+    "id": "3771b3dea1ceec7f5038531f06648d69",
+    "name": "UFO Pyramids",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/ufo-pyramids-7250d5b8.png"
+  },
+  {
+    "id": "362714f8384ac625c50da8def330e897",
+    "name": "Voodoo People",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/voodoo-people-e3803d6f.png"
+  },
+  {
+    "id": "5072a1237d8a94b75d80d46c7d614ccd",
+    "name": "WBC Ring Of Riches",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wbc-ring-of-riches-2c364d88.jpg"
+  },
+  {
+    "id": "df7673e31347e5674fd5669d6bbb7b4d",
+    "name": "West Town",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/west-town-abf9bcd6.jpg"
+  },
+  {
+    "id": "e92b8e26457beecf772b9f15f16368a6",
+    "name": "Wild Card Gang",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-card-gang-69c1fa49.png"
+  },
+  {
+    "id": "be8b9cd2c900644f953fc3ec1dde20e3",
+    "name": "Wild Cash",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-cash-f3b1672b.png"
+  },
+  {
+    "id": "94783ae2695c2546da00bec3213fcfa0",
+    "name": "Wild Cash Dice",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-cash-dice-94f9d896.jpg"
+  },
+  {
+    "id": "72d2fe00c6d3695653e21618eff3bf78",
+    "name": "Wild Cash x9990",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-cash-x9990-c8422801.jpg"
+  },
+  {
+    "id": "207fc056bea06ee353baeaadd6f3b8f4",
+    "name": "Wild Chicago",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-chicago-0c4da6b9.jpg"
+  },
+  {
+    "id": "65077b9df58ca36f2b6c607f56b807ce",
+    "name": "Wild Clusters",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-clusters-ef042b4a.png"
+  },
+  {
+    "id": "9ea3ced80f0706d9d6d25994092b3cd4",
+    "name": "Wild Heart",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-heart-a06241d8.jpg"
+  },
+  {
+    "id": "1f8561a1ebfe69197eb04c87b6f8edee",
+    "name": "Wild Million",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-million-37bab77d.png"
+  },
+  {
+    "id": "33c32eae8f0dffe5dafe462f42201735",
+    "name": "Wild Moon Thieves",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-moon-thieves-413d66e0.png"
+  },
+  {
+    "id": "a1de8d30de1e8795221e0cbcea462141",
+    "name": "Wild Tiger",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-tiger-6f0e8715.png"
+  },
+  {
+    "id": "f33eddce4bafda5f3abc9180f54d28eb",
+    "name": "Wild Tiger 2",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-tiger-2-c9a37890.png"
+  },
+  {
+    "id": "29b092dc73646c8ad1e68a89160e837c",
+    "name": "Wild West TRUEWAYS",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-west-trueways-5d2bb25e.png"
+  },
+  {
+    "id": "4e392c5c38d6a9cb79286338d29eb3a5",
+    "name": "Wild Wick",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/wild-wick-1182439a.png"
+  },
+  {
+    "id": "5b2884b89644bc83f79cb0fd2fb99c84",
+    "name": "Winter Fishing Club",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/winter-fishing-club-272c0d73.png"
+  },
+  {
+    "id": "9a9834c8cda20ff167e70f3fd5db5da9",
+    "name": "Yommi Rush",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Yommi+Rush&background=random&color=fff&size=256"
+  },
+  {
+    "id": "35df5376484b73fcd28e684a45817bc0",
+    "name": "Zeus Goes Wild",
+    "provider": "BG",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BG/zeus-goes-wild-c77f53e1.png"
+  },
+  {
+    "id": "8a158e7a44bec97e0d0ae62aa36fb285",
+    "name": "21 Burn Blackjack",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=21+Burn+Blackjack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "66d7ba2a2f383b7384541b8421ab7fce",
+    "name": "3 Pots of Olympus",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Pots+of+Olympus&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0a3841feca7fea446816cdbfdd214085",
+    "name": "3 Pots of Wishes",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Pots+of+Wishes&background=random&color=fff&size=256"
+  },
+  {
+    "id": "5a5efe63d21f1f71231a40c7060fdaab",
+    "name": "3 Tech Bros - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=3+Tech+Bros+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "bc7d916cd3f9f1e1686829cb78201ccb",
+    "name": "After Night Falls 2",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=After+Night+Falls+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ce55ed2b460784c2c18b41a90dfa2f2d",
+    "name": "American Blackjack",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=American+Blackjack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "55572de3a97cd75411c7b0781680f834",
+    "name": "American Roulette",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=American+Roulette&background=random&color=fff&size=256"
+  },
+  {
+    "id": "fcf0cb4557ca41240602c923ac1033b7",
+    "name": "April Fury and the Chamber of Scarabs",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=April+Fury+and+the+Chamber+of+Scarabs&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0aed0f826f8acdb76beefd0cf13c0756",
+    "name": "Baccarat",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Baccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f44d4f522f339caae030c233f57a82ba",
+    "name": "Breakerz",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Breakerz&background=random&color=fff&size=256"
+  },
+  {
+    "id": "15510722ed05b39d415c19f063f6a92a",
+    "name": "Caribbean Poker",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Caribbean+Poker&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f3f34a267632c559ede5564d4c4d414d",
+    "name": "Carnival Rush",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Carnival+Rush&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2b64021abd56dbc9d4afa6f31aada025",
+    "name": "Coins Of Alkemor: Extreme Magic - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Coins+Of+Alkemor%3A+Extreme+Magic+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "827df62c7cefdc5b42e9e6bd896e1c57",
+    "name": "Coins of Ra Deluxe - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Coins+of+Ra+Deluxe+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "95826f7722db31ac03dfba8756833727",
+    "name": "Coins Of Ra Power - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Coins+Of+Ra+Power+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "423e73c662892c7e5a56ca668e56f0c3",
+    "name": "Coins Of Zeus - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Coins+Of+Zeus+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "8a9e0477d2dafeefb150c9f6b35d0832",
+    "name": "Craps",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Craps&background=random&color=fff&size=256"
+  },
+  {
+    "id": "e59cf06be242ade54d92d0fe49837c69",
+    "name": "Deuces Wild",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Deuces+Wild&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b8e9342cbfb13a60861ea912eb72a4fc",
+    "name": "Dr. Jekyll & Mr. Hyde 2",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dr.+Jekyll+%26+Mr.+Hyde+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "5c152ef1d6c0f490a7a9babf1c02c9ba",
+    "name": "European Blackjack",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=European+Blackjack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c4e98084e899c9b4fe8d8ac63f655988",
+    "name": "European Roulette",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETSOFT/european-roulette-ed77a271.png"
+  },
+  {
+    "id": "649c8fb0d3ceab0bb2c5063340eb842b",
+    "name": "Fury Dragon - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Fury+Dragon+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a1f8948499d31c204dad5672aa47ed18",
+    "name": "Gold Nugget Rush - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Gold+Nugget+Rush+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "647ba4608da7f23f763f069331f5a6f1",
+    "name": "Golden Dragon Inferno",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Golden+Dragon+Inferno&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3219b456c5e58fbcb67702dbf9fd6bea",
+    "name": "Mamma Mia 2",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Mamma+Mia+2&background=random&color=fff&size=256"
+  },
+  {
+    "id": "899644b0fcf7bf1598491728aeb171ae",
+    "name": "Oasis Poker",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETSOFT/oasis-poker-7972a08a.png"
+  },
+  {
+    "id": "7a3b2a1479a4ee8f0af948ec188f0e3b",
+    "name": "Once Again Upon A Time",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Once+Again+Upon+A+Time&background=random&color=fff&size=256"
+  },
+  {
+    "id": "166db644d018ce97e2fd7a3ab0fd5064",
+    "name": "Outlaw of Sherwood - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Outlaw+of+Sherwood+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "750854bac1cddc6fe3029d6df052a45c",
+    "name": "Pai Gow",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pai+Gow&background=random&color=fff&size=256"
+  },
+  {
+    "id": "98ee9d83de33dd5ff4117780c4789fe2",
+    "name": "Pho Sho",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pho+Sho&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ee38e73fa62b1cdab6aa56c84eca15da",
+    "name": "Pirate 21",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Pirate+21&background=random&color=fff&size=256"
+  },
+  {
+    "id": "baf37250da57d45f9e01f4080969b85a",
+    "name": "Pontoon",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETSOFT/pontoon-66763535.png"
+  },
+  {
+    "id": "af39f7fcbc58d5000876844a328111e5",
+    "name": "Red Dog",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETSOFT/red-dog-3a428968.png"
+  },
+  {
+    "id": "ab77df78f2a63f22f336a687e4c28ae0",
+    "name": "Return to the Copa - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Return+to+the+Copa+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b23270a8724fd7231f79a2b4003e5af4",
+    "name": "Single Deck Blackjack",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Single+Deck+Blackjack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f29122bab15bffb8c8fe05d5122ac5a9",
+    "name": "Super 7 Blackjack",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Super+7+Blackjack&background=random&color=fff&size=256"
+  },
+  {
+    "id": "af0234452b0d01725275ee644257177c",
+    "name": "Super Golden Dragon Inferno",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Super+Golden+Dragon+Inferno&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a0c2058da75c109b8138da182b68d8ae",
+    "name": "The Auction House",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=The+Auction+House&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b15a6e02221b796866bcc80142fc24c8",
+    "name": "The Jealous Ex",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=The+Jealous+Ex&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3f56d32a8ce0c18fc735b177b318cacd",
+    "name": "The King Of Social Media",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=The+King+Of+Social+Media&background=random&color=fff&size=256"
+  },
+  {
+    "id": "e94d5fa55b41deab9fbf683d042f707c",
+    "name": "The Neighbor Wars",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=The+Neighbor+Wars&background=random&color=fff&size=256"
+  },
+  {
+    "id": "e14f59fa46dd9e379bfcd7963b86e948",
+    "name": "The Tipsy Tourist: Beach Bonanza - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=The+Tipsy+Tourist%3A+Beach+Bonanza+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d03be3c31ee7191c4a55b4c3f95f0ea0",
+    "name": "Three Card Rummy",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETSOFT/three-card-rummy-d066969d.png"
+  },
+  {
+    "id": "72531299a0fa8803dd0446c3bd6a1490",
+    "name": "Top Card Trumps",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Top+Card+Trumps&background=random&color=fff&size=256"
+  },
+  {
+    "id": "86e64bf8ed655cf641c0a9d74c7b0d8e",
+    "name": "Triple Edge Poker",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Triple+Edge+Poker&background=random&color=fff&size=256"
+  },
+  {
+    "id": "2c20f59af6ec8b044c699b53ae9e0c0d",
+    "name": "Ultimate Golden Dragon Inferno - Hold & Win",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Ultimate+Golden+Dragon+Inferno+-+Hold+%26+Win&background=random&color=fff&size=256"
+  },
+  {
+    "id": "dd7d0c9e8a4b83a34da2fa54692ec912",
+    "name": "Vip American Roulette",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Vip+American+Roulette&background=random&color=fff&size=256"
+  },
+  {
+    "id": "15f7063e1f9a6a864b2bcecf3c336816",
+    "name": "Vip European Roulette",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Vip+European+Roulette&background=random&color=fff&size=256"
+  },
+  {
+    "id": "3ecbdb980e7ed3ff4a19efa438474e60",
+    "name": "Zoom Roulette",
+    "provider": "BetSoft",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETSOFT/zoom-roulette-9862d6c5.png"
+  },
+  {
+    "id": "8a704858d5deb4af1ddc722092ac7614",
+    "name": "Betby",
+    "provider": "Betby",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://providers.gambllyapi.com/assets/providers/BETBY/betby-c93a9061.png"
   }
 ]
