@@ -911,7 +911,10 @@ function isIntlTournamentName(leagueName: string): boolean {
 //   Tier 1  ( 1– 9): the handful of leagues with the highest betting volume/liquidity
 //   Tier 2  (10–19): strong secondary leagues — still heavily bet on
 //   Tier 3  (20–39): domestic 2nd divisions of Tier 1/2 countries + solid 1st divisions elsewhere
-//   Cups    (40–59): domestic cups & super cups (all countries)
+//   Cups    (40–59): domestic cups & super cups (all countries) — own band for
+//                     display-order purposes, but footballMarketTier() below
+//                     maps this band to market Tier 4 (minimal market set /
+//                     lowest stake headroom), same as prio ≥60.
 //   Tier 4  (60–98): remaining 1st divisions, smaller confederations, minor 2nd divisions
 //   999: filtered out entirely (youth/women/reserve/amateur, or a specific
 //        league excluded on purpose — see the block below)
@@ -1577,8 +1580,10 @@ export function footballMarketTier(
   if (prio < 10) return 1; // Tier 1 domestic
   if (prio < 20) return 2; // Tier 2 domestic
   if (prio < 40) return 3; // Tier 3 domestic
-  if (prio < 60) return 2; // domestic cups — near-Tier-2 market depth
-  return 4; // Tier 4 and anything else that still gets shown
+  // Domestic cups (40-59) used to get near-Tier-2 depth; per BET62's
+  // 2026-08-07 tiering pass they're grouped with Tier 4 instead (minimal
+  // market set / lowest stake headroom), same as any other prio ≥40 league.
+  return 4;
 }
 
 const ZERO_TOTAL_GOALS: AdvancedMarkets["totalGoals"] = {
