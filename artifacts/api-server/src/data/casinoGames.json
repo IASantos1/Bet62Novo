@@ -14880,46 +14880,6 @@
     "img": "https://providers.gambllyapi.com/assets/providers/galaxsys/turbo-mines.jpg"
   },
   {
-    "id": "b4a28fec2334682ca1de26990c1d97e9",
-    "name": "Baccarat",
-    "provider": "CyberBetX",
-    "vendorCode": null,
-    "category": "slots",
-    "img": "https://ui-avatars.com/api/?name=Baccarat&background=random&color=fff&size=256"
-  },
-  {
-    "id": "39dad490397e78fd4e5602540e4228e7",
-    "name": "DragonTiger",
-    "provider": "CyberBetX",
-    "vendorCode": null,
-    "category": "slots",
-    "img": "https://ui-avatars.com/api/?name=DragonTiger&background=random&color=fff&size=256"
-  },
-  {
-    "id": "91f11654eeb5c0504491e2c06e3ea700",
-    "name": "Game lobby",
-    "provider": "CyberBetX",
-    "vendorCode": null,
-    "category": "slots",
-    "img": "https://ui-avatars.com/api/?name=Game+lobby&background=random&color=fff&size=256"
-  },
-  {
-    "id": "3137200a61755b66ded41b26e5fa668f",
-    "name": "Roulette",
-    "provider": "CyberBetX",
-    "vendorCode": null,
-    "category": "slots",
-    "img": "https://ui-avatars.com/api/?name=Roulette&background=random&color=fff&size=256"
-  },
-  {
-    "id": "9533f9dc88cc9e30bd49fb421cc67d83",
-    "name": "Sicbo",
-    "provider": "CyberBetX",
-    "vendorCode": null,
-    "category": "slots",
-    "img": "https://ui-avatars.com/api/?name=Sicbo&background=random&color=fff&size=256"
-  },
-  {
     "id": "GB_booongo_15_dragon_pearls",
     "name": "15 Dragon Pearls",
     "provider": "Booongo",
@@ -18886,5 +18846,133 @@
     "vendorCode": null,
     "category": "slots",
     "img": "https://providers.gambllyapi.com/assets/providers/BETBY/betby-c93a9061.png"
+  },
+  {
+    "id": "80855de5f07389129dfd148fad04f335",
+    "name": "Game Lobby",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Game%20Lobby&background=random&color=fff&size=256"
+  },
+  {
+    "id": "b37409879a6172c410fe2364c6683f11",
+    "name": "Baccarat",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Baccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "24148ae3e93e0082727ebdbb4ec8aaa4",
+    "name": "Live Baccarat",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Live%20Baccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "f8e2a51bc5ac52d07c1bb169f2827cf9",
+    "name": "Lightning Baccarat",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lightning%20Baccarat&background=random&color=fff&size=256"
+  },
+  {
+    "id": "0b8f2bb935ac621bd5ded413eed6fb63",
+    "name": "Roulette",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Roulette&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1ff5cc4cd598df769856409dffc300c3",
+    "name": "Dragon Tiger",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Dragon%20Tiger&background=random&color=fff&size=256"
+  },
+  {
+    "id": "410764b6270feda82756070c2eefa2ba",
+    "name": "Sicbo",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Sicbo&background=random&color=fff&size=256"
+  },
+  {
+    "id": "c58f339dd5227df613cacc559368cf6f",
+    "name": "LuckyLace",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=LuckyLace&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a3a8b2062b58f0136db27e4048f8ffa1",
+    "name": "MatchingLace",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=MatchingLace&background=random&color=fff&size=256"
+  },
+  {
+    "id": "1cf32c567adcf9fb8e5766ff83dd0d6f",
+    "name": "Lottery",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Lottery&background=random&color=fff&size=256"
+  },
+  {
+    "id": "a9d08da2740e33360f939f631761690c",
+    "name": "Mini-Game",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Mini-Game&background=random&color=fff&size=256"
+  },
+  {
+    "id": "61db5a80a893a5b6689a45bb2ef178bd",
+    "name": "Goal",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Goal&background=random&color=fff&size=256"
+  },
+  {
+    "id": "d14eaff74fb6a825406af2f14020ca93",
+    "name": "Space Crash",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Space%20Crash&background=random&color=fff&size=256"
+  },
+  {
+    "id": "e2fa3bb166ecce5a1ab376034039f639",
+    "name": "Surf Crash",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Surf%20Crash&background=random&color=fff&size=256"
+  },
+  {
+    "id": "58893408e0dd7fd7afb08a8ccdd54cc9",
+    "name": "Football Goddess",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Football%20Goddess&background=random&color=fff&size=256"
+  },
+  {
+    "id": "ca568a1c716f36891367559e7d582f8d",
+    "name": "Football Goddess Lite",
+    "provider": "CyberBetX",
+    "vendorCode": null,
+    "category": "slots",
+    "img": "https://ui-avatars.com/api/?name=Football%20Goddess%20Lite&background=random&color=fff&size=256"
   }
 ]
