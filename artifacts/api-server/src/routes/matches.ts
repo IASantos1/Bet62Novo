@@ -35,6 +35,10 @@ import {
   getPulseScoreBasketballUpcoming,
   extractBasketballOverride,
 } from "../services/pulsescore/basketball.js";
+import {
+  getCachedTeamId,
+  resolveTeamIdInBackground,
+} from "../services/sportsApiTeamLookup.js";
 
 const router: IRouter = Router();
 
@@ -10895,10 +10899,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       suspensionReason = "GOLO!";
     }
 
+    // PulseScore only ever gives us team NAMES (no id field anywhere in its
+    // schema — confirmed against a real event dump). Resolve a real crest
+    // via SportsAPI Pro's /search endpoint, cached and fire-and-forget
+    // (see sportsApiTeamLookup.ts) so this never blocks the ~1s live tick:
+    // the first tick for a new match has no logo, a later tick picks it up
+    // once the background lookup resolves.
+    resolveTeamIdInBackground("football", home);
+    resolveTeamIdInBackground("football", away);
+    const homeTeamId = getCachedTeamId("football", home) ?? undefined;
+    const awayTeamId = getCachedTeamId("football", away) ?? undefined;
+
     const state: LiveMatchState = {
       id,
       home,
       away,
+      homeTeamId,
+      awayTeamId,
       league: ev.league || "Futebol",
       country,
       sport: "football",
