@@ -23,6 +23,7 @@ import {
   extractFootballOverride,
   pulseScoreEventScore,
   pulseScoreEventMinute,
+  getPulseScoreFootballUpcoming,
 } from "../services/pulsescore/football.js";
 
 const router: IRouter = Router();
@@ -10345,6 +10346,95 @@ function _tennisPairKey(n0: string, n1: string): string {
 
 export { buildUpcomingMatches, getUpcomingAll };
 
+/** ISO-datetime equivalent of v2EventDateTime — PulseScore's `startTime` is a
+ * real ISO string, not SportsAPI V2's UNIX-seconds `startTimestamp`. */
+function pulseScoreEventDateTime(startTime: string): { date: string; time: string } {
+  const d = new Date(startTime);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+  const mm = p["minute"] ?? "00";
+  return {
+    date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+    time: `${hh}:${mm}`,
+  };
+}
+
+/**
+ * Football prematch, sourced entirely from PulseScore (getPulseScoreFootballUpcoming).
+ * Reuses the exact catalog filtering (isVirtualFootballLeague/isAllowedFootballLeague/
+ * footballLeagueAllowedStrict/leaguePriority) and odds extraction (extractFootballOverride)
+ * already proven in buildFootballLiveFromPulseScore(), and the same
+ * `pulsescore-football-${eventId}` id scheme so a match's card doesn't change identity
+ * when it goes live. Confirmed against a real GET /api/v3/bet365/leagues sample
+ * (2026-08-07) — canonicalMarket:"MATCH_RESULT"/rawName:"main" matches
+ * isMatchWinnerMarket exactly, no changes needed to football.ts.
+ */
+async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreFootballUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    if (isVirtualFootballLeague(ev.league || "")) continue;
+    if (!isAllowedFootballLeague(ev.league || "")) continue;
+
+    const leagueName = ev.league || "";
+    const isIntl = isIntlTournamentName(leagueName);
+    const countryKey = countryForLeagueName(leagueName);
+    if (!isIntl && !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName)))
+      continue;
+    const country = countryKey ?? "Internacional";
+    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
+    const prio = leaguePriority(prioKey, countryKey ?? undefined);
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractFootballOverride(ev);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = override?.totalGoals
+      ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
+      : baseMarkets;
+    const odds = override?.odds ?? baseOdds;
+    const isWomens = isWomensLeague(leagueName);
+
+    results.push({
+      id: `pulsescore-football-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country,
+      time,
+      date,
+      sport: "football",
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets,
+      isWomens,
+      isPriorityLeague: prio > 0,
+    });
+  }
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -10360,19 +10450,25 @@ async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
-    // ── ALL sports data providers disconnected from pré-jogo too, every
-    // sport ─────────────────────────────────────────────────────────────
-    // Same explicit user decision as the live-side disconnect above
-    // (2026-08-06): Statpal, SportsAPI Pro (V1/V2/V5) and PulseScore are all
-    // disconnected from the prematch listing as well, pending a from-scratch
-    // rebuild sport by sport against real confirmed API samples. None of the
-    // underlying builder functions (buildFootballUpcomingFromPulseScore,
-    // buildTennisUpcoming, buildV5Upcoming, etc.) were deleted — only this
-    // call site was short-circuited to skip fetching them at all, so
-    // re-enabling a sport later is a small, reviewable change.
-    rememberUpcomingFootballEligibility([]);
-    rememberUpcomingEligibility([]);
-    _allUpcomingCache = [];
+    // ── Sports data providers still disconnected from pré-jogo, except
+    // football ──────────────────────────────────────────────────────────
+    // Same rebuild-from-scratch effort as the live side: football's prematch
+    // listing is back on PulseScore (2026-08-07, confirmed real /leagues
+    // sample), sourced entirely from buildFootballUpcomingFromPulseScore().
+    // Every other sport's prematch (and football's own old SportsAPI V2/V5
+    // path) remains disconnected pending its own real confirmed sample.
+    let football: UpcomingMatch[] = [];
+    try {
+      football = await buildFootballUpcomingFromPulseScore();
+    } catch (err) {
+      logger.error(
+        { err },
+        "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle",
+      );
+    }
+    rememberUpcomingFootballEligibility(football);
+    rememberUpcomingEligibility(football);
+    _allUpcomingCache = football;
     _allUpcomingCacheBuiltAt = Date.now();
   } catch {
     /* keep stale */
@@ -11714,17 +11810,24 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 }
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
-  // ── ALL sports data providers disconnected from pré-jogo too, every sport
-  // ────────────────────────────────────────────────────────────────────────
-  // Same explicit user decision as rebuildUpcomingCache above (2026-08-06):
-  // Statpal, SportsAPI Pro (V1/V2/V5) and PulseScore all disconnected here
-  // too, pending a from-scratch rebuild sport by sport against real
-  // confirmed API samples. Underlying builders untouched — only this call
-  // site short-circuited.
-  rememberUpcomingFootballEligibility([]);
-  rememberUpcomingEligibility([]);
+  // ── Sports data providers still disconnected from pré-jogo, except
+  // football ──────────────────────────────────────────────────────────────
+  // Same rebuild-from-scratch effort as rebuildUpcomingCache above: football
+  // back on PulseScore (2026-08-07), every other sport pending its own real
+  // confirmed sample before being rebuilt the same way.
+  let football: UpcomingMatch[] = [];
+  try {
+    football = await buildFootballUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle",
+    );
+  }
+  rememberUpcomingFootballEligibility(football);
+  rememberUpcomingEligibility(football);
   upcomingTopCache = {
-    football: [],
+    football,
     tennis: [],
     basketball: [],
     hockey: [],
