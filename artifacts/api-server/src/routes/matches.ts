@@ -1,6 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
-import { CONFIG } from "../lib/config.js";
+import {
+  CONFIG,
+  FOOTBALL_SUSP_KEYS,
+  footballSuspensionDelayMs,
+} from "../lib/config.js";
 import { logger } from "../lib/logger.js";
 import {
   getCompetitionCatalogDecisions,
@@ -14,6 +18,12 @@ import { db, matchResultsTable } from "@workspace/db";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
+import {
+  getPulseScoreFootballLive,
+  extractFootballOverride,
+  pulseScoreEventScore,
+  pulseScoreEventMinute,
+} from "../services/pulsescore/football.js";
 
 const router: IRouter = Router();
 
@@ -1483,6 +1493,40 @@ function leaguePriority(name: string, country?: string): number {
 
   // Unknown league → filter out
   return 999;
+}
+
+const DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 130 * 60 * 1000;
+const PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 180 * 60 * 1000;
+
+function isCatalogPriorityLeague(prio: number): boolean {
+  return prio < 100;
+}
+
+function getFootballLiveDisappearGraceMs(
+  state: Pick<LiveMatchState, "league" | "country" | "minute" | "status">,
+): number {
+  // Matches clearly at/past full-time: short 3-minute grace so they disappear quickly.
+  // Covers both normal FT (90+) and extra-time (105+, 120+).
+  const statusLow = (state.status ?? "").toLowerCase();
+  const isLateGame =
+    (state.minute ?? 0) >= 88 &&
+    (statusLow.includes("2nd half") ||
+      statusLow.includes("2ª parte") ||
+      statusLow.includes("extra time") ||
+      statusLow.includes("tempo extra") ||
+      statusLow.includes("overtime") ||
+      statusLow.includes("penalties") ||
+      statusLow.includes("penalty"));
+  if (isLateGame) return 3 * 60 * 1000;
+
+  const countryKey = normalizeCountryKey(state.country);
+  const leagueKey = countryKey
+    ? `${countryKey}: ${state.league}`
+    : state.league;
+  const prio = leaguePriority(leagueKey, countryKey);
+  return isCatalogPriorityLeague(prio)
+    ? PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS
+    : DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS;
 }
 
 // ─── Market tier: how much market depth / staking headroom a league gets ──────
@@ -6444,20 +6488,15 @@ const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 // Live state: stable odds across refreshes
 //
-// ⚠️ FOOTBALL SETTLEMENT GAP (2026-08-07): before this file's sports-data-
-// provider cleanup, football's ONLY automatic settlement trigger was
-// buildFootballLiveFromPulseScore()'s disappearance-based grace-period GC
-// calling finalizeStaleLiveMatch() when a match dropped out of the live
-// feed. That function (and its call site in buildLivePayload()) has been
-// deleted along with the rest of the PulseScore/SportsAPI/Statpal live
-// pipeline, per explicit user request to disconnect every sports data
-// provider and rebuild from scratch. Football bets currently have NO
-// automatic settlement trigger at all — settlement.ts's scan chain
-// (scanVolleyballForFinished/scanTennisV1ForFinished/scanNHLForFinished/
-// scanNBAForFinished/scanMLBForFinished) never covered football. This is
-// intentional for now (no live football data flows in anyway), but
-// whoever reconnects football live data needs to also restore (or
-// redesign) a settlement trigger for it — not just re-wire the odds feed.
+// Football's automatic settlement trigger (buildFootballLiveFromPulseScore's
+// disappearance-based grace-period GC calling finalizeStaleLiveMatch — see
+// that function) was temporarily gone between the 2026-08-06 provider
+// disconnect and football's 2026-08-07 PulseScore re-instatement. Restored
+// now — football bets settle the same way they did before the disconnect.
+// settlement.ts's separate scan chain (scanVolleyballForFinished/
+// scanTennisV1ForFinished/scanNHLForFinished/scanNBAForFinished/
+// scanMLBForFinished) never covered football either way; this GC path is
+// football's only settlement trigger, same as it's always been.
 export const liveMatchState = new Map<string, LiveMatchState>();
 
 // Finished football match results — populated when matches leave liveMatchState
@@ -9552,6 +9591,45 @@ function isWomensLeague(name: string): boolean {
   );
 }
 
+/** Simulated/eSoccer football (e.g. "Esoccer Battle Volta - 6 Mins Play",
+ * "Esoccer H2H GG League - 8 Mins Play") — not a real match, block outright.
+ * "X Mins Play" is included as a secondary signal since it's specific to
+ * these fast-paced virtual formats (real football is never labelled by a
+ * short fixed play length). */
+function isVirtualFootballLeague(name: string): boolean {
+  const n = name.toLowerCase();
+  return (
+    n.includes("esoccer") ||
+    n.includes("e-soccer") ||
+    n.includes("cyber football") ||
+    n.includes("virtual football") ||
+    n.includes("fifa virtual") ||
+    /\bmins?\s*play\b/.test(n)
+  );
+}
+
+// Explicit allowlist for PulseScore-sourced live football (buildFootballLiveFromPulseScore
+// below) — add league names here to show ONLY those leagues; every other real league gets
+// hidden (virtual/eSoccer stays blocked either way via isVirtualFootballLeague above).
+// Leave EMPTY to show every real league PulseScore sends (current behavior).
+// Matching is case-insensitive substring against the league name PulseScore sends
+// (the `league` field on each live event — e.g. "England: Premier League",
+// "Spain: LaLiga", "Brazil: Brasileirão Série A"). One entry per line, e.g.:
+//   "premier league",
+//   "laliga",
+//   "brasileirao serie a",
+const PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST: string[] = [
+  // Add the leagues you want to show here — leave empty for "show all".
+];
+
+function isAllowedFootballLeague(name: string): boolean {
+  if (PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.length === 0) return true;
+  const n = name.toLowerCase();
+  return PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.some((p) =>
+    n.includes(p.toLowerCase()),
+  );
+}
+
 // ─── V2 /api/today fetch helpers ──────────────────────────────────────────────
 
 async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
@@ -10303,6 +10381,159 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
+async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  // GET /live-events?sport=soccer already returns only live events — no
+  // separate `live` boolean field exists on each event to filter by.
+  const events = await getPulseScoreFootballLive();
+  const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
+  const currentIds = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    if (isVirtualFootballLeague(ev.league || "")) continue;
+    if (!isAllowedFootballLeague(ev.league || "")) continue;
+
+    const leagueName = ev.league || "";
+    const isIntl = isIntlTournamentName(leagueName);
+    const countryKey = countryForLeagueName(leagueName);
+    // Curated competition catalog — same allow-list/priority table the old
+    // Statpal pipeline used (already tuned for BET62: which countries are
+    // shown, first-division-only countries, etc.). A league PulseScore sends
+    // that isn't in our table at all (countryKey null) is hidden rather than
+    // shown as generic "Internacional" — PulseScore does no catalog
+    // filtering of its own, so without this every obscure/regional league it
+    // happens to carry would show up in Ao Vivo.
+    if (
+      !isIntl &&
+      !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName))
+    )
+      continue;
+    const country = countryKey ?? "Internacional";
+    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
+    const prio = leaguePriority(prioKey, countryKey ?? undefined);
+    const tier = footballMarketTier(leagueName, country);
+
+    // Extract directly from `ev` — this loop is iterating PulseScore's own
+    // event list, so the override we want IS `ev`, not some other event that
+    // fuzzy-matches its team names. findPulseScoreFootballOverride() (an
+    // O(n) fuzzy Levenshtein scan per call) exists for cross-provider lookups
+    // (a Statpal/SportsAPI match hunting for its PulseScore counterpart) —
+    // using it here turned this loop O(n²) (up to ~20k fuzzy string
+    // comparisons for 200 live matches, redone every 1-2s broadcast tick),
+    // which was blocking the event loop long enough to freeze the live page
+    // and stall odds-market requests.
+    const override = extractFootballOverride(ev);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const rawMarkets: AdvancedMarkets = { ...baseMarkets };
+    if (override?.totalGoals) {
+      rawMarkets.totalGoals = { ...rawMarkets.totalGoals, ...override.totalGoals };
+    }
+    const markets = filterFootballMarketsByTier(rawMarkets, tier);
+    const odds = override?.odds ?? makeOddsFromTeams(home, away);
+    const score = pulseScoreEventScore(ev);
+    const id = `pulsescore-football-${ev.eventId}`;
+    const homeScore = score?.home ?? 0;
+    const awayScore = score?.away ?? 0;
+
+    // Goal-based market suspension — same trigger condition and delay table
+    // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
+    // footballSuspensionDelayMs, both provider-agnostic). PulseScore gives us
+    // no VAR/red-card signal, so only the goal trigger is covered here —
+    // narrower than before, but still closes the main window where a stale
+    // price could be backed right after a goal.
+    const existing = liveMatchState.get(id);
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const goalScored =
+      !!existing &&
+      (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (goalScored) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
+      );
+      suspensionReason = "GOLO!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Futebol",
+      country,
+      sport: "football",
+      homeScore,
+      awayScore,
+      minute: pulseScoreEventMinute(ev),
+      status: "LIVE",
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets,
+      matchTier: tier,
+      events: [],
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+    };
+    currentIds.add(id);
+    // liveMatchState is what settlement.ts (in-play resolution + cash-out
+    // suspension) and ensureFinishedMatchResult read from — this loop used to
+    // only return `result` without ever writing here, which meant no
+    // football bet placed since the PulseScore switch could ever be
+    // auto-settled (nothing marked matches as finished) or suspended after a
+    // goal. Mirrors the same liveMatchState.set() every other sport's live
+    // builder already does.
+    liveMatchState.set(id, state);
+    ranked.push({ state, prio });
+  }
+
+  // Garbage-collect: a match that was live and then disappears from
+  // PulseScore's feed is treated as finished after a grace period, same
+  // disappearance-based pattern already used by the Statpal live pipelines
+  // (finalizeStaleLiveMatch + getFootballLiveDisappearGraceMs, reused as-is —
+  // both are sport-agnostic and only need the LiveMatchState shape, not a
+  // specific provider). This is what actually triggers settlement
+  // (enqueueMatchSettlement, called inside finalizeStaleLiveMatch) for
+  // PulseScore-sourced football matches once they end.
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+      // buildLivePayload() awaits this whole function — an uncaught failure
+      // here would freeze live odds for every sport, not just football,
+      // until the next tick (or, without the global unhandledRejection
+      // guard added in api/index.ts, crash the process entirely). Deletes
+      // either way, same as before this try/catch existed.
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error(
+          { err, id },
+          "[pulsescore] football finalizeStaleLiveMatch failed",
+        );
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  // Big leagues first — same priority ranking (DOMESTIC_PRIORITY /
+  // INTL_TOURNAMENTS) the catalog filter and market-tier calc above already
+  // use, so display order agrees with market depth/stake headroom.
+  ranked.sort((a, b) => a.prio - b.prio);
+  return ranked.map((r) => r.state);
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
@@ -10351,20 +10582,25 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // sportWithFallback do what it already does for a temporarily-empty
   // upstream response — serve the last good snapshot for just that sport —
   // while every other sport keeps updating normally.
-  // ── ALL sports data providers disconnected from live, every sport ──────────
-  // Explicit user decision, 2026-08-06: after repeated live-page issues that
-  // survived several rounds of fixes, the user asked to disconnect every
-  // sports data provider entirely (Statpal, SportsAPI Pro, PulseScore) —
-  // including PulseScore, despite it being independently confirmed still
-  // returning correct real-time data (verified via direct API response
-  // during diagnosis) — and rebuild the sports-data layer from scratch,
-  // sport by sport, against real confirmed API samples. Ao Vivo intentionally
-  // shows zero matches for every sport until that rebuild happens. None of
-  // the underlying builder functions were deleted (buildFootballLiveFromPulseScore,
-  // buildTennisLiveFromPulseScore, etc. are untouched) — only their call
-  // sites here were short-circuited, so re-enabling a sport later is a
-  // small, reviewable change rather than rewriting this function again.
-  const footballLive: LiveMatchState[] = [];
+  // ── Sports data providers still disconnected from live, except football ────
+  // Explicit user decision, 2026-08-06: after repeated live-page issues,
+  // every sports data provider was disconnected (Statpal, SportsAPI Pro,
+  // PulseScore) and is being rebuilt from scratch, sport by sport, against
+  // real confirmed API samples — starting with football (2026-08-07), whose
+  // real /live-events sample matched exactly what was already implemented in
+  // services/pulsescore/football.ts, so buildFootballLiveFromPulseScore below
+  // is a straight re-instatement, not a rewrite. Every other sport still
+  // shows zero matches in Ao Vivo until it gets the same treatment.
+  let footballLiveRaw: LiveMatchState[] = [];
+  try {
+    footballLiveRaw = await buildFootballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildFootballLiveFromPulseScore failed this tick",
+    );
+  }
+  const footballLive = sportWithFallback("football", footballLiveRaw);
   const basketballLive: LiveMatchState[] = [];
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
