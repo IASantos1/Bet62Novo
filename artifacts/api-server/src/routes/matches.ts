@@ -25,6 +25,11 @@ import {
   pulseScoreEventMinute,
   getPulseScoreFootballUpcoming,
 } from "../services/pulsescore/football.js";
+import {
+  getPulseScoreTennisLive,
+  extractTennisOverride,
+  getPulseScoreTennisUpcoming,
+} from "../services/pulsescore/tennis.js";
 
 const router: IRouter = Router();
 
@@ -3018,6 +3023,82 @@ function getTennisLivePointContext(
   };
 }
 
+function computeTennisFallbackLiveOdds(
+  baseOdds: { home: number; draw: number; away: number },
+  sets: Array<[number, number]>,
+  homeScore: number,
+  awayScore: number,
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+): { home: number; draw: number; away: number } {
+  const currentSet =
+    sets.length > 0 ? (sets[sets.length - 1] ?? [0, 0]) : [0, 0];
+  const gamesDiff = (currentSet[0] ?? 0) - (currentSet[1] ?? 0);
+  const setsDiff = homeScore - awayScore;
+
+  // A flat per-game weight badly under-reacts once a player is close to
+  // converting the current set (e.g. leading 5-3): being 1 game from taking
+  // a set that would decide the match is worth far more than an early 2-0
+  // lead, even though both are "2 games ahead". Scale the game-lead term by
+  // how close the leader is to the 6-game threshold to capture that.
+  const leaderGames = Math.max(currentSet[0] ?? 0, currentSet[1] ?? 0);
+  const gamesToClose = Math.max(1, 6 - leaderGames);
+  const closingBoost = gamesDiff !== 0 ? 1 / gamesToClose : 0;
+
+  // Point/serve context is handled entirely by computeTennisPointAdjustedOdds
+  // (applied right after this), so it's intentionally not folded in here too
+  // — doing it in both places double-counted the same signal.
+  // 1 set > proximity-weighted games. This keeps live tennis prices moving
+  // on game-by-game progress without creating wild jumps every rally.
+  const advantage =
+    setsDiff * 0.22 + gamesDiff * 0.042 + gamesDiff * 0.1 * closingBoost;
+  const factor = Math.min(0.55, Math.abs(advantage));
+
+  if (factor <= 0) return baseOdds;
+  if (advantage > 0) {
+    return {
+      home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)),
+      draw: 0,
+      away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)),
+    };
+  }
+  return {
+    home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)),
+    draw: 0,
+    away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)),
+  };
+}
+
+function computeTennisPointAdjustedOdds(
+  anchorOdds: { home: number; draw: number; away: number },
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+): { home: number; draw: number; away: number } {
+  const hPt = tennisPointValue(currentPoints?.[0]);
+  const aPt = tennisPointValue(currentPoints?.[1]);
+  const ptDiff = hPt - aPt;
+  const servingBonus = serving?.[0] ? 0.6 : serving?.[1] ? -0.6 : 0;
+  const pressure = hPt >= 3 || aPt >= 3 ? 1.15 : 1;
+  const factor = Math.min(
+    0.12,
+    Math.abs(ptDiff * 0.018 + servingBonus * 0.01) * pressure,
+  );
+
+  if (factor <= 0) return anchorOdds;
+  if (ptDiff + servingBonus > 0) {
+    return {
+      home: Math.max(1.01, +(anchorOdds.home * (1 - factor)).toFixed(2)),
+      draw: 0,
+      away: Math.min(50, +(anchorOdds.away * (1 + factor)).toFixed(2)),
+    };
+  }
+  return {
+    home: Math.min(50, +(anchorOdds.home * (1 + factor)).toFixed(2)),
+    draw: 0,
+    away: Math.max(1.01, +(anchorOdds.away * (1 - factor)).toFixed(2)),
+  };
+}
+
 function capTennisLiveOdd(rawOdd: number, allowExtended = false): number {
   if (!Number.isFinite(rawOdd) || rawOdd <= 0) return 0;
   const odd = Math.max(1.01, +rawOdd.toFixed(2));
@@ -3033,6 +3114,64 @@ function capTennisLiveHomeAwayOdds(
   return {
     home: capTennisLiveOdd(market.home, homeExtended),
     away: capTennisLiveOdd(market.away, awayExtended),
+  };
+}
+
+function computeTennisLiveOdds(
+  baseOdds: { home: number; draw: number; away: number },
+  sets: Array<[number, number]>,
+  homeScore: number,
+  awayScore: number,
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+  realLiveOdds?: { home: number; away: number },
+): {
+  odds: { home: number; draw: number; away: number };
+  hasRealOdds: boolean;
+} {
+  const pointCtx = getTennisLivePointContext(currentPoints, serving);
+  if (realLiveOdds && realLiveOdds.home > 1.001 && realLiveOdds.away > 1.001) {
+    // Provider live odds already include current point/server context; do not
+    // apply the point-adjustment layer a second time or prices become distorted.
+    const cappedProviderOdds = capTennisLiveHomeAwayOdds(
+      {
+        home: +realLiveOdds.home.toFixed(2),
+        away: +realLiveOdds.away.toFixed(2),
+      },
+      pointCtx.homeTrailing,
+      pointCtx.awayTrailing,
+    );
+    return {
+      odds: {
+        home: cappedProviderOdds.home,
+        draw: 0,
+        away: cappedProviderOdds.away,
+      },
+      hasRealOdds: true,
+    };
+  }
+
+  const anchorOdds = computeTennisFallbackLiveOdds(
+    baseOdds,
+    sets,
+    homeScore,
+    awayScore,
+    currentPoints,
+    serving,
+  );
+  const adjustedOdds = computeTennisPointAdjustedOdds(
+    anchorOdds,
+    currentPoints,
+    serving,
+  );
+  const cappedOdds = capTennisLiveHomeAwayOdds(
+    adjustedOdds,
+    pointCtx.homeTrailing,
+    pointCtx.awayTrailing,
+  );
+  return {
+    odds: { home: cappedOdds.home, draw: 0, away: cappedOdds.away },
+    hasRealOdds: false,
   };
 }
 
@@ -10344,6 +10483,26 @@ function _tennisPairKey(n0: string, n1: string): string {
   return [_tennisSurname(n0), _tennisSurname(n1)].sort().join("|");
 }
 
+function makeTennisBaseOdds(
+  home: string,
+  away: string,
+): { home: number; draw: number; away: number } {
+  const key = _tennisPairKey(home, away);
+  const cached = _tennisPreMatchOdds.get(key);
+  if (cached && cached.home > 1.01 && cached.away > 1.01) {
+    return { home: cached.home, draw: 0, away: cached.away };
+  }
+  // Neutral tennis odds — better than a soccer Poisson model on player name hashes
+  return { home: 1.85, draw: 0, away: 1.85 };
+}
+
+function tennisSetLabel(n: number): string {
+  if (n === 1) return "1st set";
+  if (n === 2) return "2nd set";
+  if (n === 3) return "3rd set";
+  return `Set ${n}`;
+}
+
 export { buildUpcomingMatches, getUpcomingAll };
 
 /** ISO-datetime equivalent of v2EventDateTime — PulseScore's `startTime` is a
@@ -10435,6 +10594,62 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+/**
+ * Tennis prematch, sourced entirely from PulseScore (getPulseScoreTennisUpcoming).
+ * Confirmed against a real GET /api/v3/bet365/tennis/leagues sample (2026-08-07) —
+ * same envelope as football's /leagues, league format "Tour||League" (e.g.
+ * "ATP Tour||ATP Montreal") instead of football's "Country||League", match-winner
+ * market canonicalMarket:"DRAW_NO_BET"/rawName:"main" already handled by
+ * isMatchWinnerMarket in tennis.ts. No catalog/league filtering — mirrors the
+ * live builder's approach (buildTennisLiveFromPulseScore shows every league
+ * PulseScore sends, hardcoded country:"Internacional", no allowlist), so a
+ * league isn't shown live but hidden prematch or vice versa. Same
+ * `pulsescore-tennis-${eventId}` id scheme as the live builder so a match's
+ * identity doesn't change when it goes live.
+ */
+async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreTennisUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const leagueName = ev.league || "Ténis";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractTennisOverride(ev);
+    const baseOdds = makeTennisBaseOdds(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const odds = override?.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : baseOdds;
+    const isWomens = leagueName.toLowerCase().includes("wta");
+
+    results.push({
+      id: `pulsescore-tennis-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "tennis",
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets: baseMarkets,
+      isWomens,
+    });
+  }
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -10451,12 +10666,12 @@ async function rebuildUpcomingCache(): Promise<void> {
   _upcomingRebuildInProgress = true;
   try {
     // ── Sports data providers still disconnected from pré-jogo, except
-    // football ──────────────────────────────────────────────────────────
-    // Same rebuild-from-scratch effort as the live side: football's prematch
-    // listing is back on PulseScore (2026-08-07, confirmed real /leagues
-    // sample), sourced entirely from buildFootballUpcomingFromPulseScore().
-    // Every other sport's prematch (and football's own old SportsAPI V2/V5
-    // path) remains disconnected pending its own real confirmed sample.
+    // football and tennis ───────────────────────────────────────────────
+    // Same rebuild-from-scratch effort as the live side: football
+    // (2026-08-07) and tennis (2026-08-07) prematch are both back on
+    // PulseScore, each confirmed against a real /leagues sample. Every
+    // other sport's prematch remains disconnected pending its own real
+    // confirmed sample.
     let football: UpcomingMatch[] = [];
     try {
       football = await buildFootballUpcomingFromPulseScore();
@@ -10466,9 +10681,19 @@ async function rebuildUpcomingCache(): Promise<void> {
         "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle",
       );
     }
+    let tennis: UpcomingMatch[] = [];
+    try {
+      tennis = await buildTennisUpcomingFromPulseScore();
+    } catch (err) {
+      logger.error(
+        { err },
+        "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle",
+      );
+    }
+    const all = [...football, ...tennis];
     rememberUpcomingFootballEligibility(football);
-    rememberUpcomingEligibility(football);
-    _allUpcomingCache = football;
+    rememberUpcomingEligibility(all);
+    _allUpcomingCache = all;
     _allUpcomingCacheBuiltAt = Date.now();
   } catch {
     /* keep stale */
@@ -10630,6 +10855,129 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   return ranked.map((r) => r.state);
 }
 
+const TENNIS_DISAPPEAR_GRACE_MS = 3 * 60_000;
+
+async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await getPulseScoreTennisLive();
+  const result: LiveMatchState[] = [];
+  const currentIds = new Set<string>();
+  for (const ev of events) {
+   try {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const override = extractTennisOverride(ev);
+    const baseOdds = makeTennisBaseOdds(home, away);
+    const sets = override.sets.length > 0 ? override.sets : [[0, 0] as [number, number]];
+    // Without a real per-match price, every live tennis match previously
+    // fell back to the same flat neutral 1.85/1.85 baseOdds regardless of
+    // who's actually ahead — both buttons showing an identical price reads
+    // as a bug. Now driven by the real set/point/serve data above; real
+    // provider price ("To Win" market) is still used outright when active.
+    const liveOddsState = computeTennisLiveOdds(
+      baseOdds,
+      sets,
+      override.homeSetsWon,
+      override.awaySetsWon,
+      override.currentPoints,
+      override.serving,
+      override.odds,
+    );
+    const odds = liveOddsState.odds;
+    // Deliberately NOT computing tennisExtra here (computeLiveTennisExtras
+    // is a heavy, many-step probability model) — this function reruns for
+    // EVERY live tennis match on EVERY 1s broadcast tick
+    // (LIVE_UPDATE_INTERVAL), so with 15-30+ concurrent tennis matches that
+    // was 15-30+ full recomputations a second, server-side, plus a much
+    // bigger JSON payload pushed to every connected client every second —
+    // the real cause of the live page freezing after today's earlier fix.
+    // makeAdvancedMarketsFromTeams alone already satisfies the actual
+    // requirement (a fully-shaped AdvancedMarkets so the modal's generic
+    // m.handicap.homeMinusOne-style unguarded reads never crash); the
+    // tennis-specific market groups (set handicap, game handicap, etc.)
+    // fall back to their existing "not available" state instead of populating
+    // for now — computeLiveTennisExtras is computed on demand instead, only
+    // for the single match a user opens (see GET /live-match/:id below).
+    const markets: AdvancedMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const id = `pulsescore-tennis-${ev.eventId}`;
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Ténis",
+      country: "Internacional",
+      sport: "tennis",
+      homeScore: override.homeSetsWon,
+      awayScore: override.awaySetsWon,
+      minute: 0,
+      status: tennisSetLabel(Math.max(1, sets.length)),
+      hasRealOdds: liveOddsState.hasRealOdds,
+      odds,
+      markets,
+      events: [],
+      _liveExtra: {
+        sets,
+        ...(override.currentPoints ? { currentPoints: override.currentPoints } : {}),
+        ...(override.serving ? { serving: override.serving } : {}),
+      },
+    };
+    currentIds.add(id);
+    // Same liveMatchState wiring football needed from the start — settlement
+    // (ensureFinishedMatchResult / in-play resolution) and cash-out both
+    // read this map, and it's the ONLY thing that makes a match "exist" for
+    // those purposes now that nothing else populates it for tennis.
+    liveMatchState.set(id, state);
+    result.push(state);
+   } catch (err) {
+    // computeLiveTennisExtras (and everything feeding it) is a large,
+    // arithmetic-heavy model that a single real live event with an
+    // edge-case shape it doesn't expect must never be allowed to throw out
+    // of this loop: since buildLivePayload() awaits every sport's builder
+    // in the same call, an uncaught error here previously broke the ENTIRE
+    // live feed (every sport, not just tennis) for as long as that one
+    // match stayed live. Skip just this event and keep going.
+    logger.error(
+      { err, eventId: ev.eventId, home: ev.home, away: ev.away },
+      "[pulsescore] tennis live event failed to process — skipped",
+    );
+   }
+  }
+
+  // Same disappearance+grace-period finalization football uses — a fixed
+  // grace window here instead of football's league-priority-based one,
+  // since tennis has no equivalent tiering table.
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-tennis-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > TENNIS_DISAPPEAR_GRACE_MS) {
+      // Same reasoning as the per-event try/catch above: this awaits
+      // DB/settlement writes, and buildLivePayload() awaits this whole
+      // function — an uncaught failure here (not just a bad live event)
+      // would just as easily freeze every sport's odds, not only tennis's.
+      // Deletes either way (same as before this try/catch existed) — a
+      // record that fails once here isn't retried forever, since the
+      // underlying cause is almost always something about that specific
+      // match's data, not a transient one.
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error(
+          { err, id },
+          "[pulsescore] tennis finalizeStaleLiveMatch failed",
+        );
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return result;
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
@@ -10701,7 +11049,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
   const volleyballLiveItems: LiveMatchState[] = [];
-  const tennisLive: LiveMatchState[] = [];
+  let tennisLiveRaw: LiveMatchState[] = [];
+  try {
+    tennisLiveRaw = await buildTennisLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildTennisLiveFromPulseScore failed this tick",
+    );
+  }
+  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
   const boxingLive: LiveMatchState[] = [];
   const cricketLive: LiveMatchState[] = [];
   const handballLive: LiveMatchState[] = [];
@@ -11811,10 +12168,10 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // ── Sports data providers still disconnected from pré-jogo, except
-  // football ──────────────────────────────────────────────────────────────
+  // football and tennis ───────────────────────────────────────────────────
   // Same rebuild-from-scratch effort as rebuildUpcomingCache above: football
-  // back on PulseScore (2026-08-07), every other sport pending its own real
-  // confirmed sample before being rebuilt the same way.
+  // and tennis back on PulseScore (both 2026-08-07), every other sport
+  // pending its own real confirmed sample before being rebuilt the same way.
   let football: UpcomingMatch[] = [];
   try {
     football = await buildFootballUpcomingFromPulseScore();
@@ -11824,11 +12181,20 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle",
     );
   }
+  let tennis: UpcomingMatch[] = [];
+  try {
+    tennis = await buildTennisUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle",
+    );
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility(football);
+  rememberUpcomingEligibility([...football, ...tennis]);
   upcomingTopCache = {
     football,
-    tennis: [],
+    tennis,
     basketball: [],
     hockey: [],
     volleyball: [],

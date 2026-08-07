@@ -297,3 +297,100 @@ export function findPulseScoreTennisOverride(
   const override = extractTennisOverride(ev);
   return override.odds ? override : null;
 }
+
+// ── Prematch (leagues catalog) ──────────────────────────────────────────────
+// Verified against a real authenticated GET /api/v3/bet365/tennis/leagues
+// call (2026-08-07) — same paginated-leagues-with-nested-events envelope
+// already confirmed for football (total/page/limit/totalPages/hasNextPage/
+// leagues[]), same per-event shape as /live-events (eventId/home/away/
+// markets[]/moreInfo), plus startTime (ISO) and live (bool) on each event —
+// same pattern football.ts already extends PulseScoreEvent with. league is
+// "Tour||League" (e.g. "ATP Tour||ATP Montreal", "Challenger Tour||Challenger
+// Hagen") rather than football's "Country||League" — tennis's live builder
+// already shows every league PulseScore sends with no catalog filtering
+// (hardcoded country:"Internacional", no allowlist), so the prematch builder
+// follows the same no-filtering approach for consistency. Match-winner market
+// is canonicalMarket:"DRAW_NO_BET", rawName:"main" — already handled by
+// isMatchWinnerMarket above, no changes needed there.
+export type PulseScoreTennisPrematchEvent = PulseScoreEvent & {
+  startTime: string;
+  live: boolean;
+};
+
+type PulseScoreTennisLeague = {
+  name: string;
+  sport: string;
+  events: PulseScoreTennisPrematchEvent[];
+  league: string;
+  moreInfo?: { type?: string; live?: number; tournament?: string; leagueName?: string; updatedAtUTC?: number };
+  oddsSig?: string;
+};
+
+type PulseScoreTennisLeaguesResponse = {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+  leagues: PulseScoreTennisLeague[];
+};
+
+// Prematch doesn't need second-level freshness like the live poller — a
+// multi-minute cache keeps this well clear of bet365's shared 1 req/s budget.
+const TENNIS_UPCOMING_TTL_MS = 5 * 60_000;
+let upcomingCache: { events: PulseScoreTennisPrematchEvent[]; fetchedAt: number } | null = null;
+let upcomingInFlight: Promise<PulseScoreTennisPrematchEvent[]> | null = null;
+
+async function fetchAllTennisLeagues(): Promise<PulseScoreTennisLeague[]> {
+  const leagues: PulseScoreTennisLeague[] = [];
+  let page = 1;
+  // Real sample: total 67 leagues at limit=30 (the documented max) -> ~3
+  // pages — far smaller than football's 289/~10 pages, but paced the same
+  // 4s apart regardless: this shares bet365's rate budget with the live
+  // pollers (football live 1 req/s + tennis live ~0.67 req/s already
+  // running), and this fetch only runs once per TENNIS_UPCOMING_TTL_MS in
+  // the background with nothing user-facing waiting on it — see
+  // football.ts's fetchAllFootballLeagues for the full contention story
+  // that pace was chosen to avoid.
+  for (let i = 0; i < 15; i++) {
+    const data = await pulseScoreGet<PulseScoreTennisLeaguesResponse>(
+      `/tennis/leagues?page=${page}&limit=30`,
+    );
+    if (Array.isArray(data?.leagues)) leagues.push(...data.leagues);
+    if (!data?.hasNextPage) break;
+    page += 1;
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+  }
+  return leagues;
+}
+
+async function fetchTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
+  try {
+    const leagues = await fetchAllTennisLeagues();
+    return leagues.flatMap((l) => l.events ?? []).filter((ev) => !ev.live);
+  } catch {
+    return [];
+  }
+}
+
+/** Upcoming tennis fixtures from PulseScore (bet365), each carrying its
+ * DRAW_NO_BET prematch odds when bet365 has priced it yet. Empty array if
+ * PULSESCORE_API_KEY isn't configured or the upstream call fails. */
+export async function getPulseScoreTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
+  if (!CONFIG.PULSESCORE_API_KEY) return [];
+  const now = Date.now();
+  if (upcomingCache && now - upcomingCache.fetchedAt < TENNIS_UPCOMING_TTL_MS)
+    return upcomingCache.events;
+  if (!upcomingInFlight) {
+    upcomingInFlight = fetchTennisUpcoming()
+      .then((events) => {
+        upcomingCache = { events, fetchedAt: Date.now() };
+        return events;
+      })
+      .finally(() => {
+        upcomingInFlight = null;
+      });
+  }
+  return upcomingInFlight;
+}
