@@ -20,15 +20,14 @@ import {
 
 const router: IRouter = Router();
 
-// Catalog lives in Postgres (casino_games table). Palace Casino is
-// suspended — /games and /providers below only ever return source="silentapi"
-// rows (seeded via `pnpm run seed:casino`, from the static catalog snapshot
-// at ../data/casinoGames.json — SilentAPI has no live "list all games"
-// endpoint); the Palace Casino /palace/launch route and /palace/callback
-// further down are kept as dormant code, not deleted, in case that decision
-// changes again, but nothing in the active catalog reaches them. The
-// front-end pages through the catalog 24 games at a time and never talks
-// to either aggregator directly for listing.
+// Catalog lives in Postgres (casino_games table). SilentAPI is
+// suspended — /games and /providers below only ever return source="palace"
+// rows (seeded via `pnpm run seed:palace-casino`, synced live against
+// Palace Casino's API); the SilentAPI /launch route and its wallet
+// callback (registered in app.ts) are kept as dormant code, not deleted,
+// in case that decision changes again, but nothing in the active catalog
+// reaches them. The front-end pages through the catalog 24 games at a
+// time and never talks to either aggregator directly for listing.
 const GAMES_CACHE_TTL_SECONDS = 300;
 const PROVIDERS_CACHE_TTL_SECONDS = 3600;
 const DEFAULT_LIMIT = 24;
@@ -74,12 +73,12 @@ router.get("/games", async (req: Request, res: Response) => {
     return;
   }
 
-  // SilentAPI only — Palace Casino is suspended (kept as dormant code, not
+  // Palace Casino only — SilentAPI is suspended (kept as dormant code, not
   // deleted, in case that decision changes again; explicitly filtered out
   // here rather than relying on its catalog happening to be empty).
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, "silentapi"),
+    eq(casinoGamesTable.source, "palace"),
   ];
   if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
@@ -137,7 +136,7 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
 
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, "silentapi"),
+    eq(casinoGamesTable.source, "palace"),
   ];
   if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
 
@@ -199,7 +198,7 @@ router.get("/providers", async (_req: Request, res: Response) => {
   const rows = await db
     .selectDistinct({ provider: casinoGamesTable.provider })
     .from(casinoGamesTable)
-    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, "silentapi")))
+    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, "palace")))
     .orderBy(asc(casinoGamesTable.provider));
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });

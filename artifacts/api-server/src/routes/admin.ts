@@ -2478,11 +2478,11 @@ router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) 
             active: sql<number>`count(*) filter (where ${casinoGamesTable.isActive})`,
           })
           .from(casinoGamesTable)
-          .where(eq(casinoGamesTable.source, "silentapi")),
+          .where(eq(casinoGamesTable.source, "palace")),
         db
           .select({ total: sql<number>`count(distinct ${casinoGamesTable.provider})` })
           .from(casinoGamesTable)
-          .where(and(eq(casinoGamesTable.source, "silentapi"), eq(casinoGamesTable.isActive, true))),
+          .where(and(eq(casinoGamesTable.source, "palace"), eq(casinoGamesTable.isActive, true))),
         db
           .select({ net: sum(ledgerEntriesTable.amount) })
           .from(ledgerEntriesTable)
@@ -2519,7 +2519,7 @@ router.get("/casino/games", adminMiddleware, async (req: AdminRequest, res) => {
     const page = Math.max(1, Number(req.query["page"]) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 30));
 
-    const conditions = [eq(casinoGamesTable.source, "silentapi")];
+    const conditions = [eq(casinoGamesTable.source, "palace")];
     if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
     if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
     const where = and(...conditions);
