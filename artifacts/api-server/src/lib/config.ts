@@ -24,13 +24,6 @@ const FOOTBALL_DAILY_PROVIDER =
 const FOOTBALL_REFERENCE_PROVIDER =
   process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "statpal";
 
-// When true, ALL SportsAPI Pro calls are disabled (WebSockets, HTTP fetches,
-// basketball/baseball/tennis live). This avoids consuming quota when the
-// subscription is Statpal-only. Automatically true when provider = "statpal".
-const STATPAL_ONLY =
-  FOOTBALL_LIVE_PROVIDER === "statpal" ||
-  process.env["STATPAL_ONLY"] === "true";
-
 // SilentAPI — third-party casino game aggregator (game launch + wallet
 // callback). Secrets only ever come from the environment, never hardcoded —
 // same convention as SPORTSAPI_KEY/STATPAL_API_KEY above.
@@ -97,16 +90,6 @@ const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
 
-// StatScore Match Tracker — GET {base}/get_pushes/{eventId}?timestamp={ts}&
-// auth={auth}. Confirmed real by the user with a live example URL; auth is
-// a static partner token (same value also works against
-// standings.pc.statscore.com/get_standings/{leagueId}), not set here as a
-// default since it's a secret — set STATSCORE_AUTH in the environment.
-const STATSCORE_TRACKER_BASE_URL =
-  process.env["STATSCORE_TRACKER_BASE_URL"]?.trim() ||
-  "https://events-d.pc.statscore.com";
-const STATSCORE_AUTH = process.env["STATSCORE_AUTH"] ?? "";
-
 // SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
 // between the host and /playlist.m3u8 was originally assumed to be a fixed
 // per-account value, but two real BetBY captures for two different matches
@@ -133,14 +116,11 @@ export const CONFIG = {
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
   ANTHROPIC_API_KEY,
-  STATSCORE_TRACKER_BASE_URL,
-  STATSCORE_AUTH,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
-  STATPAL_ONLY,
   LIVE_UPDATE_INTERVAL: 1000,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,
