@@ -586,7 +586,72 @@ export type PulseScoreTennisLiveExtra = {
   straightSetsWinner?: { yes: number; no: number };
   goTheDistance?: { yes: number; no: number };
   oddEvenGames?: { odd: number; even: number };
+  // Exact set score (e.g. "6-4"), one list per set. Label convention
+  // matches the pre-existing score1st/score2nd/score3rd fields (already in
+  // AdvancedMarkets["tennisExtra"], previously only ever synthetic): the
+  // label is always "<home games>-<away games>" for THAT set, regardless of
+  // who won it — so a home player winning 6-4 and an away player winning
+  // 6-4 are two distinct labels, "6-4" and "4-6" respectively.
+  score1st?: Array<{ label: string; odds: number }>;
+  score2nd?: Array<{ label: string; odds: number }>;
+  score3rd?: Array<{ label: string; odds: number }>;
 };
+
+const TENNIS_SET_SCORE_ORDER = new Map([
+  ["6-0", 0], ["6-1", 1], ["6-2", 2], ["6-3", 3], ["6-4", 4], ["7-5", 5], ["7-6", 6],
+  ["0-6", 7], ["1-6", 8], ["2-6", 9], ["3-6", 10], ["4-6", 11], ["5-7", 12], ["6-7", 13],
+]);
+
+function reverseSetScoreLabel(label: string): string {
+  const m = /^(\d+)-(\d+)$/.exec(label);
+  if (!m) return label;
+  return `${m[2]}-${m[1]}`;
+}
+
+/** Exact set score for one set. PulseScore represents this as a set of
+ * inactive, zero-odds "label rows" (canonicalOutcome "OTHER", raw = the
+ * score text, e.g. "6-4") each carrying a moreInfo.OR index, cross-
+ * referenced against separate HOME/AWAY-attributed priced rows sharing that
+ * same OR index — the priced row's own raw is the player's name, not the
+ * score, so the label has to come from the matching placeholder row. */
+function findSetScore(
+  markets: PulseScoreMarket[],
+  setNum: number,
+): Array<{ label: string; odds: number }> | undefined {
+  const re = new RegExp(`^set ${setNum} score$`, "i");
+  const market = markets.find(
+    (m) => m.canonicalMarket === "OTHER" && re.test((m.rawName || "").trim()),
+  );
+  if (!market) return undefined;
+
+  const labelByOr = new Map<string, string>();
+  for (const sel of market.selections ?? []) {
+    if (sel.canonicalOutcome !== "OTHER") continue;
+    const or = sel.moreInfo?.["OR"];
+    const raw = (sel.rawName || "").trim();
+    if (typeof or !== "string" && typeof or !== "number") continue;
+    if (!/^\d-\d$/.test(raw)) continue;
+    labelByOr.set(String(or), raw);
+  }
+  if (labelByOr.size === 0) return undefined;
+
+  const out: Array<{ label: string; odds: number }> = [];
+  for (const sel of market.selections ?? []) {
+    if (sel.canonicalOutcome !== "HOME" && sel.canonicalOutcome !== "AWAY") continue;
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const or = sel.moreInfo?.["OR"];
+    const baseLabel = labelByOr.get(String(or));
+    if (!baseLabel) continue;
+    const label = sel.canonicalOutcome === "HOME" ? baseLabel : reverseSetScoreLabel(baseLabel);
+    out.push({ label, odds: val });
+  }
+  if (out.length === 0) return undefined;
+  return out.sort(
+    (a, b) => (TENNIS_SET_SCORE_ORDER.get(a.label) ?? 999) - (TENNIS_SET_SCORE_ORDER.get(b.label) ?? 999),
+  );
+}
 
 function findSetWinnerByName(
   markets: PulseScoreMarket[],
@@ -697,6 +762,13 @@ export function extractTennisLiveExtra(ev: PulseScoreEvent): PulseScoreTennisLiv
     }
     if (odd !== null && even !== null) out.oddEvenGames = { odd, even };
   }
+
+  const score1st = findSetScore(markets, 1);
+  if (score1st) out.score1st = score1st;
+  const score2nd = findSetScore(markets, 2);
+  if (score2nd) out.score2nd = score2nd;
+  const score3rd = findSetScore(markets, 3);
+  if (score3rd) out.score3rd = score3rd;
 
   return out;
 }
