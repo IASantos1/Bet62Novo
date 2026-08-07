@@ -17268,6 +17268,81 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {/* Total Sets O/U 2.5 */}
+                    {((m as any).tennisExtra as any).totalSets?.over > 0 && (
+                      <MarketGroup title="Total de Sets — Mais/Menos de 2.5">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ts-o-2.5"
+                          odd={((m as any).tennisExtra as any).totalSets.over}
+                          market="especiais"
+                          label="Mais de 2.5 Sets"
+                          suspKey="totalSets"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ts-u-2.5"
+                          odd={((m as any).tennisExtra as any).totalSets.under}
+                          market="especiais"
+                          label="Menos de 2.5 Sets"
+                          suspKey="totalSets"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Straight Sets Winner */}
+                    {((m as any).tennisExtra as any).straightSetsWinner?.yes >
+                      0 && (
+                      <MarketGroup title="Vence sem perder Set?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ssw-yes"
+                          odd={
+                            ((m as any).tennisExtra as any).straightSetsWinner
+                              .yes
+                          }
+                          market="especiais"
+                          label="Sim"
+                          suspKey="straightSets"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ssw-no"
+                          odd={
+                            ((m as any).tennisExtra as any).straightSetsWinner
+                              .no
+                          }
+                          market="especiais"
+                          label="Não"
+                          suspKey="straightSets"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Go The Distance */}
+                    {((m as any).tennisExtra as any).goTheDistance?.yes >
+                      0 && (
+                      <MarketGroup title="Vai até o Último Set?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="gtd-yes"
+                          odd={
+                            ((m as any).tennisExtra as any).goTheDistance.yes
+                          }
+                          market="especiais"
+                          label="Sim"
+                          suspKey="goTheDistance"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="gtd-no"
+                          odd={
+                            ((m as any).tennisExtra as any).goTheDistance.no
+                          }
+                          market="especiais"
+                          label="Não"
+                          suspKey="goTheDistance"
+                        />
+                      </MarketGroup>
+                    )}
                     {/* Set/Match combo (also shown here for quick access) */}
                     {(m as any).tennisExtra?.setMatch?.h11 > 0 && (
                       <MarketGroup title="Set + Resultado Final">
