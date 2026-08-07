@@ -61,13 +61,25 @@ type BroadcastFrame = {
   data: PulseScoreEvent[];
 };
 
+// Confirmed live in production (2026-08-07): the WS connection is shared/
+// multiplexed per bookmaker, not actually scoped to the sport in the
+// subscription URL — broadcast frames for OTHER sports (soccer, esoccer)
+// arrive on this same tennis-subscribed socket and, without this filter,
+// got merged straight into liveByEventId and served as tennis matches
+// (wrong icon, wrong score format on the live page — a football/esoccer
+// match rendered as if it were a tennis one). Both frame.sport and each
+// individual event's own ev.sport are checked — defense in depth in case
+// a mixed frame ever slips through with the wrong top-level sport but a
+// correctly-tagged (or mis-tagged) event inside it.
 function applyFrame(frame: BroadcastFrame): void {
   lastFrameAt = Date.now();
   rollUsageDateIfNeeded();
   framesToday += 1;
+  if (frame.sport && frame.sport !== "tennis") return;
   const seenIds = new Set<string>();
   for (const ev of frame.data ?? []) {
     if (!ev?.eventId) continue;
+    if (ev.sport && ev.sport !== "tennis") continue;
     liveByEventId.set(ev.eventId, ev);
     seenIds.add(ev.eventId);
   }
