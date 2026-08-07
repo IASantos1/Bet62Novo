@@ -555,3 +555,148 @@ export function extractTennisPrematchExtra(
 
   return out;
 }
+
+// ── Live extra markets (real PulseScore data, not the synthetic
+// computeLiveTennisExtras model in matches.ts) ──────────────────────────────
+// Verified against a real GET /live-events?sport=tennis sample (2026-08-07,
+// 11 live matches). These are plain field lookups — no probability model —
+// so cheap enough to run on every live tick, unlike computeLiveTennisExtras
+// (see its own comment in matches.ts for why THAT stays on-demand only).
+//
+// Confirmed live carries a materially different shape than the prematch
+// /tennis/events sample extractTennisPrematchExtra above was built against:
+// "Set 2/3 Winner" here is canonicalMarket "OTHER" with the set number only
+// in rawName, not canonicalMarket "SET_WINNER" like prematch's first-set
+// market — same kind of prematch-vs-live divergence already seen for the
+// moneyline itself. Not assumed to also hold for prematch without its own
+// confirmed sample, so this extractor is live-only for now.
+//
+// Deliberately excludes every handicap-shaped market ("Set N Handicap",
+// "Match Handicap") — both selections carry canonicalOutcome "OTHER" with
+// the player name only embedded in a free-text string ("Terence Atmane
+// +1.5"), no structured HOME/AWAY field, same reasoning as GAME_HANDICAP
+// above — and every ultra-granular in-play micro-market (score after N
+// points, next break of serve, ace/double-fault totals, setcast, ...) as
+// out of scope for a sportsbook's market list, not a real gap.
+export type PulseScoreTennisLiveExtra = {
+  set2?: { home: number; away: number };
+  set3?: { home: number; away: number };
+  set2Games?: { line: number; over: number; under: number };
+  totalSets?: { line: number; over: number; under: number };
+  straightSetsWinner?: { yes: number; no: number };
+  goTheDistance?: { yes: number; no: number };
+  oddEvenGames?: { odd: number; even: number };
+};
+
+function findSetWinnerByName(
+  markets: PulseScoreMarket[],
+  setNum: number,
+): { home: number; away: number } | undefined {
+  const re = new RegExp(`^set ${setNum} winner$`, "i");
+  const market = markets.find(
+    (m) => m.canonicalMarket === "OTHER" && re.test((m.rawName || "").trim()),
+  );
+  if (!market) return undefined;
+  let home: number | null = null;
+  let away: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "HOME") home = val;
+    else if (sel.canonicalOutcome === "AWAY") away = val;
+  }
+  return home !== null && away !== null ? { home, away } : undefined;
+}
+
+function findTotalGamesInSet(
+  markets: PulseScoreMarket[],
+  setNum: number,
+): { line: number; over: number; under: number } | undefined {
+  const re = new RegExp(`^total games in set ${setNum}$`, "i");
+  const matching = markets.filter(
+    (m) => m.canonicalMarket === "OTHER" && re.test((m.rawName || "").trim()),
+  );
+  return pickMostEvenLine(collectOverUnderLines(matching));
+}
+
+function findYesNoMarket(
+  markets: PulseScoreMarket[],
+  canonicalMarket: string,
+  rawNameLower?: string,
+): { yes: number; no: number } | undefined {
+  const market = markets.find(
+    (m) =>
+      m.canonicalMarket === canonicalMarket &&
+      (rawNameLower === undefined || (m.rawName || "").trim().toLowerCase() === rawNameLower),
+  );
+  if (!market) return undefined;
+  let yes: number | null = null;
+  let no: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim().toLowerCase();
+    if (raw === "yes") yes = val;
+    else if (raw === "no") no = val;
+  }
+  return yes !== null && no !== null ? { yes, no } : undefined;
+}
+
+export function extractTennisLiveExtra(ev: PulseScoreEvent): PulseScoreTennisLiveExtra {
+  const markets = ev.markets ?? [];
+  const out: PulseScoreTennisLiveExtra = {};
+
+  const set2 = findSetWinnerByName(markets, 2);
+  if (set2) out.set2 = set2;
+  const set3 = findSetWinnerByName(markets, 3);
+  if (set3) out.set3 = set3;
+
+  const set2Games = findTotalGamesInSet(markets, 2);
+  if (set2Games) out.set2Games = set2Games;
+
+  const totalSetsMarket = markets.find((m) => m.canonicalMarket === "TOTAL_SETS");
+  if (totalSetsMarket) {
+    let twoSets: number | null = null;
+    let threeSets: number | null = null;
+    for (const sel of totalSetsMarket.selections ?? []) {
+      if (!sel.isActive) continue;
+      const val = oddsToNumber(sel.odds);
+      if (val === null) continue;
+      const raw = (sel.rawName || "").trim().toLowerCase();
+      if (raw === "2 sets") twoSets = val;
+      else if (raw === "3 sets") threeSets = val;
+    }
+    if (twoSets !== null && threeSets !== null) {
+      out.totalSets = { line: 2.5, under: twoSets, over: threeSets };
+    }
+  }
+
+  const straightSets = findYesNoMarket(markets, "OTHER", "straight sets winner?");
+  if (straightSets) out.straightSetsWinner = straightSets;
+
+  const goDistance = findYesNoMarket(markets, "GO_THE_DISTANCE");
+  if (goDistance) out.goTheDistance = goDistance;
+
+  const oddEvenMarket = markets.find(
+    (m) =>
+      m.canonicalMarket === "OTHER" &&
+      (m.rawName || "").trim().toLowerCase() === "match total games odd/even",
+  );
+  if (oddEvenMarket) {
+    let odd: number | null = null;
+    let even: number | null = null;
+    for (const sel of oddEvenMarket.selections ?? []) {
+      if (!sel.isActive) continue;
+      const val = oddsToNumber(sel.odds);
+      if (val === null) continue;
+      const raw = (sel.rawName || "").trim().toLowerCase();
+      if (raw === "odd") odd = val;
+      else if (raw === "even") even = val;
+    }
+    if (odd !== null && even !== null) out.oddEvenGames = { odd, even };
+  }
+
+  return out;
+}

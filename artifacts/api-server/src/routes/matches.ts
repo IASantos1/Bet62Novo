@@ -30,6 +30,8 @@ import {
   extractTennisOverride,
   getPulseScoreTennisUpcoming,
   extractTennisPrematchExtra,
+  extractTennisLiveExtra,
+  type PulseScoreTennisLiveExtra,
 } from "../services/pulsescore/tennis.js";
 import {
   getPulseScoreBasketballUpcoming,
@@ -236,6 +238,11 @@ type AdvancedMarkets = {
     score1st?: Array<{ label: string; odds: number }>;
     score2nd?: Array<{ label: string; odds: number }>;
     score3rd?: Array<{ label: string; odds: number }>;
+    // Real PulseScore live markets with no prior equivalent field — see
+    // extractTennisLiveExtra in services/pulsescore/tennis.ts.
+    totalSets?: { line: number; over: number; under: number };
+    straightSetsWinner?: { yes: number; no: number };
+    goTheDistance?: { yes: number; no: number };
   };
   // Hockey extended markets
   hockeyExtra?: {
@@ -408,6 +415,11 @@ export type LiveMatchState = {
     sets?: Array<[number, number]>; // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
+    // Real (non-modeled) PulseScore extra markets for this tick — cheap to
+    // compute (see extractTennisLiveExtra's own comment), stashed here so
+    // GET /live-match/:id can overlay real bookmaker odds on top of
+    // computeLiveTennisExtras's synthetic model wherever real data exists.
+    realExtra?: PulseScoreTennisLiveExtra;
     currentPts?: [number, number]; // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>; // volleyball: completed set scores [[25,18],[22,25]]
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
@@ -11066,6 +11078,10 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
         sets,
         ...(override.currentPoints ? { currentPoints: override.currentPoints } : {}),
         ...(override.serving ? { serving: override.serving } : {}),
+        // Cheap field lookups (no probability model) — safe every tick,
+        // unlike computeLiveTennisExtras. See extractTennisLiveExtra's
+        // header comment for exactly which markets this covers.
+        realExtra: extractTennisLiveExtra(ev),
       },
     };
     currentIds.add(id);
@@ -11987,7 +12003,7 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
         match.odds.home > 0 && match.odds.away > 0
           ? 1 / match.odds.home / (1 / match.odds.home + 1 / match.odds.away)
           : 0.5;
-      const tennisExtra = computeLiveTennisExtras(
+      const modeledExtra = computeLiveTennisExtras(
         liveHomeP,
         sets,
         homeSetsWon,
@@ -11996,6 +12012,11 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
         liveExtra?.currentPoints,
         liveExtra?.serving,
       );
+      // Real bookmaker odds (stashed per-tick in _liveExtra.realExtra by
+      // buildTennisLiveFromPulseScore) override the modeled estimate
+      // wherever PulseScore actually priced that market — the model only
+      // fills in what real data doesn't cover (e.g. set/game handicap).
+      const tennisExtra = { ...modeledExtra, ...liveExtra?.realExtra };
       match = { ...match, markets: { ...match.markets, tennisExtra } };
     }
 
