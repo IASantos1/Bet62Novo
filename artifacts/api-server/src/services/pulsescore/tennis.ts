@@ -1,22 +1,29 @@
-// Tennis live odds from PulseScore, polled via REST — replaces the earlier
-// WebSocket-based approach (tennisWs.ts, removed 2026-08-05). The WS
-// connection's URL/auth shape (wss://.../v3/bet365/ws/live?key=...&sport=tennis)
-// was never confirmed against real PulseScore data: no "connected" frame or
-// live event was ever observed through it, unlike every REST endpoint in
-// this integration (football, MMA, leagues), each individually verified
-// against a real authenticated response before being trusted. REST is the
-// same bookmaker-poll pattern already proven to work everywhere else.
+// Tennis live odds from PulseScore — WebSocket primary, REST fallback.
 //
-// Shares the bet365 bookmaker with football.ts (the only bookmaker
+// WS was tried once before (2026-08-05) and removed because the connection
+// never produced a single confirmed frame (see git history commit ede487a).
+// Reintroduced 2026-08-07 against PulseScore's own published connection-
+// pattern docs, which confirm the URL shape (wss://.../v3/bet365/ws/live?
+// key=...&sport=tennis) was already right — see tennisWs.ts's header for the
+// full story. To avoid repeating a silent failure, getPulseScoreTennisLive()
+// below only trusts the WS source while tennisWsIsFresh() is true (a real
+// frame arrived recently); otherwise it transparently falls back to the REST
+// poll that was the sole source until today. Both paths return the exact
+// same PulseScoreEvent[] shape, so every downstream consumer
+// (extractTennisOverride, buildTennisLiveFromPulseScore in matches.ts) is
+// unaffected by which one served a given tick.
+//
+// REST shares the bet365 bookmaker with football.ts (the only bookmaker
 // confirmed to carry tennis, via the real /tennis/leagues sample that
 // revealed the DRAW_NO_BET market) rather than a distinct bookmaker prefix
 // like basketball/hockey/baseball/volleyball use — picking an unconfirmed
 // bookmaker name for tennis would repeat the exact mistake this integration
 // keeps having to correct. Since bet365's PRO-plan budget is 1 req/s shared
-// with football, this polls at a slightly longer interval than football's
+// with football, REST polls at a slightly longer interval than football's
 // 1000ms to reduce (not eliminate) collision — an occasional 429 just means
 // serving the last good cache for that tick, not a crash (same
-// catch-and-fall-back shape as every other PulseScore fetch here).
+// catch-and-fall-back shape as every other PulseScore fetch here). WS runs
+// on its own separate connection, entirely outside that shared REST budget.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -27,8 +34,14 @@ import {
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
+import { getTennisWsEvents, tennisWsIsFresh } from "./tennisWs.js";
 
 const TENNIS_LIVE_TTL_MS = 1_500;
+// How stale the last WS frame is allowed to be before falling back to REST.
+// Generous enough to ride out a single dropped/delayed frame, tight enough
+// that a truly dead connection (the 2026-08-05 failure mode) falls back
+// within a couple of ticks instead of serving stale WS data indefinitely.
+const TENNIS_WS_FRESHNESS_MS = 5_000;
 
 let cache: { events: PulseScoreEvent[]; fetchedAt: number } | null = null;
 let inFlight: Promise<PulseScoreEvent[]> | null = null;
@@ -66,11 +79,7 @@ async function fetchTennisLive(): Promise<PulseScoreEvent[]> {
   }
 }
 
-/** Live tennis odds from PulseScore (bet365, normalized). Empty array if
- * PULSESCORE_API_KEY isn't configured yet or the upstream call fails. */
-export async function getPulseScoreTennisLive(): Promise<PulseScoreEvent[]> {
-  if (!CONFIG.PULSESCORE_API_KEY) return [];
-
+async function getPulseScoreTennisLiveRest(): Promise<PulseScoreEvent[]> {
   const now = Date.now();
   if (cache && now - cache.fetchedAt < TENNIS_LIVE_TTL_MS) return cache.events;
 
@@ -85,6 +94,16 @@ export async function getPulseScoreTennisLive(): Promise<PulseScoreEvent[]> {
       });
   }
   return inFlight;
+}
+
+/** Live tennis odds from PulseScore (bet365, normalized). WS-sourced
+ * whenever a frame has arrived in the last TENNIS_WS_FRESHNESS_MS; REST
+ * otherwise. Empty array if PULSESCORE_API_KEY isn't configured yet or
+ * both sources are currently unavailable. */
+export async function getPulseScoreTennisLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.PULSESCORE_API_KEY) return [];
+  if (tennisWsIsFresh(TENNIS_WS_FRESHNESS_MS)) return getTennisWsEvents();
+  return getPulseScoreTennisLiveRest();
 }
 
 // ── match_winner → our own odds shape ───────────────────────────────────────

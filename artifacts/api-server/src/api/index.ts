@@ -4,6 +4,7 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
+import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -94,6 +95,11 @@ server.listen(port, () => {
   // (or early in-play when the outcome is already determined).
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
+
+  // Tennis live odds prefer this WS connection over REST polling (see
+  // services/pulsescore/tennisWs.ts) — safe to call even before
+  // PULSESCORE_API_KEY is set, it just no-ops until then.
+  startPulseScoreTennisWs();
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
