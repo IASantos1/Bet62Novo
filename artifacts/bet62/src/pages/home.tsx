@@ -6906,7 +6906,14 @@ export default function Home({
     [],
   );
   const LIVE_SNAPSHOT_MAX_AGE_MS = 20_000;
-  function readSnapshot<T>(key: string): Snapshot<T> | null {
+  // Stable identities (useCallback, no deps — these only ever touch their own
+  // arguments and localStorage, never component state). Without this they were
+  // a new function every render, which made the live-tab effect below (whose
+  // deps list includes them) tear down and re-run on every render — reopening
+  // the SSE connection and re-calling fetchLive(true) each time, flashing the
+  // loading skeleton on/off. Real live data used to mask this (liveMatches was
+  // rarely empty), but with matches always empty now the flicker is constant.
+  const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return null;
@@ -6917,12 +6924,12 @@ export default function Home({
     } catch {
       return null;
     }
-  }
-  function writeSnapshot(key: string, value: any) {
+  }, []);
+  const writeSnapshot = useCallback((key: string, value: any) => {
     try {
       localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
     } catch {}
-  }
+  }, []);
 
   // Sync expandedMatch with live data silently (score/odds update without closing panel).
   // Also handles the case where the match was opened *before* it went live (e.g. from
