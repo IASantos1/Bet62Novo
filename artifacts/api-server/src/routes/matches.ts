@@ -23,6 +23,7 @@ import {
   extractFootballOverride,
   pulseScoreEventScore,
   pulseScoreEventMinute,
+  pulseScoreEventClockSec,
   getPulseScoreFootballUpcoming,
 } from "../services/pulsescore/football.js";
 import {
@@ -11038,6 +11039,17 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       events: [],
       marketSuspension,
       _suspensionReason: suspensionReason,
+      // Feeds the frontend's existing clockSec-based MM:SS ticking clock
+      // (getFootballClockLabel/getDisplayMinute in home.tsx) — already built
+      // for other live sources, just never wired up for PulseScore football,
+      // which only ever supplied the coarse whole-minute `minute` field
+      // above. TS (seconds-within-the-minute) sits right next to TM in
+      // PulseScore's own moreInfo and was simply never read until now.
+      _liveExtra: {
+        clockSec: pulseScoreEventClockSec(ev),
+        clockAtMs: Date.now(),
+        clockRunning: true,
+      },
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out

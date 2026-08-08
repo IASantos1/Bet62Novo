@@ -479,6 +479,28 @@ export function pulseScoreEventMinute(ev: PulseScoreEvent): number {
   return Number.isFinite(tm) && tm >= 0 ? tm : 0;
 }
 
+/** Total elapsed seconds (TM*60 + TS) — TS is bet365's own seconds-within-
+ * the-minute counter, sitting right next to TM in moreInfo but previously
+ * never read (pulseScoreEventMinute above only surfaced whole minutes).
+ * Feeds LiveMatchState._liveExtra.clockSec, which the frontend already
+ * knows how to extrapolate client-side into a running MM:SS clock (same
+ * mechanism other live sources use) — was never wired up for PulseScore
+ * football, so the clock only ever showed a coarse, occasionally-stuck-at-0
+ * whole minute instead of a live-ticking seconds-precision one. */
+export function pulseScoreEventClockSec(ev: PulseScoreEvent): number {
+  const rawTm = ev.moreInfo?.TM;
+  if (rawTm == null) return 0;
+  const tmMatch = /^(\d+)/.exec(String(rawTm).trim());
+  if (!tmMatch) return 0;
+  const minutes = Number(tmMatch[1]);
+  if (!Number.isFinite(minutes) || minutes < 0) return 0;
+  const rawTs = ev.moreInfo?.TS;
+  const secondsNum = Number(String(rawTs ?? "0").trim());
+  const seconds =
+    Number.isFinite(secondsNum) && secondsNum >= 0 && secondsNum < 60 ? secondsNum : 0;
+  return minutes * 60 + seconds;
+}
+
 // ── Prematch (leagues catalog) ──────────────────────────────────────────────
 // Verified against a real authenticated GET /api/v3/bet365/leagues call
 // (2026-08-06) — this is the FOOTBALL leagues endpoint despite the bare path
