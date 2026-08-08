@@ -12,6 +12,9 @@ const { bookmakerPrefix, pulseScoreRestUrl, pulseScoreWsUrl } = await import(
   "../services/pulsescore/client.js"
 );
 const { teamNamesMatch } = await import("../services/pulsescore/teamMatch.js");
+const { extractFootballOverride } = await import(
+  "../services/pulsescore/football.js"
+);
 const { __testing: footballWs } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -80,6 +83,60 @@ test("teamNamesMatch: surname-only fallback only applies when a comma signals an
 test("teamNamesMatch: empty strings never match", () => {
   assert.equal(teamNamesMatch("", "Real Madrid"), false);
   assert.equal(teamNamesMatch("Real Madrid", ""), false);
+});
+
+// Real event samples (2026-08-08) showed "Goal Line (H-A)" markets pricing
+// the exact same numeric line as "Match Goals" with different odds (e.g.
+// Match Goals Over 2.5 @1.8333 vs Goal Line (0-2) Over 2.5 @1.95 on the same
+// live event) — extractFootballOverride must always prefer "Match Goals",
+// never let "Goal Line" silently win by array order.
+function makeOverUnderMarket(rawName: string, line: number, overOdds: number, underOdds: number) {
+  return {
+    canonicalMarket: "OVER_UNDER",
+    rawName,
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: `test:${rawName}`,
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over", odds: overOdds, isActive: true, line },
+      { canonicalOutcome: "UNDER", rawName: "Under", odds: underOdds, isActive: true, line },
+    ],
+  };
+}
+
+function makeFootballEvent(markets: unknown[]) {
+  return {
+    eventId: "test-1",
+    sport: "soccer",
+    league: "Test League",
+    home: "Home FC",
+    away: "Away FC",
+    score: { home: "0", away: "0" },
+    markets,
+  } as Parameters<typeof extractFootballOverride>[0];
+}
+
+test("extractFootballOverride: 'Match Goals' wins over a same-line 'Goal Line' market regardless of array order", () => {
+  const matchGoals = makeOverUnderMarket("Match Goals", 2.5, 1.8333, 1.8333);
+  const goalLine = makeOverUnderMarket("Goal Line (0-2)", 2.5, 1.95, 1.85);
+
+  const overrideA = extractFootballOverride(makeFootballEvent([matchGoals, goalLine]));
+  assert.equal(overrideA.totalGoals?.over25, 1.8333);
+  assert.equal(overrideA.totalGoals?.under25, 1.8333);
+
+  const overrideB = extractFootballOverride(makeFootballEvent([goalLine, matchGoals]));
+  assert.equal(overrideB.totalGoals?.over25, 1.8333);
+  assert.equal(overrideB.totalGoals?.under25, 1.8333);
+});
+
+test("extractFootballOverride: 'Alternative Match Goals' still contributes lines Match Goals doesn't cover", () => {
+  const matchGoals = makeOverUnderMarket("Match Goals", 2.5, 1.8333, 1.8333);
+  const altGoals = makeOverUnderMarket("Alternative Match Goals", 3.5, 6, 1.125);
+
+  const override = extractFootballOverride(makeFootballEvent([matchGoals, altGoals]));
+  assert.equal(override.totalGoals?.over25, 1.8333);
+  assert.equal(override.totalGoals?.over35, 6);
+  assert.equal(override.totalGoals?.under35, 1.125);
 });
 
 test("footballWs applyFrame: keeps an event missing from a single subsequent frame (grace period)", () => {
