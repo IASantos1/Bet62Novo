@@ -11238,7 +11238,26 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       events: [],
       marketSuspension,
       _suspensionReason: suspensionReason,
-      _liveExtra: { clockSec, clockAtMs, clockRunning: !isClockStale, htScore },
+      // clockRunning gates whether the frontend extrapolates this clock
+      // forward client-side between server updates (see getFootballClockLabel/
+      // getDisplayMinute in home.tsx). This used to be tied to isClockStale
+      // alone (>20s since PulseScore's own TM/TS reading last changed) — but
+      // PulseScore routinely goes well past 20s between real updates even for
+      // ordinary in-play matches (that's the whole reason the frontend
+      // extrapolates locally in the first place, capped at its own +180s
+      // safety net). Gating on isClockStale meant the clock froze solid every
+      // time PulseScore's own feed paused for more than 20s, then jumped
+      // straight to whatever the next real reading was — reported as the
+      // clock going "0 → freeze → jump to 45 → HT → 45 → freeze → jump to
+      // 90" instead of visibly ticking second by second. The clock should
+      // only actually stop where the match itself stops: half-time and
+      // full-time, both already detected above.
+      _liveExtra: {
+        clockSec,
+        clockAtMs,
+        clockRunning: !isHalftimeFreeze && !isFulltimeFreeze,
+        htScore,
+      },
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out
