@@ -10970,6 +10970,41 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
       );
       suspensionReason = "GOLO!";
+      // TEMPORARY diagnostic (remove once answered): does bet365's own feed
+      // flip a market's/selection's isActive to false when IT suspends for
+      // this goal, independent of our own synthetic delay-based suspension
+      // above? If so, mirroring that per-market instead of guessing a fixed
+      // delay would also cover VAR/penalty/card — PulseScore gives no
+      // explicit event type for those, but if bet365's live suspension state
+      // is visible in isActive, we don't need to know WHICH incident caused
+      // it. No extra API calls — this piggybacks on the tick already in
+      // flight. Logs once per goal; grep prod logs for "[DIAG goal]".
+      logger.warn(
+        {
+          eventId: ev.eventId,
+          home,
+          away,
+          homeScore,
+          awayScore,
+          // Skip player-prop markets (Goalscorer/Assists/Multi Scorers can
+          // carry 50-100+ selection rows each) — not what we extract, and
+          // would bloat this log for no benefit to the question being asked.
+          markets: (ev.markets ?? [])
+            .filter((m) => (m.selections ?? []).length <= 25)
+            .map((m) => ({
+              rawName: m.rawName,
+              canonicalMarket: m.canonicalMarket,
+              marketIsActive: m.isActive,
+              selections: (m.selections ?? []).map((s) => ({
+                raw: s.rawName,
+                outcome: s.canonicalOutcome,
+                active: s.isActive,
+                odds: s.odds,
+              })),
+            })),
+        },
+        "[DIAG goal] raw PulseScore markets at moment of goal — checking whether bet365's own isActive flips on suspension",
+      );
     }
 
     // PulseScore only ever gives us team NAMES (no id field anywhere in its
