@@ -27,7 +27,20 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let startedOnce = false;
 
 const liveByEventId = new Map<string, PulseScoreEvent>();
+const lastSeenAt = new Map<string, number>();
 let lastFrameAt = 0;
+
+// How long an event can go unmentioned in a frame before it's dropped as
+// "no longer live". Whether PulseScore's football frames are full
+// snapshots or delta-only (only events that changed since the last frame)
+// is unverified — see football.ts's getPulseScoreFootballLive() comment
+// for the production incident (matches vanishing) this question caused.
+// A grace window makes this module correct under BOTH hypotheses instead
+// of betting on one: under full-snapshot semantics a live match reappears
+// on every frame well within this window; under delta-only semantics a
+// match with nothing new to report simply won't be mentioned for a while
+// and shouldn't be treated as having ended just because of that.
+const STALE_EVENT_GRACE_MS = 20_000;
 
 let framesToday = 0;
 let usageDate = todayUtc();
@@ -73,16 +86,21 @@ function applyFrame(frame: BroadcastFrame): void {
   rollUsageDateIfNeeded();
   framesToday += 1;
   if (frame.sport !== "soccer") return;
-  const seenIds = new Set<string>();
+  const now = Date.now();
   for (const ev of frame.data ?? []) {
     if (!ev?.eventId) continue;
     if (ev.sport !== "soccer") continue;
     liveByEventId.set(ev.eventId, ev);
-    seenIds.add(ev.eventId);
+    lastSeenAt.set(ev.eventId, now);
   }
-  // Drop events no longer present in the feed (match ended / went off live).
-  for (const id of liveByEventId.keys()) {
-    if (!seenIds.has(id)) liveByEventId.delete(id);
+  // Drop events not mentioned in any frame for STALE_EVENT_GRACE_MS (match
+  // ended / went off live) rather than on the very first frame that omits
+  // them — see STALE_EVENT_GRACE_MS above for why.
+  for (const [id, seenAt] of lastSeenAt) {
+    if (now - seenAt > STALE_EVENT_GRACE_MS) {
+      liveByEventId.delete(id);
+      lastSeenAt.delete(id);
+    }
   }
 }
 
@@ -155,6 +173,11 @@ function connect(): void {
     ws = null;
   });
 }
+
+// Exposed only for the applyFrame unit tests in tests/pulsescore.spec.ts —
+// lets them feed synthetic frames and inspect the grace-period behavior
+// without opening a real WebSocket.
+export const __testing = { applyFrame, liveByEventId, lastSeenAt };
 
 /** Call once at server startup. Safe to call even without an API key yet —
  * it's a no-op until PULSESCORE_API_KEY is set (nothing to retry-loop). */
