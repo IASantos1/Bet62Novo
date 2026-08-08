@@ -21,11 +21,39 @@ export function pulseScoreWsUrl(sport: string): string {
   return `${httpBase}/${bookmakerPrefix()}/ws/live?key=${key}&sport=${encodeURIComponent(sport)}`;
 }
 
+// Every REST caller (football's live poller, tennis's live poller, and both
+// sports' background prematch league fetches) hits the SAME shared 1 req/s
+// budget whenever they resolve to the bet365 bookmaker — confirmed in
+// production (2026-08-08) via a direct probe that returned 200 sometimes and
+// 429/401 other times for the exact same key: nothing was serializing these
+// callers against each other, so two of them landing in the same ~1s window
+// (which happens most cycles — football and tennis are each refreshed on
+// their own ~1-1.5s timer, back-to-back) collided and one lost. Queuing here,
+// in the one shared entry point every caller already goes through, fixes it
+// for all of them at once instead of coordinating each poller individually.
+const bookmakerChain = new Map<string, Promise<void>>();
+const lastRequestAtByBookmaker = new Map<string, number>();
+const MIN_REQUEST_GAP_MS = 1_050; // just over the documented 1 req/s, as a safety margin
+
+function throttleBookmaker(bookmaker: string): Promise<void> {
+  const previous = bookmakerChain.get(bookmaker) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    const last = lastRequestAtByBookmaker.get(bookmaker) ?? 0;
+    const wait = Math.max(0, MIN_REQUEST_GAP_MS - (Date.now() - last));
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastRequestAtByBookmaker.set(bookmaker, Date.now());
+  });
+  bookmakerChain.set(bookmaker, next);
+  return next;
+}
+
 export async function pulseScoreGet<T>(
   path: string,
   timeoutMs = 4000,
   bookmaker?: string,
 ): Promise<T> {
+  const bookmakerName = bookmaker ?? CONFIG.PULSESCORE_BOOKMAKER;
+  await throttleBookmaker(bookmakerName);
   const resp = await fetch(pulseScoreRestUrl(path, bookmaker), {
     headers: { "X-Secret": CONFIG.PULSESCORE_API_KEY },
     signal: AbortSignal.timeout(timeoutMs),
