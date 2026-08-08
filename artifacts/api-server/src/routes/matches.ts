@@ -1192,12 +1192,98 @@ const LEAGUE_NAME_TO_COUNTRY: Map<string, string> = (() => {
   return out;
 })();
 
-/** Best-effort country lookup for a bare league name (no "country:" prefix),
- * e.g. "premier league" → "england". Returns null when the league isn't in
- * our priority table yet, or its bare name is ambiguous across countries —
- * callers should treat null as "unknown", never guess. */
+// PulseScore's /live-events league string embeds the country name as a
+// plain word prefix with NO delimiter — confirmed against real samples
+// (2026-08-08): "USA MLS", "Dominica Premier League", "El Salvador
+// Apertura", "Peru Liga 1", "Guatemala Liga Nacional", "Paraguay Women
+// League". This is a different shape from the "Country||League" pipe
+// format documented for the separate /leagues (prematch catalog) endpoint.
+// countryForLeagueName's plain bare-name lookup below (LEAGUE_NAME_TO_COUNTRY,
+// expects NO country word at all) only ever matched PulseScore's live
+// league strings by pure coincidence — confirmed in production (2026-08-08):
+// only 1 of dozens of real live matches was making it onto the site,
+// because every other league's country came back null and got silently
+// hidden as "unknown" by buildFootballLiveFromPulseScore.
+//
+// Only lists countries this site actually shows (LIVE_FOOTBALL_COUNTRY_ALLOW)
+// — no point guessing a label for a country that would be filtered out even
+// if correctly identified. These labels are this codebase's own English
+// country names / common bet365 conventions, confirmed against PulseScore
+// for "usa" only (the real "USA MLS" sample); the rest are unverified best
+// guesses. A wrong guess here is harmless — it just leaves that country
+// filtered out exactly as it does today, never a false positive, since the
+// resolved key still has to pass LIVE_FOOTBALL_COUNTRY_ALLOW AND the full
+// original league string (country word included) still has to match a real
+// DOMESTIC_PRIORITY pattern afterwards.
+const PULSESCORE_COUNTRY_PREFIXES = [
+  ["south korea", "south korea"],
+  ["korea republic", "south korea"],
+  ["saudi arabia", "saudi arabia"],
+  ["south africa", "south africa"],
+  ["czech republic", "czechia"],
+  ["czechia", "czechia"],
+  ["united arab emirates", "uae"],
+  ["united states", "usa"],
+  ["usa", "usa"], // confirmed real: "USA MLS"
+  ["england", "england"],
+  ["spain", "spain"],
+  ["germany", "germany"],
+  ["italy", "italy"],
+  ["france", "france"],
+  ["portugal", "portugal"],
+  ["netherlands", "netherlands"],
+  ["belgium", "belgium"],
+  ["turkey", "turkey"],
+  ["greece", "greece"],
+  ["austria", "austria"],
+  ["scotland", "scotland"],
+  ["switzerland", "switzerland"],
+  ["denmark", "denmark"],
+  ["norway", "norway"],
+  ["sweden", "sweden"],
+  ["croatia", "croatia"],
+  ["serbia", "serbia"],
+  ["poland", "poland"],
+  ["russia", "russia"],
+  ["ukraine", "ukraine"],
+  ["hungary", "hungary"],
+  ["romania", "romania"],
+  ["bulgaria", "bulgaria"],
+  ["israel", "israel"],
+  ["brazil", "brazil"],
+  ["argentina", "argentina"],
+  ["mexico", "mexico"],
+  ["chile", "chile"],
+  ["colombia", "colombia"],
+  ["japan", "japan"],
+  ["thailand", "thailand"],
+  ["india", "india"],
+  ["australia", "australia"],
+  ["slovakia", "slovakia"],
+  ["slovenia", "slovenia"],
+  ["egypt", "egypt"],
+  ["morocco", "morocco"],
+  ["tunisia", "tunisia"],
+  ["qatar", "qatar"],
+] as Array<[string, string]>;
+// Longest label first — e.g. "south korea" must be tried before any
+// single-word country that could otherwise falsely prefix-match its first
+// word alone.
+PULSESCORE_COUNTRY_PREFIXES.sort((a, b) => b[0].length - a[0].length);
+
+/** Best-effort country lookup for a league name. Tries stripping a known
+ * country name off the front first (PulseScore's actual live-event format —
+ * see PULSESCORE_COUNTRY_PREFIXES above), then falls back to an exact
+ * bare-name match (no country prefix at all), e.g. "premier league" →
+ * "england" — kept for any league that genuinely has no country word
+ * attached. Returns null when neither matches — callers should treat null
+ * as "unknown", never guess. */
 export function countryForLeagueName(leagueName: string): string | null {
-  return LEAGUE_NAME_TO_COUNTRY.get(leagueName.trim().toLowerCase()) ?? null;
+  const lower = leagueName.trim().toLowerCase();
+  for (const [prefix, country] of PULSESCORE_COUNTRY_PREFIXES) {
+    if (lower === prefix || lower.startsWith(`${prefix} `)) return country;
+  }
+  return LEAGUE_NAME_TO_COUNTRY.get(lower) ?? null;
 }
 
 // All countries with explicit domestic league entries (used to detect intl tournaments)
