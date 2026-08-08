@@ -1549,7 +1549,16 @@ function getFootballLiveDisappearGraceMs(
       statusLow.includes("tempo extra") ||
       statusLow.includes("overtime") ||
       statusLow.includes("penalties") ||
-      statusLow.includes("penalty"));
+      statusLow.includes("penalty") ||
+      // PulseScore football only ever sets status to the coarse "LIVE"/"HT"
+      // (see buildFootballLiveFromPulseScore) — none of the descriptive
+      // phrases above, written for the old Statpal pipeline, ever match it.
+      // Confirmed in production (2026-08-08): without this, a PulseScore
+      // match minute 88+ that vanishes from the feed (finished) never got
+      // the fast grace and instead sat for up to 130-180 minutes before
+      // finalizeStaleLiveMatch/settlement ever ran. "HT" deliberately
+      // excluded — a match reported paused isn't a finish candidate.
+      statusLow === "live");
   if (isLateGame) return 3 * 60 * 1000;
 
   const countryKey = normalizeCountryKey(state.country);
