@@ -1100,6 +1100,60 @@ export default function AdminPage() {
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Raw PulseScore TM/TS (their own clock fields) for a searched team, straight
+  // from getPulseScoreFootballLive()'s current cache (same data the live poller
+  // itself just fetched) — lets us tell apart "PulseScore's own clock is stale
+  // for this match" from "our code is holding onto an old value while the
+  // score updates", by comparing this raw reading against the site's display.
+  const [pulsescoreClockQuery, setPulsescoreClockQuery] = useState("");
+  const [pulsescoreClockResults, setPulsescoreClockResults] = useState<
+    Array<{
+      home: string;
+      away: string;
+      league: string;
+      score: string;
+      TM?: string;
+      TS?: string;
+      TT?: string;
+      updatedAtUTC?: number;
+    }> | null
+  >(null);
+  const [pulsescoreClockLoading, setPulsescoreClockLoading] = useState(false);
+  const fetchPulsescoreClockCheck = useCallback(async () => {
+    if (!token) return;
+    setPulsescoreClockLoading(true);
+    try {
+      const res = await fetch("/api/admin/pulsescore-debug", { headers: authHeader });
+      if (res.ok) {
+        const data = await res.json();
+        const q = pulsescoreClockQuery.trim().toLowerCase();
+        const events: any[] = data?.football?.events ?? [];
+        const matches = (q
+          ? events.filter(
+              (ev) =>
+                String(ev.home ?? "").toLowerCase().includes(q) ||
+                String(ev.away ?? "").toLowerCase().includes(q),
+            )
+          : events
+        ).map((ev) => ({
+          home: ev.home,
+          away: ev.away,
+          league: ev.league,
+          score: `${ev.score?.home ?? "?"}-${ev.score?.away ?? "?"}`,
+          TM: ev.moreInfo?.TM,
+          TS: ev.moreInfo?.TS,
+          TT: ev.moreInfo?.TT,
+          updatedAtUTC: ev.moreInfo?.updatedAtUTC,
+        }));
+        setPulsescoreClockResults(matches);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setPulsescoreClockLoading(false);
+    }
+  }, [token, pulsescoreClockQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const usersQuery = useQuery({
     queryKey: ["admin", "users"],
@@ -3260,6 +3314,72 @@ export default function AdminPage() {
                       ) : (
                         <div className="text-center text-zinc-600 text-sm py-4">
                           Clique em "Testar agora" para chamar o PulseScore diretamente.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── PulseScore raw clock (TM/TS) lookup by team name ── */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
+                        <Activity size={16} className="text-orange-400" />
+                        PulseScore — Relógio bruto (TM/TS) por equipa
+                      </h3>
+                      <div className="flex gap-2 mb-4">
+                        <input
+                          type="text"
+                          value={pulsescoreClockQuery}
+                          onChange={(e) => setPulsescoreClockQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") fetchPulsescoreClockCheck();
+                          }}
+                          placeholder="Nome de uma equipa (ex: Vicenza)"
+                          className="flex-1 bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500"
+                        />
+                        <button
+                          onClick={fetchPulsescoreClockCheck}
+                          disabled={pulsescoreClockLoading}
+                          className="text-xs font-bold px-3 py-2 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          <RefreshCw size={12} className={pulsescoreClockLoading ? "animate-spin" : ""} />
+                          Consultar
+                        </button>
+                      </div>
+                      {pulsescoreClockResults === null ? (
+                        <div className="text-center text-zinc-600 text-sm py-4">
+                          Digite o nome de uma equipa (ou deixe vazio pra ver todos) e clique em "Consultar".
+                        </div>
+                      ) : pulsescoreClockResults.length === 0 ? (
+                        <div className="text-center text-zinc-600 text-sm py-4">
+                          Nenhum jogo ao vivo encontrado com esse nome.
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                          {pulsescoreClockResults.map((r, i) => (
+                            <div key={i} className="bg-zinc-800/60 rounded-xl p-3">
+                              <div className="text-sm font-bold text-zinc-200">
+                                {r.home} v {r.away}
+                              </div>
+                              <div className="text-[11px] text-zinc-500">{r.league}</div>
+                              <div className="flex gap-4 mt-1.5 text-xs tabular-nums">
+                                <span className="text-zinc-400">
+                                  Placar: <span className="text-zinc-200 font-bold">{r.score}</span>
+                                </span>
+                                <span className="text-orange-400 font-bold">
+                                  TM={r.TM ?? "—"} TS={r.TS ?? "—"} TT={r.TT ?? "—"}
+                                </span>
+                              </div>
+                              {r.updatedAtUTC && (
+                                <div className="text-[11px] text-zinc-500 mt-1">
+                                  Atualizado (PulseScore):{" "}
+                                  {new Date(
+                                    r.updatedAtUTC < 10_000_000_000
+                                      ? r.updatedAtUTC * 1000
+                                      : r.updatedAtUTC,
+                                  ).toLocaleTimeString("pt-PT")}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
