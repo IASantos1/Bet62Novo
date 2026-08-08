@@ -11054,19 +11054,27 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
         ? existing._liveExtra.clockAtMs
         : Date.now();
-    // Halftime detection: confirmed in production (2026-08-08, Vicenza v
-    // Catania) that PulseScore correctly freezes TM/TS at exactly 45:00
-    // while the ref is holding players off the pitch — a genuine real-world
-    // pause, not a stalled feed. Nothing here read that as HT (status was
-    // hardcoded "LIVE" below), so the frontend kept extrapolating forward
-    // from 45:00 not knowing play had stopped, hit its own +3min safety
-    // cap, and displayed a frozen "48:00" that looked exactly like a stuck
+    // Stale-reading guard: confirmed in production (2026-08-08, Vicenza v
+    // Catania, a lower-coverage Coppa Italia preliminary-round match) that
+    // PulseScore doesn't refresh TM/TS continuously for every match — this
+    // one sat at exactly 45:00 for many minutes (well past any real
+    // halftime) and then jumped straight to 90:00 with nothing in between,
+    // meaning that match only gets occasional checkpoint snapshots, not a
+    // real per-second feed. clockRunning was hardcoded true regardless, so
+    // the frontend spent that whole gap extrapolating forward from a
+    // reading that was never actually advancing, hit its own +3min safety
+    // cap, and displayed a frozen wrong number that looked like a stuck
     // clock. clockAtMs only moves when clockSec changes (above), so "how
     // long has this exact value been sitting" is just Date.now() -
-    // clockAtMs — no extra state to track. Deliberately narrow (exact
-    // 45:00 only, sustained >20s): extra time's halfway point isn't covered
-    // since there's no confirmed sample yet of PulseScore pausing there too.
-    const isHalftimeFreeze = clockSec === 45 * 60 && Date.now() - clockAtMs > 20_000;
+    // clockAtMs — no extra state to track. Generic on purpose (any stuck
+    // value, not just 45:00/90:00): well-covered matches update every ~1-2s
+    // so this practically never fires for them, while lower-coverage
+    // matches can freeze at any point, not only the half/full-time marks.
+    const isClockStale = Date.now() - clockAtMs > 20_000;
+    // "HT" is only claimed for the one freeze point that's actually
+    // meaningful to label — sitting elsewhere just holds the last known
+    // minute (clockRunning: false below) without guessing a phase.
+    const isHalftimeFreeze = isClockStale && clockSec === 45 * 60;
     const state: LiveMatchState = {
       id,
       home,
@@ -11087,7 +11095,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       events: [],
       marketSuspension,
       _suspensionReason: suspensionReason,
-      _liveExtra: { clockSec, clockAtMs, clockRunning: !isHalftimeFreeze },
+      _liveExtra: { clockSec, clockAtMs, clockRunning: !isClockStale },
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out
