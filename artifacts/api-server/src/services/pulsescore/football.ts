@@ -69,21 +69,38 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
  * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
  * call fails on the very first attempt (nothing cached yet to fall back to).
  *
- * A WS-preferring version of this function shipped and was reverted the
- * same day (2026-08-08): reports of many live matches missing from the site
- * right after that change went out are consistent with a real risk that
- * was never actually verified — applyFrame() in footballWs.ts treats each
- * broadcast frame as a full snapshot of every live match (deleting anything
- * not present in that frame), copying tennisWs.ts's proven behavior, but
- * that assumption was only ever confirmed true for tennis's much lower
- * match volume. If football's frames are delta-only (only matches that
- * changed since the last frame), that logic would purge every match not
- * touched in the latest frame — exactly the symptom reported. Back to
- * REST-only (known-good) rather than shipping a second unverified guess on
- * top of the first. The WS connection (footballWs.ts) is still started at
- * boot so its behavior/logs can be observed without being trusted for real
- * data yet — see getFootballWsEvents/footballWsIsFresh, currently unused
- * here. */
+ * A WS-preferring version of this function has now shipped and been
+ * reverted TWICE the same day (2026-08-08):
+ *
+ * Attempt 1: reports of many live matches missing from the site right
+ * after it went out. Suspected cause — applyFrame() in footballWs.ts
+ * treated each broadcast frame as a full snapshot (deleting anything
+ * absent from that frame), an assumption copied from tennisWs.ts but only
+ * ever confirmed for tennis's much lower match volume; if football's
+ * frames are delta-only, that logic would purge every untouched match
+ * every frame. Fixed by switching applyFrame to a 20s grace period per
+ * event instead of deleting on the first absent frame — correct under
+ * either snapshot or delta semantics.
+ *
+ * Attempt 2 (after that fix): reports of stuck clocks (one observed
+ * capped at exactly 3:00 — the frontend's own extrapolation ceiling),
+ * matches that should have gone live never appearing, and finished
+ * matches still showing "A Iniciar". Root cause this time: WS freshness
+ * (footballWsIsFresh) is tracked PER CONNECTION, not per event — it only
+ * asks "did any frame arrive recently", which stays true as long as OTHER
+ * matches keep broadcasting. If PulseScore's frames really are delta-only
+ * and only re-broadcast a match when its price moves, a match with quiet
+ * odds can go stale (clockSec frozen) for a long time while the
+ * connection as a whole looks perfectly healthy — and REST never kicks in
+ * to correct that one match specifically, because the freshness check
+ * that gates the fallback never sees it as stale. Fixing this for real
+ * needs PER-EVENT freshness (e.g. a lastSeenAt timestamp per eventId,
+ * falling back to REST for just that match once its own reading goes
+ * stale, not an all-or-nothing connection-level check) — not attempted
+ * yet. Back to REST-only (known-good) until that exists. The WS
+ * connection (footballWs.ts) is still started at boot so its behavior/logs
+ * can be observed without being trusted for real data yet — see
+ * getFootballWsEvents/footballWsIsFresh, currently unused here. */
 export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
