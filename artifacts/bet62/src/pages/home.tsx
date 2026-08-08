@@ -6624,7 +6624,7 @@ export default function Home({
   const getFootballPhaseTag = (
     match: Match,
     minute: number,
-  ): "1P" | "HT" | "2P" | "ET" | "PEN" | null => {
+  ): "1P" | "HT" | "2P" | "ET" | "PEN" | "FT" | null => {
     const status = String(match.status ?? "")
       .trim()
       .toLowerCase();
@@ -6643,6 +6643,14 @@ export default function Home({
       status === "pause"
     )
       return "HT";
+    // Backend sets status "FT" when PulseScore's clock is stuck at/past
+    // 90:00 for 20s+ (see buildFootballLiveFromPulseScore's isFulltimeFreeze)
+    // — the match is very likely over even though it hasn't left the
+    // live-events feed yet. Without this, minute would push it into the
+    // "2P" fallback below and the clock label would just show a frozen
+    // "90+N'" forever instead of a clean end-of-match marker.
+    if (status === "ft" || status.includes("full time") || status === "finished")
+      return "FT";
     if (showET) return "ET";
     if (
       status.includes("2nd half") ||
@@ -6663,7 +6671,7 @@ export default function Home({
 
   const fmtFootballMin = (
     min: number,
-    tag: "1P" | "HT" | "2P" | "ET" | "PEN" | null,
+    tag: "1P" | "HT" | "2P" | "ET" | "PEN" | "FT" | null,
   ): string => {
     if (min < 0) return "";
     if (tag === "1P" && min > 45) return `45+${min - 45}'`;
@@ -6676,6 +6684,7 @@ export default function Home({
     const tag = getFootballPhaseTag(match, minute);
     const extra = match._liveExtra;
     if (tag === "HT") return "HT";
+    if (tag === "FT") return "FT";
 
     const baseClockSec = Number(extra?.clockSec);
     const clockAtMs = Number(extra?.clockAtMs ?? 0);
@@ -10308,6 +10317,7 @@ export default function Home({
 
       const tag = getFootballPhaseTag(match, minute);
       if (tag === "HT") return "HT";
+      if (tag === "FT") return "FT";
       if (tag === "PEN") return "PEN";
       const minLbl = getFootballClockLabel(match, minute);
       if (tag === "ET") return `ET${minLbl ? ` · ${minLbl}` : ""}`;
@@ -18670,6 +18680,7 @@ export default function Home({
                             const tag = getFootballPhaseTag(expandedMatch, m);
                             if (m <= 0) return "AO VIVO";
                             if (tag === "HT") return "HT";
+                            if (tag === "FT") return "FT";
                             if (tag)
                               return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
                             return `${m}'`;
@@ -18709,6 +18720,7 @@ export default function Home({
                                   : null;
                                 if (m <= 0) return "AO VIVO";
                                 if (tag === "HT") return "HT";
+                                if (tag === "FT") return "FT";
                                 if (tag && isFootball)
                                   return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
                                 if (tag) return `${m}' · ${tag}`;

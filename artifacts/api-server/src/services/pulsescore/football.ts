@@ -202,9 +202,23 @@ function isMatchWinnerMarket(market: PulseScoreMarket): boolean {
   return MATCH_WINNER_RAW_NAMES.has((market.rawName || "").toLowerCase());
 }
 
+// Restricted to these two exact names (not just canonicalMarket "OVER_UNDER"
+// + FULL_TIME) after a real sample showed a THIRD same-shaped market —
+// "Goal Line (H-A)" — sharing the canonicalMarket/period combo. Goal Line
+// prices the same numeric lines differently (e.g. one real event: Match
+// Goals Over 2.5 @1.8333 vs Goal Line (0-2) Over 2.5 @1.95) — before this
+// fix, isTotalGoalsMarket() matched all three, and the byLine Map below
+// silently let whichever market happened to appear later in ev.markets
+// (API order, not something we control) overwrite the others for any line
+// they both covered. "Alternative Match Goals" is kept in because real
+// samples show it only ever adds NEW lines Match Goals doesn't have, never
+// overlapping — Goal Line is the one that collides.
+const TOTAL_GOALS_RAW_NAMES = new Set(["match goals", "alternative match goals"]);
+
 function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
-  return market.canonicalMarket === "OVER_UNDER";
+  if (market.canonicalMarket !== "OVER_UNDER") return false;
+  return TOTAL_GOALS_RAW_NAMES.has((market.rawName || "").toLowerCase());
 }
 
 // ── Extended markets — verified against a real GET /live-events?sport=soccer

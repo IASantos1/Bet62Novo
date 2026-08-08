@@ -11055,11 +11055,38 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // so this practically never fires for them, while lower-coverage
     // matches can freeze at any point, not only the half/full-time marks.
     const isClockStale = Date.now() - clockAtMs > 20_000;
-    // "HT" is only claimed for the one freeze point that's actually
+    // "HT"/"FT" are claimed for the two freeze points that are actually
     // meaningful to label — sitting elsewhere just holds the last known
     // minute (clockRunning: false below) without guessing a phase.
-    const isHalftimeFreeze = isClockStale && clockSec === 45 * 60;
-    const liveStatus = isHalftimeFreeze ? "HT" : "LIVE";
+    //
+    // A ±60s tolerance around 45:00 (not an exact clockSec === 2700 match)
+    // is required here: a real production reading (2026-08-08, eventId
+    // 199102620) froze at 45:01 — one second off the exact mark — and an
+    // exact-match check silently missed it, leaving the match labeled
+    // "LIVE" with a clock that just stopped advancing instead of "HT".
+    // Real in-play readings pass through this ±60s window in a couple of
+    // ticks (well-covered matches update every ~1-2s), so widening it this
+    // much still can't misfire on a genuinely advancing clock — only a
+    // reading that's actually stuck for the full 20s (isClockStale) lands
+    // here at all.
+    const HALFTIME_MARK_SEC = 45 * 60;
+    const FULLTIME_MARK_SEC = 90 * 60;
+    const FREEZE_TOLERANCE_SEC = 60;
+    const isHalftimeFreeze =
+      isClockStale && Math.abs(clockSec - HALFTIME_MARK_SEC) <= FREEZE_TOLERANCE_SEC;
+    // Same reasoning applied to the OTHER freeze point PulseScore's own
+    // production incident described (that same match "jumped straight to
+    // 90:00" next): a match whose clock is stuck anywhere from 89:00 onward
+    // has, in practice, ended — real stoppage time varies (a match can
+    // legitimately finish at 90:00, 93:47, or later), so this is a
+    // lower-bound check (>=), not another ±60s window, deliberately wide
+    // enough to also catch a match that got stuck mid-stoppage-time rather
+    // than exactly on the whistle.
+    const isFulltimeFreeze =
+      isClockStale &&
+      !isHalftimeFreeze &&
+      clockSec >= FULLTIME_MARK_SEC - FREEZE_TOLERANCE_SEC;
+    const liveStatus = isHalftimeFreeze ? "HT" : isFulltimeFreeze ? "FT" : "LIVE";
     // Half-time score, captured the moment HT is first confirmed and carried
     // forward unchanged for the rest of the match — settlement.ts's
     // liveDefinitiveOutcomeForSel() already knows how to settle ht-home/
@@ -11086,7 +11113,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // live-looking price for an already-decided outcome.
     const settledMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, liveStatus);
     const markets = filterFootballMarketsByTier(settledMarkets, tier);
-    const odds = override?.odds ?? makeOddsFromTeams(home, away);
+    // Real sample (2026-08-08, eventId 199102620): a match that had a full
+    // slate of active markets 5 minutes earlier came back with just one dead
+    // market (isActive:false, odds:0 throughout) while its clock (TM/TS) sat
+    // frozen at the exact same reading — PulseScore had effectively stopped
+    // pricing it without it leaving the live-events list. Falling back to
+    // makeOddsFromTeams() here (fully synthetic, computer-generated odds)
+    // in that situation meant the site could keep taking real-money bets
+    // against invented numbers for a match no bookmaker was actually
+    // pricing. Now: once a match has shown real odds at least once, losing
+    // them doesn't regenerate synthetic ones — the last known real odds
+    // stay on screen (below) and betting gets suspended (see oddsWentDark
+    // below) until PulseScore prices it again or the match leaves the live
+    // list. Only a match that has NEVER had real odds (still bootstrapping
+    // right after it appeared) gets the synthetic starting price.
+    const hasRealOddsNow = !!override?.odds;
+    const odds =
+      override?.odds ?? (existing?.hasRealOdds ? existing.odds : makeOddsFromTeams(home, away));
 
     // Goal-based market suspension — same trigger condition and delay table
     // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
@@ -11147,6 +11190,22 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         "[DIAG goal] raw PulseScore markets at moment of goal — checking whether bet365's own isActive flips on suspension",
       );
     }
+    // Odds-unavailable suspension — separate from the goal trigger above
+    // (which already suspends everything for its own delay window and takes
+    // priority when both happen on the same tick). Re-applied fresh every
+    // tick this condition holds, so it stays suspended for as long as
+    // PulseScore keeps not pricing this match, and clears itself within a
+    // few seconds of real odds coming back (nothing renews it once
+    // hasRealOddsNow is true again). See the odds computation above for the
+    // production incident this covers.
+    const oddsWentDark = !hasRealOddsNow && !!existing?.hasRealOdds;
+    if (oddsWentDark && !goalScored) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + 5_000]),
+      );
+      suspensionReason = "ODDS INDISPONÍVEIS";
+    }
 
     // PulseScore only ever gives us team NAMES (no id field anywhere in its
     // schema — confirmed against a real event dump). Resolve a real crest
@@ -11172,7 +11231,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       awayScore,
       minute: pulseScoreEventMinute(ev),
       status: liveStatus,
-      hasRealOdds: !!override?.odds,
+      hasRealOdds: hasRealOddsNow,
       odds,
       markets,
       matchTier: tier,
