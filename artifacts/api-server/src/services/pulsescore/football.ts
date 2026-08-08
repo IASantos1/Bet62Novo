@@ -1,6 +1,8 @@
-// Football live odds from PulseScore, polled via REST. Tennis (tennis.ts)
-// shares this same bet365 bookmaker rather than the WebSocket originally
-// planned for it — see tennis.ts for why.
+// Football live odds from PulseScore — primarily the WebSocket (footballWs.ts,
+// pushed frames) since 2026-08-08, falling back to REST polling whenever a WS
+// frame hasn't arrived recently (getPulseScoreFootballLiveRest below, the
+// sole source before that date). Tennis (tennis.ts) shares this same bet365
+// bookmaker for its own REST fallback.
 // Same in-process cache + in-flight-dedup shape already used throughout
 // matches.ts for other ~1s live polls (e.g. TENNIS_LIVE_V1_TTL).
 import { CONFIG } from "../../lib/config.js";
@@ -13,6 +15,14 @@ import {
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
+import { getFootballWsEvents, footballWsIsFresh } from "./footballWs.js";
+
+// How stale the last WS frame is allowed to be before falling back to REST —
+// same value and reasoning as tennis's own TENNIS_WS_FRESHNESS_MS had:
+// generous enough to ride out a single dropped/delayed frame, tight enough
+// that a genuinely dead connection falls back within a couple of ticks
+// instead of serving stale WS data indefinitely.
+const FOOTBALL_WS_FRESHNESS_MS = 5_000;
 
 const FOOTBALL_LIVE_TTL_MS = 1_000; // matches the PRO plan's 1 req/s rate limit
 
@@ -62,10 +72,12 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live football odds from PulseScore (bet365, normalized). Empty array if
- * PULSESCORE_API_KEY isn't configured yet, or the upstream call fails on
- * the very first attempt (nothing cached yet to fall back to). */
-export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
+/** REST-polled live football odds from PulseScore (bet365, normalized).
+ * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
+ * call fails on the very first attempt (nothing cached yet to fall back
+ * to). This is the fallback path — see getPulseScoreFootballLive below for
+ * the WS-preferring entry point every caller should actually use. */
+async function getPulseScoreFootballLiveRest(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
   const now = Date.now();
@@ -95,6 +107,18 @@ export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
       });
   }
   return inFlight;
+}
+
+/** Live football odds from PulseScore — prefers the pushed WebSocket feed
+ * (footballWs.ts) whenever a frame has arrived recently, falling back to
+ * REST polling otherwise. Both paths return the exact same PulseScoreEvent[]
+ * shape, so every downstream consumer (extractFootballOverride,
+ * buildFootballLiveFromPulseScore in matches.ts) is unaffected by which one
+ * served a given tick — mirrors tennis's own WS/REST split (tennis.ts). */
+export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.PULSESCORE_API_KEY) return [];
+  if (footballWsIsFresh(FOOTBALL_WS_FRESHNESS_MS)) return getFootballWsEvents();
+  return getPulseScoreFootballLiveRest();
 }
 
 // ── canonicalMarket → our own market shape ──────────────────────────────────

@@ -4,7 +4,7 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
-import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
+import { startPulseScoreFootballWs } from "../services/pulsescore/footballWs.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -96,10 +96,14 @@ server.listen(port, () => {
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
 
-  // Tennis live odds prefer this WS connection over REST polling (see
-  // services/pulsescore/tennisWs.ts) — safe to call even before
-  // PULSESCORE_API_KEY is set, it just no-ops until then.
-  startPulseScoreTennisWs();
+  // Football live odds prefer this WS connection over REST polling (see
+  // services/pulsescore/footballWs.ts) — the PRO plan only allows one
+  // concurrent WS connection; moved here from tennis 2026-08-08 (explicit
+  // user decision) since football's live clock/score for lower-coverage
+  // matches was the actual source of complaints REST polling alone
+  // couldn't fix. Safe to call even before PULSESCORE_API_KEY is set, it
+  // just no-ops until then.
+  startPulseScoreFootballWs();
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);

@@ -29,7 +29,7 @@ import {
   getPulseScoreTennisLive,
   getPulseScoreTennisUsage,
 } from "../services/pulsescore/tennis.js";
-import { pulseScoreTennisWsStatus } from "../services/pulsescore/tennisWs.js";
+import { pulseScoreFootballWsStatus } from "../services/pulsescore/footballWs.js";
 import {
   pulseScoreBasketball,
   pulseScoreHockey,
@@ -2302,8 +2302,8 @@ router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res)
     return;
   }
   res.json({
-    football: getPulseScoreFootballUsage(),
-    tennis: { ...getPulseScoreTennisUsage(), ws: pulseScoreTennisWsStatus() },
+    football: { ...getPulseScoreFootballUsage(), ws: pulseScoreFootballWsStatus() },
+    tennis: getPulseScoreTennisUsage(),
     basketball: pulseScoreBasketball.getUsage(),
     hockey: pulseScoreHockey.getUsage(),
     baseball: pulseScoreBaseball.getUsage(),
