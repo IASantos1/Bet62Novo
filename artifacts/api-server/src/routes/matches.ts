@@ -11055,11 +11055,38 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // so this practically never fires for them, while lower-coverage
     // matches can freeze at any point, not only the half/full-time marks.
     const isClockStale = Date.now() - clockAtMs > 20_000;
-    // "HT" is only claimed for the one freeze point that's actually
+    // "HT"/"FT" are claimed for the two freeze points that are actually
     // meaningful to label — sitting elsewhere just holds the last known
     // minute (clockRunning: false below) without guessing a phase.
-    const isHalftimeFreeze = isClockStale && clockSec === 45 * 60;
-    const liveStatus = isHalftimeFreeze ? "HT" : "LIVE";
+    //
+    // A ±60s tolerance around 45:00 (not an exact clockSec === 2700 match)
+    // is required here: a real production reading (2026-08-08, eventId
+    // 199102620) froze at 45:01 — one second off the exact mark — and an
+    // exact-match check silently missed it, leaving the match labeled
+    // "LIVE" with a clock that just stopped advancing instead of "HT".
+    // Real in-play readings pass through this ±60s window in a couple of
+    // ticks (well-covered matches update every ~1-2s), so widening it this
+    // much still can't misfire on a genuinely advancing clock — only a
+    // reading that's actually stuck for the full 20s (isClockStale) lands
+    // here at all.
+    const HALFTIME_MARK_SEC = 45 * 60;
+    const FULLTIME_MARK_SEC = 90 * 60;
+    const FREEZE_TOLERANCE_SEC = 60;
+    const isHalftimeFreeze =
+      isClockStale && Math.abs(clockSec - HALFTIME_MARK_SEC) <= FREEZE_TOLERANCE_SEC;
+    // Same reasoning applied to the OTHER freeze point PulseScore's own
+    // production incident described (that same match "jumped straight to
+    // 90:00" next): a match whose clock is stuck anywhere from 89:00 onward
+    // has, in practice, ended — real stoppage time varies (a match can
+    // legitimately finish at 90:00, 93:47, or later), so this is a
+    // lower-bound check (>=), not another ±60s window, deliberately wide
+    // enough to also catch a match that got stuck mid-stoppage-time rather
+    // than exactly on the whistle.
+    const isFulltimeFreeze =
+      isClockStale &&
+      !isHalftimeFreeze &&
+      clockSec >= FULLTIME_MARK_SEC - FREEZE_TOLERANCE_SEC;
+    const liveStatus = isHalftimeFreeze ? "HT" : isFulltimeFreeze ? "FT" : "LIVE";
     // Half-time score, captured the moment HT is first confirmed and carried
     // forward unchanged for the rest of the match — settlement.ts's
     // liveDefinitiveOutcomeForSel() already knows how to settle ht-home/
