@@ -118,7 +118,12 @@ function connect(): void {
   if (!CONFIG.PULSESCORE_API_KEY) return; // not configured yet
   if (connected) return;
 
-  const url = pulseScoreWsUrl("soccer");
+  // Pinned to "bwin" — matches football.ts's REST source (FOOTBALL_BOOKMAKER)
+  // as of 2026-08-08, so this dormant WS connection observes the same
+  // bookmaker's data shape it would need to trust if it were ever wired
+  // back up as a live source (see football.ts's getPulseScoreFootballLive
+  // header for why it isn't yet).
+  const url = pulseScoreWsUrl("soccer", "bwin");
   let socket: WebSocket;
   try {
     socket = new WebSocket(url);
