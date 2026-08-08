@@ -22894,7 +22894,16 @@ export default function Home({
                                     <>
                                       <img
                                         src={c.logo}
-                                        alt={c.label}
+                                        // Deliberately blank, not c.label — a browser
+                                        // renders alt text visibly in place of a
+                                        // broken/failed-to-load image (these are
+                                        // external media.api-sports.io/wikimedia.org
+                                        // URLs, not guaranteed reachable), and since
+                                        // c.label already renders in its own <span>
+                                        // right after this, alt={c.label} read as a
+                                        // duplicated league name ("NBA NBA") whenever
+                                        // the logo failed to load.
+                                        alt=""
                                         width={20}
                                         height={20}
                                         className="rounded object-contain shrink-0"
