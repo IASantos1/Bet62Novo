@@ -10940,12 +10940,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (override?.teamGoals) {
       rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
     }
-    const markets = filterFootballMarketsByTier(rawMarkets, tier);
-    const odds = override?.odds ?? makeOddsFromTeams(home, away);
     const score = pulseScoreEventScore(ev);
-    const id = `pulsescore-football-${ev.eventId}`;
     const homeScore = score?.home ?? 0;
     const awayScore = score?.away ?? 0;
+    // filterLiveMarkets zeroes out (hides) any line/scoreline the current
+    // score has already settled — e.g. "Over 0.5" once any goal has been
+    // scored, or a correct-score entry below the actual score. Existed in
+    // this file already (written for the old Statpal pipeline, per its own
+    // status-string checks) but was never actually called from anywhere —
+    // dead code. Real bet365 lines get the same treatment as the synthetic
+    // fallback here: if bet365 itself already pulled a settled line
+    // (common — it stops offering "Over 0.5" once it's guaranteed), the
+    // synthetic fallback that fills the gap needs this too, or it'd show a
+    // live-looking price for an already-decided outcome.
+    const settledMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, "LIVE");
+    const markets = filterFootballMarketsByTier(settledMarkets, tier);
+    const odds = override?.odds ?? makeOddsFromTeams(home, away);
+    const id = `pulsescore-football-${ev.eventId}`;
 
     // Goal-based market suspension — same trigger condition and delay table
     // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
