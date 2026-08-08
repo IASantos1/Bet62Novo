@@ -6957,7 +6957,20 @@ export default function Home({
         const anyPrev = prev as any;
         return {
           ...anyUpdated,
-          markets: anyUpdated.markets ?? anyPrev.markets,
+          // tennisExtra is deliberately never included in the live list
+          // payload (see buildTennisLiveFromPulseScore in matches.ts) —
+          // it's only computed on demand by the per-match hydration fetch
+          // above. Without this fallback, every periodic live-list sync
+          // tick (this effect) overwrote it with the list's plain markets
+          // shell right after that fetch populated it — tennis market
+          // groups appearing then immediately disappearing.
+          markets: anyUpdated.markets
+            ? {
+                ...anyUpdated.markets,
+                tennisExtra:
+                  anyUpdated.markets.tennisExtra ?? anyPrev.markets?.tennisExtra,
+              }
+            : anyPrev.markets,
           events: anyUpdated.events ?? anyPrev.events,
           // The direct-tracker poller resolves on its own 20s interval —
           // any single /live poll tick can transiently land between
