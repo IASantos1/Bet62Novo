@@ -890,6 +890,17 @@ export default function AdminPage() {
   } | null>(null);
   const [pulsescoreUsageLoading, setPulsescoreUsageLoading] = useState(false);
 
+  // Raw uncached probe of PulseScore's own /live-events endpoint (bypasses
+  // the football/tennis pollers' cache-and-swallow-errors behavior) — lets
+  // us see the actual HTTP status/body PulseScore returns right now, from
+  // the admin panel instead of needing Railway log/shell access.
+  const [pulsescoreLiveCheck, setPulsescoreLiveCheck] = useState<{
+    football: { sport: string; status: number | null; ok: boolean; tookMs: number; bodyPreview?: string; error?: string };
+    tennis: { sport: string; status: number | null; ok: boolean; tookMs: number; bodyPreview?: string; error?: string };
+    checkedAt: string;
+  } | null>(null);
+  const [pulsescoreLiveCheckLoading, setPulsescoreLiveCheckLoading] = useState(false);
+
 
   // Filters/UI
   const [userSearch, setUserSearch] = useState("");
@@ -1073,6 +1084,19 @@ export default function AdminPage() {
       /* ignore */
     } finally {
       setPulsescoreUsageLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchPulsescoreLiveCheck = useCallback(async () => {
+    if (!token) return;
+    setPulsescoreLiveCheckLoading(true);
+    try {
+      const res = await fetch("/api/admin/pulsescore-live-check", { headers: authHeader });
+      if (res.ok) setPulsescoreLiveCheck(await res.json());
+    } catch {
+      /* ignore */
+    } finally {
+      setPulsescoreLiveCheckLoading(false);
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3171,6 +3195,71 @@ export default function AdminPage() {
                       ) : (
                         <div className="text-center text-zinc-600 text-sm py-4">
                           Não foi possível obter dados da PulseScore.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── PulseScore raw live-endpoint probe (diagnose 401/429/etc) ── */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
+                          <Activity size={16} className="text-orange-400" />
+                          PulseScore — Teste em tempo real (/live-events)
+                        </h3>
+                        <button
+                          onClick={fetchPulsescoreLiveCheck}
+                          disabled={pulsescoreLiveCheckLoading}
+                          className="text-xs font-bold px-3 py-1.5 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors flex items-center gap-1.5"
+                        >
+                          <RefreshCw size={12} className={pulsescoreLiveCheckLoading ? "animate-spin" : ""} />
+                          Testar agora
+                        </button>
+                      </div>
+                      {pulsescoreLiveCheckLoading && !pulsescoreLiveCheck ? (
+                        <div className="flex items-center justify-center py-6">
+                          <Loader2 size={22} className="animate-spin text-orange-400" />
+                        </div>
+                      ) : pulsescoreLiveCheck ? (
+                        <div className="space-y-3">
+                          <div className="text-xs text-zinc-500">
+                            Testado às{" "}
+                            {new Date(pulsescoreLiveCheck.checkedAt).toLocaleTimeString("pt-PT")}
+                          </div>
+                          {([
+                            { key: "football", label: "Futebol (soccer)" },
+                            { key: "tennis", label: "Tênis" },
+                          ] as const).map(({ key, label }) => {
+                            const r = pulsescoreLiveCheck[key];
+                            const statusColor = r.ok
+                              ? "text-green-400"
+                              : r.status === 401
+                                ? "text-red-400"
+                                : r.status === 429
+                                  ? "text-yellow-400"
+                                  : "text-red-400";
+                            return (
+                              <div key={key} className="bg-zinc-800/60 rounded-xl p-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-bold text-zinc-300">{label}</span>
+                                  <span className={`text-sm font-black tabular-nums ${statusColor}`}>
+                                    {r.status ?? "ERR"} {r.ok ? "OK" : ""}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-zinc-500 mt-1">
+                                  {r.tookMs}ms
+                                </div>
+                                {(r.bodyPreview || r.error) && (
+                                  <pre className="mt-2 text-[10px] text-zinc-500 whitespace-pre-wrap break-all bg-black/30 rounded-lg p-2 max-h-32 overflow-y-auto">
+                                    {r.bodyPreview || r.error}
+                                  </pre>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center text-zinc-600 text-sm py-4">
+                          Clique em "Testar agora" para chamar o PulseScore diretamente.
                         </div>
                       )}
                     </div>

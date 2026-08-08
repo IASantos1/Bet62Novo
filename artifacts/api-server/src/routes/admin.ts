@@ -36,6 +36,7 @@ import {
   pulseScoreBaseball,
   pulseScoreVolleyball,
 } from "../services/pulsescore/genericSportLive.js";
+import { pulseScoreRestUrl } from "../services/pulsescore/client.js";
 import { CONFIG } from "../lib/config.js";
 import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
 import { timingSafeEqualString } from "../lib/security.js";
@@ -2308,6 +2309,51 @@ router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res)
     baseball: pulseScoreBaseball.getUsage(),
     volleyball: pulseScoreVolleyball.getUsage(),
   });
+});
+
+// Raw, uncached probe of PulseScore's /live-events endpoint — bypasses
+// getPulseScoreFootballLive()'s cache-and-swallow-errors behavior (built so
+// a transient failure never blows away the live board, but that same
+// behavior hides a persistent failure behind stale data with no visible
+// error anywhere in the UI). Confirmed in production (2026-08-08) via
+// Railway's Deploy Logs: football's live poller was getting a persistent
+// 401 while tennis's got a 429 (rate-limited, so its key IS accepted) in
+// the same window — this endpoint exists so that comparison can be re-run
+// from the admin panel instead of needing Railway shell/log access every
+// time, since PULSESCORE_API_KEY is the same for both sports/paths.
+router.get("/pulsescore-live-check", adminMiddleware, async (_req: AdminRequest, res) => {
+  if (!CONFIG.PULSESCORE_API_KEY) {
+    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
+    return;
+  }
+  const probe = async (sport: string) => {
+    const url = pulseScoreRestUrl(`/live-events?sport=${sport}&limit=5`);
+    const startedAt = Date.now();
+    try {
+      const resp = await fetch(url, {
+        headers: { "X-Secret": CONFIG.PULSESCORE_API_KEY },
+        signal: AbortSignal.timeout(6000),
+      });
+      const bodyText = await resp.text();
+      return {
+        sport,
+        status: resp.status,
+        ok: resp.ok,
+        tookMs: Date.now() - startedAt,
+        bodyPreview: bodyText.slice(0, 500),
+      };
+    } catch (err) {
+      return {
+        sport,
+        status: null,
+        ok: false,
+        tookMs: Date.now() - startedAt,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  };
+  const [football, tennis] = await Promise.all([probe("soccer"), probe("tennis")]);
+  res.json({ football, tennis, checkedAt: new Date().toISOString() });
 });
 
 // Read-only diagnostic ahead of a possible PulseScore fixtures cutover:
