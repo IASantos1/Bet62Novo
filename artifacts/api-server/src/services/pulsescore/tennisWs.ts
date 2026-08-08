@@ -1,21 +1,29 @@
-// Tennis live odds from PulseScore via WebSocket — the PRO plan's single
-// concurrent WS connection is dedicated to tennis specifically because
-// point-by-point pricing benefits most from push updates; football stays on
-// REST (see football.ts).
+// Tennis live odds from PulseScore via WebSocket — CURRENTLY DORMANT.
+// startPulseScoreTennisWs() below is fully wired but has zero call sites;
+// nothing in this codebase invokes it. This module is kept only in case
+// tennis gets the PRO plan's single concurrent WS connection back.
 //
-// This was tried once before (2026-08-05) and removed because the
-// connection never produced a single confirmed frame — no "connected" frame,
-// no live event, nothing (see git history commit ede487a). Reintroduced
-// 2026-08-07 against PulseScore's own published connection-pattern
-// documentation: wss://api.pulsescore.net/api/{bookmaker}/ws/live?key=...&sport=...,
-// bet365 using the versioned /api/v3/bet365 prefix — exactly what
-// pulseScoreWsUrl() in client.ts already builds, unchanged since the first
-// attempt. That doc confirms the URL shape was already right; it doesn't
-// explain why no frames arrived, so tennis.ts's getPulseScoreTennisLive()
-// only trusts this source while a frame has actually arrived within
+// History: originally the WS connection was dedicated to tennis
+// specifically because point-by-point pricing benefits most from push
+// updates. First attempt (2026-08-05) never produced a single confirmed
+// frame — no "connected" frame, no live event, nothing (see git history
+// commit ede487a). Reintroduced 2026-08-07 against PulseScore's own
+// published connection-pattern documentation: wss://api.pulsescore.net/api/
+// {bookmaker}/ws/live?key=...&sport=..., bet365 using the versioned
+// /api/v3/bet365 prefix — exactly what pulseScoreWsUrl() in client.ts
+// already builds, unchanged since the first attempt. That doc confirmed the
+// URL shape was already right; it didn't explain why no frames had arrived
+// the first time, so tennis.ts's getPulseScoreTennisLive() was written to
+// only trust this source while a frame had actually arrived within
 // TENNIS_WS_FRESHNESS_MS (tennisWsIsFresh below) — a bare open `connected`
-// socket is not enough. A repeat of last time's silent failure degrades to
-// the REST poller instead of going dark.
+// socket was not enough, so a repeat of the first attempt's silent failure
+// would degrade to the REST poller instead of going dark.
+//
+// The PRO plan only allows one concurrent WS connection, and it was moved
+// to football on 2026-08-08 (explicit user decision — football's live
+// clock/score, particularly for lower-coverage matches, was what was
+// actually causing complaints; see footballWs.ts's header). Tennis has
+// been REST-only since, via tennis.ts's getPulseScoreTennisLive().
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { pulseScoreWsUrl, type PulseScoreEvent } from "./client.js";
@@ -213,8 +221,11 @@ function connect(): void {
   });
 }
 
-/** Call once at server startup. Safe to call even without an API key yet —
- * it's a no-op until PULSESCORE_API_KEY is set (nothing to retry-loop). */
+/** Call once at server startup to use tennis's WS connection. Not currently
+ * called anywhere — the PRO plan's single WS connection is presently given
+ * to football instead (see startPulseScoreFootballWs in footballWs.ts).
+ * Safe to call even without an API key yet — it's a no-op until
+ * PULSESCORE_API_KEY is set (nothing to retry-loop). */
 export function startPulseScoreTennisWs(): void {
   if (startedOnce) return;
   startedOnce = true;
