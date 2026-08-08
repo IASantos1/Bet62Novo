@@ -10897,6 +10897,36 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (override?.totalGoals) {
       rawMarkets.totalGoals = { ...rawMarkets.totalGoals, ...override.totalGoals };
     }
+    // Real bet365 prices via PulseScore override the synthetic model
+    // wherever it actually priced the market — same "real wins, synthetic
+    // fills the gap" pattern as tennis's tennisExtra merge (see
+    // buildTennisLiveFromPulseScore). Every field here maps onto an
+    // existing AdvancedMarkets shape the frontend already renders, so no UI
+    // changes were needed — this just swaps what's underneath it.
+    if (override?.doubleChance) {
+      rawMarkets.doubleChance = { ...rawMarkets.doubleChance, ...override.doubleChance };
+    }
+    if (override?.bothTeamsScore) {
+      rawMarkets.bothTeamsScore = { ...rawMarkets.bothTeamsScore, ...override.bothTeamsScore };
+    }
+    if (override?.drawNoBet) {
+      rawMarkets.drawNoBet = { ...rawMarkets.drawNoBet, ...override.drawNoBet };
+    }
+    if (override?.secondHalf) {
+      rawMarkets.secondHalf = { ...rawMarkets.secondHalf, ...override.secondHalf };
+    }
+    if (override?.goalOddEven) {
+      rawMarkets.goalOddEven = { ...rawMarkets.goalOddEven, ...override.goalOddEven };
+    }
+    if (override?.cleanSheet) {
+      rawMarkets.cleanSheet = { ...rawMarkets.cleanSheet, ...override.cleanSheet };
+    }
+    if (override?.correctScore) {
+      rawMarkets.correctScore = { ...rawMarkets.correctScore, ...override.correctScore };
+    }
+    if (override?.teamGoals) {
+      rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
+    }
     const markets = filterFootballMarketsByTier(rawMarkets, tier);
     const odds = override?.odds ?? makeOddsFromTeams(home, away);
     const score = pulseScoreEventScore(ev);

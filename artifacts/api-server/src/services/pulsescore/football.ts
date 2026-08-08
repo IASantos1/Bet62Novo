@@ -118,6 +118,26 @@ export type TotalGoalsOverride = Partial<{
 export type PulseScoreFootballOverride = {
   odds?: { home: number; draw: number; away: number };
   totalGoals?: TotalGoalsOverride;
+  // Extended markets — verified against a real GET /live-events?sport=soccer
+  // sample (2026-08-08). Each maps 1:1 onto an existing AdvancedMarkets field
+  // shape (matches.ts) so buildFootballLiveFromPulseScore can merge it
+  // straight in, same as totalGoals above — no new UI needed, just real data
+  // replacing the synthetic model wherever PulseScore actually priced it.
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  bothTeamsScore?: { yes: number; no: number };
+  drawNoBet?: { home: number; away: number };
+  secondHalf?: { home: number; draw: number; away: number };
+  goalOddEven?: { odd: number; even: number };
+  cleanSheet?: { home: number; away: number };
+  correctScore?: Record<string, number>;
+  teamGoals?: Partial<{
+    homeOver05: number; homeUnder05: number;
+    homeOver15: number; homeUnder15: number;
+    homeOver25: number; homeUnder25: number;
+    awayOver05: number; awayUnder05: number;
+    awayOver15: number; awayUnder15: number;
+    awayOver25: number; awayUnder25: number;
+  }>;
 };
 
 const TOTAL_GOALS_LINE_KEYS: Record<string, { over: keyof TotalGoalsOverride; under: keyof TotalGoalsOverride }> = {
@@ -168,6 +188,94 @@ function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
   return market.canonicalMarket === "OVER_UNDER";
 }
 
+// ── Extended markets — verified against a real GET /live-events?sport=soccer
+// sample (2026-08-08). Each identifies its market the same rawName/
+// canonicalMarket-fallback way as the two above, per PulseScore's own
+// documented guidance (canonicalMarket alone isn't reliable).
+function isDoubleChanceMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return (
+    market.canonicalMarket === "DOUBLE_CHANCE" ||
+    (market.rawName || "").toLowerCase() === "double chance"
+  );
+}
+
+function isBothTeamsToScoreMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return market.canonicalMarket === "BOTH_TEAMS_TO_SCORE";
+}
+
+function isDrawNoBetMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return market.canonicalMarket === "DRAW_NO_BET";
+}
+
+function isSecondHalfWinnerMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "SECOND_HALF") return false;
+  return (
+    market.canonicalMarket === "MATCH_RESULT" ||
+    (market.rawName || "").toLowerCase() === "to win 2nd half"
+  );
+}
+
+function isGoalOddEvenMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return (market.rawName || "").toLowerCase() === "goals odd/even";
+}
+
+function isCleanSheetMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return (market.rawName || "").toLowerCase() === "team clean sheet";
+}
+
+function isCorrectScoreMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return (market.rawName || "").toLowerCase() === "final score";
+}
+
+// "{Team} Goals" (O/U at .5 lines) — distinct from "{Team} Exact Goals"
+// (discrete 0/1/2/3+ buckets, not extracted here: no matching AdvancedMarkets
+// field shape exists for a discrete per-team distribution).
+function isTeamGoalsMarket(market: PulseScoreMarket, teamName: string): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return (market.rawName || "") === `${teamName} Goals`;
+}
+
+function applyTeamGoalsMarket(
+  market: PulseScoreMarket,
+  side: "home" | "away",
+  out: PulseScoreFootballOverride,
+): void {
+  const byLine = new Map<string, { over: number | null; under: number | null }>();
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive || sel.line === undefined) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").toLowerCase();
+    const key = String(sel.line);
+    const entry = byLine.get(key) ?? { over: null, under: null };
+    if (raw === "over") entry.over = val;
+    else if (raw === "under") entry.under = val;
+    byLine.set(key, entry);
+  }
+  const patch: Record<string, number> = {};
+  for (const [line, suffix] of [
+    ["0.5", "05"],
+    ["1.5", "15"],
+    ["2.5", "25"],
+  ] as const) {
+    const entry = byLine.get(line);
+    if (entry?.over != null) patch[`${side}Over${suffix}`] = entry.over;
+    if (entry?.under != null) patch[`${side}Under${suffix}`] = entry.under;
+  }
+  if (Object.keys(patch).length > 0) {
+    out.teamGoals = {
+      ...out.teamGoals,
+      ...patch,
+    } as PulseScoreFootballOverride["teamGoals"];
+  }
+}
+
 /** Builds a market override from one PulseScore event's fulltime match-
  * winner and total-goals markets. Returns an empty object (not null) when
  * the event has neither recognised yet — callers should only apply the
@@ -216,6 +324,104 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
           [lineKeys.under]: under,
         };
       }
+    } else if (isDoubleChanceMarket(market)) {
+      let homeOrDraw: number | null = null;
+      let awayOrDraw: number | null = null;
+      let homeOrAway: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const code = String(sel.moreInfo?.["N2"] ?? "");
+        if (code === "1X") homeOrDraw = val;
+        else if (code === "X2") awayOrDraw = val;
+        else if (code === "12") homeOrAway = val;
+      }
+      if (homeOrDraw !== null && awayOrDraw !== null && homeOrAway !== null) {
+        out.doubleChance = { homeOrDraw, awayOrDraw, homeOrAway };
+      }
+    } else if (isBothTeamsToScoreMarket(market)) {
+      let yes: number | null = null;
+      let no: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "YES") yes = val;
+        else if (sel.canonicalOutcome === "NO") no = val;
+      }
+      if (yes !== null && no !== null) out.bothTeamsScore = { yes, no };
+    } else if (isDrawNoBetMarket(market)) {
+      let home: number | null = null;
+      let away: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "HOME") home = val;
+        else if (sel.canonicalOutcome === "AWAY") away = val;
+      }
+      if (home !== null && away !== null) out.drawNoBet = { home, away };
+    } else if (isSecondHalfWinnerMarket(market)) {
+      let home: number | null = null;
+      let draw: number | null = null;
+      let away: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "HOME") home = val;
+        else if (sel.canonicalOutcome === "AWAY") away = val;
+        else if (sel.canonicalOutcome === "DRAW") draw = val;
+      }
+      if (home !== null && draw !== null && away !== null) {
+        out.secondHalf = { home, draw, away };
+      }
+    } else if (isGoalOddEvenMarket(market)) {
+      let odd: number | null = null;
+      let even: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const raw = (sel.rawName || "").toLowerCase();
+        if (raw === "odd") odd = val;
+        else if (raw === "even") even = val;
+      }
+      if (odd !== null && even !== null) out.goalOddEven = { odd, even };
+    } else if (isCleanSheetMarket(market)) {
+      let home: number | null = null;
+      let away: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        // "Yes" = that team keeps a clean sheet (concedes 0) — the "No"
+        // rows share the same HOME/AWAY canonicalOutcome, so HD is the only
+        // way to tell which side of the market a row is on.
+        if (String(sel.moreInfo?.["HD"] ?? "").toLowerCase() !== "yes") continue;
+        if (sel.canonicalOutcome === "HOME") home = val;
+        else if (sel.canonicalOutcome === "AWAY") away = val;
+      }
+      if (home !== null && away !== null) out.cleanSheet = { home, away };
+    } else if (isCorrectScoreMarket(market)) {
+      const scores: Record<string, number> = {};
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const label = (sel.rawName || "").trim();
+        // Skip the placeholder "{home} {away}" summary row (odds:0,
+        // isActive:false already filters it, but the label shape check is a
+        // second guard) and anything that isn't a plain "H-A" scoreline.
+        if (!/^\d+-\d+$/.test(label)) continue;
+        scores[label] = val;
+      }
+      if (Object.keys(scores).length > 0) out.correctScore = scores;
+    } else if (isTeamGoalsMarket(market, ev.home)) {
+      applyTeamGoalsMarket(market, "home", out);
+    } else if (isTeamGoalsMarket(market, ev.away)) {
+      applyTeamGoalsMarket(market, "away", out);
     } else {
       recordUnknownCanonicalMarket(market.canonicalMarket);
     }
@@ -238,7 +444,8 @@ export function findPulseScoreFootballOverride(
   );
   if (!ev) return null;
   const override = extractFootballOverride(ev);
-  return override.odds || override.totalGoals ? override : null;
+  const hasAny = Object.keys(override).length > 0;
+  return hasAny ? override : null;
 }
 
 /** Real match score, read from the {home,away} object (not the docs'
