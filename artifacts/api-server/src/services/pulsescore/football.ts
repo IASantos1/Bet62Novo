@@ -1,25 +1,11 @@
-// Football live odds from PulseScore — primarily the WebSocket (footballWs.ts,
-// pushed frames) since 2026-08-08, falling back to REST polling whenever a WS
-// frame hasn't arrived recently (getPulseScoreFootballLiveRest below, the
-// sole source between the first WS revert and this re-enable). Tennis
-// (tennis.ts) shares this same bet365 bookmaker for its own REST-only feed —
-// the PRO plan's single WS connection is football's alone.
+// Football live odds from PulseScore, polled via REST. Tennis (tennis.ts)
+// shares this same bet365 bookmaker for its own REST fallback.
 // Same in-process cache + in-flight-dedup shape already used throughout
 // matches.ts for other ~1s live polls (e.g. TENNIS_LIVE_V1_TTL).
 //
-// History: a WS-preferring version of this shipped once already
-// (2026-08-08) and was reverted the same day — live matches were reported
-// missing from the site right after. The suspect was applyFrame() in
-// footballWs.ts treating each broadcast frame as a full snapshot (deleting
-// any match absent from that frame), an assumption copied from tennisWs.ts
-// but only ever confirmed for tennis's much lower match volume; if
-// football's frames are delta-only, that logic would purge every untouched
-// match every frame — matching the symptom exactly. Rather than resolve
-// that question with live traffic (risky on a betting site), applyFrame was
-// changed to a 20s grace period keyed by per-event last-seen time instead of
-// deleting on the very first absent frame — correct under EITHER hypothesis,
-// snapshot or delta, so the WS is safe to trust again regardless of which
-// one PulseScore actually does. See footballWs.ts's applyFrame for the fix.
+// A WS connection also exists (footballWs.ts, started at boot) but is
+// deliberately NOT used as a data source here — see getPulseScoreFootballLive
+// below for why it was tried and reverted the same day.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -30,14 +16,6 @@ import {
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
-import { getFootballWsEvents, footballWsIsFresh } from "./footballWs.js";
-
-// How stale the last WS frame is allowed to be before falling back to REST —
-// same value/reasoning tennis's own WS-preferring version used: generous
-// enough to ride out a single dropped/delayed frame, tight enough that a
-// genuinely dead connection falls back within a couple of ticks instead of
-// serving stale WS data indefinitely.
-const FOOTBALL_WS_FRESHNESS_MS = 5_000;
 
 const FOOTBALL_LIVE_TTL_MS = 1_000; // matches the PRO plan's 1 req/s rate limit
 
@@ -87,12 +65,43 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** REST-polled live football odds from PulseScore (bet365, normalized).
+/** Live football odds from PulseScore (bet365, normalized), REST-only.
  * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
- * call fails on the very first attempt (nothing cached yet to fall back
- * to). This is the fallback path — see getPulseScoreFootballLive below for
- * the WS-preferring entry point every caller should actually use. */
-async function getPulseScoreFootballLiveRest(): Promise<PulseScoreEvent[]> {
+ * call fails on the very first attempt (nothing cached yet to fall back to).
+ *
+ * A WS-preferring version of this function has now shipped and been
+ * reverted TWICE the same day (2026-08-08):
+ *
+ * Attempt 1: reports of many live matches missing from the site right
+ * after it went out. Suspected cause — applyFrame() in footballWs.ts
+ * treated each broadcast frame as a full snapshot (deleting anything
+ * absent from that frame), an assumption copied from tennisWs.ts but only
+ * ever confirmed for tennis's much lower match volume; if football's
+ * frames are delta-only, that logic would purge every untouched match
+ * every frame. Fixed by switching applyFrame to a 20s grace period per
+ * event instead of deleting on the first absent frame — correct under
+ * either snapshot or delta semantics.
+ *
+ * Attempt 2 (after that fix): reports of stuck clocks (one observed
+ * capped at exactly 3:00 — the frontend's own extrapolation ceiling),
+ * matches that should have gone live never appearing, and finished
+ * matches still showing "A Iniciar". Root cause this time: WS freshness
+ * (footballWsIsFresh) is tracked PER CONNECTION, not per event — it only
+ * asks "did any frame arrive recently", which stays true as long as OTHER
+ * matches keep broadcasting. If PulseScore's frames really are delta-only
+ * and only re-broadcast a match when its price moves, a match with quiet
+ * odds can go stale (clockSec frozen) for a long time while the
+ * connection as a whole looks perfectly healthy — and REST never kicks in
+ * to correct that one match specifically, because the freshness check
+ * that gates the fallback never sees it as stale. Fixing this for real
+ * needs PER-EVENT freshness (e.g. a lastSeenAt timestamp per eventId,
+ * falling back to REST for just that match once its own reading goes
+ * stale, not an all-or-nothing connection-level check) — not attempted
+ * yet. Back to REST-only (known-good) until that exists. The WS
+ * connection (footballWs.ts) is still started at boot so its behavior/logs
+ * can be observed without being trusted for real data yet — see
+ * getFootballWsEvents/footballWsIsFresh, currently unused here. */
+export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
   const now = Date.now();
@@ -122,19 +131,6 @@ async function getPulseScoreFootballLiveRest(): Promise<PulseScoreEvent[]> {
       });
   }
   return inFlight;
-}
-
-/** Live football odds from PulseScore — prefers the pushed WebSocket feed
- * (footballWs.ts) whenever a frame has arrived within FOOTBALL_WS_FRESHNESS_MS,
- * falling back to REST polling otherwise. Both paths return the exact same
- * PulseScoreEvent[] shape, so every downstream consumer
- * (extractFootballOverride, buildFootballLiveFromPulseScore in matches.ts)
- * is unaffected by which one served a given tick — mirrors tennis's own
- * WS/REST split before that connection moved to football (tennis.ts). */
-export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
-  if (!CONFIG.PULSESCORE_API_KEY) return [];
-  if (footballWsIsFresh(FOOTBALL_WS_FRESHNESS_MS)) return getFootballWsEvents();
-  return getPulseScoreFootballLiveRest();
 }
 
 // ── canonicalMarket → our own market shape ──────────────────────────────────
