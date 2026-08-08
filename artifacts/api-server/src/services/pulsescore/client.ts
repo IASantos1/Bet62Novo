@@ -15,10 +15,10 @@ export function pulseScoreRestUrl(path: string, bookmaker?: string): string {
   return `${CONFIG.PULSESCORE_BASE_URL}/${bookmakerPrefix(bookmaker)}${path}`;
 }
 
-export function pulseScoreWsUrl(sport: string): string {
+export function pulseScoreWsUrl(sport: string, bookmaker?: string): string {
   const httpBase = CONFIG.PULSESCORE_BASE_URL.replace(/^http/, "ws");
   const key = encodeURIComponent(CONFIG.PULSESCORE_API_KEY);
-  return `${httpBase}/${bookmakerPrefix()}/ws/live?key=${key}&sport=${encodeURIComponent(sport)}`;
+  return `${httpBase}/${bookmakerPrefix(bookmaker)}/ws/live?key=${key}&sport=${encodeURIComponent(sport)}`;
 }
 
 // Every REST caller (football's live poller, tennis's live poller, and both
@@ -138,16 +138,36 @@ export type PulseScoreEvent = {
   eventId: string;
   sport: string;
   league: string;
-  country?: string; // observed always "" in practice — don't rely on it
+  // bet365: observed always "" in practice — don't rely on it there.
+  // bwin: populated with the real country name (e.g. "Brazil", "Chile") —
+  // confirmed against real /live-events?sport=soccer samples (2026-08-08).
+  country?: string;
   home: string;
   away: string;
   score?: { home: string; away: string };
   markets: PulseScoreMarket[];
-  // Raw bet365 fields preserved alongside the normalized ones. TM/TS are the
-  // only place the live clock is available (no normalized "minute" field
-  // exists) — TM = minutes elapsed, TS = seconds, both as string numbers.
-  // Confirmed against real live matches: TM values (92, 68, 45, 90, 71) line
-  // up exactly with plausible real match minutes.
+  // Normalized live match clock — confirmed present on bwin's real
+  // /live-events?sport=soccer samples (2026-08-08): { minute: 92, second: 42,
+  // period: "2H", running: true }, also seen period: "Finished" for an ended
+  // match. Not confirmed for bet365 — that bookmaker instead only exposes
+  // the clock via the raw moreInfo.TM/TS fields below (see
+  // football.ts::pulseScoreEventMinute/pulseScoreEventClockSec, which prefer
+  // this field when present and fall back to moreInfo.TM/TS otherwise).
+  matchClock?: {
+    minute: number;
+    second: number;
+    period: string; // seen: "2H", "Finished" — other values (1H/HT?) unconfirmed
+    running: boolean;
+  };
+  // Raw bet365-specific fields preserved alongside the normalized ones. Not
+  // confirmed present on bwin — the full bwin API doc sampled 2026-08-08 (62
+  // real live-soccer events) never showed a moreInfo object on any event or
+  // selection, so treat this as bet365-only until proven otherwise. TM/TS
+  // are the only place bet365's live clock is available (no normalized
+  // "minute" field exists for that bookmaker) — TM = minutes elapsed, TS =
+  // seconds, both as string numbers. Confirmed against real live matches:
+  // TM values (92, 68, 45, 90, 71) line up exactly with plausible real match
+  // minutes.
   moreInfo?: {
     TM?: string;
     TS?: string;

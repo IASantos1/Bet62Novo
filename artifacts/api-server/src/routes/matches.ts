@@ -24,6 +24,7 @@ import {
   pulseScoreEventScore,
   pulseScoreEventMinute,
   pulseScoreEventClockSec,
+  pulseScoreEventClockFinished,
   getPulseScoreFootballUpcoming,
 } from "../services/pulsescore/football.js";
 import {
@@ -1284,6 +1285,26 @@ export function countryForLeagueName(leagueName: string): string | null {
     if (lower === prefix || lower.startsWith(`${prefix} `)) return country;
   }
   return LEAGUE_NAME_TO_COUNTRY.get(lower) ?? null;
+}
+
+/** Country lookup for a PulseScore football event, preferring the event's
+ * own `country` field (bwin populates this with a real value — "Brazil",
+ * "Chile", ... — confirmed against a real /live-events?sport=soccer sample,
+ * 2026-08-08) over the country-in-league-name guesswork above. bet365 always
+ * sends `country: ""`, so this transparently falls back to
+ * countryForLeagueName(league) for that bookmaker exactly as before — this
+ * only changes behavior for events that actually carry a country. Uses the
+ * same PULSESCORE_COUNTRY_PREFIXES label→key table as an exact lookup (not
+ * a prefix strip, since `country` here is already just the bare country
+ * name) so both paths resolve to the same key vocabulary. */
+function countryForPulseScoreFootballEvent(ev: { country?: string; league?: string }): string | null {
+  const raw = (ev.country || "").trim().toLowerCase();
+  if (raw) {
+    for (const [label, key] of PULSESCORE_COUNTRY_PREFIXES) {
+      if (raw === label) return key;
+    }
+  }
+  return countryForLeagueName(ev.league || "");
 }
 
 // All countries with explicit domestic league entries (used to detect intl tournaments)
@@ -10737,7 +10758,7 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
 
     const leagueName = ev.league || "";
     const isIntl = isIntlTournamentName(leagueName);
-    const countryKey = countryForLeagueName(leagueName);
+    const countryKey = countryForPulseScoreFootballEvent(ev);
     if (!isIntl && !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName)))
       continue;
     const country = countryKey ?? "Internacional";
@@ -11025,7 +11046,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
 
     const leagueName = ev.league || "";
     const isIntl = isIntlTournamentName(leagueName);
-    const countryKey = countryForLeagueName(leagueName);
+    const countryKey = countryForPulseScoreFootballEvent(ev);
     // Curated competition catalog — same allow-list/priority table the old
     // Statpal pipeline used (already tuned for BET62: which countries are
     // shown, first-division-only countries, etc.). A league PulseScore sends
@@ -11168,10 +11189,17 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // lower-bound check (>=), not another ±60s window, deliberately wide
     // enough to also catch a match that got stuck mid-stoppage-time rather
     // than exactly on the whistle.
+    // pulseScoreEventClockFinished(ev) short-circuits this for bwin events:
+    // its matchClock.period reports "Finished" directly and immediately
+    // (confirmed real, 2026-08-08), no need to wait out the 20s staleness
+    // window below — that heuristic stays as the only signal for bet365
+    // events (no matchClock) and as a safety net for any other terminal
+    // bwin period value this hasn't seen yet.
     const isFulltimeFreeze =
-      isClockStale &&
-      !isHalftimeFreeze &&
-      clockSec >= FULLTIME_MARK_SEC - FREEZE_TOLERANCE_SEC;
+      pulseScoreEventClockFinished(ev) ||
+      (isClockStale &&
+        !isHalftimeFreeze &&
+        clockSec >= FULLTIME_MARK_SEC - FREEZE_TOLERANCE_SEC);
     const liveStatus = isHalftimeFreeze ? "HT" : isFulltimeFreeze ? "FT" : "LIVE";
     // Half-time score, captured the moment HT is first confirmed and carried
     // forward unchanged for the rest of the match — settlement.ts's

@@ -1,5 +1,10 @@
-// Football live odds from PulseScore, polled via REST. Tennis (tennis.ts)
-// shares this same bet365 bookmaker for its own REST fallback.
+// Football live odds from PulseScore, polled via REST. Pinned to its own
+// "bwin" bookmaker (FOOTBALL_BOOKMAKER below) as of 2026-08-08 — tennis
+// (tennis.ts) still uses CONFIG.PULSESCORE_BOOKMAKER ("bet365"), unchanged,
+// since bwin's shape is only confirmed for football/soccer so far (its own
+// API doc sample never showed a tennis or basketball event, and tennis.ts's
+// live set/point/serve tracking depends entirely on bet365-specific
+// moreInfo fields this doc never showed at all, for any sport).
 // Same in-process cache + in-flight-dedup shape already used throughout
 // matches.ts for other ~1s live polls (e.g. TENNIS_LIVE_V1_TTL).
 //
@@ -49,6 +54,17 @@ export function getPulseScoreFootballUsage(): {
   return { requestsToday, date: usageDate };
 }
 
+// Football pins its own "bwin" bookmaker explicitly, rather than following
+// CONFIG.PULSESCORE_BOOKMAKER (still "bet365" — tennis/basketball stay on
+// it, unverified against bwin's shape). Switched 2026-08-08 after bet365
+// live coverage proved unreliable for football (see git history: the
+// country-glued-to-league-name bug, sparse/checkpoint-only clock updates
+// for lower-coverage matches) and a real bwin sample showed both fixed
+// (separate `country` field, per-second `matchClock`) — see
+// pulseScoreEventMinute/pulseScoreEventClockSec and this file's market
+// matchers below for the concrete shape differences that required.
+const FOOTBALL_BOOKMAKER = "bwin";
+
 async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   rollUsageDateIfNeeded();
   requestsToday += 1;
@@ -56,16 +72,18 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   // not a bare array as the public docs' example showed — confirmed via a
   // real authenticated call. limit=200 comfortably covers real live-soccer
   // volume (18 events observed) in a single request within the 1 req/s
-  // PRO-plan rate limit. Lets errors (429s from the shared bet365 budget,
-  // timeouts, ...) propagate — see getPulseScoreFootballLive's .catch()
-  // for why swallowing them here was a real bug, not a safety net.
+  // PRO-plan rate limit. Lets errors (429s from the shared bookmaker
+  // budget, timeouts, ...) propagate — see getPulseScoreFootballLive's
+  // .catch() for why swallowing them here was a real bug, not a safety net.
   const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
     "/live-events?sport=soccer&limit=200",
+    undefined,
+    FOOTBALL_BOOKMAKER,
   );
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live football odds from PulseScore (bet365, normalized), REST-only.
+/** Live football odds from PulseScore (bwin, normalized), REST-only.
  * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
  * call fails on the very first attempt (nothing cached yet to fall back to).
  *
@@ -115,11 +133,11 @@ export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
       })
       .catch((err) => {
         // This used to swallow the error and return [] unconditionally —
-        // a transient 429 (bet365's shared 1 req/s budget collides with
-        // tennis's REST fallback, or a background prematch page fetch)
-        // silently wiped the live football feed to "0 matches" with zero
-        // trace anywhere. Log it and keep serving the last good cache
-        // instead — only genuinely empty right after boot (cache null).
+        // a transient 429 (bwin's 1 req/s budget collides with football's
+        // own background prematch page fetch, which shares it) silently
+        // wiped the live football feed to "0 matches" with zero trace
+        // anywhere. Log it and keep serving the last good cache instead —
+        // only genuinely empty right after boot (cache null).
         logger.warn(
           { err: err instanceof Error ? err.message : String(err) },
           "[pulsescore] football live fetch failed — serving stale cache",
@@ -229,8 +247,17 @@ function isMatchWinnerMarket(market: PulseScoreMarket): boolean {
 // (API order, not something we control) overwrite the others for any line
 // they both covered. "Alternative Match Goals" is kept in because real
 // samples show it only ever adds NEW lines Match Goals doesn't have, never
-// overlapping — Goal Line is the one that collides.
-const TOTAL_GOALS_RAW_NAMES = new Set(["match goals", "alternative match goals"]);
+// overlapping — Goal Line is the one that collides. "total goals" is bwin's
+// own name for this same market (confirmed against a real bwin
+// /live-events?sport=soccer sample, 2026-08-08 — bet365 calls it "Match
+// Goals", bwin calls the identical canonicalMarket/period combo "Total
+// Goals"); bwin's sample never showed a colliding Goal-Line-style market
+// under that name, so no extra disambiguation was needed there.
+const TOTAL_GOALS_RAW_NAMES = new Set([
+  "match goals",
+  "alternative match goals",
+  "total goals",
+]);
 
 function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
@@ -241,7 +268,9 @@ function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
 // ── Extended markets — verified against a real GET /live-events?sport=soccer
 // sample (2026-08-08). Each identifies its market the same rawName/
 // canonicalMarket-fallback way as the two above, per PulseScore's own
-// documented guidance (canonicalMarket alone isn't reliable).
+// documented guidance (canonicalMarket alone isn't reliable). Comments below
+// call out which bookmaker's naming was actually confirmed — bet365 and
+// bwin diverge on several of these despite sharing the same canonicalMarket.
 function isDoubleChanceMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
   return (
@@ -260,27 +289,50 @@ function isDrawNoBetMarket(market: PulseScoreMarket): boolean {
   return market.canonicalMarket === "DRAW_NO_BET";
 }
 
+// bet365: canonicalMarket "MATCH_RESULT" or rawName "to win 2nd half"
+// (unverified naming, never actually seen — kept as a defensive fallback).
+// bwin: canonicalMarket "OTHER", rawName "2nd Half Result" — confirmed
+// against a real live sample (2026-08-08); doesn't share either bet365
+// check, so needed its own clause rather than just widening the existing one.
 function isSecondHalfWinnerMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "SECOND_HALF") return false;
+  const rawName = (market.rawName || "").toLowerCase();
   return (
     market.canonicalMarket === "MATCH_RESULT" ||
-    (market.rawName || "").toLowerCase() === "to win 2nd half"
+    rawName === "to win 2nd half" ||
+    (market.canonicalMarket === "OTHER" && rawName === "2nd half result")
   );
 }
 
+// bet365: rawName "goals odd/even" (unverified naming, never actually seen).
+// bwin: canonicalMarket "TOTAL_GOALS_ODD_EVEN", rawName "Odd/Even - Total
+// Goals" — confirmed against a real live sample (2026-08-08).
 function isGoalOddEvenMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
-  return (market.rawName || "").toLowerCase() === "goals odd/even";
+  return (
+    market.canonicalMarket === "TOTAL_GOALS_ODD_EVEN" ||
+    (market.rawName || "").toLowerCase() === "goals odd/even"
+  );
 }
 
+// bet365-only so far — rawName "team clean sheet" was never independently
+// confirmed against a real sample, and bwin's own doc sample (2026-08-08,
+// 62 real live events) never showed a Clean Sheet market at all. Left
+// as-is: a market this doesn't recognize just doesn't populate
+// out.cleanSheet, which safely falls back to the synthetic price — no
+// crash risk, just needs a real bwin sample before extending.
 function isCleanSheetMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
   return (market.rawName || "").toLowerCase() === "team clean sheet";
 }
 
+// bet365: rawName "final score" (unverified naming, never actually seen).
+// bwin: rawName "Correct Score" — confirmed against a real live sample
+// (2026-08-08).
 function isCorrectScoreMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
-  return (market.rawName || "").toLowerCase() === "final score";
+  const rawName = (market.rawName || "").toLowerCase();
+  return rawName === "final score" || rawName === "correct score";
 }
 
 // "{Team} Goals" (O/U at .5 lines) — distinct from "{Team} Exact Goals"
@@ -382,10 +434,37 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         if (!sel.isActive) continue;
         const val = oddsToNumber(sel.odds);
         if (val === null) continue;
+        // bet365: a moreInfo.N2 code identifies which pair this selection
+        // covers ("1X"/"X2"/"12"). bwin: no selection in its whole doc
+        // sample (2026-08-08, 62 real live events) ever carried a moreInfo
+        // field at all — falls back to parsing the two sides straight out
+        // of rawName instead ("{home} or X", "X or {away}", "{home} or
+        // {away}"), confirmed against a real bwin sample.
         const code = String(sel.moreInfo?.["N2"] ?? "");
-        if (code === "1X") homeOrDraw = val;
-        else if (code === "X2") awayOrDraw = val;
-        else if (code === "12") homeOrAway = val;
+        if (code === "1X") {
+          homeOrDraw = val;
+          continue;
+        }
+        if (code === "X2") {
+          awayOrDraw = val;
+          continue;
+        }
+        if (code === "12") {
+          homeOrAway = val;
+          continue;
+        }
+        const parts = (sel.rawName || "").split(/\s+or\s+/i);
+        if (parts.length !== 2) continue;
+        const a = parts[0]!.trim();
+        const b = parts[1]!.trim();
+        const isDrawToken = (s: string) => /^x$/i.test(s) || /^draw$/i.test(s);
+        const aIsHome = teamNamesMatch(a, ev.home);
+        const aIsAway = !aIsHome && teamNamesMatch(a, ev.away);
+        const bIsHome = teamNamesMatch(b, ev.home);
+        const bIsAway = !bIsHome && teamNamesMatch(b, ev.away);
+        if ((aIsHome && isDrawToken(b)) || (isDrawToken(a) && bIsHome)) homeOrDraw = val;
+        else if ((aIsAway && isDrawToken(b)) || (isDrawToken(a) && bIsAway)) awayOrDraw = val;
+        else if ((aIsHome && bIsAway) || (aIsAway && bIsHome)) homeOrAway = val;
       }
       if (homeOrDraw !== null && awayOrDraw !== null && homeOrAway !== null) {
         out.doubleChance = { homeOrDraw, awayOrDraw, homeOrAway };
@@ -509,10 +588,11 @@ export function pulseScoreEventScore(
   return { home: h, away: a };
 }
 
-/** Live clock in minutes, read from the raw bet365 moreInfo.TM field — no
- * normalized "minute" field exists in this API. Confirmed against real live
- * matches (TM values of 92/68/45/90/71 line up with plausible real match
- * minutes); not documented anywhere, so treat as best-effort.
+/** Live clock in minutes. Prefers bwin's normalized `matchClock.minute` —
+ * confirmed against real live samples (2026-08-08, values 90-95 lining up
+ * with plausible match minutes) — falling back to bet365's raw moreInfo.TM
+ * field (no normalized "minute" field exists on that bookmaker) for any
+ * event that doesn't carry matchClock.
  *
  * bet365 sends stoppage time as "45+2"/"90+3" — plain Number() on that is
  * NaN, which silently froze the clock at 0 for whichever matches happened
@@ -521,6 +601,10 @@ export function pulseScoreEventScore(
  * the base minute is taken; the "+N" part isn't surfaced separately since
  * the frontend clock just needs a monotonically increasing number. */
 export function pulseScoreEventMinute(ev: PulseScoreEvent): number {
+  if (ev.matchClock) {
+    const m = ev.matchClock.minute;
+    return Number.isFinite(m) && m >= 0 ? m : 0;
+  }
   const raw = ev.moreInfo?.TM;
   if (raw == null) return 0;
   const m = /^(\d+)/.exec(String(raw).trim());
@@ -529,15 +613,24 @@ export function pulseScoreEventMinute(ev: PulseScoreEvent): number {
   return Number.isFinite(tm) && tm >= 0 ? tm : 0;
 }
 
-/** Total elapsed seconds (TM*60 + TS) — TS is bet365's own seconds-within-
- * the-minute counter, sitting right next to TM in moreInfo but previously
- * never read (pulseScoreEventMinute above only surfaced whole minutes).
- * Feeds LiveMatchState._liveExtra.clockSec, which the frontend already
- * knows how to extrapolate client-side into a running MM:SS clock (same
- * mechanism other live sources use) — was never wired up for PulseScore
- * football, so the clock only ever showed a coarse, occasionally-stuck-at-0
- * whole minute instead of a live-ticking seconds-precision one. */
+/** Total elapsed seconds. Prefers bwin's normalized `matchClock.minute`/
+ * `.second` (a real per-second reading, confirmed against live samples
+ * 2026-08-08 — e.g. {minute:92, second:42}), falling back to bet365's raw
+ * TM (minutes) + TS (seconds-within-the-minute) moreInfo fields, which sit
+ * right next to each other but are only ever checkpoint/best-effort on that
+ * bookmaker (see getPulseScoreFootballLive's header for the production
+ * incident — sparse updates for lower-coverage matches — that motivated
+ * moving football to bwin in the first place). Feeds
+ * LiveMatchState._liveExtra.clockSec, which the frontend already knows how
+ * to extrapolate client-side into a running MM:SS clock. */
 export function pulseScoreEventClockSec(ev: PulseScoreEvent): number {
+  if (ev.matchClock) {
+    const minutes = ev.matchClock.minute;
+    const seconds = ev.matchClock.second;
+    if (!Number.isFinite(minutes) || minutes < 0) return 0;
+    const secOk = Number.isFinite(seconds) && seconds >= 0 && seconds < 60;
+    return minutes * 60 + (secOk ? seconds : 0);
+  }
   const rawTm = ev.moreInfo?.TM;
   if (rawTm == null) return 0;
   const tmMatch = /^(\d+)/.exec(String(rawTm).trim());
@@ -549,6 +642,16 @@ export function pulseScoreEventClockSec(ev: PulseScoreEvent): number {
   const seconds =
     Number.isFinite(secondsNum) && secondsNum >= 0 && secondsNum < 60 ? secondsNum : 0;
   return minutes * 60 + seconds;
+}
+
+/** True only when bwin's own matchClock explicitly reports the match over
+ * (`period: "Finished"`, confirmed against a real live sample 2026-08-08) —
+ * a verified, immediate signal, unlike matches.ts's staleness-based
+ * isFulltimeFreeze heuristic (which still exists for bet365 events that
+ * carry no matchClock at all, and as a safety net for any bwin period value
+ * this hasn't seen yet). Always false for bet365 events (no matchClock). */
+export function pulseScoreEventClockFinished(ev: PulseScoreEvent): boolean {
+  return ev.matchClock?.period === "Finished";
 }
 
 // ── Prematch (leagues catalog) ──────────────────────────────────────────────
@@ -601,7 +704,7 @@ type PulseScoreLeaguesResponse = {
 };
 
 // Prematch doesn't need second-level freshness like the live poller — a
-// multi-minute cache keeps this well clear of bet365's shared 1 req/s budget.
+// multi-minute cache keeps this well clear of bwin's 1 req/s budget.
 const FOOTBALL_UPCOMING_TTL_MS = 5 * 60_000;
 let upcomingCache: { events: PulseScorePrematchEvent[]; fetchedAt: number } | null = null;
 let upcomingInFlight: Promise<PulseScorePrematchEvent[]> | null = null;
@@ -610,20 +713,28 @@ async function fetchAllFootballLeagues(): Promise<PulseScoreLeague[]> {
   const leagues: PulseScoreLeague[] = [];
   let page = 1;
   // Real sample: total 289 leagues at limit=30 (the documented max) -> ~10
-  // pages. This shares bet365's rate budget with the live pollers (football
-  // live 1 req/s + tennis live ~0.67 req/s on their own already), so pacing
-  // this at 1.1s apart — as first written — meant it alone consumed nearly
-  // an entire extra req/s for ~16s every FOOTBALL_UPCOMING_TTL_MS, on top of
-  // that already-committed live traffic: exactly the kind of burst that
-  // starves the live pollers into 429s/timeouts, which buildLivePayload()
-  // then has no choice but to paper over with sportWithFallback's stale
-  // snapshot — i.e. odds/score look frozen. Paced far slower here instead:
-  // this fetch only runs once per FOOTBALL_UPCOMING_TTL_MS in the
-  // background and nothing user-facing waits on it (served from its own
-  // cache), so taking longer wall-clock time to finish costs nothing.
+  // pages. This shares football's own "bwin" bookmaker budget with the live
+  // poller (fetchFootballLive above, ~1 req/s), so pacing this at 1.1s apart
+  // — as first written — meant it alone consumed nearly an entire extra
+  // req/s for ~16s every FOOTBALL_UPCOMING_TTL_MS, on top of that
+  // already-committed live traffic: exactly the kind of burst that starves
+  // the live poller into 429s/timeouts, which buildLivePayload() then has no
+  // choice but to paper over with sportWithFallback's stale snapshot — i.e.
+  // odds/score look frozen. Paced far slower here instead: this fetch only
+  // runs once per FOOTBALL_UPCOMING_TTL_MS in the background and nothing
+  // user-facing waits on it (served from its own cache), so taking longer
+  // wall-clock time to finish costs nothing. (Tennis no longer shares this
+  // budget — it stayed on the separate "bet365" bookmaker when football
+  // moved to "bwin", and client.ts's throttle is keyed per bookmaker.)
   for (let i = 0; i < 15; i++) {
+    // bwin's leagues path is "/soccer/leagues" (confirmed against a real
+    // Swagger sample, 2026-08-08: "GET /api/bwin/soccer/leagues") — unlike
+    // bet365, which serves this at the bare bookmaker root with no sport
+    // segment (see this function's own header comment history). Getting
+    // this wrong would 404 the whole prematch fetch for bwin.
     const data = await pulseScoreGetWithRetry<PulseScoreLeaguesResponse>(
-      `/leagues?page=${page}&limit=30`,
+      `/soccer/leagues?page=${page}&limit=30`,
+      { bookmaker: FOOTBALL_BOOKMAKER },
     );
     if (!data) break; // out of retries — keep whatever was already collected
     if (Array.isArray(data.leagues)) leagues.push(...data.leagues);
@@ -652,8 +763,8 @@ async function fetchFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
     .filter((ev) => !ev.live && ev.sport === "soccer");
 }
 
-/** Upcoming football fixtures from PulseScore (bet365), each carrying its
- * MATCH_RESULT prematch odds when bet365 has priced it yet. Empty array if
+/** Upcoming football fixtures from PulseScore (bwin), each carrying its
+ * MATCH_RESULT prematch odds when bwin has priced it yet. Empty array if
  * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
  * very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
@@ -670,11 +781,11 @@ export async function getPulseScoreFootballUpcoming(): Promise<PulseScorePrematc
       .catch((err) => {
         // Used to swallow the error and overwrite upcomingCache with []
         // unconditionally — a single transient failure across the ~10-page
-        // paginated /leagues fetch (429 collision with the live pollers'
-        // shared bet365 budget, a timeout, ...) wiped 5 minutes of prematch
-        // listings to empty, which is exactly what shows up on the site as
-        // matches "appearing and disappearing". Log it and keep serving
-        // whatever was cached instead.
+        // paginated /leagues fetch (429 collision with the live poller's own
+        // bwin budget, a timeout, ...) wiped 5 minutes of prematch listings
+        // to empty, which is exactly what shows up on the site as matches
+        // "appearing and disappearing". Log it and keep serving whatever was
+        // cached instead.
         logger.warn(
           { err: err instanceof Error ? err.message : String(err) },
           "[pulsescore] football upcoming fetch failed — serving stale cache",
