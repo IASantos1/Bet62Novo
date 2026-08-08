@@ -11086,7 +11086,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // live-looking price for an already-decided outcome.
     const settledMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, liveStatus);
     const markets = filterFootballMarketsByTier(settledMarkets, tier);
-    const odds = override?.odds ?? makeOddsFromTeams(home, away);
+    // Real sample (2026-08-08, eventId 199102620): a match that had a full
+    // slate of active markets 5 minutes earlier came back with just one dead
+    // market (isActive:false, odds:0 throughout) while its clock (TM/TS) sat
+    // frozen at the exact same reading — PulseScore had effectively stopped
+    // pricing it without it leaving the live-events list. Falling back to
+    // makeOddsFromTeams() here (fully synthetic, computer-generated odds)
+    // in that situation meant the site could keep taking real-money bets
+    // against invented numbers for a match no bookmaker was actually
+    // pricing. Now: once a match has shown real odds at least once, losing
+    // them doesn't regenerate synthetic ones — the last known real odds
+    // stay on screen (below) and betting gets suspended (see oddsWentDark
+    // below) until PulseScore prices it again or the match leaves the live
+    // list. Only a match that has NEVER had real odds (still bootstrapping
+    // right after it appeared) gets the synthetic starting price.
+    const hasRealOddsNow = !!override?.odds;
+    const odds =
+      override?.odds ?? (existing?.hasRealOdds ? existing.odds : makeOddsFromTeams(home, away));
 
     // Goal-based market suspension — same trigger condition and delay table
     // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
@@ -11147,6 +11163,22 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         "[DIAG goal] raw PulseScore markets at moment of goal — checking whether bet365's own isActive flips on suspension",
       );
     }
+    // Odds-unavailable suspension — separate from the goal trigger above
+    // (which already suspends everything for its own delay window and takes
+    // priority when both happen on the same tick). Re-applied fresh every
+    // tick this condition holds, so it stays suspended for as long as
+    // PulseScore keeps not pricing this match, and clears itself within a
+    // few seconds of real odds coming back (nothing renews it once
+    // hasRealOddsNow is true again). See the odds computation above for the
+    // production incident this covers.
+    const oddsWentDark = !hasRealOddsNow && !!existing?.hasRealOdds;
+    if (oddsWentDark && !goalScored) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + 5_000]),
+      );
+      suspensionReason = "ODDS INDISPONÍVEIS";
+    }
 
     // PulseScore only ever gives us team NAMES (no id field anywhere in its
     // schema — confirmed against a real event dump). Resolve a real crest
@@ -11172,7 +11204,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       awayScore,
       minute: pulseScoreEventMinute(ev),
       status: liveStatus,
-      hasRealOdds: !!override?.odds,
+      hasRealOdds: hasRealOddsNow,
       odds,
       markets,
       matchTier: tier,
