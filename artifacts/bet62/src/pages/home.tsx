@@ -15078,26 +15078,48 @@ export default function Home({
                               />
                             </MarketGroup>
                           )}
-                          {!showSet3 && m.totalGoals.over25 > 0 && (
-                            <MarketGroup title="Total de Sets — O/U 2.5">
-                              <MarketOddsBtn
-                                match={match}
-                                sel="osets"
-                                odd={m.totalGoals.over25}
-                                market="sets"
-                                label="Mais de 2.5 sets"
-                                suspKey="sets"
-                              />
-                              <MarketOddsBtn
-                                match={match}
-                                sel="usets"
-                                odd={m.totalGoals.under25}
-                                market="sets"
-                                label="Menos de 2.5 sets"
-                                suspKey="sets"
-                              />
-                            </MarketGroup>
-                          )}
+                          {!showSet3 &&
+                            (te?.totalSets?.over > 0 ? (
+                              <MarketGroup title="Total de Sets — O/U 2.5">
+                                <MarketOddsBtn
+                                  match={match}
+                                  sel="osets"
+                                  odd={te.totalSets.over}
+                                  market="sets"
+                                  label="Mais de 2.5 sets"
+                                  suspKey="sets"
+                                />
+                                <MarketOddsBtn
+                                  match={match}
+                                  sel="usets"
+                                  odd={te.totalSets.under}
+                                  market="sets"
+                                  label="Menos de 2.5 sets"
+                                  suspKey="sets"
+                                />
+                              </MarketGroup>
+                            ) : (
+                              m.totalGoals.over25 > 0 && (
+                                <MarketGroup title="Total de Sets — O/U 2.5">
+                                  <MarketOddsBtn
+                                    match={match}
+                                    sel="osets"
+                                    odd={m.totalGoals.over25}
+                                    market="sets"
+                                    label="Mais de 2.5 sets"
+                                    suspKey="sets"
+                                  />
+                                  <MarketOddsBtn
+                                    match={match}
+                                    sel="usets"
+                                    odd={m.totalGoals.under25}
+                                    market="sets"
+                                    label="Menos de 2.5 sets"
+                                    suspKey="sets"
+                                  />
+                                </MarketGroup>
+                              )
+                            ))}
                           {renderSetResultColumns(
                             "Resultado Exato em Sets",
                             [
