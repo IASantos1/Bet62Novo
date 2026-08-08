@@ -6974,8 +6974,18 @@ export default function Home({
   useEffect(() => {
     if (!expandedMatch?.isLive) return;
     const id = String(expandedMatch.id);
+    const isTennisMatch = expandedMatch.sport === "tennis";
+    // Tennis's tennisExtra (total sets, straight-sets/go-the-distance, exact
+    // set score, etc.) is deliberately never included in the live list
+    // payload — buildTennisLiveFromPulseScore only stashes a bare `markets`
+    // shell there and computes tennisExtra on demand, only for this
+    // per-match fetch (see GET /live-match/:id in matches.ts). Bailing out
+    // on `hasMarkets` alone skipped this fetch for every tennis match ever
+    // opened from the live list, since that shell already counts as
+    // "markets" — silently hiding every tennisExtra-only market group.
     const hasMarkets = !!(expandedMatch as any).markets;
-    if (hasMarkets) return;
+    const hasTennisExtra = !!(expandedMatch as any).markets?.tennisExtra;
+    if (hasMarkets && (!isTennisMatch || hasTennisExtra)) return;
     const snap = readSnapshot(matchSnapshotKey(id));
     const canUseSnap = !!(
       snap &&
@@ -7026,7 +7036,9 @@ export default function Home({
               tracker: mm.tracker ?? pv.tracker,
             };
           });
-          return !!(m as any).markets;
+          return isTennisMatch
+            ? !!(m as any).markets?.tennisExtra
+            : !!(m as any).markets;
         })
         .catch(() => false)
         .finally(() => {
