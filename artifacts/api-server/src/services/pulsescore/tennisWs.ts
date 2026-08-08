@@ -61,6 +61,21 @@ type BroadcastFrame = {
   data: PulseScoreEvent[];
 };
 
+// A real tennis match can never have a three-way (1X2) market — there's no
+// draw in tennis. Seen in production (2026-08-08): a football match got
+// broadcast on this tennis-subscribed socket with ev.sport itself already
+// stamped "tennis" (mistagged upstream, not just missing) — which passes
+// the exact-tag check below outright — and rendered on the live page with
+// tennis's set-score format and two-way odds instead of 1X2. Since the tag
+// can't be trusted at all in that case, this checks the market shape
+// instead: any DRAW selection anywhere in the event's markets is
+// impossible for real tennis and a certain sign of contamination.
+export function hasDrawMarket(ev: PulseScoreEvent): boolean {
+  return (ev.markets ?? []).some((m) =>
+    (m.selections ?? []).some((s) => s.canonicalOutcome === "DRAW"),
+  );
+}
+
 // Confirmed live in production (2026-08-07): the WS connection is shared/
 // multiplexed per bookmaker, not actually scoped to the sport in the
 // subscription URL — broadcast frames for OTHER sports (soccer/esoccer
@@ -73,7 +88,9 @@ type BroadcastFrame = {
 // missing/empty rather than mistagged. Now requires an exact "tennis"
 // match on both frame.sport and each event's own ev.sport — anything
 // without that exact tag is dropped, not just anything with a
-// conflicting one.
+// conflicting one. hasDrawMarket() catches the remaining case: an event
+// mistagged "tennis" already at the source, which the exact-tag check
+// alone can't see.
 function applyFrame(frame: BroadcastFrame): void {
   lastFrameAt = Date.now();
   rollUsageDateIfNeeded();
@@ -83,6 +100,13 @@ function applyFrame(frame: BroadcastFrame): void {
   for (const ev of frame.data ?? []) {
     if (!ev?.eventId) continue;
     if (ev.sport !== "tennis") continue;
+    if (hasDrawMarket(ev)) {
+      logger.warn(
+        { eventId: ev.eventId, home: ev.home, away: ev.away, league: ev.league },
+        "[pulsescore] tennis WS event has a draw market — dropping as mistagged non-tennis contamination",
+      );
+      continue;
+    }
     liveByEventId.set(ev.eventId, ev);
     seenIds.add(ev.eventId);
   }

@@ -33,6 +33,7 @@ import {
   extractTennisLiveExtra,
   type PulseScoreTennisLiveExtra,
 } from "../services/pulsescore/tennis.js";
+import { hasDrawMarket } from "../services/pulsescore/tennisWs.js";
 import {
   getPulseScoreBasketballUpcoming,
   extractBasketballOverride,
@@ -11029,6 +11030,18 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // not just at the WS layer, means this loop is safe regardless of
     // whether a bad event slipped in via WS or REST.
     if (ev.sport !== "tennis") continue;
+    // hasDrawMarket catches the remaining case the exact-tag check above
+    // can't see: an event mistagged "tennis" already at the source (seen
+    // 2026-08-08 — a football match with ev.sport === "tennis" verbatim,
+    // rendered with tennis's set-score format and two-way odds instead of
+    // 1X2). No real tennis match ever has a draw market.
+    if (hasDrawMarket(ev)) {
+      logger.warn(
+        { eventId: ev.eventId, home: ev.home, away: ev.away, league: ev.league },
+        "[pulsescore] tennis live event has a draw market — skipping as mistagged non-tennis contamination",
+      );
+      continue;
+    }
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
