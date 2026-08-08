@@ -12,12 +12,6 @@ const STATPAL_API_KEY =
 const STATPAL_BASE_URL =
   process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
 
-// Default to "statpal" — Statpal is the primary and only live data source.
-// Set FOOTBALL_LIVE_PROVIDER=auto to also try SportsAPI Pro as fallback,
-// or FOOTBALL_LIVE_PROVIDER=sportsapipro to use only SportsAPI Pro.
-const FOOTBALL_LIVE_PROVIDER =
-  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "statpal";
-
 const FOOTBALL_DAILY_PROVIDER =
   process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "statpal";
 
@@ -55,7 +49,14 @@ const PALACE_CASINO_CALLBACK_TOKEN =
 // PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
 //   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
 //   - NÃO FAZ: Estatísticas detalhadas, H2H, rankings, logos, play-by-play.
-// Futebol puxado via REST polling; tênis via WebSocket (PRO plan permite 1 conexão WS concorrente — tênis foi o escolhido por atualização point-by-point).
+// Futebol e tênis ao vivo puxados via REST polling. O PRO plan só permite 1
+// conexão WS concorrente; ela está atualmente dedicada ao futebol
+// (footballWs.ts) rodando em paralelo apenas para observação — ainda não
+// alimenta o payload ao vivo, pois o comportamento snapshot-vs-delta dos
+// frames de futebol não foi confirmado (ver comentário em
+// pulsescore/football.ts). O módulo WS do tênis (tennisWs.ts) existe mas
+// está dormente (zero call sites) desde que a conexão foi movida pro futebol
+// em 2026-08-08.
 // Cota: ilimitada conforme plano do usuário. Usar sempre que possível para overlay de odds e comparação multi-bookmaker.
 const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
 const PULSESCORE_BASE_URL =
@@ -71,7 +72,10 @@ const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 // ── BET62 Live + Match Tracker + Streaming ──
 //
 //  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
-//    • Odds em tempo real, mercados normalizados (canonicalMarket), WebSocket ~1s (tênis).
+//    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
+//      polling para futebol e tênis; WebSocket (~1s) dedicado ao futebol
+//      mas ainda não consumido no payload ao vivo (só observação — ver
+//      footballWs.ts).
 //    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
 //
 //  TRACKER LIVE: StatScore — placar/minuto/incidentes AO VIVO.
@@ -118,7 +122,6 @@ export const CONFIG = {
   ANTHROPIC_API_KEY,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
-  FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 1000,
