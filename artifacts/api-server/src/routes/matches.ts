@@ -11030,6 +11030,43 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const homeTeamId = getCachedTeamId("football", home) ?? undefined;
     const awayTeamId = getCachedTeamId("football", away) ?? undefined;
 
+    // Feeds the frontend's existing clockSec-based MM:SS ticking clock
+    // (getFootballClockLabel/getDisplayMinute in home.tsx) — already built
+    // for other live sources, just never wired up for PulseScore football,
+    // which only ever supplied the coarse whole-minute `minute` field above.
+    // TS (seconds-within-the-minute) sits right next to TM in PulseScore's
+    // own moreInfo and was simply never read until now.
+    //
+    // clockAtMs is the anchor the frontend extrapolates client-side seconds
+    // forward from (Date.now() - clockAtMs) — it must only move when
+    // clockSec itself actually changes. Stamping Date.now() here
+    // unconditionally on every ~1s tick (regardless of whether PulseScore
+    // sent a fresh TM/TS reading) reset that anchor constantly, which
+    // silently defeats the whole extrapolation: whenever PulseScore's own
+    // clock for a given match updates slower than our poll, the frontend's
+    // "how long since we last confirmed this" math was always ~0, so it
+    // never extrapolated forward and the display just sat on the stale
+    // value, drifting further behind the longer PulseScore's own reading
+    // stayed stuck.
+    const clockSec = pulseScoreEventClockSec(ev);
+    const prevClockSec = existing?._liveExtra?.clockSec;
+    const clockAtMs =
+      prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
+        ? existing._liveExtra.clockAtMs
+        : Date.now();
+    // Halftime detection: confirmed in production (2026-08-08, Vicenza v
+    // Catania) that PulseScore correctly freezes TM/TS at exactly 45:00
+    // while the ref is holding players off the pitch — a genuine real-world
+    // pause, not a stalled feed. Nothing here read that as HT (status was
+    // hardcoded "LIVE" below), so the frontend kept extrapolating forward
+    // from 45:00 not knowing play had stopped, hit its own +3min safety
+    // cap, and displayed a frozen "48:00" that looked exactly like a stuck
+    // clock. clockAtMs only moves when clockSec changes (above), so "how
+    // long has this exact value been sitting" is just Date.now() -
+    // clockAtMs — no extra state to track. Deliberately narrow (exact
+    // 45:00 only, sustained >20s): extra time's halfway point isn't covered
+    // since there's no confirmed sample yet of PulseScore pausing there too.
+    const isHalftimeFreeze = clockSec === 45 * 60 && Date.now() - clockAtMs > 20_000;
     const state: LiveMatchState = {
       id,
       home,
@@ -11042,7 +11079,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       homeScore,
       awayScore,
       minute: pulseScoreEventMinute(ev),
-      status: "LIVE",
+      status: isHalftimeFreeze ? "HT" : "LIVE",
       hasRealOdds: !!override?.odds,
       odds,
       markets,
@@ -11050,34 +11087,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       events: [],
       marketSuspension,
       _suspensionReason: suspensionReason,
-      // Feeds the frontend's existing clockSec-based MM:SS ticking clock
-      // (getFootballClockLabel/getDisplayMinute in home.tsx) — already built
-      // for other live sources, just never wired up for PulseScore football,
-      // which only ever supplied the coarse whole-minute `minute` field
-      // above. TS (seconds-within-the-minute) sits right next to TM in
-      // PulseScore's own moreInfo and was simply never read until now.
-      //
-      // clockAtMs is the anchor the frontend extrapolates client-side
-      // seconds forward from (Date.now() - clockAtMs) — it must only move
-      // when clockSec itself actually changes. Stamping Date.now() here
-      // unconditionally on every ~1s tick (regardless of whether PulseScore
-      // sent a fresh TM/TS reading) reset that anchor constantly, which
-      // silently defeats the whole extrapolation: whenever PulseScore's own
-      // clock for a given match updates slower than our poll (confirmed —
-      // some matches' TM/TS visibly lag real broadcast time by many
-      // minutes), the frontend's "how long since we last confirmed this"
-      // math was always ~0, so it never extrapolated forward and the
-      // display just sat on the stale value, drifting further behind the
-      // longer PulseScore's own reading stayed stuck.
-      _liveExtra: (() => {
-        const clockSec = pulseScoreEventClockSec(ev);
-        const prevClockSec = existing?._liveExtra?.clockSec;
-        const clockAtMs =
-          prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
-            ? existing._liveExtra.clockAtMs
-            : Date.now();
-        return { clockSec, clockAtMs, clockRunning: true };
-      })(),
+      _liveExtra: { clockSec, clockAtMs, clockRunning: !isHalftimeFreeze },
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out
