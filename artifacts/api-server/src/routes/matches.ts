@@ -7161,6 +7161,59 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
+  // ── PulseScore football/tennis match IDs (pulsescore-football-{id} /
+  // pulsescore-tennis-{id}) ────────────────────────────────────────────────
+  // DB-only recovery path: finalizeStaleLiveMatch() already writes a
+  // complete record (score + extras.football/tennis) via
+  // persistFinishedMatchRecord the moment one of these matches finishes
+  // while the server is running, so this only matters after a restart wipes
+  // the in-memory finishedMatchResults cache before a pending bet's
+  // settlement cycle gets to it. Confirmed missing entirely (2026-08-08
+  // audit) — isProviderManagedMatchId() never recognized this prefix, so
+  // this function was never even called for these ids from the settlement
+  // cycle's ensure-loop; a bet on a match that finished across a restart had
+  // no way to recover its result. No live-feed fallback needed here (unlike
+  // tennis-v1 above) since finalizeStaleLiveMatch already persists the full
+  // record up front.
+  if (/^pulsescore-(football|tennis)-.+$/.test(matchId)) {
+    const cached = finishedMatchResults.get(matchId);
+    if (
+      cached &&
+      typeof cached.home === "number" &&
+      typeof cached.away === "number"
+    )
+      return true;
+    try {
+      if (db) {
+        const [row] = await db
+          .select()
+          .from(matchResultsTable)
+          .where(eq(matchResultsTable.matchId, matchId))
+          .limit(1);
+        if (row && typeof row.home === "number" && typeof row.away === "number") {
+          const record = {
+            home: row.home,
+            away: row.away,
+            htHome: row.htHome ?? undefined,
+            htAway: row.htAway ?? undefined,
+            homeTeam: row.homeTeam ?? "",
+            awayTeam: row.awayTeam ?? "",
+            status: row.status ?? undefined,
+            cornersTotal: row.cornersTotal ?? undefined,
+            cardsTotal: row.cardsTotal ?? undefined,
+            firstGoal:
+              (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
+            extras: row.extras ?? undefined,
+            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+          };
+          finishedMatchResults.set(matchId, record);
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  }
+
   // Fetching is done via top-level fetchFootballExtras function
 
   const parse = (): { sport: SportKey; prefix: string; id: number } | null => {
@@ -11007,6 +11060,19 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // minute (clockRunning: false below) without guessing a phase.
     const isHalftimeFreeze = isClockStale && clockSec === 45 * 60;
     const liveStatus = isHalftimeFreeze ? "HT" : "LIVE";
+    // Half-time score, captured the moment HT is first confirmed and carried
+    // forward unchanged for the rest of the match — settlement.ts's
+    // liveDefinitiveOutcomeForSel() already knows how to settle ht-home/
+    // ht-away/ht-draw, 1H BTTS, and HT/FT combo bets the instant this is
+    // populated (fully pre-existing logic, provider-agnostic), but it was
+    // never reachable for PulseScore football since nothing here ever set
+    // it. The score at the exact tick HT is confirmed IS the HT score by
+    // definition, so no separate lookup is needed.
+    const htScore: [number, number] | undefined = existing?._liveExtra?.htScore
+      ? existing._liveExtra.htScore
+      : isHalftimeFreeze
+        ? [homeScore, awayScore]
+        : undefined;
 
     // filterLiveMarkets zeroes out (hides) any line/scoreline the current
     // score has already settled — e.g. "Over 0.5" once any goal has been
@@ -11113,7 +11179,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       events: [],
       marketSuspension,
       _suspensionReason: suspensionReason,
-      _liveExtra: { clockSec, clockAtMs, clockRunning: !isClockStale },
+      _liveExtra: { clockSec, clockAtMs, clockRunning: !isClockStale, htScore },
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out

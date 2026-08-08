@@ -3449,11 +3449,19 @@ function providerMatchIdPrefixesForSport(
 ): string[] {
   switch (sport) {
     case "football":
-      return ["football-v2"];
+      // pulsescore-football is the current live prefix (buildFootballLiveFromPulseScore
+      // in matches.ts) — football-v2 (old SportsAPI Pro) is dead (no code creates that
+      // prefix anymore, confirmed 2026-08-08) but kept for any pre-migration matchIds
+      // still sitting in finishedMatchResults/historical bets. Without pulsescore-football
+      // here, resultMatchesSelectionSport() rejected every current football match before
+      // even attempting a team-name match, silently breaking the fuzzy-lookup fallback
+      // (findLiveResultByTeams/findResultByTeams) for 100% of today's football bets.
+      return ["pulsescore-football", "football-v2"];
     case "tennis":
-      // tennis-v1 is the Statpal V1 feed prefix; tennis-v2 is the legacy SportsAPI V2 prefix.
-      // Both must be listed so canonicalizeSelectionMatchIds generates lookups for either format.
-      return ["tennis-v1", "tennis-v2"];
+      // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
+      // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
+      // kept for the same pre-migration reason as football-v2 above.
+      return ["pulsescore-tennis", "tennis-v1", "tennis-v2"];
     case "basketball":
       return ["bball-v2"];
     case "baseball":
@@ -3542,7 +3550,11 @@ function getSelectionLookupMatchIds(
 function isProviderManagedMatchId(matchId: string): boolean {
   // tennis-v1 must be included so ensureFinishedMatchResult (with DB fallback) is called
   // nhl/nba/mlb are the prefixes used by Statpal-native scan functions
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$/.test(
+  // pulsescore-football/pulsescore-tennis added 2026-08-08 — ensureFinishedMatchResult
+  // gained a DB-recovery branch for these (matches.ts) but it was never reachable from
+  // the settlement cycle's ensure-loop since this regex never matched the current live
+  // id format, only the dead pre-migration ones above.
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }
