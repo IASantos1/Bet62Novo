@@ -10573,6 +10573,12 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const ev of events) {
+    // Second layer of defense against sport-tag contamination (see
+    // fetchFootballUpcoming in football.ts for the full story — the bare
+    // /leagues endpoint has no ?sport= param and leaked basketball fixtures
+    // into football's upcoming list). Checking here too means this loop is
+    // safe regardless of whether a bad league slipped past the first filter.
+    if (ev.sport !== "soccer") continue;
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
@@ -10856,6 +10862,11 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
   const currentIds = new Set<string>();
   for (const ev of events) {
+    // Defense in depth, same reasoning as the prematch builder just below —
+    // ?sport=soccer scopes this REST endpoint, but PulseScore's own
+    // sport-tag scoping has now proven unreliable on multiple endpoints
+    // (tennis WS, this endpoint's prematch counterpart). Cheap to check.
+    if (ev.sport !== "soccer") continue;
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;

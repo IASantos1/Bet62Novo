@@ -564,9 +564,20 @@ async function fetchAllFootballLeagues(): Promise<PulseScoreLeague[]> {
 
 async function fetchFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
   const leagues = await fetchAllFootballLeagues();
+  // Seen in production (2026-08-08): despite the header comment above
+  // claiming every league/event in the original sample carried
+  // sport:"soccer", this bare /leagues endpoint (no ?sport= query param at
+  // all, unlike /live-events) sometimes returns OTHER sports' leagues too —
+  // basketball fixtures (Uruguay Liga de Ascenso, Chile LNB, WNBA, FIBA 3x3,
+  // ...) showed up in the football "Em Breve"/upcoming list. Filter at both
+  // the league and event level — same two-layer defense already applied to
+  // tennis's WS leak (tennisWs.ts's applyFrame + buildTennisLiveFromPulseScore).
   // live:true entries here never carry markets (see comment above) —
   // getPulseScoreFootballLive() already covers those; keep this prematch-only.
-  return leagues.flatMap((l) => l.events ?? []).filter((ev) => !ev.live);
+  return leagues
+    .filter((l) => l.sport === "soccer")
+    .flatMap((l) => l.events ?? [])
+    .filter((ev) => !ev.live && ev.sport === "soccer");
 }
 
 /** Upcoming football fixtures from PulseScore (bet365), each carrying its
