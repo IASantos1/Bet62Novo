@@ -24061,6 +24061,18 @@ setInterval(() => {
   let anyChange = false;
   for (const [id, state] of liveMatchState.entries()) {
     if (state.sport !== "football") continue;
+    // PulseScore-sourced matches already get their entire markets object
+    // rebuilt every ~1s by buildFootballLiveFromPulseScore itself — real
+    // bet365 odds merged over the synthetic model wherever bet365 actually
+    // prices a market (see extractFootballOverride). This drift engine
+    // predates that integration and was never taught to leave those matches
+    // alone: running it here on the same shared liveMatchState entries
+    // overwrote real prices with a fresh synthetic recalculation on this
+    // loop's own independent timer, uncoordinated with PulseScore's tick —
+    // real odds would flicker to synthetic ones and back essentially at
+    // random. PulseScore matches don't need synthetic drift at all; they
+    // have an actual live feed.
+    if (id.startsWith("pulsescore-football-")) continue;
     const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
     if (skip.includes(state.status)) continue;
     if (state.marketSuspension) {
