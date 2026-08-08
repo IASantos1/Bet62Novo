@@ -76,6 +76,26 @@ export function hasDrawMarket(ev: PulseScoreEvent): boolean {
   );
 }
 
+// hasDrawMarket() only catches contamination from sports that happen to
+// have a draw outcome. Seen in production (2026-08-08, same day):  an MLB
+// baseball match leaked through too — baseball moneylines have no draw
+// either, so that check alone let it through. Excluding one bad sport at a
+// time after each new leak is a losing game (football, esoccer,
+// ebasketball, table tennis, now baseball — all through this one socket).
+// Flip it around: confirm the league name actually looks like a tennis
+// tour instead of trying to list every sport it isn't. Built from every
+// real tennis league name seen in production sampling (ATP/WTA tour,
+// UTR Pro, ITF's M##/W## money-tier naming, Challenger) — logs a warning
+// on rejection instead of silently dropping so a genuine tour naming
+// convention this misses can be added instead of guessed at.
+const TENNIS_LEAGUE_PATTERN =
+  /^(ATP|WTA|ITF|UTR(\s+Pro)?|Challenger|Boys?|Girls?|Wimbledon|Roland\s+Garros|French\s+Open|US\s+Open|Australian\s+Open|Grand\s+Slam|Davis\s+Cup|Billie\s+Jean\s+King\s+Cup|Laver\s+Cup|Next\s+Gen|Exhibition|M\d{2}|W\d{2})\b/i;
+
+export function looksLikeTennisLeague(league: string | undefined): boolean {
+  if (!league) return false;
+  return TENNIS_LEAGUE_PATTERN.test(league.trim());
+}
+
 // Confirmed live in production (2026-08-07): the WS connection is shared/
 // multiplexed per bookmaker, not actually scoped to the sport in the
 // subscription URL — broadcast frames for OTHER sports (soccer/esoccer
@@ -104,6 +124,13 @@ function applyFrame(frame: BroadcastFrame): void {
       logger.warn(
         { eventId: ev.eventId, home: ev.home, away: ev.away, league: ev.league },
         "[pulsescore] tennis WS event has a draw market — dropping as mistagged non-tennis contamination",
+      );
+      continue;
+    }
+    if (!looksLikeTennisLeague(ev.league)) {
+      logger.warn(
+        { eventId: ev.eventId, home: ev.home, away: ev.away, league: ev.league },
+        "[pulsescore] tennis WS event's league doesn't match a known tennis tour naming pattern — dropping as likely non-tennis contamination",
       );
       continue;
     }

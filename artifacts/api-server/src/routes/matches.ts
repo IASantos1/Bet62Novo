@@ -33,7 +33,7 @@ import {
   extractTennisLiveExtra,
   type PulseScoreTennisLiveExtra,
 } from "../services/pulsescore/tennis.js";
-import { hasDrawMarket } from "../services/pulsescore/tennisWs.js";
+import { hasDrawMarket, looksLikeTennisLeague } from "../services/pulsescore/tennisWs.js";
 import {
   getPulseScoreBasketballUpcoming,
   extractBasketballOverride,
@@ -11039,6 +11039,18 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       logger.warn(
         { eventId: ev.eventId, home: ev.home, away: ev.away, league: ev.league },
         "[pulsescore] tennis live event has a draw market — skipping as mistagged non-tennis contamination",
+      );
+      continue;
+    }
+    // looksLikeTennisLeague catches contamination hasDrawMarket can't see —
+    // sports with no draw outcome of their own (seen 2026-08-08: an MLB
+    // baseball match leaked through this same socket). Confirms the league
+    // name actually matches a known tennis tour naming convention instead
+    // of trying to exclude every other sport one at a time.
+    if (!looksLikeTennisLeague(ev.league)) {
+      logger.warn(
+        { eventId: ev.eventId, home: ev.home, away: ev.away, league: ev.league },
+        "[pulsescore] tennis live event's league doesn't match a known tennis tour naming pattern — skipping as likely non-tennis contamination",
       );
       continue;
     }
