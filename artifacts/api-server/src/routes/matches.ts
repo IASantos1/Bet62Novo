@@ -11056,11 +11056,28 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       // which only ever supplied the coarse whole-minute `minute` field
       // above. TS (seconds-within-the-minute) sits right next to TM in
       // PulseScore's own moreInfo and was simply never read until now.
-      _liveExtra: {
-        clockSec: pulseScoreEventClockSec(ev),
-        clockAtMs: Date.now(),
-        clockRunning: true,
-      },
+      //
+      // clockAtMs is the anchor the frontend extrapolates client-side
+      // seconds forward from (Date.now() - clockAtMs) — it must only move
+      // when clockSec itself actually changes. Stamping Date.now() here
+      // unconditionally on every ~1s tick (regardless of whether PulseScore
+      // sent a fresh TM/TS reading) reset that anchor constantly, which
+      // silently defeats the whole extrapolation: whenever PulseScore's own
+      // clock for a given match updates slower than our poll (confirmed —
+      // some matches' TM/TS visibly lag real broadcast time by many
+      // minutes), the frontend's "how long since we last confirmed this"
+      // math was always ~0, so it never extrapolated forward and the
+      // display just sat on the stale value, drifting further behind the
+      // longer PulseScore's own reading stayed stuck.
+      _liveExtra: (() => {
+        const clockSec = pulseScoreEventClockSec(ev);
+        const prevClockSec = existing?._liveExtra?.clockSec;
+        const clockAtMs =
+          prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
+            ? existing._liveExtra.clockAtMs
+            : Date.now();
+        return { clockSec, clockAtMs, clockRunning: true };
+      })(),
     };
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out
