@@ -11988,7 +11988,20 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
                       // so API lag can't cause them to vanish without ever going live
         si <= maxSi &&
         !liveIds.has(String(m.id)) &&
-        !isUpcomingAlreadyLive(m)
+        !isUpcomingAlreadyLive(m) &&
+        // A match that has EVER gone live stays in liveMatchState for up to
+        // getFootballLiveDisappearGraceMs (130-180 min) after it stops
+        // appearing in the live feed — well past mergeStickyLive's 5-minute
+        // sticky window that backs liveIds/isUpcomingAlreadyLive above. In
+        // that gap, a finished match (the overwhelmingly common reason a
+        // match stops appearing in the live feed for that long) satisfied
+        // every other condition here — si stayed within the 3h post-kickoff
+        // window and it was no longer "live" by the checks above — so it
+        // reappeared in "Em Breve" right after finishing. Reported in
+        // production 2026-08-09. Any match tracked in liveMatchState has, by
+        // definition, already gone live at least once and can never be
+        // "still upcoming" again.
+        !liveMatchState.has(String(m.id))
       );
     })
     .sort(
