@@ -2004,9 +2004,18 @@ function getTeamBadgeAsset(
     | "awayTeamId"
     | "homeImageVersion"
     | "awayImageVersion"
+    | "homeLogoUrl"
+    | "awayLogoUrl"
   >,
   side: "home" | "away",
 ): { src?: string; fit: "cover" | "contain"; padded: boolean } {
+  // API-Football's crest URL is already the finished asset — no ID-to-URL
+  // construction needed, and it resolves for teams buildSportsApiTeamLogoUrl
+  // sometimes can't (lower-coverage leagues with no SportsAPI team ID
+  // cached yet). Preferred when present; falls through to the SportsAPI
+  // path otherwise, unchanged.
+  const directLogo = side === "home" ? match.homeLogoUrl : match.awayLogoUrl;
+  if (directLogo) return { src: directLogo, fit: "contain", padded: true };
   const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
   const imageVersion =
     side === "home" ? match.homeImageVersion : match.awayImageVersion;
@@ -3655,6 +3664,10 @@ type Match = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
+  // Direct crest URLs from API-Football (football only) — preferred over
+  // homeTeamId/homeImageVersion in getTeamBadgeAsset, see that function.
+  homeLogoUrl?: string;
+  awayLogoUrl?: string;
   league: string;
   country?: string;
   time?: string;

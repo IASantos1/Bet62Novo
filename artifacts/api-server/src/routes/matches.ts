@@ -50,6 +50,14 @@ import {
 } from "../services/pulsescore/volleyball.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import {
+  getApiFootballLiveFixtures,
+  findApiFootballFixture,
+  fixtureHasRedCard,
+  fixtureHasVarReview,
+  latestGoalScorer,
+  type ApiFootballFixture,
+} from "../services/apiFootball.js";
+import {
   getCachedTeamId,
   resolveTeamIdInBackground,
 } from "../services/sportsApiTeamLookup.js";
@@ -377,6 +385,14 @@ export type LiveMatchState = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
+  // Direct crest URLs from API-Football (football only) — preferred over the
+  // homeTeamId/homeImageVersion pair above where present, since those need
+  // an extra SportsAPI ID-to-URL construction (buildSportsApiTeamLogoUrl in
+  // home.tsx) that can fail to resolve at all for lower-coverage teams,
+  // while API-Football already returns the finished URL on the same fixture
+  // this file's events/red-card data comes from.
+  homeLogoUrl?: string;
+  awayLogoUrl?: string;
   league: string;
   country: string;
   sport: string;
@@ -391,6 +407,10 @@ export type LiveMatchState = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string }>;
+  // Count of VAR-typed events seen so far (API-Football) — compared tick-to-
+  // tick to detect a NEW VAR review vs. one already suspended for, same
+  // reasoning as redCardsHome/Away being counts rather than a single flag.
+  _apiFootballVarEventCount?: number;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -11280,6 +11300,14 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   // GET /live-events?sport=soccer already returns only live events — no
   // separate `live` boolean field exists on each event to filter by.
   const events = await getPulseScoreFootballLive();
+  // API-Football (api-sports.io) — real match events (goals w/ scorer name,
+  // cards, subs, VAR when one occurs). One request per tick covers every
+  // live fixture worldwide (see apiFootball.ts's own caching), so fetching
+  // it once here and reusing the same batch for every match below costs
+  // nothing extra as more matches get tracked. Empty array (not an error)
+  // when API_FOOTBALL_KEY isn't configured — every use below degrades to
+  // "no extra data available" rather than breaking football's own live feed.
+  const apiFootballFixtures = await getApiFootballLiveFixtures();
   const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
   const currentIds = new Set<string>();
   for (const ev of events) {
@@ -11384,6 +11412,45 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const score = pulseScoreEventScore(ev);
     const homeScore = score?.home ?? existing?.homeScore ?? 0;
     const awayScore = score?.away ?? existing?.awayScore ?? 0;
+
+    // API-Football cross-reference — tolerant team-name match against
+    // whatever fixtures came back this tick (empty array, hence null here,
+    // whenever API_FOOTBALL_KEY isn't configured or that fetch failed; every
+    // use below already treats null as "no extra data" and falls back to
+    // PulseScore-only behavior, same as before this integration existed).
+    const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures);
+    // Counts, not booleans — fixtureHasRedCard/fixtureHasVarReview would stay
+    // true for the rest of the match after a single occurrence (the events
+    // array only grows), so comparing against the PREVIOUS tick's count is
+    // what actually detects a NEW red card/VAR review this tick rather than
+    // re-suspending forever after the first one. Counted directly here
+    // (not via fixtureHasRedCard, a plain boolean) since the count itself is
+    // what needs to persist tick-to-tick.
+    const redCardEvents = apiFixture
+      ? apiFixture.events.filter((e) => e.type === "Card" && e.detail.toLowerCase().includes("red card"))
+      : [];
+    const varEventCount = apiFixture ? apiFixture.events.filter((e) => e.type.toLowerCase() === "var").length : 0;
+    const redCardsHome = apiFixture
+      ? redCardEvents.filter((e) => e.teamId === apiFixture.home.id).length
+      : (existing?.redCardsHome ?? 0);
+    const redCardsAway = apiFixture
+      ? redCardEvents.filter((e) => e.teamId === apiFixture.away.id).length
+      : (existing?.redCardsAway ?? 0);
+    const prevRedCardTotal = (existing?.redCardsHome ?? 0) + (existing?.redCardsAway ?? 0);
+    const prevVarEventCount = existing?._apiFootballVarEventCount ?? 0;
+    const newRedCard = apiFixture && redCardsHome + redCardsAway > prevRedCardTotal;
+    const newVarReview = apiFixture && varEventCount > prevVarEventCount;
+    // Real match events (goals/cards/subs, and VAR if present) for the live
+    // event timeline — LiveMatchState.events already existed with this exact
+    // shape (see its own comment) but had no data source until now.
+    const apiFootballEvents: LiveMatchState["events"] = apiFixture
+      ? apiFixture.events.map((e) => ({
+          type: e.type,
+          team: e.teamId === apiFixture.home.id ? home : away,
+          minute: e.minute,
+          player: e.playerName ?? "",
+        }))
+      : [];
 
     // Feeds the frontend's existing clockSec-based MM:SS ticking clock
     // (getFootballClockLabel/getDisplayMinute in home.tsx) — already built
@@ -11537,7 +11604,12 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       marketSuspension = Object.fromEntries(
         FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
       );
-      suspensionReason = "GOLO!";
+      // Enriched with the scorer's name when API-Football has already picked
+      // up the goal event by this same tick (its own ~12s cache can lag a
+      // PulseScore score change by a few seconds) — falls back to the plain
+      // "GOLO!" banner PulseScore-only matches already had otherwise.
+      const scorer = apiFixture ? latestGoalScorer(apiFixture) : null;
+      suspensionReason = scorer ? `GOLO! ${scorer}` : "GOLO!";
       // TEMPORARY diagnostic (remove once answered): does bet365's own feed
       // flip a market's/selection's isActive to false when IT suspends for
       // this goal, independent of our own synthetic delay-based suspension
@@ -11574,6 +11646,24 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         "[DIAG goal] raw PulseScore markets at moment of goal — checking whether bet365's own isActive flips on suspension",
       );
     }
+    // Red-card / VAR-review suspension — closes the gap PulseScore alone
+    // can't (see apiFootball.ts's header): it has no signal for either, only
+    // the goal-based score-diff trigger above. Uses the "var" delay tier
+    // (20-45s, longer than a goal's 12-25s) for both, since neither has its
+    // own tier in footballSuspensionDelayMs and both plausibly involve a
+    // longer real-world stoppage than a routine goal confirmation. Does NOT
+    // overwrite a goal suspension that just fired this same tick (checked
+    // via `!goalScored`) — the goal trigger already suspends everything for
+    // its own window, and API-Football's events array often lists the goal
+    // and a related card together, which would otherwise downgrade a fresh
+    // "GOLO!" reason to a less specific one on the very tick it's set.
+    if (!goalScored && (newRedCard || newVarReview)) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+      );
+      suspensionReason = newVarReview ? "VAR" : "CARTÃO VERMELHO";
+    }
     // Odds-unavailable suspension — separate from the goal trigger above
     // (which already suspends everything for its own delay window and takes
     // priority when both happen on the same tick). Re-applied fresh every
@@ -11608,6 +11698,8 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       away,
       homeTeamId,
       awayTeamId,
+      homeLogoUrl: apiFixture?.home.logo ?? undefined,
+      awayLogoUrl: apiFixture?.away.logo ?? undefined,
       league: ev.league || "Futebol",
       country,
       sport: "football",
@@ -11619,7 +11711,10 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       odds,
       markets,
       matchTier: tier,
-      events: [],
+      events: apiFootballEvents,
+      redCardsHome,
+      redCardsAway,
+      _apiFootballVarEventCount: varEventCount,
       marketSuspension,
       _suspensionReason: suspensionReason,
       // clockRunning gates whether the frontend extrapolates this clock
