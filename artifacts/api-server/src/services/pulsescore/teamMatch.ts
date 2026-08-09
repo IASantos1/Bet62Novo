@@ -90,5 +90,36 @@ export function teamNamesMatch(a: string, b: string): boolean {
     if (sa && sb && sa === sb) return true;
   }
 
+  // Initial+surname fallback — bwin's tennis market selections often
+  // abbreviate the given name to a single or double initial ("J.
+  // Schwaerzler", "O.J. Gutierrez") while the tracked event's own home/away
+  // field carries the full given name plus a trailing "(CTRY)" suffix
+  // ("Joel Schwaerzler (AUT)", "Oscar Jose Gutierrez (ESP)") — confirmed
+  // against real /tennis/leagues and /tennis/events samples (2026-08-09).
+  // The fuzzy-similarity check above fails this pair outright (the given
+  // name is too large a share of the full string for the abbreviation to
+  // score high), and it isn't comma-formatted so the fallback above doesn't
+  // fire either. Gated on one side actually LOOKING like an initial
+  // abbreviation (single/double letter token ending in a period, not just
+  // any name that happens to start with the same letter) to keep this the
+  // same shape as the comma-gated fallback above — an unrelated full name
+  // never reaches the surname/initial comparison at all.
+  const stripTrailingCountrySuffix = (name: string): string =>
+    name.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const looksInitialAbbreviated = (name: string): boolean =>
+    /^([A-Za-z]\.){1,2}$/.test(name.trim().split(/\s+/)[0] ?? "");
+  if (looksInitialAbbreviated(a) || looksInitialAbbreviated(b)) {
+    const tokensOf = (name: string): string[] =>
+      slugifyTeamNameStripped(stripTrailingCountrySuffix(name)).split("-").filter(Boolean);
+    const tokensA = tokensOf(a);
+    const tokensB = tokensOf(b);
+    const surnameA = tokensA[tokensA.length - 1];
+    const surnameB = tokensB[tokensB.length - 1];
+    const initialA = tokensA[0]?.[0];
+    const initialB = tokensB[0]?.[0];
+    if (surnameA && surnameB && surnameA === surnameB && initialA && initialB && initialA === initialB)
+      return true;
+  }
+
   return false;
 }
