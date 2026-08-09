@@ -175,6 +175,7 @@ export const FOOTBALL_SUSP_KEYS = [
   "secondHalf",
   "drawNoBet2",
   "handicapPoints",
+  "anytimeGoalscorer",
 ] as const;
 
 export type FootballSuspensionEvent = "goal" | "var";

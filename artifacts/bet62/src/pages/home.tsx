@@ -3579,6 +3579,9 @@ type AdvancedMarkets = {
     aa: number;
   };
   correctScore?: Record<string, number>;
+  // Anytime Goalscorer market. sel key must be `pg:${player}` to settle via the
+  // existing player-goal settlement pipeline (parseSelectionPlayerMarket).
+  anytimeGoalscorer?: Array<{ player: string; odds: number }>;
   corners?: {
     o85: number;
     u85: number;
@@ -13215,6 +13218,7 @@ export default function Home({
                           : []),
                         { key: "htft", label: "HT/FT" },
                         { key: "placar", label: "Placar Exato" },
+                        { key: "marcadores", label: "Marcadores" },
                         { key: "escanteios", label: "Escanteios" },
                         { key: "cartoes", label: "Cartões" },
                         { key: "asiatico", label: "Asiático" },
@@ -15919,6 +15923,53 @@ export default function Home({
                   </div>
                 )}
 
+              {/* ── FUTEBOL: MARCADOR A QUALQUER MOMENTO ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "marcadores" || modalTab === "todos") &&
+                m &&
+                m.anytimeGoalscorer &&
+                m.anytimeGoalscorer.length > 0 && (
+                  <div>
+                    <MarketAccordionSection
+                      title="Marcador a Qualquer Momento"
+                      defaultOpen={false}
+                      count={m.anytimeGoalscorer.length}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione o jogador que marcar a qualquer momento da
+                        partida.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.anytimeGoalscorer.map(({ player, odds }) => (
+                          <MarketOddsBtn
+                            key={player}
+                            match={match}
+                            sel={`pg:${player}`}
+                            odd={odds}
+                            market="marcadores"
+                            label={player}
+                            suspKey="anytimeGoalscorer"
+                          />
+                        ))}
+                      </div>
+                    </MarketAccordionSection>
+                  </div>
+                )}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                modalTab === "marcadores" &&
+                m &&
+                (!m.anytimeGoalscorer || m.anytimeGoalscorer.length === 0) && (
+                  <div className="text-center text-zinc-600 py-6 text-sm">
+                    Mercado não disponível para esta partida.
+                  </div>
+                )}
+
               {/* ── FUTEBOL: ESCANTEIOS ── */}
               {isFootball &&
                 !showET &&
@@ -17943,6 +17994,7 @@ export default function Home({
     cards: "Cartões",
     htft: "Intervalo/Final",
     firstGoal: "1.º Golo",
+    marcadores: "Marcador a Qualquer Momento",
   };
 
   /** Returns a market-specific result string for a settled tennis selection.
