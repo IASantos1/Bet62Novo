@@ -182,6 +182,28 @@ test("extractFootballOverride: recognizes bwin's 'Total Goals' market name", () 
   assert.equal(override.totalGoals?.under25, 1.9);
 });
 
+// bwin-only canonicalMarket "FIRST_TEAM_TO_SCORE" — confirmed against real
+// live and prematch samples (2026-08-08). Maps onto the existing
+// AdvancedMarkets.firstGoal field.
+test("extractFootballOverride: recognizes bwin's FIRST_TEAM_TO_SCORE market", () => {
+  const firstTeamToScore = {
+    canonicalMarket: "FIRST_TEAM_TO_SCORE",
+    rawName: "First Team to Score",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:ftts",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Home FC", odds: 1.55, isActive: true },
+      { canonicalOutcome: "NEITHER", rawName: "No goal", odds: 12, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Away FC", odds: 2.65, isActive: true },
+    ],
+  };
+  const override = extractFootballOverride(makeFootballEvent([firstTeamToScore]));
+  assert.equal(override.firstGoal?.home, 1.55);
+  assert.equal(override.firstGoal?.noGoal, 12);
+  assert.equal(override.firstGoal?.away, 2.65);
+});
+
 // bwin's selections carry no moreInfo at all (confirmed: zero occurrences
 // across a full real API doc sample, 2026-08-08) — double chance has to be
 // read off rawName instead of bet365's moreInfo.N2 code.
