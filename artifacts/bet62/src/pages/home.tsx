@@ -22543,11 +22543,26 @@ export default function Home({
                       label: "ATP Masters",
                     },
                   ];
+                  // LONGEST matching pattern wins (see findML's own comment
+                  // below for why first-match-in-declaration-order was
+                  // wrong) — this is the function that decides which
+                  // matches actually belong to a selected chip, so the same
+                  // bug here meant a Brazilian match could be FILTERED INTO
+                  // the "Serie A" (Italy) chip's results, not just show its
+                  // icon wrong.
                   const _fml = (n: string) => {
                     const ln = (n ?? "").toLowerCase();
-                    return _mlPats.find((ml) =>
-                      ml.p.some((p) => ln.includes(p)),
-                    );
+                    let best: (typeof _mlPats)[number] | null = null;
+                    let bestLen = 0;
+                    for (const ml of _mlPats) {
+                      for (const p of ml.p) {
+                        if (ln.includes(p) && p.length > bestLen) {
+                          best = ml;
+                          bestLen = p.length;
+                        }
+                      }
+                    }
+                    return best;
                   };
                   const seen = new Set<string>();
                   return combined
@@ -22974,11 +22989,31 @@ export default function Home({
                         const byLabel = new Map(
                           ML.map((m) => [m.label, m] as const),
                         );
+                        // LONGEST matching pattern wins, not the first one
+                        // declared in ML — picking the first match made this
+                        // order-dependent on nothing meaningful: "Serie A"
+                        // (Italy) is declared earlier in ML than
+                        // "Brasileirão" (campeonato brasileiro/brasileirao),
+                        // so any Brazilian league string containing "serie a"
+                        // (e.g. "Campeonato Brasileiro Serie A") matched
+                        // Italy's chip/logo first — reported in production
+                        // 2026-08-09 (Brazilian match showing Italy's Serie A
+                        // badge). Same fix already applied to
+                        // getCountryFlagIso/getLeagueLogo for the same
+                        // underlying bug, just a separate copy of the pattern.
                         const findML = (name: string) => {
                           const n = name.toLowerCase();
-                          return ML.find((ml) =>
-                            ml.p.some((pt) => n.includes(pt)),
-                          );
+                          let best: (typeof ML)[number] | null = null;
+                          let bestLen = 0;
+                          for (const ml of ML) {
+                            for (const pt of ml.p) {
+                              if (n.includes(pt) && pt.length > bestLen) {
+                                best = ml;
+                                bestLen = pt.length;
+                              }
+                            }
+                          }
+                          return best;
                         };
                         const seenLabels = new Set<string>();
                         const chips: Array<{
