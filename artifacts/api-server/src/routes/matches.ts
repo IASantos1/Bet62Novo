@@ -11349,11 +11349,25 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (override?.teamGoals) {
       rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
     }
-    const score = pulseScoreEventScore(ev);
-    const homeScore = score?.home ?? 0;
-    const awayScore = score?.away ?? 0;
     const id = `pulsescore-football-${ev.eventId}`;
     const existing = liveMatchState.get(id);
+    // Same "don't regenerate from a default, keep the last known real value"
+    // protection already applied to odds above — pulseScoreEventScore(ev)
+    // returns null whenever ev.score is transiently missing/malformed for a
+    // single poll tick (plausible exactly at the moment a goal is being
+    // confirmed upstream, when PulseScore's own state is also mid-update).
+    // Falling back to a hard 0 here (as this used to) meant a single glitchy
+    // tick made the score visibly flash back to 0-0 AND made goalScored
+    // below fire a false positive (homeScore/awayScore momentarily != the
+    // real existing score) — resetting the goal-suspension window for no
+    // real goal, then firing AGAIN when the score corrected itself next
+    // tick. Reported in production as a match repeatedly flashing
+    // "suspended" and its odds disappearing/reappearing around a goal
+    // instead of one clean ~20s suspension. Falling back to the existing
+    // score instead means a genuinely missing reading just holds steady.
+    const score = pulseScoreEventScore(ev);
+    const homeScore = score?.home ?? existing?.homeScore ?? 0;
+    const awayScore = score?.away ?? existing?.awayScore ?? 0;
 
     // Feeds the frontend's existing clockSec-based MM:SS ticking clock
     // (getFootballClockLabel/getDisplayMinute in home.tsx) — already built
