@@ -410,3 +410,133 @@ export async function getApiFootballFixtureStatistics(
   statsInFlight.set(fixtureId, promise);
   return promise;
 }
+
+// ── Team crest lookup, independent of any specific fixture ────────────────
+// findApiFootballFixture above only finds a logo for a team currently
+// playing a LIVE match (it searches /fixtures?live=all's results). Prematch
+// "Em Breve" listings and the "Destaques" tab (which just renders a filtered
+// view of the same upcoming/live match data, not its own separate fetch —
+// no backend changes needed there once the source match objects carry a
+// logo) show teams that aren't live yet, so they need a lookup that doesn't
+// depend on a live fixture existing at all. A team's crest is effectively
+// static — GET /teams?name={name} searches API-Football's own team
+// database directly and is cached per searched name for
+// TEAM_LOGO_CACHE_TTL_MS (7 days), long enough that the steady-state cost
+// approaches zero regardless of how many matches reference the same team
+// across leagues/rounds. Verified against API-Football's stable public docs
+// shape (response: [{team: {id, name, logo, ...}, venue: {...}}]) — not
+// against a captured real response the way /fixtures?live=all was.
+type RawTeamSearchEntry = { team?: { id?: number; name?: string; logo?: string | null } };
+type RawTeamSearchResponse = { response?: RawTeamSearchEntry[] };
+
+const TEAM_LOGO_CACHE_TTL_MS = 7 * 24 * 60 * 60_000;
+const teamLogoCache = new Map<string, { logo: string | null; fetchedAt: number }>();
+const teamLogoInFlight = new Map<string, Promise<string | null>>();
+
+// Bounds how many NEW (uncached) team names get looked up per call site
+// invocation — a cold cache facing hundreds of distinct prematch teams at
+// once would otherwise fire hundreds of requests in one burst. Spreads that
+// one-time warm-up cost across multiple prematch rebuild cycles (every
+// 5 min, see football.ts's FOOTBALL_UPCOMING_TTL_MS) instead of stalling a
+// single cycle for minutes. A small stagger between requests (not fired
+// concurrently) additionally guards against an unknown-to-us per-second
+// rate limit on this endpoint specifically.
+const MAX_NEW_TEAM_LOOKUPS_PER_BATCH = 25;
+const TEAM_LOOKUP_STAGGER_MS = 300;
+
+function normalizeTeamCacheKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+async function fetchTeamLogoUncached(name: string): Promise<string | null> {
+  rollUsageDateIfNeeded();
+  requestsToday += 1;
+  const resp = await fetch(
+    `${CONFIG.API_FOOTBALL_BASE_URL}/teams?name=${encodeURIComponent(name)}`,
+    {
+      headers: { "x-apisports-key": CONFIG.API_FOOTBALL_KEY },
+      signal: AbortSignal.timeout(8_000),
+    },
+  );
+  if (!resp.ok) {
+    throw new Error(`[api-football] ${resp.status} on /teams?name=${name}`);
+  }
+  const data = (await resp.json()) as RawTeamSearchResponse;
+  const match = (data.response ?? []).find(
+    (entry) => entry.team?.name && teamNamesMatch(name, entry.team.name),
+  );
+  return match?.team?.logo ?? null;
+}
+
+/** Team crest URL by name, independent of any live fixture — see this
+ * section's header. Returns null (not an error) for a name not yet looked
+ * up this batch (see MAX_NEW_TEAM_LOOKUPS_PER_BATCH), a name API-Football's
+ * search returns no tolerant-matching result for, or when
+ * API_FOOTBALL_KEY isn't configured — every caller already treats "no logo
+ * yet" as "fall back to the existing SportsAPI lookup", same as a live
+ * fixture not being found. */
+export async function getApiFootballTeamLogo(name: string): Promise<string | null> {
+  if (!CONFIG.API_FOOTBALL_KEY) return null;
+  const key = normalizeTeamCacheKey(name);
+  const now = Date.now();
+  const cached = teamLogoCache.get(key);
+  if (cached && now - cached.fetchedAt < TEAM_LOGO_CACHE_TTL_MS) return cached.logo;
+  const pending = teamLogoInFlight.get(key);
+  if (pending) return pending;
+  const promise = fetchTeamLogoUncached(name)
+    .then((logo) => {
+      teamLogoCache.set(key, { logo, fetchedAt: Date.now() });
+      return logo;
+    })
+    .catch((err) => {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), name },
+        "[api-football] team logo search failed",
+      );
+      return null;
+    })
+    .finally(() => {
+      teamLogoInFlight.delete(key);
+    });
+  teamLogoInFlight.set(key, promise);
+  return promise;
+}
+
+/** Resolves logos for a batch of (home, away) team-name pairs, respecting
+ * MAX_NEW_TEAM_LOOKUPS_PER_BATCH and TEAM_LOOKUP_STAGGER_MS — call once per
+ * prematch rebuild cycle with every match's team names rather than
+ * per-match, so the batch cap applies across the whole cycle instead of
+ * resetting per match. Returns a Map from normalized team name to logo URL
+ * (or null) for every name that had a cached answer or got looked up this
+ * call; a name absent from the returned map simply wasn't reached this
+ * batch (deferred to the next cycle, since its cache entry doesn't exist
+ * yet either). */
+export async function batchResolveApiFootballTeamLogos(
+  teamNames: Iterable<string>,
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (!CONFIG.API_FOOTBALL_KEY) return out;
+  const now = Date.now();
+  const toLookUp: string[] = [];
+  const seen = new Set<string>();
+  for (const name of teamNames) {
+    const key = normalizeTeamCacheKey(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const cached = teamLogoCache.get(key);
+    if (cached && now - cached.fetchedAt < TEAM_LOGO_CACHE_TTL_MS) {
+      out.set(key, cached.logo);
+    } else {
+      toLookUp.push(name);
+    }
+  }
+  const batch = toLookUp.slice(0, MAX_NEW_TEAM_LOOKUPS_PER_BATCH);
+  for (const name of batch) {
+    const logo = await getApiFootballTeamLogo(name);
+    out.set(normalizeTeamCacheKey(name), logo);
+    if (name !== batch[batch.length - 1]) {
+      await new Promise((resolve) => setTimeout(resolve, TEAM_LOOKUP_STAGGER_MS));
+    }
+  }
+  return out;
+}
