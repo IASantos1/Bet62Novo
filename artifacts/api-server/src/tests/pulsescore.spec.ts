@@ -377,3 +377,29 @@ test("extractBasketballOverride: reads Totals line from the market, not the sele
   assert.equal(override.total?.over, 1.85);
   assert.equal(override.total?.under, 1.83);
 });
+
+// bwin-only: canonicalMarket "OTHER", rawName "Anytime Goalscorer" — one
+// selection per real player plus a "No goalscorer" row. Confirmed against a
+// real live sample (2026-08-08). The "No goalscorer" row must be excluded
+// (it's not a player), and each surviving row's `player` string must be
+// exactly what a "pg:{player}" selection key would carry, since
+// settlement.ts matches that against Statpal's own goal-incident names.
+test("extractFootballOverride: extracts bwin's Anytime Goalscorer market, excluding the 'No goalscorer' row", () => {
+  const goalscorer = {
+    canonicalMarket: "OTHER",
+    rawName: "Anytime Goalscorer",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:anytime-scorer",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "Jan Kliment", odds: 2.65, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "Vaclav Sejk", odds: 5.5, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "No goalscorer", odds: 9.5, isActive: true },
+    ],
+  };
+  const override = extractFootballOverride(makeFootballEvent([goalscorer]));
+  assert.deepEqual(override.anytimeGoalscorer, [
+    { player: "Jan Kliment", odds: 2.65 },
+    { player: "Vaclav Sejk", odds: 5.5 },
+  ]);
+});

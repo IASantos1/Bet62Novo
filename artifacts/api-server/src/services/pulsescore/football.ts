@@ -193,6 +193,16 @@ export type PulseScoreFootballOverride = {
     awayOver15: number; awayUnder15: number;
     awayOver25: number; awayUnder25: number;
   }>;
+  // bwin-only so far: canonicalMarket "OTHER", rawName "Anytime Goalscorer" —
+  // one selection per real player name plus a "No goalscorer" row, confirmed
+  // against a real live sample (2026-08-08, 51 selections on one match).
+  // `player` is exactly the rawName PulseScore sends — settlement.ts's
+  // parseSelectionPlayerMarket matches a "pg:{playerName}" selection key
+  // against Statpal's own goal-incident player names
+  // (getFootballGoalEventsFromExtras), so this only ever auto-settles for
+  // matches Statpal also covers; otherwise it just stays pending, same as
+  // any other player-market bet on this codebase already does.
+  anytimeGoalscorer?: Array<{ player: string; odds: number }>;
 };
 
 const TOTAL_GOALS_LINE_KEYS: Record<string, { over: keyof TotalGoalsOverride; under: keyof TotalGoalsOverride }> = {
@@ -315,6 +325,15 @@ function isSecondHalfWinnerMarket(market: PulseScoreMarket): boolean {
 function isFirstTeamToScoreMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
   return market.canonicalMarket === "FIRST_TEAM_TO_SCORE";
+}
+
+// bwin-only so far: canonicalMarket "OTHER", rawName "Anytime Goalscorer" —
+// confirmed against a real live sample (2026-08-08). No canonicalMarket of
+// its own (unlike FIRST_TEAM_TO_SCORE), so identified by rawName only, same
+// fallback approach already used for bet365's OTHER-bucketed markets above.
+function isAnytimeGoalscorerMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return (market.rawName || "").trim().toLowerCase() === "anytime goalscorer";
 }
 
 // bet365: rawName "goals odd/even" (unverified naming, never actually seen).
@@ -517,6 +536,17 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
       if (home !== null && noGoal !== null && away !== null) {
         out.firstGoal = { home, noGoal, away };
       }
+    } else if (isAnytimeGoalscorerMarket(market)) {
+      const scorers: Array<{ player: string; odds: number }> = [];
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const player = (sel.rawName || "").trim();
+        if (!player || player.toLowerCase() === "no goalscorer") continue;
+        scorers.push({ player, odds: val });
+      }
+      if (scorers.length > 0) out.anytimeGoalscorer = scorers;
     } else if (isDrawNoBetMarket(market)) {
       let home: number | null = null;
       let away: number | null = null;

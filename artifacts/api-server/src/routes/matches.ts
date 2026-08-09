@@ -175,6 +175,12 @@ type AdvancedMarkets = {
     aa: number;
   };
   correctScore?: Record<string, number>;
+  // Anytime Goalscorer — one row per real player name, PulseScore/bwin only
+  // (confirmed real, 2026-08-08). `player` matches exactly what the frontend
+  // must send back as the "pg:{player}" selection key for
+  // settlement.ts's parseSelectionPlayerMarket/getFootballGoalEventsFromExtras
+  // to auto-settle it against Statpal's own goal-incident player names.
+  anytimeGoalscorer?: Array<{ player: string; odds: number }>;
   corners?: {
     o85: number;
     u85: number;
@@ -1759,6 +1765,7 @@ export function filterFootballMarketsByTier(
   delete out.corners;
   delete out.cards;
   delete out.secondHalf;
+  delete out.anytimeGoalscorer;
 
   if (tier === 2) return out;
 
@@ -11093,6 +11100,9 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     }
     if (override?.firstGoal) {
       rawMarkets.firstGoal = { ...rawMarkets.firstGoal, ...override.firstGoal };
+    }
+    if (override?.anytimeGoalscorer) {
+      rawMarkets.anytimeGoalscorer = override.anytimeGoalscorer;
     }
     if (override?.drawNoBet) {
       rawMarkets.drawNoBet = { ...rawMarkets.drawNoBet, ...override.drawNoBet };
