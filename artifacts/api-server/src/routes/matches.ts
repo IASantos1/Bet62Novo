@@ -47,6 +47,7 @@ import {
 } from "../services/pulsescore/hockey.js";
 import {
   getPulseScoreVolleyballUpcoming,
+  getPulseScoreVolleyballLive,
   extractVolleyballOverride,
 } from "../services/pulsescore/volleyball.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
@@ -11366,6 +11367,99 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   return results;
 }
 
+/**
+ * Volleyball live score, sourced from PulseScore's bet365 feed — DIFFERENT
+ * bookmaker than the bwin-sourced prematch builder above (see
+ * getPulseScoreVolleyballLive's own header: bwin's volleyball live events
+ * carry no score field at all, bet365's do, unconfirmed yet whether it
+ * actually populates once a match is genuinely in progress — this is a
+ * first pass to find out). Markets/odds stay synthetic (bet365's volleyball
+ * market shapes aren't extracted yet, they don't match extractVolleyballOverride's
+ * bwin-tuned patterns) — this builder's only real signal is score. Same
+ * `pulsescore-volleyball-${eventId}` id prefix as prematch even though the
+ * eventId SPACE differs per bookmaker (bwin's are colon-containing like
+ * "5:1106680", bet365's are bare numeric like "199191475" — never collide),
+ * kept for consistency with every other sport's id scheme.
+ */
+async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await getPulseScoreVolleyballLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+
+    const id = `pulsescore-volleyball-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
+    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
+      set1: { home: 0, away: 0 },
+      set2: { home: 0, away: 0 },
+      set3: { home: 0, away: 0 },
+      exactScore: { s30: 0, s31: 0, s32: 0, s03: 0, s13: 0, s23: 0 },
+      setHandicap: { home: 0, away: 0 },
+      pointsLines: [],
+      handicapPoints: { line: 0, home: 0, away: 0 },
+    };
+    const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
+    // Flat neutral fallback — bet365's volleyball market shapes aren't
+    // extracted yet (see this function's own header), so there's no real
+    // odds source here at all yet, unlike the prematch builder's
+    // override-when-priced pattern.
+    const odds = { home: 1.85, draw: 0, away: 1.85 };
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Voleibol",
+      country: ev.country || "Internacional",
+      sport: "volleyball",
+      homeScore,
+      awayScore,
+      // No confirmed continuous clock or set/period field from bet365 for
+      // volleyball yet (see getPulseScoreVolleyballLive's header) — 0 and a
+      // generic "AO VIVO" label rather than feeding the UI a guessed value.
+      minute: 0,
+      status: "AO VIVO",
+      hasRealOdds: false,
+      odds,
+      markets,
+      events: [],
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  // Garbage-collect matches that stopped appearing in the feed — same
+  // disappearance-based grace period every other PulseScore sport uses.
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-volleyball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[pulsescore] volleyball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -12343,7 +12437,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
-  const volleyballLiveItems: LiveMatchState[] = [];
+  let volleyballLiveRaw: LiveMatchState[] = [];
+  try {
+    volleyballLiveRaw = await buildVolleyballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildVolleyballLiveFromPulseScore failed this tick",
+    );
+  }
+  const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
     tennisLiveRaw = await buildTennisLiveFromPulseScore();
@@ -12393,12 +12496,27 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // tennis rarely has more than a couple dozen concurrent live matches, so
   // this is cheap per tick.
   const liveTennisMatches = livePart.filter((m) => m.sport === "tennis");
+  // Same fuzzy fallback, now also needed for volleyball (2026-08-09):
+  // prematch is bwin-sourced ("Manaus Nilton Lins") but live is bet365-
+  // sourced ("Nilton Lins") — bwin's the only one with a live score field
+  // for basketball but NOT volleyball, so volleyball's live builder pins
+  // bet365 specifically for its score field, unlike every other sport
+  // where live/prematch share one bookmaker. Without this, the same exact-
+  // string-only gap tennis had (fixed 2026-08-09) reappears for volleyball.
+  const liveVolleyballMatches = livePart.filter((m) => m.sport === "volleyball");
   function isUpcomingAlreadyLive(m: UpcomingMatch): boolean {
     if (liveTeamPairs.has(`${m.home}|${m.away}`)) return true;
-    if (m.sport !== "tennis") return false;
-    return liveTennisMatches.some(
-      (lm) => teamNamesMatch(m.home, lm.home) && teamNamesMatch(m.away, lm.away),
-    );
+    if (m.sport === "tennis") {
+      return liveTennisMatches.some(
+        (lm) => teamNamesMatch(m.home, lm.home) && teamNamesMatch(m.away, lm.away),
+      );
+    }
+    if (m.sport === "volleyball") {
+      return liveVolleyballMatches.some(
+        (lm) => teamNamesMatch(m.home, lm.home) && teamNamesMatch(m.away, lm.away),
+      );
+    }
+    return false;
   }
 
   // Max minutes ahead a match can be to appear as "Em Breve", per sport

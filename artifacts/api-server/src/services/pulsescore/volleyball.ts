@@ -4,15 +4,26 @@
 // disconnected Statpal feed, used today only to recover final scores for
 // old bets — see matches.ts's scanVolleyballForFinished — and a
 // computeVolleyballExtras synthetic model that was written but never
-// actually wired up anywhere). Live is NOT implemented here yet, same
-// reasoning as basketball.ts/hockey.ts: no real /live-events?sport=volleyball
-// sample has been seen, only the prematch /volleyball/leagues catalog.
+// actually wired up anywhere).
+//
+// Live: pinned to bet365 instead (see getPulseScoreVolleyballLive below) —
+// a real GET /live-events?sport=volleyball comparison (2026-08-09) showed
+// bwin's volleyball live events carry NO score field at all (only
+// matchClock.period, e.g. "2nd Set"), while bet365's DO carry a `score`
+// object. Every non-volleyball sport in this codebase uses the SAME
+// bookmaker for prematch and live — volleyball is the first exception,
+// which matters for id/name matching (see matches.ts's
+// isUpcomingAlreadyLive: prematch's bwin "Manaus Nilton Lins" vs live's
+// bet365 "Nilton Lins" need the fuzzy team-name fallback, not exact string
+// match, to recognize the same real match).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
+  pulseScoreGet,
   pulseScoreGetWithRetry,
   type PulseScoreEvent,
   type PulseScoreMarket,
+  type PulseScoreLiveEventsResponse,
 } from "./client.js";
 
 function oddsToNumber(raw: number | undefined): number | null {
@@ -279,4 +290,63 @@ export async function getPulseScoreVolleyballUpcoming(): Promise<PulseScoreVolle
       });
   }
   return upcomingInFlight;
+}
+
+// ── Live (REST poll, bet365) ────────────────────────────────────────────────
+const VOLLEYBALL_LIVE_BOOKMAKER = "bet365";
+const VOLLEYBALL_LIVE_TTL_MS = 1_000; // same PRO-plan 1 req/s budget as other live pollers
+let liveCache: { events: PulseScoreEvent[]; fetchedAt: number } | null = null;
+let liveInFlight: Promise<PulseScoreEvent[]> | null = null;
+
+async function fetchVolleyballLive(): Promise<PulseScoreEvent[]> {
+  // Confirmed real (2026-08-09, bet365): same paginated { total, page, ...,
+  // events: [...] } envelope as every other sport's live feed. `score` is
+  // {home,away} as STRINGS when present — sampled matches all read "0"/"0"
+  // (unconfirmed whether that's real 0-0 or a not-yet-live entry; bet365
+  // carries no matchClock at all for volleyball, only the generic
+  // moreInfo.TM/TS/TT/SS raw fields also seen on football/tennis, all "0"/
+  // empty in the sample). Markets use different canonicalMarket/rawName
+  // shapes than bwin's (extractVolleyballOverride was built against bwin's
+  // "Match Result"/"Set 1 Winner"/"Total Points"/"Correct Score" naming) —
+  // NOT re-extracted here yet, matches.ts's live builder uses the same
+  // synthetic-odds fallback prematch already falls back to when bwin hasn't
+  // priced a market, until bet365's volleyball market shapes are confirmed
+  // separately.
+  const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+    "/live-events?sport=volleyball&limit=200",
+    undefined,
+    VOLLEYBALL_LIVE_BOOKMAKER,
+  );
+  return Array.isArray(data?.events) ? data.events : [];
+}
+
+/** Live volleyball score from PulseScore (bet365), REST-only. Empty array if
+ * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
+ * very first attempt (nothing cached yet to fall back to). See
+ * fetchVolleyballLive's header for the real-sample caveats — this is a
+ * first pass to confirm whether bet365's score field actually populates
+ * once a match is genuinely in progress (still unconfirmed as of
+ * 2026-08-09). */
+export async function getPulseScoreVolleyballLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.PULSESCORE_API_KEY) return [];
+  const now = Date.now();
+  if (liveCache && now - liveCache.fetchedAt < VOLLEYBALL_LIVE_TTL_MS) return liveCache.events;
+  if (!liveInFlight) {
+    liveInFlight = fetchVolleyballLive()
+      .then((events) => {
+        liveCache = { events, fetchedAt: Date.now() };
+        return events;
+      })
+      .catch((err) => {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[pulsescore] volleyball live fetch failed — serving stale cache",
+        );
+        return liveCache?.events ?? [];
+      })
+      .finally(() => {
+        liveInFlight = null;
+      });
+  }
+  return liveInFlight;
 }
