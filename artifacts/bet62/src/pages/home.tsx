@@ -7286,6 +7286,8 @@ export default function Home({
       drawOdd: String(expandedMatch.odds.draw),
       awayOdd: String(expandedMatch.odds.away),
       sport: expandedMatch.sport ?? "football",
+      league: expandedMatch.league ?? "",
+      country: expandedMatch.country ?? "",
     });
     fetch(`/api/matches/stats?${p}`)
       .then((r) => (r.ok ? r.json() : null))
