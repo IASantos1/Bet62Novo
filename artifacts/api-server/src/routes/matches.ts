@@ -44,6 +44,7 @@ import {
   getPulseScoreHockeyUpcoming,
   extractHockeyOverride,
 } from "../services/pulsescore/hockey.js";
+import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import {
   getCachedTeamId,
   resolveTeamIdInBackground,
@@ -10872,15 +10873,26 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     (a.startTime || "").localeCompare(b.startTime || ""),
   );
   const results: UpcomingMatch[] = [];
-  const seen = new Set<string>();
   for (const ev of events) {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
 
-    const key = `${home}|${away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    // bet365 sometimes lists the same real match twice under different tour/
+    // category groupings, each with its own name-string variant (e.g. "Arina
+    // Bulatova (RUS)" under one grouping vs "Arina Bulatova" under another)
+    // and different, often stale, odds — reported in production 2026-08-09:
+    // duplicate tennis entries with conflicting prices, and one of the two
+    // never recognized as "now live" once the match starts (see the
+    // liveTeamPairs comment in buildLivePayload), leaving it stuck showing
+    // "A Iniciar" for up to 3h. An exact `${home}|${away}` string key let
+    // both variants through; teamNamesMatch recognizes them as the same
+    // match. Linear scan against results-so-far is fine — this list rarely
+    // exceeds a few hundred entries per poll.
+    const isDuplicate = results.some(
+      (r) => teamNamesMatch(r.home, home) && teamNamesMatch(r.away, away),
+    );
+    if (isDuplicate) continue;
 
     const leagueName = ev.league || "Ténis";
     const { date, time } = pulseScoreEventDateTime(ev.startTime);
@@ -11829,6 +11841,26 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const liveIds = new Set(livePart.map((m) => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
   const liveTeamPairs = new Set(livePart.map((m) => `${m.home}|${m.away}`));
+  // Tennis-only fuzzy fallback for the exact-string check above. bet365's own
+  // team-name string sometimes differs between its prematch and live tennis
+  // feeds (country suffix present/absent, initials vs full name — same class
+  // of variance tennis.ts's own extraction already handles via
+  // teamNamesMatch). Without this, a tennis match whose live-feed name
+  // string doesn't exactly match its prematch string is never recognized as
+  // "now live", so it keeps showing "A Iniciar" for up to 3h after kickoff
+  // even though it's genuinely live — reported in production 2026-08-09.
+  // Scoped to tennis only (linear scan, not folded into the Set above) to
+  // avoid changing well-tested exact-match behavior for every other sport;
+  // tennis rarely has more than a couple dozen concurrent live matches, so
+  // this is cheap per tick.
+  const liveTennisMatches = livePart.filter((m) => m.sport === "tennis");
+  function isUpcomingAlreadyLive(m: UpcomingMatch): boolean {
+    if (liveTeamPairs.has(`${m.home}|${m.away}`)) return true;
+    if (m.sport !== "tennis") return false;
+    return liveTennisMatches.some(
+      (lm) => teamNamesMatch(m.home, lm.home) && teamNamesMatch(m.away, lm.away),
+    );
+  }
 
   // Max minutes ahead a match can be to appear as "Em Breve", per sport
   const SOON_WINDOW: Record<string, number> = {
@@ -11852,7 +11884,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
                       // so API lag can't cause them to vanish without ever going live
         si <= maxSi &&
         !liveIds.has(String(m.id)) &&
-        !liveTeamPairs.has(`${m.home}|${m.away}`)
+        !isUpcomingAlreadyLive(m)
       );
     })
     .sort(
