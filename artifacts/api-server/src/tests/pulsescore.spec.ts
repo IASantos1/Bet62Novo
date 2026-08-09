@@ -402,6 +402,75 @@ test("mergeFootballWsFreshness: overlays matchClock/score from a fresh WS event,
   assert.equal(merged[1]!.matchClock?.minute, 10, "an event WS hasn't seen must be untouched");
 });
 
+test("mergeFootballWsFreshness: a WS reading OLDER than REST's own must NOT regress the clock/score (production bug, 2026-08-09)", () => {
+  footballWs.liveByEventId.clear();
+  footballWs.lastSeenAt.clear();
+  // WS's last broadcast for this event is genuinely older than what REST
+  // already fetched — realistic when WS only re-broadcasts on change and
+  // REST keeps polling every ~1s regardless.
+  footballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "evt-stale-ws",
+        sport: "soccer",
+        home: "A",
+        away: "B",
+        matchClock: { minute: 60, second: 0, period: "2H", running: true },
+        score: { home: "1", away: "0" },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "evt-stale-ws",
+      sport: "soccer",
+      home: "A",
+      away: "B",
+      markets: [],
+      matchClock: { minute: 61, second: 30, period: "2H", running: true },
+      score: { home: "2", away: "0" },
+    },
+  ] as never[];
+  const merged = mergeFootballWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.matchClock?.minute, 61, "clock must not tick backward");
+  assert.equal(merged[0]!.matchClock?.second, 30);
+  assert.equal(merged[0]!.score?.home, "2", "score must not regress either");
+});
+
+test("mergeFootballWsFreshness: mismatched periods (mid-transition) are not compared — REST wins", () => {
+  footballWs.liveByEventId.clear();
+  footballWs.lastSeenAt.clear();
+  footballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "evt-transition",
+        sport: "soccer",
+        home: "A",
+        away: "B",
+        matchClock: { minute: 45, second: 0, period: "1H", running: true },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "evt-transition",
+      sport: "soccer",
+      home: "A",
+      away: "B",
+      markets: [],
+      matchClock: { minute: 46, second: 5, period: "2H", running: true },
+    },
+  ] as never[];
+  const merged = mergeFootballWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.matchClock?.period, "2H", "REST's more advanced period must not be overwritten by a WS reading still in the prior half");
+});
+
 // ── Basketball (bwin) ────────────────────────────────────────────────────
 // Real bwin GET /basketball/leagues sample (2026-08-09): every event carries
 // its Money Line / Handicap / Totals markets THREE times (FULL_TIME,
@@ -591,6 +660,40 @@ test("mergeBasketballWsFreshness: overlays matchClock/score from a fresh WS even
   const merged = mergeBasketballWsFreshness(restEvents as never);
   assert.equal(merged[0]!.score?.home, "60", "fresh WS reading should win over REST's own score");
   assert.equal(merged[1]!.score?.home, "10", "an event WS hasn't seen must be untouched");
+});
+
+test("mergeBasketballWsFreshness: a WS reading OLDER than REST's own must NOT regress the period/score", () => {
+  basketballWs.liveByEventId.clear();
+  basketballWs.lastSeenAt.clear();
+  basketballWs.applyFrame({
+    sport: "basketball",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "bball-stale-ws",
+        sport: "basketball",
+        home: "A",
+        away: "B",
+        matchClock: { period: "Q2" },
+        score: { home: "40", away: "35" },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "bball-stale-ws",
+      sport: "basketball",
+      home: "A",
+      away: "B",
+      markets: [],
+      matchClock: { period: "Q3" },
+      score: { home: "55", away: "50" },
+    },
+  ] as never[];
+  const merged = mergeBasketballWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.matchClock?.period, "Q3", "period must not go backward");
+  assert.equal(merged[0]!.score?.home, "55", "score must not regress either");
 });
 
 // bwin-only: canonicalMarket "OTHER", rawName "Anytime Goalscorer" — one

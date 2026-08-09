@@ -171,6 +171,49 @@ export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
   return mergeFootballWsFreshness(events);
 }
 
+// WS only re-broadcasts an event when PulseScore decides something about it
+// changed — it does NOT re-broadcast every second the way REST is polled.
+// A WS frame still within FOOTBALL_WS_EVENT_FRESHNESS_MS can therefore be
+// for a moment strictly EARLIER than what REST's own most recent fetch
+// already has (REST keeps advancing every ~1s regardless of WS activity).
+// Reported in production (2026-08-09): the clock visibly ticking backward
+// whenever a WS frame landed. Fixed by only ever accepting the WS reading
+// if it's at least as advanced as REST's own — same "never regress a
+// displayed value" rule already applied to score elsewhere in this
+// codebase (see buildFootballLiveFromPulseScore's pulseScoreEventScore
+// fallback in matches.ts), just applied at the merge point instead.
+function clockSeconds(clock: NonNullable<PulseScoreEvent["matchClock"]>): number {
+  return clock.minute * 60 + clock.second;
+}
+
+function isWsClockAtLeastAsAdvanced(
+  wsClock: PulseScoreEvent["matchClock"],
+  restClock: PulseScoreEvent["matchClock"],
+): boolean {
+  if (!wsClock) return false;
+  if (!restClock) return true; // nothing to regress from
+  // Different periods (e.g. one source already flipped to "2H", the other
+  // still "1H"/"HT") means one side is mid-transition — comparing raw
+  // minute:second across periods is meaningless, so don't guess: only trust
+  // WS here if REST agrees on the period.
+  if (wsClock.period !== restClock.period) return false;
+  return clockSeconds(wsClock) >= clockSeconds(restClock);
+}
+
+function isWsScoreAtLeastAsAdvanced(
+  wsScore: PulseScoreEvent["score"],
+  restScore: PulseScoreEvent["score"],
+): boolean {
+  if (!wsScore) return false;
+  if (!restScore) return true;
+  const wsHome = Number(wsScore.home);
+  const wsAway = Number(wsScore.away);
+  const restHome = Number(restScore.home);
+  const restAway = Number(restScore.away);
+  if ([wsHome, wsAway, restHome, restAway].some((n) => Number.isNaN(n))) return false;
+  return wsHome >= restHome && wsAway >= restAway;
+}
+
 /** Exported only for tests — see getPulseScoreFootballLive's header for the
  * per-event merge rules this implements. */
 export function mergeFootballWsFreshness(restEvents: PulseScoreEvent[]): PulseScoreEvent[] {
@@ -180,8 +223,10 @@ export function mergeFootballWsFreshness(restEvents: PulseScoreEvent[]): PulseSc
     if (!wsEv) return ev;
     return {
       ...ev,
-      matchClock: wsEv.matchClock ?? ev.matchClock,
-      score: wsEv.score ?? ev.score,
+      matchClock: isWsClockAtLeastAsAdvanced(wsEv.matchClock, ev.matchClock)
+        ? wsEv.matchClock
+        : ev.matchClock,
+      score: isWsScoreAtLeastAsAdvanced(wsEv.score, ev.score) ? wsEv.score : ev.score,
     };
   });
 }
