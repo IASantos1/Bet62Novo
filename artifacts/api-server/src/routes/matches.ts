@@ -11091,6 +11091,9 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (override?.bothTeamsScore) {
       rawMarkets.bothTeamsScore = { ...rawMarkets.bothTeamsScore, ...override.bothTeamsScore };
     }
+    if (override?.firstGoal) {
+      rawMarkets.firstGoal = { ...rawMarkets.firstGoal, ...override.firstGoal };
+    }
     if (override?.drawNoBet) {
       rawMarkets.drawNoBet = { ...rawMarkets.drawNoBet, ...override.drawNoBet };
     }

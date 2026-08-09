@@ -179,6 +179,7 @@ export type PulseScoreFootballOverride = {
   // replacing the synthetic model wherever PulseScore actually priced it.
   doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore?: { yes: number; no: number };
+  firstGoal?: { home: number; noGoal: number; away: number };
   drawNoBet?: { home: number; away: number };
   secondHalf?: { home: number; draw: number; away: number };
   goalOddEven?: { odd: number; even: number };
@@ -302,6 +303,18 @@ function isSecondHalfWinnerMarket(market: PulseScoreMarket): boolean {
     rawName === "to win 2nd half" ||
     (market.canonicalMarket === "OTHER" && rawName === "2nd half result")
   );
+}
+
+// bwin-only so far: canonicalMarket "FIRST_TEAM_TO_SCORE", rawName "First
+// Team to Score", selections HOME/NEITHER/AWAY ("No goal") — confirmed
+// against real live and prematch samples (2026-08-08). Maps directly onto
+// the existing AdvancedMarkets.firstGoal field (matches.ts), which every
+// match already renders (frontend label "1.º Golo") from a synthetic price
+// — this just supplies the real one when bwin has it. Not confirmed for
+// bet365 (never seen this canonicalMarket in any bet365 sample).
+function isFirstTeamToScoreMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  return market.canonicalMarket === "FIRST_TEAM_TO_SCORE";
 }
 
 // bet365: rawName "goals odd/even" (unverified naming, never actually seen).
@@ -480,6 +493,21 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         else if (sel.canonicalOutcome === "NO") no = val;
       }
       if (yes !== null && no !== null) out.bothTeamsScore = { yes, no };
+    } else if (isFirstTeamToScoreMarket(market)) {
+      let home: number | null = null;
+      let noGoal: number | null = null;
+      let away: number | null = null;
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "HOME") home = val;
+        else if (sel.canonicalOutcome === "AWAY") away = val;
+        else if (sel.canonicalOutcome === "NEITHER") noGoal = val;
+      }
+      if (home !== null && noGoal !== null && away !== null) {
+        out.firstGoal = { home, noGoal, away };
+      }
     } else if (isDrawNoBetMarket(market)) {
       let home: number | null = null;
       let away: number | null = null;
