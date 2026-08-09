@@ -240,6 +240,37 @@ export function latestGoalScorer(fixture: ApiFootballFixture): string | null {
   return null;
 }
 
+/** True if the LAST goal event on this fixture was a penalty — used to
+ * relabel the goal suspension reason "GOLO DE PÊNALTI!" instead of the
+ * generic "GOLO!". API-Football's own docs list "Penalty" as one of the
+ * `detail` values for a type:"Goal" event (scored penalty) — matched by
+ * exact equality (case-insensitive) so a routine open-play goal never
+ * matches. */
+export function latestGoalIsPenalty(fixture: ApiFootballFixture): boolean {
+  for (let i = fixture.events.length - 1; i >= 0; i--) {
+    const ev = fixture.events[i]!;
+    if (ev.type === "Goal") return ev.detail.toLowerCase() === "penalty";
+  }
+  return false;
+}
+
+/** Penalty-outcome events, scored OR missed. A missed/saved penalty
+ * previously triggered NO suspension at all — goalScored (matches.ts) only
+ * fires on a score change, and there was no other trigger covering it, a
+ * real gap for a moment that should freeze betting markets just as much as
+ * a scored goal does. API-Football's own docs list "Missed Penalty" as a
+ * `detail` value for a type:"Goal" event (the goals tally itself doesn't
+ * increment) alongside "Penalty" for a scored one — matched by substring on
+ * "penalty" so both are covered without needing the exact missed-penalty
+ * wording confirmed against a real sample first (same reasoning as
+ * fixtureHasVarReview: rare event, catch it the instant one appears rather
+ * than allow-listing one exact spelling). */
+export function fixturePenaltyEvents(fixture: ApiFootballFixture): ApiFootballEvent[] {
+  return fixture.events.filter(
+    (ev) => ev.type === "Goal" && ev.detail.toLowerCase().includes("penalty"),
+  );
+}
+
 // ── Live match statistics (shots, possession, corners, fouls, ...) ────────
 // GET /fixtures/statistics?fixture={id} — unlike /fixtures?live=all, this is
 // PER FIXTURE, not one request for every live match, so it's called on

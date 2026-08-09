@@ -6,6 +6,8 @@ const {
   fixtureHasRedCard,
   fixtureHasVarReview,
   latestGoalScorer,
+  latestGoalIsPenalty,
+  fixturePenaltyEvents,
   extractTeamStats,
 } = await import("../services/apiFootball.js");
 
@@ -144,6 +146,84 @@ test("latestGoalScorer: returns the last goal's scorer, ignoring cards/subs afte
 test("latestGoalScorer: null when the fixture has no goal events yet", () => {
   const fixture = makeFixture({ events: [] });
   assert.equal(latestGoalScorer(fixture), null);
+});
+
+test("latestGoalIsPenalty: true when the last goal event's detail is exactly 'Penalty'", () => {
+  const fixture = makeFixture({
+    events: [
+      {
+        minute: 10,
+        extraMinute: null,
+        teamId: 10,
+        teamName: "Home FC",
+        playerName: "S. Lindmark",
+        assistName: null,
+        type: "Goal",
+        detail: "Penalty",
+        comments: null,
+      },
+    ],
+  });
+  assert.equal(latestGoalIsPenalty(fixture), true);
+});
+
+test("latestGoalIsPenalty: false for a routine open-play goal", () => {
+  const fixture = makeFixture({
+    events: [
+      {
+        minute: 10,
+        extraMinute: null,
+        teamId: 10,
+        teamName: "Home FC",
+        playerName: "S. Lindmark",
+        assistName: null,
+        type: "Goal",
+        detail: "Normal Goal",
+        comments: null,
+      },
+    ],
+  });
+  assert.equal(latestGoalIsPenalty(fixture), false);
+});
+
+test("fixturePenaltyEvents: catches a MISSED penalty even though the score never changes", () => {
+  const fixture = makeFixture({
+    events: [
+      {
+        minute: 60,
+        extraMinute: null,
+        teamId: 20,
+        teamName: "Away FC",
+        playerName: "W. Jiang",
+        assistName: null,
+        type: "Goal",
+        detail: "Missed Penalty",
+        comments: null,
+      },
+    ],
+  });
+  const penalties = fixturePenaltyEvents(fixture);
+  assert.equal(penalties.length, 1);
+  assert.equal(penalties[0]?.playerName, "W. Jiang");
+});
+
+test("fixturePenaltyEvents: empty when the fixture has no penalty-outcome events", () => {
+  const fixture = makeFixture({
+    events: [
+      {
+        minute: 10,
+        extraMinute: null,
+        teamId: 10,
+        teamName: "Home FC",
+        playerName: "S. Lindmark",
+        assistName: null,
+        type: "Goal",
+        detail: "Normal Goal",
+        comments: null,
+      },
+    ],
+  });
+  assert.equal(fixturePenaltyEvents(fixture).length, 0);
 });
 
 // teamNamesMatch's existing fuzzy/tolerant matching (already battle-tested
