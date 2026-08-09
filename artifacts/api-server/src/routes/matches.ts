@@ -11634,6 +11634,28 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         htScore,
       },
     };
+    // Leave "Ao Vivo" the instant FT is detected, instead of sitting there
+    // with a frozen "FT" badge until PulseScore stops returning the event
+    // AND the long disappear-grace-period (130-180 min, see the GC loop
+    // below) elapses — user-reported 2026-08-09: finished matches lingered
+    // in the live section far too long. isFulltimeFreeze is trustworthy
+    // enough to freeze the display on already (see its own comment above —
+    // bwin's matchClock.period "Finished" is immediate and confirmed real),
+    // so it's trustworthy enough to finalize on too. Guarded on
+    // finishedMatchResults so a match PulseScore keeps reporting as
+    // "Finished" for several more ticks after the first one only finalizes
+    // (and enqueues settlement) ONCE, not on every tick it's still present.
+    if (isFulltimeFreeze) {
+      if (!finishedMatchResults.has(id)) {
+        try {
+          await finalizeStaleLiveMatch(state);
+        } catch (err) {
+          logger.error({ err, id }, "[pulsescore] football finalizeStaleLiveMatch (FT) failed");
+        }
+      }
+      liveMatchState.delete(id);
+      continue;
+    }
     currentIds.add(id);
     // liveMatchState is what settlement.ts (in-play resolution + cash-out
     // suspension) and ensureFinishedMatchResult read from — this loop used to
