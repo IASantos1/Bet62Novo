@@ -6,6 +6,7 @@ const {
   fixtureHasRedCard,
   fixtureHasVarReview,
   latestGoalScorer,
+  extractTeamStats,
 } = await import("../services/apiFootball.js");
 
 function makeFixture(overrides: Partial<Record<string, unknown>> = {}) {
@@ -163,4 +164,49 @@ test("findApiFootballFixture: returns null when no fixture matches", () => {
   ];
   const found = findApiFootballFixture("Home FC", "Away FC", fixtures);
   assert.equal(found, null);
+});
+
+// Built against API-Football's stable public documentation for
+// /fixtures/statistics (not yet verified against a real live response —
+// see apiFootball.ts's own header comment on this section). Shape: one
+// block per team, each a {type, value} array, value either a plain number
+// or a "NN%" string.
+test("extractTeamStats: maps known stat types, parsing both plain numbers and '%' strings", () => {
+  const block = {
+    team: { id: 10, name: "Home FC" },
+    statistics: [
+      { type: "Shots on Goal", value: 5 },
+      { type: "Total Shots", value: 12 },
+      { type: "Ball Possession", value: "58%" },
+      { type: "Corner Kicks", value: 6 },
+      { type: "Fouls", value: 9 },
+      { type: "Offsides", value: 2 },
+      { type: "Yellow Cards", value: 1 },
+      { type: "Red Cards", value: null },
+    ],
+  };
+  const stats = extractTeamStats(block);
+  assert.equal(stats?.shotsTotal, 12);
+  assert.equal(stats?.shotsOnTarget, 5);
+  assert.equal(stats?.possessionPct, 58);
+  assert.equal(stats?.corners, 6);
+  assert.equal(stats?.fouls, 9);
+  assert.equal(stats?.offsides, 2);
+  assert.equal(stats?.yellowCards, 1);
+  assert.equal(stats?.redCards, null);
+});
+
+test("extractTeamStats: an unrecognised type string still lands in `raw`, not a promoted field", () => {
+  const block = {
+    team: { id: 10, name: "Home FC" },
+    statistics: [{ type: "expected_goals", value: "1.8" }],
+  };
+  const stats = extractTeamStats(block);
+  assert.equal(stats?.shotsTotal, null);
+  assert.equal(stats?.raw["expected_goals"], "1.8");
+});
+
+test("extractTeamStats: null when the block has no statistics array at all", () => {
+  assert.equal(extractTeamStats(undefined), null);
+  assert.equal(extractTeamStats({ team: { id: 10, name: "Home FC" } }), null);
 });

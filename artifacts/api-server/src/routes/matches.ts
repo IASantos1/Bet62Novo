@@ -55,6 +55,7 @@ import {
   fixtureHasRedCard,
   fixtureHasVarReview,
   latestGoalScorer,
+  getApiFootballFixtureStatistics,
   type ApiFootballFixture,
 } from "../services/apiFootball.js";
 import {
@@ -424,6 +425,23 @@ export type LiveMatchState = {
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
+  // Live match statistics (football only) from API-Football's
+  // /fixtures/statistics — null per field when that stat wasn't present in
+  // the raw response (not yet reported for this match, or an unexpected
+  // type-string variant — see apiFootball.ts's STAT_TYPE_MAP), absent
+  // entirely when no API-Football fixture was matched at all.
+  matchStats?: {
+    shotsTotalHome: number | null;
+    shotsTotalAway: number | null;
+    shotsOnTargetHome: number | null;
+    shotsOnTargetAway: number | null;
+    possessionHome: number | null;
+    possessionAway: number | null;
+    cornersHome: number | null;
+    cornersAway: number | null;
+    foulsHome: number | null;
+    foulsAway: number | null;
+  };
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -11419,6 +11437,15 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // use below already treats null as "no extra data" and falls back to
     // PulseScore-only behavior, same as before this integration existed).
     const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures);
+    // Per-fixture request (unlike the single apiFootballFixtures fetch
+    // above) — cheap here because getApiFootballFixtureStatistics caches
+    // per fixtureId with its own 30s TTL, so this only actually hits the
+    // network once per match per 30s regardless of how often this tick
+    // runs. Null (not fetched at all) whenever there's no matched fixture,
+    // rather than guessing at a stale one.
+    const apiFootballStats = apiFixture
+      ? await getApiFootballFixtureStatistics(apiFixture.fixtureId)
+      : null;
     // Counts, not booleans — fixtureHasRedCard/fixtureHasVarReview would stay
     // true for the rest of the match after a single occurrence (the events
     // array only grows), so comparing against the PREVIOUS tick's count is
@@ -11714,6 +11741,20 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       events: apiFootballEvents,
       redCardsHome,
       redCardsAway,
+      matchStats: apiFootballStats
+        ? {
+            shotsTotalHome: apiFootballStats.home?.shotsTotal ?? null,
+            shotsTotalAway: apiFootballStats.away?.shotsTotal ?? null,
+            shotsOnTargetHome: apiFootballStats.home?.shotsOnTarget ?? null,
+            shotsOnTargetAway: apiFootballStats.away?.shotsOnTarget ?? null,
+            possessionHome: apiFootballStats.home?.possessionPct ?? null,
+            possessionAway: apiFootballStats.away?.possessionPct ?? null,
+            cornersHome: apiFootballStats.home?.corners ?? null,
+            cornersAway: apiFootballStats.away?.corners ?? null,
+            foulsHome: apiFootballStats.home?.fouls ?? null,
+            foulsAway: apiFootballStats.away?.fouls ?? null,
+          }
+        : undefined,
       _apiFootballVarEventCount: varEventCount,
       marketSuspension,
       _suspensionReason: suspensionReason,
