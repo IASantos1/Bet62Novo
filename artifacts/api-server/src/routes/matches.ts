@@ -58,6 +58,7 @@ import {
   latestGoalScorer,
   latestGoalIsPenalty,
   fixturePenaltyEvents,
+  getApiFootballStandingsForLeague,
   getApiFootballFixtureStatistics,
   getApiFootballTeamLogo,
   batchResolveApiFootballTeamLogos,
@@ -16035,6 +16036,8 @@ router.get("/stats", async (req: Request, res: Response) => {
   const home = String(req.query["home"] ?? "");
   const away = String(req.query["away"] ?? "");
   const sport = String(req.query["sport"] ?? "football");
+  const leagueQuery = String(req.query["league"] ?? "");
+  const countryQuery = String(req.query["country"] ?? "");
   const homeOdd = parseFloat(String(req.query["homeOdd"] ?? "2")) || 2;
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
@@ -16327,10 +16330,36 @@ router.get("/stats", async (req: Request, res: Response) => {
   });
 
   // --- League standings ---
-  const leagueParam = String(req.query["league"] ?? "");
   // Do NOT default to "england" — use only the actual league name sent by the client.
-  // If no match is found in LEAGUE_TEAMS, buildLeagueStandings uses the real team names + generic fillers.
-  const standingsData = buildLeagueStandings(leagueParam, home, away);
+  // Real table from API-Football when it can resolve this league (any
+  // country/tier it covers — not limited to a curated list), falling back to
+  // buildLeagueStandings's fully-synthetic filler table (fake team names,
+  // pseudo-random points) only when API-Football has no key configured,
+  // fails, or genuinely doesn't carry this particular league.
+  let standingsData = buildLeagueStandings(leagueQuery, home, away);
+  if (sport === "football" && leagueQuery.trim()) {
+    try {
+      const real = await getApiFootballStandingsForLeague(leagueQuery, countryQuery);
+      if (real && real.teams.length > 0) {
+        standingsData = {
+          league: real.leagueName || leagueQuery,
+          teams: real.teams.map((t) => ({
+            pos: t.rank,
+            name: t.teamName,
+            played: t.played,
+            won: t.win,
+            drawn: t.draw,
+            lost: t.lose,
+            gf: t.goalsFor,
+            ga: t.goalsAgainst,
+            pts: t.points,
+          })),
+        };
+      }
+    } catch (err) {
+      logger.error({ err, league: leagueQuery }, "[api-football] standings lookup failed for /stats — keeping synthetic fallback");
+    }
+  }
 
   // Lineups: never generate fake players — real data is fetched by clients via /v2-lineups
   const lineups = null;

@@ -571,3 +571,222 @@ export async function batchResolveApiFootballTeamLogos(
   }
   return out;
 }
+
+// ── League standings ────────────────────────────────────────────────────────
+// Real per-league table (position/points/played/W-D-L/goals/form), replacing
+// the fully-synthetic buildLeagueStandings() (matches.ts) that generated
+// fake filler team names ("Sporting FC", "Athletic CF", ...) with
+// pseudo-random points for ANY league without a curated Statpal ID — which
+// in practice meant EVERY league, since the frontend never even sent one
+// (see matches.ts's /stats route, which only ever received home/away/odds).
+//
+// Two-step lookup, both verified against a real response (2026-08-09,
+// Belgian Jupiler Pro League): GET /leagues?name=X&country=Y to resolve
+// OUR league name string to API-Football's own numeric league id + current
+// season year, then GET /standings?league={id}&season={year}. Confirmed
+// shape: response[0].league.standings is an ARRAY OF ARRAYS (one inner
+// array per group — e.g. a later-season split into championship/relegation
+// groups; a normal single-table league just has one inner array) of
+// {rank, team:{id,name,logo}, points, goalsDiff, form, all:{played,win,
+// draw,lose,goals:{for,against}}, ...}. Every inner array is flattened here
+// since matches.ts wants one flat table, and the vast majority of leagues
+// (early/mid season, no split yet) only ever have one anyway.
+export type ApiFootballStandingsTeam = {
+  rank: number;
+  teamId: number;
+  teamName: string;
+  teamLogo: string | null;
+  points: number;
+  goalsDiff: number;
+  form: string | null;
+  played: number;
+  win: number;
+  draw: number;
+  lose: number;
+  goalsFor: number;
+  goalsAgainst: number;
+};
+
+export type ApiFootballLeagueStandings = {
+  leagueId: number;
+  leagueName: string;
+  season: number;
+  teams: ApiFootballStandingsTeam[];
+};
+
+type RawLeagueSearchResponse = {
+  response?: Array<{
+    league?: { id?: number; name?: string };
+    seasons?: Array<{ year?: number; current?: boolean }>;
+  }>;
+};
+
+type RawStandingsEntry = {
+  rank?: number;
+  team?: { id?: number; name?: string; logo?: string | null };
+  points?: number;
+  goalsDiff?: number;
+  form?: string | null;
+  all?: {
+    played?: number;
+    win?: number;
+    draw?: number;
+    lose?: number;
+    goals?: { for?: number; against?: number };
+  };
+};
+type RawStandingsResponse = {
+  response?: Array<{
+    league?: { id?: number; name?: string; season?: number; standings?: RawStandingsEntry[][] };
+  }>;
+};
+
+const LEAGUE_ID_CACHE_TTL_MS = 24 * 60 * 60_000; // league<->id mapping is effectively static day-to-day
+const leagueIdCache = new Map<
+  string,
+  { league: { leagueId: number; season: number } | null; fetchedAt: number }
+>();
+
+function normalizeLeagueCacheKey(name: string, country: string): string {
+  return `${name.trim().toLowerCase()}|${country.trim().toLowerCase()}`;
+}
+
+/** Resolves OUR league name (+ optional country, for disambiguation — many
+ * leagues share a generic name like "Premier League" across countries) to
+ * API-Football's own numeric league id and current season year. Cached
+ * (including a "not found" result, so a league API-Football doesn't carry
+ * isn't re-searched on every call) since this mapping barely ever changes. */
+export async function resolveApiFootballLeague(
+  name: string,
+  country: string,
+): Promise<{ leagueId: number; season: number } | null> {
+  if (!CONFIG.API_FOOTBALL_KEY || !name.trim()) return null;
+  const key = normalizeLeagueCacheKey(name, country);
+  const cached = leagueIdCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < LEAGUE_ID_CACHE_TTL_MS) return cached.league;
+
+  rollUsageDateIfNeeded();
+  requestsToday += 1;
+  const params = new URLSearchParams({ name });
+  if (country.trim()) params.set("country", country.trim());
+  let result: { leagueId: number; season: number } | null = null;
+  try {
+    const resp = await fetch(`${CONFIG.API_FOOTBALL_BASE_URL}/leagues?${params.toString()}`, {
+      headers: { "x-apisports-key": CONFIG.API_FOOTBALL_KEY },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!resp.ok) throw new Error(`[api-football] ${resp.status} on /leagues?${params.toString()}`);
+    const data = (await resp.json()) as RawLeagueSearchResponse;
+    const found = data.response?.[0];
+    const leagueId = found?.league?.id;
+    const season =
+      found?.seasons?.find((s) => s.current)?.year ?? found?.seasons?.at(-1)?.year;
+    if (leagueId !== undefined && season !== undefined) {
+      result = { leagueId, season };
+    }
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), name, country },
+      "[api-football] league id search failed",
+    );
+    // A transient failure isn't cached as "not found" (unlike a genuine
+    // empty response above) — falls through to cache `null` for this tick
+    // only via the assignment below, same as a real "not found" would, but
+    // worth flagging: the next call will just retry.
+  }
+  leagueIdCache.set(key, { league: result, fetchedAt: Date.now() });
+  return result;
+}
+
+const STANDINGS_TTL_MS = 30 * 60_000; // standings only change after a full-time result, not worth polling faster
+const standingsCache = new Map<
+  string,
+  { data: ApiFootballLeagueStandings | null; fetchedAt: number }
+>();
+
+async function fetchStandingsUncached(
+  leagueId: number,
+  season: number,
+): Promise<ApiFootballLeagueStandings | null> {
+  rollUsageDateIfNeeded();
+  requestsToday += 1;
+  const resp = await fetch(
+    `${CONFIG.API_FOOTBALL_BASE_URL}/standings?league=${leagueId}&season=${season}`,
+    { headers: { "x-apisports-key": CONFIG.API_FOOTBALL_KEY }, signal: AbortSignal.timeout(8_000) },
+  );
+  if (!resp.ok) {
+    throw new Error(`[api-football] ${resp.status} on /standings?league=${leagueId}&season=${season}`);
+  }
+  const data = (await resp.json()) as RawStandingsResponse;
+  const leagueBlock = data.response?.[0]?.league;
+  const groups = leagueBlock?.standings ?? [];
+  const teams: ApiFootballStandingsTeam[] = groups.flat().flatMap((t): ApiFootballStandingsTeam[] => {
+    if (t.rank === undefined || t.team?.id === undefined || !t.team?.name) return [];
+    return [
+      {
+        rank: t.rank,
+        teamId: t.team.id,
+        teamName: t.team.name,
+        teamLogo: t.team.logo ?? null,
+        points: t.points ?? 0,
+        goalsDiff: t.goalsDiff ?? 0,
+        form: t.form ?? null,
+        played: t.all?.played ?? 0,
+        win: t.all?.win ?? 0,
+        draw: t.all?.draw ?? 0,
+        lose: t.all?.lose ?? 0,
+        goalsFor: t.all?.goals?.for ?? 0,
+        goalsAgainst: t.all?.goals?.against ?? 0,
+      },
+    ];
+  });
+  if (teams.length === 0) return null;
+  return {
+    leagueId,
+    leagueName: leagueBlock?.name ?? "",
+    season: leagueBlock?.season ?? season,
+    teams,
+  };
+}
+
+/** Real standings table for one API-Football league id + season, cached for
+ * STANDINGS_TTL_MS. Null when API_FOOTBALL_KEY isn't configured, the
+ * fetch fails, or the league genuinely has no standings data (e.g. a cup
+ * competition without a league table). */
+export async function getApiFootballStandings(
+  leagueId: number,
+  season: number,
+): Promise<ApiFootballLeagueStandings | null> {
+  if (!CONFIG.API_FOOTBALL_KEY) return null;
+  const key = `${leagueId}-${season}`;
+  const cached = standingsCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < STANDINGS_TTL_MS) return cached.data;
+  let data: ApiFootballLeagueStandings | null = null;
+  try {
+    data = await fetchStandingsUncached(leagueId, season);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), leagueId, season },
+      "[api-football] standings fetch failed",
+    );
+    // Serve the previous cached table (even if past TTL) rather than blanking
+    // the "Classificação" tab out on one transient failure.
+    return cached?.data ?? null;
+  }
+  standingsCache.set(key, { data, fetchedAt: Date.now() });
+  return data;
+}
+
+/** One-call convenience combining resolveApiFootballLeague +
+ * getApiFootballStandings — what matches.ts's /stats route actually calls.
+ * Null whenever either step comes up empty (league not found, or found but
+ * no standings data for it), so the caller can fall back to its own
+ * synthetic table without special-casing each failure mode separately. */
+export async function getApiFootballStandingsForLeague(
+  leagueName: string,
+  country: string,
+): Promise<ApiFootballLeagueStandings | null> {
+  const resolved = await resolveApiFootballLeague(leagueName, country);
+  if (!resolved) return null;
+  return getApiFootballStandings(resolved.leagueId, resolved.season);
+}
