@@ -21,6 +21,9 @@ const {
 const { extractBasketballOverride } = await import(
   "../services/pulsescore/basketball.js"
 );
+const { extractTennisPrematchExtra } = await import(
+  "../services/pulsescore/tennis.js"
+);
 const { __testing: footballWs } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -84,6 +87,21 @@ test("teamNamesMatch: surname-only fallback only applies when a comma signals an
   // Neither side has a comma, so club names sharing a trailing city token
   // must NOT fall back to surname-only matching.
   assert.equal(teamNamesMatch("Real Madrid", "Atletico Madrid"), false);
+});
+
+// bwin's tennis market selections often abbreviate the given name to a
+// single or double initial while the tracked event's own home/away carries
+// the full name plus a "(CTRY)" suffix — confirmed against real
+// /tennis/leagues and /tennis/events samples (2026-08-09). No comma
+// involved, so this needs its own fallback distinct from the one above.
+test("teamNamesMatch: initial+surname fallback matches bwin's abbreviated tennis selection names", () => {
+  assert.equal(teamNamesMatch("J. Schwaerzler", "Joel Schwaerzler (AUT)"), true);
+  // Double-initial abbreviation ("O.J.") must still resolve to the same
+  // surname/first-initial as the full "Oscar Jose".
+  assert.equal(teamNamesMatch("O.J. Gutierrez", "Oscar Jose Gutierrez (ESP)"), true);
+  // Two different players who happen to share a surname must NOT collapse
+  // together just because one side looks abbreviated.
+  assert.equal(teamNamesMatch("J. Schwaerzler", "Andrea Guerrieri (ITA)"), false);
 });
 
 test("teamNamesMatch: empty strings never match", () => {
@@ -402,4 +420,63 @@ test("extractFootballOverride: extracts bwin's Anytime Goalscorer market, exclud
     { player: "Jan Kliment", odds: 2.65 },
     { player: "Vaclav Sejk", odds: 5.5 },
   ]);
+});
+
+function makeTennisPrematchEvent(markets: unknown[]) {
+  return {
+    eventId: "test-tennis-1",
+    sport: "tennis",
+    league: "ATP Challenger Test",
+    home: "Joel Schwaerzler (AUT)",
+    away: "Andrea Guerrieri (ITA)",
+    startTime: "2026-08-09T11:15:00.000Z",
+    live: false,
+    markets,
+  } as Parameters<typeof extractTennisPrematchExtra>[0];
+}
+
+// bwin's Set 1 Winner (confirmed against a real /tennis/leagues sample,
+// 2026-08-09) reuses canonicalMarket "MATCH_RESULT" — same as the overall
+// match winner — differentiated only by period "FIRST_SET", and its
+// selections carry canonicalOutcome "OTHER" with the player name in
+// rawName instead of HOME/AWAY. Before this fix, extractTennisPrematchExtra
+// looked for a dedicated "SET_WINNER" canonicalMarket (bet365's shape) and
+// only read HOME/AWAY outcomes — both wrong for bwin, so out.firstSet would
+// silently never populate.
+test("extractTennisPrematchExtra: extracts bwin's Set 1 Winner (MATCH_RESULT + FIRST_SET, OTHER outcomes)", () => {
+  const setWinner = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "Set 1 Winner",
+    period: "FIRST_SET",
+    isActive: true,
+    marketId: "test:set1winner",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "J. Schwaerzler", odds: 1.72, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "A. Guerrieri", odds: 1.95, isActive: true },
+    ],
+  };
+  const extra = extractTennisPrematchExtra(makeTennisPrematchEvent([setWinner]));
+  assert.deepEqual(extra.firstSet, { home: 1.72, away: 1.95 });
+});
+
+// bwin puts `line` on the TOTAL_GAMES market, never the selection (same
+// class of bug already fixed for football/basketball's totals markets) —
+// each alternate line is its own separate market object.
+test("extractTennisPrematchExtra: reads Total Games line from the market, not the selection (bwin)", () => {
+  const totalGames = {
+    canonicalMarket: "TOTAL_GAMES",
+    rawName: "Total games: Match",
+    period: "FULL_TIME",
+    line: 22.5,
+    isActive: true,
+    marketId: "test:total-games",
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over 22.5", odds: 1.9, isActive: true },
+      { canonicalOutcome: "UNDER", rawName: "Under 22.5", odds: 1.78, isActive: true },
+    ],
+  };
+  const extra = extractTennisPrematchExtra(makeTennisPrematchEvent([totalGames]));
+  assert.equal(extra.totalGames?.line, 22.5);
+  assert.equal(extra.totalGames?.over, 1.9);
+  assert.equal(extra.totalGames?.under, 1.78);
 });

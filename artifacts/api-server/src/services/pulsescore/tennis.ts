@@ -9,16 +9,29 @@
 // footballWs.ts's header). Tennis is back to REST-only, same as it was
 // before 2026-08-07 and same as football was before this date.
 //
-// Shares the bet365 bookmaker with football.ts (the only bookmaker
-// confirmed to carry tennis, via the real /tennis/leagues sample that
-// revealed the DRAW_NO_BET market) rather than a distinct bookmaker prefix
-// like basketball/hockey/baseball/volleyball use — picking an unconfirmed
-// bookmaker name for tennis would repeat the exact mistake this integration
-// keeps having to correct. bet365's PRO-plan REST budget is 1 req/s shared
-// with football, serialized through a per-bookmaker throttle in client.ts
-// (pulseScoreGet) — an occasional 429 from that just means serving the last
-// good cache for that tick, not a crash (same catch-and-fall-back shape as
-// every other PulseScore fetch here).
+// Switched to bwin 2026-08-09 (same explicit user decision that moved
+// football/basketball off bet365 — see football.ts's FOOTBALL_BOOKMAKER
+// comment), pinned via TENNIS_BOOKMAKER below rather than the global
+// CONFIG.PULSESCORE_BOOKMAKER default. IMPORTANT KNOWN GAP, accepted
+// knowingly by the user after being shown the concrete consequence: bwin's
+// tennis feed (prematch AND live, confirmed against real samples of both)
+// carries ZERO moreInfo anywhere, unlike bet365 which exposed live set/game
+// score via moreInfo.SS and the current game's point score via moreInfo.XP.
+// Every live-set/point-score/serving field this file derives from those two
+// keys (parseTennisSetsFromSS/parseTennisPointsFromXP/detectTennisServer)
+// will silently come back empty for bwin — sets stays [], homeSetsWon/
+// awaySetsWon stay 0/0 for the ENTIRE match. Since matches.ts's
+// finalizeStaleLiveMatch persists state.homeScore/awayScore (== those two
+// fields) as the final result the moment a live match disappears, every
+// live tennis moneyline bet settled after this switch resolves with a 0-0
+// final score — settlement.ts's generic 1X2 fallthrough then marks BOTH
+// home and away as "lost" (tennis has no draw), regardless of who actually
+// won. No independent tennis score source exists elsewhere in this codebase
+// (unlike football's Statpal goal/card feed) to fall back on. Real bwin
+// "To Win"/"Match Winner" live prices are still used outright when active
+// (see extractTennisOverride/computeTennisLiveOdds), so displayed live odds
+// stay accurate right up to the point the match disappears — only the
+// final settlement outcome is affected.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -29,6 +42,8 @@ import {
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
+
+const TENNIS_BOOKMAKER = "bwin";
 
 const TENNIS_LIVE_TTL_MS = 1_500;
 
@@ -65,11 +80,13 @@ async function fetchTennisLive(): Promise<PulseScoreEvent[]> {
   // no trace anywhere.
   const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
     "/live-events?sport=tennis&limit=200",
+    4000,
+    TENNIS_BOOKMAKER,
   );
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live tennis odds from PulseScore (bet365, normalized), REST-polled.
+/** Live tennis odds from PulseScore (bwin, normalized), REST-polled.
  * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
  * call fails on the very first attempt (nothing cached yet to fall back
  * to). */
@@ -127,6 +144,12 @@ export type PulseScoreTennisOverride = {
   // exactly that) makes that comparison false for BOTH "home" and "away",
   // so scoreOutcomeForSel returns "lost" for every tennis moneyline bet on
   // both sides once the match finishes — worse than never settling.
+  //
+  // This exact scenario is now live, not just theoretical: bwin (moreInfo.
+  // SS/XP both absent) reproduces the permanent-0/0 case described above for
+  // every match, since there's no other source for real set/point data — a
+  // known, user-accepted tradeoff of the 2026-08-09 bwin switch (see this
+  // file's header comment), not a bug to "fix" by special-casing it here.
   sets: Array<[number, number]>;
   homeSetsWon: number;
   awaySetsWon: number;
@@ -202,12 +225,16 @@ function parseTennisPointsFromXP(xp: unknown): [string, string] | undefined {
 }
 
 // No explicit "serving" field exists anywhere in moreInfo — the only real
-// signal found in the live sample is bet365 appending " (Svr)" to the
-// serving player's name inside per-game market selections (e.g. "Lizette
-// Cabrera (Svr)" in a "Point Betting - Set 2 Game 10" market). Scans every
-// market/selection for the first isActive one carrying that suffix. Bounded
-// per-event (a live tennis event can carry 60-100+ markets, but this is O(1)
-// per event per poll tick, not O(n^2) across events).
+// signal found in the bet365 live sample was bet365 appending " (Svr)" to
+// the serving player's name inside per-game market selections (e.g.
+// "Lizette Cabrera (Svr)" in a "Point Betting - Set 2 Game 10" market).
+// Scans every market/selection for the first isActive one carrying that
+// suffix. Bounded per-event (a live tennis event can carry 60-100+ markets,
+// but this is O(1) per event per poll tick, not O(n^2) across events).
+// bwin's real live sample (2026-08-09) shows no "(Svr)" suffix anywhere (no
+// moreInfo at all, same as everywhere else in that feed) — this now always
+// returns undefined for bwin, which is safe (serving stays unset, same as
+// any other match with no server signal) rather than wrong.
 function detectTennisServer(
   ev: PulseScoreEvent,
   home: string,
@@ -334,6 +361,24 @@ export function findPulseScoreTennisOverride(
 //     /events (not /leagues) for the richer markets — no league-catalog
 //     filtering happens for tennis either way (see buildTennisLiveFromPulseScore
 //     in matches.ts), so the flat shape costs nothing here.
+//
+// Re-verified against real bwin /tennis/leagues, /tennis/events and
+// /live-events?sport=tennis samples (2026-08-09, after switching TENNIS_
+// BOOKMAKER to "bwin"): moneyline still canonicalMarket "MATCH_RESULT"/
+// period FULL_TIME (isMatchWinnerMarket above already matches, no change
+// needed). Set Winner reuses canonicalMarket "MATCH_RESULT" too — period
+// FIRST_SET/SECOND_SET/THIRD_SET is the only thing distinguishing it from
+// the overall match winner, not a dedicated "SET_WINNER" canonicalMarket —
+// and its selections carry canonicalOutcome "OTHER" with the player name in
+// rawName, not HOME/AWAY (see extractTennisPrematchExtra's setWinner
+// block). TOTAL_GAMES puts `line` on the market, never the selection (see
+// collectOverUnderLines). SET_BETTING is a single combined market with no
+// per-player split and no moreInfo at all (see the exactSets comment
+// below). GAME_HANDICAP/SET_HANDICAP, unlike bet365, DO carry explicit
+// HOME/AWAY — not extracted here regardless, out of scope for this switch.
+// Zero moreInfo confirmed anywhere in any of these three endpoints' samples
+// — see this file's header comment for what that costs (live set/point
+// score and settlement accuracy).
 export type PulseScoreTennisPrematchEvent = PulseScoreEvent & {
   startTime: string;
   live: boolean;
@@ -366,6 +411,7 @@ async function fetchAllTennisEvents(): Promise<PulseScoreTennisPrematchEvent[]> 
   for (let i = 0; i < 15; i++) {
     const data = await pulseScoreGetWithRetry<PulseScoreTennisEventsResponse>(
       `/tennis/events?page=${page}&limit=30`,
+      { bookmaker: TENNIS_BOOKMAKER },
     );
     if (!data) break; // out of retries — keep whatever was already collected
     if (Array.isArray(data.events)) events.push(...data.events);
@@ -383,7 +429,7 @@ async function fetchTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
   return events.filter((ev) => !ev.live);
 }
 
-/** Upcoming tennis fixtures from PulseScore (bet365), each carrying its
+/** Upcoming tennis fixtures from PulseScore (bwin), each carrying its
  * MATCH_RESULT prematch odds when bet365 has priced it yet. Empty array if
  * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
  * very first attempt (nothing cached yet to fall back to). */
@@ -433,13 +479,22 @@ function collectOverUnderLines(
   const byLine = new Map<number, { over: number | null; under: number | null }>();
   for (const m of markets) {
     for (const sel of m.selections ?? []) {
-      if (!sel.isActive || sel.line === undefined) continue;
+      if (!sel.isActive) continue;
+      // bwin puts `line` on the market, never the selection (same shape
+      // confirmed for football/basketball's TOTAL_GOALS/TOTAL_POINTS) —
+      // sel.line stays the primary source since a single market can list
+      // several lines with each selection tagging its own (seen for
+      // TOTAL_GAMES: Set 1 in the real bwin sample, three separate markets
+      // for 8/8.5/10.5/12.5), market.line only applies when the market
+      // carries just one line and doesn't say so per-selection.
+      const line = sel.line ?? m.line;
+      if (line === undefined) continue;
       const val = oddsToNumber(sel.odds);
       if (val === null) continue;
-      const entry = byLine.get(sel.line) ?? { over: null, under: null };
+      const entry = byLine.get(line) ?? { over: null, under: null };
       if (sel.canonicalOutcome === "OVER") entry.over = val;
       else if (sel.canonicalOutcome === "UNDER") entry.under = val;
-      byLine.set(sel.line, entry);
+      byLine.set(line, entry);
     }
   }
   const out: Array<{ line: number; over: number; under: number }> = [];
@@ -464,22 +519,23 @@ function pickMostEvenLine(
 
 /** Extracts the tennis-specific prematch markets beyond the moneyline
  * (already handled by extractTennisOverride/isMatchWinnerMarket above) from
- * one PulseScore tennis prematch event's full market list. GAME_HANDICAP is
- * deliberately NOT extracted here — its two selections both carry
- * canonicalOutcome "OTHER" with no HOME/AWAY (or team-name) attribution
- * anywhere in the real sample, unlike every other 2-way market in this
- * response (MATCH_RESULT, SET_WINNER both use explicit HOME/AWAY). Getting
- * a real-money handicap side backwards is a correctness bug that actually
- * hurts a bettor, not just a cosmetic miss — needs a real sample that
- * disambiguates it before being added. */
+ * one PulseScore tennis prematch event's full market list. GAME_HANDICAP/
+ * SET_HANDICAP are deliberately NOT extracted here even though bwin's real
+ * sample (2026-08-09) does carry explicit HOME/AWAY on both — out of scope
+ * for this bookmaker switch, not a data-shape blocker; add when actually
+ * requested. */
 export function extractTennisPrematchExtra(
   ev: PulseScoreTennisPrematchEvent,
 ): PulseScoreTennisPrematchExtra {
   const out: PulseScoreTennisPrematchExtra = {};
   const markets = ev.markets ?? [];
 
+  // bwin's Set 1 Winner (confirmed against a real /tennis/leagues sample,
+  // 2026-08-09) reuses canonicalMarket "MATCH_RESULT" — same as the overall
+  // match winner — differentiated only by period "FIRST_SET", not a
+  // dedicated "SET_WINNER" canonicalMarket like bet365 used.
   const setWinner = markets.find(
-    (m) => m.canonicalMarket === "SET_WINNER" && (m.period || "").toUpperCase() === "FIRST_SET",
+    (m) => m.canonicalMarket === "MATCH_RESULT" && (m.period || "").toUpperCase() === "FIRST_SET",
   );
   if (setWinner) {
     let home: number | null = null;
@@ -488,8 +544,14 @@ export function extractTennisPrematchExtra(
       if (!sel.isActive) continue;
       const val = oddsToNumber(sel.odds);
       if (val === null) continue;
+      // bwin's Set Winner selections carry canonicalOutcome "OTHER" with the
+      // player name in rawName instead of HOME/AWAY (unlike the overall
+      // match winner market) — same fallback the moneyline extraction below
+      // already uses for that case.
       if (sel.canonicalOutcome === "HOME") home = val;
       else if (sel.canonicalOutcome === "AWAY") away = val;
+      else if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+      else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
     }
     if (home !== null && away !== null) out.firstSet = { home, away };
   }
@@ -509,9 +571,15 @@ export function extractTennisPrematchExtra(
   const set1Lines = collectOverUnderLines(totalGamesSet1);
   if (set1Lines.length > 0) out.set1Games = pickMostEvenLine(set1Lines);
 
-  // SET_BETTING: one market PER PLAYER (moreInfo.subMarket names which),
-  // each listing that player's own winning-score odds ("2-0"/"2-1"). Safe
-  // to attribute by matching the player's name, not by position.
+  // SET_BETTING: bet365 shape was one market PER PLAYER (moreInfo.subMarket
+  // names which), each listing that player's own winning-score odds
+  // ("2-0"/"2-1"). bwin's real sample (2026-08-09) has zero moreInfo and a
+  // single combined SET_BETTING market listing all four outcomes
+  // ("2-0"/"2-1"/"1-2"/"0-2") with no player attribution at all — the
+  // subMarket check below now always finds "" and skips every bwin market,
+  // so out.exactSets never populates for bwin. Left as-is rather than
+  // guessing which side "2-0" refers to (same reasoning as the GAME_HANDICAP
+  // note above) — needs a disambiguating real sample before being rebuilt.
   let h20: number | null = null;
   let h21: number | null = null;
   let a02: number | null = null;
