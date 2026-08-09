@@ -24,6 +24,9 @@ const { extractBasketballOverride } = await import(
 const { extractTennisPrematchExtra } = await import(
   "../services/pulsescore/tennis.js"
 );
+const { extractHockeyOverride } = await import(
+  "../services/pulsescore/hockey.js"
+);
 const { __testing: footballWs } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -479,4 +482,111 @@ test("extractTennisPrematchExtra: reads Total Games line from the market, not th
   assert.equal(extra.totalGames?.line, 22.5);
   assert.equal(extra.totalGames?.over, 1.9);
   assert.equal(extra.totalGames?.under, 1.78);
+});
+
+test("teamNamesMatch: nickname-suffix fallback matches bwin's short hockey team names", () => {
+  assert.equal(teamNamesMatch("Panthers", "Florida Panthers"), true);
+  assert.equal(teamNamesMatch("Hurricanes", "Carolina Hurricanes"), true);
+  // Same-length token sets must NOT fall back to this — "Real Madrid" isn't
+  // a nickname-abbreviated form of "Atletico Madrid", they're different
+  // clubs that happen to share a trailing city token.
+  assert.equal(teamNamesMatch("Real Madrid", "Atletico Madrid"), false);
+});
+
+function makeHockeyEvent(home: string, away: string, markets: unknown[]) {
+  return {
+    eventId: "test-hockey-1",
+    sport: "ice_hockey",
+    league: "Test League",
+    home,
+    away,
+    markets,
+  } as Parameters<typeof extractHockeyOverride>[0];
+}
+
+// bwin's hockey moneyline is a "3-Way - Result After Regular Time" market
+// (canonicalMarket "OTHER", not "MATCH_RESULT") whose selections sometimes
+// carry only the short team nickname with canonicalOutcome "OTHER" instead
+// of HOME/AWAY (confirmed against a real NHL /ice-hockey/leagues sample,
+// 2026-08-09: "Panthers"/"Hurricanes" selections vs event home/away
+// "Florida Panthers"/"Carolina Hurricanes") — needs teamNamesMatch's
+// nickname-suffix fallback to resolve.
+test("extractHockeyOverride: extracts the 3-Way Result market, resolving nickname-only selections via teamNamesMatch", () => {
+  const threeWay = {
+    canonicalMarket: "OTHER",
+    rawName: "3-Way - Result After Regular Time",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:3way",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "Panthers", odds: 2.54, isActive: true },
+      { canonicalOutcome: "DRAW", rawName: "X", odds: 4, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "Hurricanes", odds: 2.3, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(
+    makeHockeyEvent("Florida Panthers", "Carolina Hurricanes", [threeWay]),
+  );
+  assert.deepEqual(override.odds, { home: 2.54, draw: 4, away: 2.3 });
+});
+
+// bwin's hockey Handicap (canonicalMarket "ASIAN_HANDICAP") puts `line` on
+// the market, not the selection, and lists alternate lines as separate
+// market objects — same shape already confirmed for basketball. Verified
+// against a real Australian Ice Hockey League event (2026-08-09) that
+// carried both +1.5 and -1.5 as separate FULL_TIME markets.
+test("extractHockeyOverride: picks the most-even-odds Handicap line from multiple alternates (bwin)", () => {
+  const handicapA = {
+    canonicalMarket: "ASIAN_HANDICAP",
+    rawName: "Handicap (regular time)",
+    period: "FULL_TIME",
+    line: 1.5,
+    isActive: true,
+    marketId: "test:handicap-a",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Home +1.5", odds: 1.5, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Away -1.5", odds: 2.35, isActive: true },
+    ],
+  };
+  const handicapB = {
+    canonicalMarket: "ASIAN_HANDICAP",
+    rawName: "Handicap (regular time)",
+    period: "FULL_TIME",
+    line: -1.5,
+    isActive: true,
+    marketId: "test:handicap-b",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Home -1.5", odds: 3.1, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Away +1.5", odds: 1.3, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(
+    makeHockeyEvent("Perth Thunder", "Melbourne Mustangs", [handicapA, handicapB]),
+  );
+  // |1.5 - 2.35| = 0.85 vs |3.1 - 1.3| = 1.8 -> handicapA is more even.
+  assert.deepEqual(override.spread, { line: 1.5, home: 1.5, away: 2.35 });
+});
+
+// bwin's hockey Totals (canonicalMarket "OVER_UNDER") puts `line` on the
+// market, never the selection — same class of bug already fixed for
+// football/basketball/tennis's totals markets.
+test("extractHockeyOverride: reads Totals line from the market, not the selection (bwin)", () => {
+  const totals = {
+    canonicalMarket: "OVER_UNDER",
+    rawName: "Totals (regular time)",
+    period: "FULL_TIME",
+    line: 8.5,
+    isActive: true,
+    marketId: "test:totals",
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over 8.5", odds: 1.8, isActive: true },
+      { canonicalOutcome: "UNDER", rawName: "Under 8.5", odds: 1.87, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(
+    makeHockeyEvent("Perth Thunder", "Melbourne Mustangs", [totals]),
+  );
+  assert.equal(override.total?.line, 8.5);
+  assert.equal(override.total?.over, 1.8);
+  assert.equal(override.total?.under, 1.87);
 });

@@ -41,6 +41,10 @@ import {
   extractBasketballOverride,
 } from "../services/pulsescore/basketball.js";
 import {
+  getPulseScoreHockeyUpcoming,
+  extractHockeyOverride,
+} from "../services/pulsescore/hockey.js";
+import {
   getCachedTeamId,
   resolveTeamIdInBackground,
 } from "../services/sportsApiTeamLookup.js";
@@ -4827,6 +4831,51 @@ function makeHockeyMarketsFromTeams(
       shotsOnGoal: { line: shotsLine, over: oShots!, under: uShots! },
     },
   } as unknown as AdvancedMarkets;
+}
+
+// makeHockeyMarketsFromTeams above computes a full-match moneyline internally
+// (plH/plA) but only exposes it repurposed as the synthetic handicap odds —
+// no full-match home/draw/away triple is returned anywhere. Needed as the
+// synthetic fallback for buildHockeyUpcomingFromPulseScore when bwin hasn't
+// priced an event's 3-Way Result market yet, mirroring
+// makeBasketballMoneylineFromTeams's role for basketball but modeling a real
+// regulation-time draw (impossible in basketball, routine in hockey) via the
+// same Poisson-goal approach mkPeriod already uses per-period inside
+// makeHockeyMarketsFromTeams, just for the full match total instead of a
+// third of it.
+function makeHockeyMoneylineFromTeams(
+  home: string,
+  away: string,
+): { home: number; draw: number; away: number } {
+  const sr = seededRng(`hockey-ml:${home}:${away}`);
+  const isNHL = ![
+    "Moscow",
+    "Kazan",
+    "SKA",
+    "Metallurg",
+    "Dynamo",
+    "CSKA",
+    "Ak Bars",
+  ].some((k) => home.includes(k) || away.includes(k));
+  const meanTotal = mc((isNHL ? 6.1 : 5.6) + (sr(1) - 0.5) * 1.6, 4.5, 8.0);
+  const marginMean = mc((sr(2) - 0.5) * 2.2 + 0.15, -2.5, 2.5);
+  const lH = mc(meanTotal / 2 + marginMean / 2, 0.5, 7);
+  const lA = mc(meanTotal / 2 - marginMean / 2, 0.5, 7);
+  const pH = poissonPmf(lH, 8);
+  const pA = poissonPmf(lA, 8);
+  let hw = 0,
+    d = 0,
+    aw = 0;
+  for (let gi = 0; gi <= 8; gi++)
+    for (let gj = 0; gj <= 8; gj++) {
+      const p = (pH[gi] ?? 0) * (pA[gj] ?? 0);
+      if (gi > gj) hw += p;
+      else if (gi < gj) aw += p;
+      else d += p;
+    }
+  const s = hw + d + aw;
+  const [h, dx, a] = probsToDecimalOdds([hw / s, d / s, aw / s], 1.08);
+  return { home: h!, draw: dx!, away: a! };
 }
 
 function makeMLBMarketsFromTeams(
@@ -10954,6 +11003,69 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   return results;
 }
 
+/** Upcoming hockey fixtures from PulseScore (bwin), each carrying its 3-Way
+ * Result / Handicap / Totals prematch odds when bwin has priced it yet, with
+ * makeHockeyMarketsFromTeams's synthetic model still filling every market
+ * this builder doesn't have a real source for yet (period-level markets,
+ * shots on goal, both-teams-to-score — no real per-period sample seen for
+ * hockey, same gap basketball's basketballExtra has). Same
+ * `pulsescore-hockey-${eventId}` id scheme as the other PulseScore sports so
+ * a match's identity doesn't change if a live pipeline is added later. */
+async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreHockeyUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const leagueName = ev.league || "Hóquei no Gelo";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractHockeyOverride(ev);
+    const markets = makeHockeyMarketsFromTeams(home, away);
+    if (override.spread) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.spread.home,
+        awayPlusOne: override.spread.away,
+      };
+      markets._spread = -override.spread.line;
+      markets._spreadLine = -override.spread.line;
+    }
+    if (override.total) {
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over25: override.total.over,
+        under25: override.total.under,
+      };
+      markets._total = override.total.line;
+    }
+    const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
+
+    results.push({
+      id: `pulsescore-hockey-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "hockey",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+    });
+  }
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -10976,18 +11088,20 @@ let _upcomingRebuildInProgress = false;
 let _lastGoodFootballUpcoming: UpcomingMatch[] = [];
 let _lastGoodTennisUpcoming: UpcomingMatch[] = [];
 let _lastGoodBasketballUpcoming: UpcomingMatch[] = [];
+let _lastGoodHockeyUpcoming: UpcomingMatch[] = [];
 
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
     // ── Sports data providers still disconnected from pré-jogo, except
-    // football, tennis and basketball ─────────────────────────────────────
+    // football, tennis, basketball and hockey ───────────────────────────────
     // Same rebuild-from-scratch effort as the live side: football
-    // (2026-08-07), tennis (2026-08-07) and basketball (2026-08-07) prematch
-    // are all back on PulseScore, each confirmed against a real /leagues
-    // sample. Every other sport's prematch remains disconnected pending its
-    // own real confirmed sample.
+    // (2026-08-07), tennis (2026-08-07), basketball (2026-08-07) and hockey
+    // (2026-08-09, built from scratch — hockey had no prior PulseScore
+    // integration) prematch are all on PulseScore, each confirmed against a
+    // real /leagues sample. Every other sport's prematch remains
+    // disconnected pending its own real confirmed sample.
     let football: UpcomingMatch[];
     try {
       football = await buildFootballUpcomingFromPulseScore();
@@ -11021,7 +11135,18 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       basketball = _lastGoodBasketballUpcoming;
     }
-    const all = [...football, ...tennis, ...basketball];
+    let hockey: UpcomingMatch[];
+    try {
+      hockey = await buildHockeyUpcomingFromPulseScore();
+      _lastGoodHockeyUpcoming = hockey;
+    } catch (err) {
+      logger.error(
+        { err },
+        "[pulsescore] buildHockeyUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+      );
+      hockey = _lastGoodHockeyUpcoming;
+    }
+    const all = [...football, ...tennis, ...basketball, ...hockey];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
@@ -12792,11 +12917,11 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // ── Sports data providers still disconnected from pré-jogo, except
-  // football, tennis and basketball ─────────────────────────────────────────
+  // football, tennis, basketball and hockey ───────────────────────────────
   // Same rebuild-from-scratch effort as rebuildUpcomingCache above: football,
-  // tennis and basketball all back on PulseScore (all 2026-08-07), every
-  // other sport pending its own real confirmed sample before being rebuilt
-  // the same way.
+  // tennis, basketball (all 2026-08-07) and hockey (2026-08-09) all on
+  // PulseScore, every other sport pending its own real confirmed sample
+  // before being rebuilt the same way.
   let football: UpcomingMatch[] = [];
   try {
     football = await buildFootballUpcomingFromPulseScore();
@@ -12824,13 +12949,22 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle",
     );
   }
+  let hockey: UpcomingMatch[] = [];
+  try {
+    hockey = await buildHockeyUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildHockeyUpcomingFromPulseScore failed this cycle",
+    );
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey]);
   upcomingTopCache = {
     football,
     tennis,
     basketball,
-    hockey: [],
+    hockey,
     volleyball: [],
     baseball: [],
     boxing: [],
