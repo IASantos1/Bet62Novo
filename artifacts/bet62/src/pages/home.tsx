@@ -21990,7 +21990,31 @@ export default function Home({
                         </div>
                       ) : (
                         <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 overflow-hidden">
-                          {balanced.map((m) => (
+                          {balanced.map((m) => {
+                            // Per-sport live clock/status label — football
+                            // shows the running minute like before, but
+                            // tennis (sets/games, not minutes) and
+                            // basketball (quarters, no continuous minute
+                            // clock from bwin) need their own real signal
+                            // instead of a misleading "X'" football-style
+                            // minute. Mirrors the same per-sport logic
+                            // renderMatchCard's liveBadgeLabel already uses
+                            // in the full Ao Vivo tab.
+                            const sport = m.sport ?? "football";
+                            const liveLabel = (() => {
+                              if (sport === "tennis") {
+                                const sets = m._liveExtra?.sets ?? [];
+                                const lastSet = sets[sets.length - 1];
+                                if (lastSet) return `S${sets.length} ${lastSet[0]}-${lastSet[1]}`;
+                                return m.status || "AO VIVO";
+                              }
+                              if (sport === "basketball") {
+                                const s = m.status || "";
+                                return s === "HT" || s === "Halftime" ? "Int." : s || "AO VIVO";
+                              }
+                              return `${m.minute}'`;
+                            })();
+                            return (
                             <div
                               key={m.id}
                               className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3 hover:bg-zinc-800/60 transition-colors"
@@ -21999,8 +22023,8 @@ export default function Home({
                                 onClick={() => selectMainTab("live")}
                                 className="flex items-center gap-3 flex-1 min-w-0 text-left"
                               >
-                                <span className="text-red-500 font-black text-xs w-9 shrink-0 tabular-nums">
-                                  {m.minute}'
+                                <span className="text-red-500 font-black text-[11px] w-11 shrink-0 tabular-nums">
+                                  {liveLabel}
                                 </span>
                                 <div className="flex-1 min-w-0">
                                   <div className="text-[10px] text-zinc-500 uppercase font-bold truncate">
@@ -22037,7 +22061,8 @@ export default function Home({
                                 </button>
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
