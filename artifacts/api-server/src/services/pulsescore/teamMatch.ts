@@ -121,5 +121,25 @@ export function teamNamesMatch(a: string, b: string): boolean {
       return true;
   }
 
+  // Team-nickname suffix fallback — bwin's hockey market selections often
+  // give just the mascot/nickname ("Panthers") while the tracked event's own
+  // home/away field carries the full "City Mascot" name ("Florida
+  // Panthers") — confirmed against a real /ice-hockey/leagues sample
+  // (2026-08-09, NHL's "3-Way - Result After Regular Time" market). The
+  // fuzzy-similarity check above fails this pair outright when the city
+  // name is a large share of the full string ("florida-panthers" vs
+  // "panthers" scores well under 0.82). Matches only when the shorter name's
+  // full token sequence is an exact trailing match of the longer name's
+  // tokens — not a generic substring check — so "Rangers" only matches a
+  // full name actually ending in "...Rangers", not an unrelated team whose
+  // name happens to contain that word elsewhere.
+  const tokensA2 = slugifyTeamNameStripped(a).split("-").filter(Boolean);
+  const tokensB2 = slugifyTeamNameStripped(b).split("-").filter(Boolean);
+  if (tokensA2.length > 0 && tokensB2.length > 0 && tokensA2.length !== tokensB2.length) {
+    const [shorter, longer] = tokensA2.length < tokensB2.length ? [tokensA2, tokensB2] : [tokensB2, tokensA2];
+    const tail = longer.slice(longer.length - shorter.length);
+    if (tail.join("-") === shorter.join("-")) return true;
+  }
+
   return false;
 }
