@@ -12055,7 +12055,21 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         // production 2026-08-09. Any match tracked in liveMatchState has, by
         // definition, already gone live at least once and can never be
         // "still upcoming" again.
-        !liveMatchState.has(String(m.id))
+        !liveMatchState.has(String(m.id)) &&
+        // Football no longer stays in liveMatchState at all once FT is
+        // detected — it's deleted immediately (see isFulltimeFreeze in
+        // buildFootballLiveFromPulseScore, added right after the fix above)
+        // so it leaves "Ao Vivo" right away instead of lingering. That
+        // silently broke the liveMatchState check just above: the instant a
+        // football match finished, it vanished from liveMatchState too,
+        // re-satisfying every condition here and reappearing in "Em Breve"
+        // again — reported in production a second time, 2026-08-09.
+        // finishedMatchResults is what finalizeStaleLiveMatch (called at the
+        // moment of that same immediate deletion) writes to, and it's kept
+        // for 96h (_pruneFinishedResults), long past any realistic "Em
+        // Breve" window — checking it here catches exactly the match the
+        // liveMatchState check above no longer can.
+        !finishedMatchResults.has(String(m.id))
       );
     })
     .sort(
