@@ -11368,18 +11368,29 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
 }
 
 /**
- * Volleyball live score, sourced from PulseScore's bet365 feed — DIFFERENT
- * bookmaker than the bwin-sourced prematch builder above (see
- * getPulseScoreVolleyballLive's own header: bwin's volleyball live events
- * carry no score field at all, bet365's do, unconfirmed yet whether it
- * actually populates once a match is genuinely in progress — this is a
- * first pass to find out). Markets/odds stay synthetic (bet365's volleyball
- * market shapes aren't extracted yet, they don't match extractVolleyballOverride's
- * bwin-tuned patterns) — this builder's only real signal is score. Same
+ * Volleyball live score, sourced from PulseScore's "unibetau" (Unibet
+ * Australia) feed — a THIRD bookmaker, different from the bwin-sourced
+ * prematch builder above. Neither bwin (no score field at all) nor bet365
+ * (score field present but stuck at 0-0/empty even for genuinely in-play
+ * matches) worked — both tried and reverted the same day (2026-08-09).
+ * unibetau's real sample DOES carry a working live signal: a genuine
+ * continuous matchClock {minute, second, running}, `score` as the CURRENT
+ * set's points (e.g. "24"/"19"), and `statistics.sets.{home,away}` as
+ * parallel arrays of each COMPLETED set's final score (e.g. [25,25] /
+ * [20,13]) plus `homeServe`. Feeds LiveMatchState._liveExtra.vollSets/
+ * currentPts, which home.tsx's "Placar por Set" panel and VolleyScore
+ * header already render — those fields existed with zero real source until
+ * now. Markets/odds stay synthetic: unibetau's real sample showed some
+ * markets that LOOK like they'd match extractVolleyballOverride's filters
+ * (e.g. canonicalMarket "OVER_UNDER" / period "FULL_TIME" for a market
+ * actually named "Total Points - Set 3") but aren't semantically the same
+ * thing that field means elsewhere (whole-match total, not one set's) —
+ * risky to wire blindly for a real-money market, deliberately left
+ * synthetic-only until mapped carefully as its own pass. Same
  * `pulsescore-volleyball-${eventId}` id prefix as prematch even though the
  * eventId SPACE differs per bookmaker (bwin's are colon-containing like
- * "5:1106680", bet365's are bare numeric like "199191475" — never collide),
- * kept for consistency with every other sport's id scheme.
+ * "5:1106680", unibetau's are bare numeric like "1028651154" — never
+ * collide), kept for consistency with every other sport's id scheme.
  */
 async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreVolleyballLive();
@@ -11389,12 +11400,24 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const home = ev.home?.trim();
     const away = ev.away?.trim();
     if (!home || !away) continue;
+    // matchClock is this feed's actual "is this genuinely live" signal —
+    // confirmed real samples always carried it for in-play matches.
+    if (!ev.matchClock) continue;
 
     const id = `pulsescore-volleyball-${ev.eventId}`;
     currentIds.add(id);
     const existing = liveMatchState.get(id);
-    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
-    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const setsHomeRaw = ev.statistics?.sets?.home ?? [];
+    const setsAwayRaw = ev.statistics?.sets?.away ?? [];
+    const vollSets: Array<[number, number]> = setsHomeRaw.map((h, i) => [h, setsAwayRaw[i] ?? 0]);
+    const homeScore = vollSets.filter(([h, a]) => h > a).length;
+    const awayScore = vollSets.filter(([h, a]) => a > h).length;
+    const currentPts: [number, number] = [
+      Number(ev.score?.home ?? existing?._liveExtra?.currentPts?.[0] ?? 0),
+      Number(ev.score?.away ?? existing?._liveExtra?.currentPts?.[1] ?? 0),
+    ];
+    const minute = ev.matchClock?.minute ?? existing?.minute ?? 0;
 
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
@@ -11407,10 +11430,9 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       handicapPoints: { line: 0, home: 0, away: 0 },
     };
     const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
-    // Flat neutral fallback — bet365's volleyball market shapes aren't
-    // extracted yet (see this function's own header), so there's no real
-    // odds source here at all yet, unlike the prematch builder's
-    // override-when-priced pattern.
+    // Flat neutral fallback — see this function's own header on why
+    // unibetau's markets aren't extracted yet despite superficially
+    // matching shapes.
     const odds = { home: 1.85, draw: 0, away: 1.85 };
 
     const state: LiveMatchState = {
@@ -11422,16 +11444,14 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       sport: "volleyball",
       homeScore,
       awayScore,
-      // No confirmed continuous clock or set/period field from bet365 for
-      // volleyball yet (see getPulseScoreVolleyballLive's header) — 0 and a
-      // generic "AO VIVO" label rather than feeding the UI a guessed value.
-      minute: 0,
-      status: "AO VIVO",
+      minute,
+      status: `Set ${vollSets.length + 1}`,
       hasRealOdds: false,
       odds,
       markets,
       events: [],
       _lastSeenAt: Date.now(),
+      _liveExtra: { vollSets, currentPts },
     };
     liveMatchState.set(id, state);
     results.push(state);
@@ -12437,16 +12457,21 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
-  // Reverted 2026-08-09 (same day it shipped): confirmed in production that
-  // neither PulseScore bookmaker gives usable live volleyball data — bwin
-  // carries no score field at all, and bet365's score field stayed stuck at
-  // 0-0 for a match the user confirmed was genuinely in progress. Showing
-  // "AO VIVO" with a frozen wrong score AND identical synthetic 1.85/1.85
-  // odds on both sides (reported as looking like a duplicate-odds bug) was
-  // worse than not showing volleyball live at all. buildVolleyballLiveFromPulseScore
-  // is kept below, just not called, so this can resume the moment either
-  // bookmaker's volleyball feed actually carries a real live score.
-  const volleyballLiveItems: LiveMatchState[] = [];
+  // Re-enabled 2026-08-09 on a THIRD bookmaker ("unibetau") after bwin (no
+  // score field) and bet365 (score stuck at 0-0/empty even when genuinely
+  // in-play) both failed and were reverted the same day — see
+  // buildVolleyballLiveFromPulseScore's own header for the confirmed real
+  // sample that made this one work (genuine matchClock + per-set scores).
+  let volleyballLiveRaw: LiveMatchState[] = [];
+  try {
+    volleyballLiveRaw = await buildVolleyballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildVolleyballLiveFromPulseScore failed this tick",
+    );
+  }
+  const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
     tennisLiveRaw = await buildTennisLiveFromPulseScore();

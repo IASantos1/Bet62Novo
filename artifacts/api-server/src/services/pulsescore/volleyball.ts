@@ -292,27 +292,47 @@ export async function getPulseScoreVolleyballUpcoming(): Promise<PulseScoreVolle
   return upcomingInFlight;
 }
 
-// ── Live (REST poll, bet365) ────────────────────────────────────────────────
-const VOLLEYBALL_LIVE_BOOKMAKER = "bet365";
-const VOLLEYBALL_LIVE_TTL_MS = 1_000; // same PRO-plan 1 req/s budget as other live pollers
-let liveCache: { events: PulseScoreEvent[]; fetchedAt: number } | null = null;
-let liveInFlight: Promise<PulseScoreEvent[]> | null = null;
+// ── Live (REST poll, Unibet Australia) ──────────────────────────────────────
+// Neither bwin nor bet365 carry a usable live score for volleyball (both
+// tried and reverted 2026-08-09 — see matches.ts's git history). A third
+// bookmaker, "unibetau", DOES: confirmed real (2026-08-09) — matchClock has
+// a genuine continuous {minute, second, running} clock (no "period" field
+// at all, unlike football/basketball), `score` is the CURRENT set's points
+// as strings (e.g. "24"/"19" — set 3 in progress at 24-19), and a
+// `statistics.sets` block gives the completed sets' scores as parallel
+// arrays ({home:[25,25], away:[20,13], homeServe:true}) — i.e. exactly the
+// shape LiveMatchState._liveExtra.vollSets/currentPts (matches.ts) and
+// home.tsx's "Placar por Set" panel already expected, just never had real
+// data to fill them.
+export type PulseScoreVolleyballLiveEvent = PulseScoreEvent & {
+  matchClock?: { minute: number; second: number; running: boolean };
+  statistics?: {
+    sets?: {
+      home?: number[];
+      away?: number[];
+      homeServe?: boolean;
+    };
+  };
+};
 
-async function fetchVolleyballLive(): Promise<PulseScoreEvent[]> {
-  // Confirmed real (2026-08-09, bet365): same paginated { total, page, ...,
-  // events: [...] } envelope as every other sport's live feed. `score` is
-  // {home,away} as STRINGS when present — sampled matches all read "0"/"0"
-  // (unconfirmed whether that's real 0-0 or a not-yet-live entry; bet365
-  // carries no matchClock at all for volleyball, only the generic
-  // moreInfo.TM/TS/TT/SS raw fields also seen on football/tennis, all "0"/
-  // empty in the sample). Markets use different canonicalMarket/rawName
-  // shapes than bwin's (extractVolleyballOverride was built against bwin's
-  // "Match Result"/"Set 1 Winner"/"Total Points"/"Correct Score" naming) —
-  // NOT re-extracted here yet, matches.ts's live builder uses the same
-  // synthetic-odds fallback prematch already falls back to when bwin hasn't
-  // priced a market, until bet365's volleyball market shapes are confirmed
-  // separately.
-  const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+type UnibetVolleyballLiveResponse = {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+  sport: string;
+  events: PulseScoreVolleyballLiveEvent[];
+};
+
+const VOLLEYBALL_LIVE_BOOKMAKER = "unibetau";
+const VOLLEYBALL_LIVE_TTL_MS = 1_000; // same PRO-plan 1 req/s budget as other live pollers
+let liveCache: { events: PulseScoreVolleyballLiveEvent[]; fetchedAt: number } | null = null;
+let liveInFlight: Promise<PulseScoreVolleyballLiveEvent[]> | null = null;
+
+async function fetchVolleyballLive(): Promise<PulseScoreVolleyballLiveEvent[]> {
+  const data = await pulseScoreGet<UnibetVolleyballLiveResponse>(
     "/live-events?sport=volleyball&limit=200",
     undefined,
     VOLLEYBALL_LIVE_BOOKMAKER,
@@ -320,14 +340,19 @@ async function fetchVolleyballLive(): Promise<PulseScoreEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live volleyball score from PulseScore (bet365), REST-only. Empty array if
- * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
- * very first attempt (nothing cached yet to fall back to). See
- * fetchVolleyballLive's header for the real-sample caveats — this is a
- * first pass to confirm whether bet365's score field actually populates
- * once a match is genuinely in progress (still unconfirmed as of
- * 2026-08-09). */
-export async function getPulseScoreVolleyballLive(): Promise<PulseScoreEvent[]> {
+/** Live volleyball score from PulseScore (Unibet Australia), REST-only.
+ * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
+ * fails on the very first attempt (nothing cached yet to fall back to).
+ * Markets use different canonicalMarket/rawName shapes than bwin's
+ * (extractVolleyballOverride was built against bwin's "Match Result"/
+ * "Set 1 Winner"/"Total Points"/"Correct Score" naming, unibetau's real
+ * sample showed "Match Odds"/"Correct Score"/"Total Points - Set N"/
+ * "Set N" instead) — NOT re-extracted here yet, matches.ts's live builder
+ * uses the same synthetic-odds fallback prematch already falls back to
+ * when bwin hasn't priced a market, until unibetau's shapes are mapped
+ * separately. Score/clock/sets ARE real and confirmed, unlike the two
+ * earlier attempts. */
+export async function getPulseScoreVolleyballLive(): Promise<PulseScoreVolleyballLiveEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (liveCache && now - liveCache.fetchedAt < VOLLEYBALL_LIVE_TTL_MS) return liveCache.events;
