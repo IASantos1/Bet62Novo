@@ -56,6 +56,8 @@ import {
   fixtureHasRedCard,
   fixtureHasVarReview,
   latestGoalScorer,
+  latestGoalIsPenalty,
+  fixturePenaltyEvents,
   getApiFootballFixtureStatistics,
   getApiFootballTeamLogo,
   batchResolveApiFootballTeamLogos,
@@ -415,6 +417,10 @@ export type LiveMatchState = {
   // tick to detect a NEW VAR review vs. one already suspended for, same
   // reasoning as redCardsHome/Away being counts rather than a single flag.
   _apiFootballVarEventCount?: number;
+  // Count of penalty-outcome events (scored OR missed) seen so far — same
+  // tick-to-tick comparison reasoning, needed to catch a MISSED penalty
+  // (goalScored never fires for one, since the score doesn't change).
+  _apiFootballPenaltyEventCount?: number;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -11463,6 +11469,12 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
+// TEMPORARY (remove alongside the "[DIAG apifootball-miss]" log site below,
+// once the goal/VAR/card/penalty-enrichment question it's diagnosing is
+// answered) — dedupes that log to once per match id instead of once per
+// ~1-2s tick for the whole match's lifetime.
+const _apiFootballMissLogged = new Set<string>();
+
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   // GET /live-events?sport=soccer already returns only live events — no
   // separate `live` boolean field exists on each event to filter by.
@@ -11586,6 +11598,30 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // use below already treats null as "no extra data" and falls back to
     // PulseScore-only behavior, same as before this integration existed).
     const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures);
+    // TEMPORARY diagnostic (remove once answered, 2026-08-09): user-reported
+    // goal/VAR/card/penalty enrichment "still not coming through correctly"
+    // — need to know WHY apiFixture stays unmatched for a given match: a
+    // team-name mismatch between PulseScore/bwin and API-Football, or
+    // API-Football simply not covering that particular league live. Logged
+    // once per match id (not every ~1-2s tick), only when API-Football's own
+    // live batch came back non-empty (rules out "key missing"/"fetch failed
+    // this tick" as the cause) but this specific match — one bet365/bwin
+    // has real priced odds for, i.e. one that actually matters — wasn't in
+    // it. Grep prod logs for "[DIAG apifootball-miss]".
+    if (!apiFixture && apiFootballFixtures.length > 0 && override?.odds && !_apiFootballMissLogged.has(id)) {
+      _apiFootballMissLogged.add(id);
+      logger.warn(
+        {
+          id,
+          home,
+          away,
+          league: ev.league,
+          apiFootballFixtureCount: apiFootballFixtures.length,
+          apiFootballTeamNames: apiFootballFixtures.map((f) => `${f.home.name} v ${f.away.name}`),
+        },
+        "[DIAG apifootball-miss] no API-Football fixture matched this PulseScore match — check team-name spelling above against apiFootballTeamNames",
+      );
+    }
     // Team-search fallback for when this match's live fixture wasn't found
     // above (name-matching miss, or API-Football just doesn't carry this
     // particular match live) — getApiFootballTeamLogo has its own 7-day
@@ -11623,6 +11659,11 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const prevVarEventCount = existing?._apiFootballVarEventCount ?? 0;
     const newRedCard = apiFixture && redCardsHome + redCardsAway > prevRedCardTotal;
     const newVarReview = apiFixture && varEventCount > prevVarEventCount;
+    // Penalty (scored OR missed) — see fixturePenaltyEvents's own comment for
+    // why a missed one needed its own trigger (goalScored never covers it).
+    const penaltyEvents = apiFixture ? fixturePenaltyEvents(apiFixture) : [];
+    const prevPenaltyEventCount = existing?._apiFootballPenaltyEventCount ?? 0;
+    const newPenaltyEvent = apiFixture && penaltyEvents.length > prevPenaltyEventCount;
     // Real match events (goals/cards/subs, and VAR if present) for the live
     // event timeline — LiveMatchState.events already existed with this exact
     // shape (see its own comment) but had no data source until now.
@@ -11788,12 +11829,15 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       marketSuspension = Object.fromEntries(
         FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
       );
-      // Enriched with the scorer's name when API-Football has already picked
-      // up the goal event by this same tick (its own ~12s cache can lag a
+      // Enriched with the scorer's name (and "DE PÊNALTI" when the last goal
+      // event's own detail says so) when API-Football has already picked up
+      // the goal event by this same tick (its own ~12s cache can lag a
       // PulseScore score change by a few seconds) — falls back to the plain
       // "GOLO!" banner PulseScore-only matches already had otherwise.
       const scorer = apiFixture ? latestGoalScorer(apiFixture) : null;
-      suspensionReason = scorer ? `GOLO! ${scorer}` : "GOLO!";
+      const isPenaltyGoal = apiFixture ? latestGoalIsPenalty(apiFixture) : false;
+      const goalLabel = isPenaltyGoal ? "GOLO DE PÊNALTI!" : "GOLO!";
+      suspensionReason = scorer ? `${goalLabel} ${scorer}` : goalLabel;
       // TEMPORARY diagnostic (remove once answered): does bet365's own feed
       // flip a market's/selection's isActive to false when IT suspends for
       // this goal, independent of our own synthetic delay-based suspension
@@ -11830,23 +11874,27 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         "[DIAG goal] raw PulseScore markets at moment of goal — checking whether bet365's own isActive flips on suspension",
       );
     }
-    // Red-card / VAR-review suspension — closes the gap PulseScore alone
-    // can't (see apiFootball.ts's header): it has no signal for either, only
-    // the goal-based score-diff trigger above. Uses the "var" delay tier
-    // (20-45s, longer than a goal's 12-25s) for both, since neither has its
-    // own tier in footballSuspensionDelayMs and both plausibly involve a
-    // longer real-world stoppage than a routine goal confirmation. Does NOT
-    // overwrite a goal suspension that just fired this same tick (checked
-    // via `!goalScored`) — the goal trigger already suspends everything for
-    // its own window, and API-Football's events array often lists the goal
-    // and a related card together, which would otherwise downgrade a fresh
-    // "GOLO!" reason to a less specific one on the very tick it's set.
-    if (!goalScored && (newRedCard || newVarReview)) {
+    // Red-card / VAR-review / missed-penalty suspension — closes the gap
+    // PulseScore alone can't (see apiFootball.ts's header): it has no signal
+    // for any of these, only the goal-based score-diff trigger above (which
+    // itself never fires for a MISSED penalty, since the score doesn't
+    // change — that's what newPenaltyEvent covers here). Uses the "var"
+    // delay tier (20-45s, longer than a goal's 12-25s) for all three, since
+    // none has its own tier in footballSuspensionDelayMs and each plausibly
+    // involves a longer real-world stoppage than a routine goal
+    // confirmation. Does NOT overwrite a goal suspension that just fired
+    // this same tick (checked via `!goalScored`) — the goal trigger already
+    // suspends everything for its own window, and API-Football's events
+    // array often lists the goal and a related card together, which would
+    // otherwise downgrade a fresh "GOLO!" reason to a less specific one on
+    // the very tick it's set. A SCORED penalty also never reaches this
+    // branch — goalScored is already true for it, handled above instead.
+    if (!goalScored && (newRedCard || newVarReview || newPenaltyEvent)) {
       const now = Date.now();
       marketSuspension = Object.fromEntries(
         FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
       );
-      suspensionReason = newVarReview ? "VAR" : "CARTÃO VERMELHO";
+      suspensionReason = newVarReview ? "VAR" : newRedCard ? "CARTÃO VERMELHO" : "PÊNALTI PERDIDO";
     }
     // Odds-unavailable suspension — separate from the goal trigger above
     // (which already suspends everything for its own delay window and takes
@@ -11913,6 +11961,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
           }
         : undefined,
       _apiFootballVarEventCount: varEventCount,
+      _apiFootballPenaltyEventCount: penaltyEvents.length,
       marketSuspension,
       _suspensionReason: suspensionReason,
       // clockRunning gates whether the frontend extrapolates this clock
