@@ -5,6 +5,7 @@ import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startPulseScoreFootballWs } from "../services/pulsescore/footballWs.js";
+import { startPulseScoreBasketballWs } from "../services/pulsescore/basketballWs.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -96,14 +97,17 @@ server.listen(port, () => {
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
 
-  // Football live odds prefer this WS connection over REST polling (see
-  // services/pulsescore/footballWs.ts) — the PRO plan only allows one
-  // concurrent WS connection; moved here from tennis 2026-08-08 (explicit
-  // user decision) since football's live clock/score for lower-coverage
-  // matches was the actual source of complaints REST polling alone
-  // couldn't fix. Safe to call even before PULSESCORE_API_KEY is set, it
-  // just no-ops until then.
+  // Football and basketball each get their own dedicated WS connection —
+  // confirmed 2026-08-09 (real PulseScore docs) that the PRO plan grants one
+  // concurrent connection PER SPORT, not one connection total for the whole
+  // account (the earlier "only one, pick a sport" assumption baked into
+  // footballWs.ts/tennisWs.ts's history was wrong). Each connection layers
+  // PER-EVENT freshness on top of that sport's own REST poll — see
+  // getPulseScoreFootballLive (football.ts) / getPulseScoreBasketballLive
+  // (basketball.ts) for the merge design. Safe to call even before
+  // PULSESCORE_API_KEY is set, both just no-op until then.
   startPulseScoreFootballWs();
+  startPulseScoreBasketballWs();
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);

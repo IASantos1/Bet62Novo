@@ -17,8 +17,9 @@ const {
   pulseScoreEventMinute,
   pulseScoreEventClockSec,
   pulseScoreEventClockFinished,
+  mergeFootballWsFreshness,
 } = await import("../services/pulsescore/football.js");
-const { extractBasketballOverride } = await import(
+const { extractBasketballOverride, mergeBasketballWsFreshness } = await import(
   "../services/pulsescore/basketball.js"
 );
 const { extractTennisPrematchExtra } = await import(
@@ -30,8 +31,11 @@ const { extractHockeyOverride } = await import(
 const { extractVolleyballOverride } = await import(
   "../services/pulsescore/volleyball.js"
 );
-const { __testing: footballWs } = await import(
+const { __testing: footballWs, getFootballWsEventIfFresh } = await import(
   "../services/pulsescore/footballWs.js"
+);
+const { __testing: basketballWs, getBasketballWsEventIfFresh } = await import(
+  "../services/pulsescore/basketballWs.js"
 );
 
 test("bookmakerPrefix: bet365 uses the versioned v3 path", () => {
@@ -303,6 +307,101 @@ test("footballWs applyFrame: ignores frames/events tagged for a different sport"
   assert.equal(footballWs.liveByEventId.size, 0);
 });
 
+test("getFootballWsEventIfFresh: returns the event when its own lastSeenAt is within maxAgeMs", () => {
+  footballWs.liveByEventId.clear();
+  footballWs.lastSeenAt.clear();
+  footballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [{ eventId: "evt-fresh", sport: "soccer", home: "A", away: "B" } as never],
+  });
+  const ev = getFootballWsEventIfFresh("evt-fresh", 4_000);
+  assert.equal(ev?.eventId, "evt-fresh");
+});
+
+test("getFootballWsEventIfFresh: returns null for an event never broadcast at all", () => {
+  footballWs.liveByEventId.clear();
+  footballWs.lastSeenAt.clear();
+  assert.equal(getFootballWsEventIfFresh("never-seen", 4_000), null);
+});
+
+test("getFootballWsEventIfFresh: PER-EVENT staleness — a quiet event goes stale even while other events keep broadcasting (Attempt 2's bug)", () => {
+  footballWs.liveByEventId.clear();
+  footballWs.lastSeenAt.clear();
+  // evt-quiet is seen once, far in the past — simulates a match whose price
+  // hasn't moved since, so a delta-only feed never re-broadcasts it.
+  footballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [{ eventId: "evt-quiet", sport: "soccer", home: "A", away: "B" } as never],
+  });
+  footballWs.lastSeenAt.set("evt-quiet", Date.now() - 10_000);
+  // evt-busy broadcasts right now — the connection as a whole looks healthy.
+  footballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      { eventId: "evt-quiet", sport: "soccer", home: "A", away: "B" } as never,
+      { eventId: "evt-busy", sport: "soccer", home: "C", away: "D" } as never,
+    ],
+  });
+  // applyFrame's own call above just refreshed evt-quiet's lastSeenAt too —
+  // force it back to stale to isolate the per-event check being tested.
+  footballWs.lastSeenAt.set("evt-quiet", Date.now() - 10_000);
+  assert.equal(
+    getFootballWsEventIfFresh("evt-quiet", 4_000),
+    null,
+    "a quiet event's own staleness must not be masked by other events broadcasting",
+  );
+  assert.notEqual(getFootballWsEventIfFresh("evt-busy", 4_000), null);
+});
+
+test("mergeFootballWsFreshness: overlays matchClock/score from a fresh WS event, keeps REST untouched otherwise", () => {
+  footballWs.liveByEventId.clear();
+  footballWs.lastSeenAt.clear();
+  footballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "evt-live",
+        sport: "soccer",
+        home: "A",
+        away: "B",
+        matchClock: { minute: 55, second: 12, period: "2H", running: true },
+        score: { home: "2", away: "1" },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "evt-live",
+      sport: "soccer",
+      home: "A",
+      away: "B",
+      markets: [],
+      matchClock: { minute: 54, second: 40, period: "2H", running: true },
+      score: { home: "2", away: "1" },
+    },
+    {
+      eventId: "evt-no-ws",
+      sport: "soccer",
+      home: "C",
+      away: "D",
+      markets: [],
+      matchClock: { minute: 10, second: 0, period: "1H", running: true },
+      score: { home: "0", away: "0" },
+    },
+  ] as never[];
+  const merged = mergeFootballWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.matchClock?.minute, 55, "fresh WS reading should win over REST's own clock");
+  assert.equal(merged[1]!.matchClock?.minute, 10, "an event WS hasn't seen must be untouched");
+});
+
 // ── Basketball (bwin) ────────────────────────────────────────────────────
 // Real bwin GET /basketball/leagues sample (2026-08-09): every event carries
 // its Money Line / Handicap / Totals markets THREE times (FULL_TIME,
@@ -400,6 +499,98 @@ test("extractBasketballOverride: reads Totals line from the market, not the sele
   assert.equal(override.total?.line, 170.5);
   assert.equal(override.total?.over, 1.85);
   assert.equal(override.total?.under, 1.83);
+});
+
+// ── Basketball WS (dedicated per-sport connection, mirrors footballWs) ────
+test("basketballWs applyFrame: keeps an event missing from a single subsequent frame (grace period)", () => {
+  basketballWs.liveByEventId.clear();
+  basketballWs.lastSeenAt.clear();
+  basketballWs.applyFrame({
+    sport: "basketball",
+    timestamp: Date.now(),
+    count: 1,
+    data: [{ eventId: "bball-1", sport: "basketball" } as never],
+  });
+  assert.equal(basketballWs.liveByEventId.has("bball-1"), true);
+
+  basketballWs.applyFrame({ sport: "basketball", timestamp: Date.now(), count: 0, data: [] });
+  assert.equal(
+    basketballWs.liveByEventId.has("bball-1"),
+    true,
+    "an event absent from one frame should survive the grace period",
+  );
+});
+
+test("basketballWs applyFrame: ignores frames/events tagged for a different sport", () => {
+  basketballWs.liveByEventId.clear();
+  basketballWs.lastSeenAt.clear();
+  basketballWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [{ eventId: "bball-2", sport: "soccer" } as never],
+  });
+  assert.equal(basketballWs.liveByEventId.size, 0);
+});
+
+test("getBasketballWsEventIfFresh: PER-EVENT staleness — a quiet event goes stale even while other events keep broadcasting", () => {
+  basketballWs.liveByEventId.clear();
+  basketballWs.lastSeenAt.clear();
+  basketballWs.applyFrame({
+    sport: "basketball",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      { eventId: "bball-quiet", sport: "basketball", home: "A", away: "B" } as never,
+      { eventId: "bball-busy", sport: "basketball", home: "C", away: "D" } as never,
+    ],
+  });
+  basketballWs.lastSeenAt.set("bball-quiet", Date.now() - 10_000);
+  assert.equal(getBasketballWsEventIfFresh("bball-quiet", 4_000), null);
+  assert.notEqual(getBasketballWsEventIfFresh("bball-busy", 4_000), null);
+});
+
+test("mergeBasketballWsFreshness: overlays matchClock/score from a fresh WS event, keeps REST untouched otherwise", () => {
+  basketballWs.liveByEventId.clear();
+  basketballWs.lastSeenAt.clear();
+  basketballWs.applyFrame({
+    sport: "basketball",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "bball-live",
+        sport: "basketball",
+        home: "A",
+        away: "B",
+        matchClock: { period: "Q3" },
+        score: { home: "60", away: "58" },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "bball-live",
+      sport: "basketball",
+      home: "A",
+      away: "B",
+      markets: [],
+      matchClock: { period: "Q2" },
+      score: { home: "55", away: "50" },
+    },
+    {
+      eventId: "bball-no-ws",
+      sport: "basketball",
+      home: "C",
+      away: "D",
+      markets: [],
+      matchClock: { period: "Q1" },
+      score: { home: "10", away: "8" },
+    },
+  ] as never[];
+  const merged = mergeBasketballWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.score?.home, "60", "fresh WS reading should win over REST's own score");
+  assert.equal(merged[1]!.score?.home, "10", "an event WS hasn't seen must be untouched");
 });
 
 // bwin-only: canonicalMarket "OTHER", rawName "Anytime Goalscorer" — one

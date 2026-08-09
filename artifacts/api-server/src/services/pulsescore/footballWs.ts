@@ -1,16 +1,23 @@
-// Football live odds from PulseScore via WebSocket — the PRO plan's single
-// concurrent WS connection was originally given to tennis (point-by-point
-// pricing benefits most from push updates) but football stayed on REST,
-// which meant its clock/score only ever updated when our own ~1s poll
-// happened to land (and, once football/tennis started sharing the bet365
-// REST budget via a per-bookmaker throttle, at best every ~2s). That's fine
-// for well-covered leagues but not for lower-coverage ones — confirmed in
-// production (2026-08-08, Vicenza v Catania, a Coppa Italia preliminary-
-// round match): PulseScore itself only sends occasional checkpoint updates
-// for those, and REST polling can't do better than whatever's already
-// there. Moved to football 2026-08-08 (explicit user decision, trading
-// tennis's WS access for it — the plan only allows one) since football is
-// the sport actually driving live-clock complaints.
+// Football live odds from PulseScore via WebSocket — originally the PRO
+// plan's WS connection was given to tennis (point-by-point pricing benefits
+// most from push updates) but football stayed on REST, which meant its
+// clock/score only ever updated when our own ~1s poll happened to land (and,
+// once football/tennis started sharing the bet365 REST budget via a
+// per-bookmaker throttle, at best every ~2s). That's fine for well-covered
+// leagues but not for lower-coverage ones — confirmed in production
+// (2026-08-08, Vicenza v Catania, a Coppa Italia preliminary-round match):
+// PulseScore itself only sends occasional checkpoint updates for those, and
+// REST polling can't do better than whatever's already there. Moved to
+// football 2026-08-08 (explicit user decision, trading tennis's WS access
+// for it) under the belief the PRO plan allowed only one concurrent WS
+// connection total. That belief was WRONG — confirmed 2026-08-09 (real
+// PulseScore docs) the plan grants one connection PER SPORT; basketball now
+// has its own dedicated connection (basketballWs.ts) rather than needing to
+// take this one from football. Tennis's own connection (tennisWs.ts)
+// remains dormant not because of a connection budget but because its
+// per-event-freshness design (this file's own fix, see
+// getPulseScoreFootballLive's header in football.ts) was never
+// applied/reactivated there.
 //
 // Mirrors tennisWs.ts's structure exactly (see that file's history/comments
 // for why: WS was tried once before and abandoned when no frame ever
@@ -201,9 +208,32 @@ export function getFootballWsEvents(): PulseScoreEvent[] {
 
 /** True only if a frame has actually arrived within maxAgeMs — deliberately
  * NOT just `connected`, since a socket can sit open without ever pushing
- * real data. Callers should fall back to REST whenever this is false. */
+ * real data. Callers should fall back to REST whenever this is false.
+ *
+ * Connection-level only — kept for status reporting (pulseScoreFootballWsStatus
+ * uses the same lastFrameAt reasoning). Attempt 2 in getPulseScoreFootballLive's
+ * header used exactly this check to gate trusting WS data and got burned: a
+ * quiet event (no price movement, so PulseScore never re-broadcasts it) went
+ * stale while OTHER events kept the connection looking healthy. Use
+ * getFootballWsEventIfFresh for any per-match trust decision instead. */
 export function footballWsIsFresh(maxAgeMs: number): boolean {
   return connected && lastFrameAt > 0 && Date.now() - lastFrameAt < maxAgeMs;
+}
+
+/** PER-EVENT freshness check, the fix for Attempt 2's bug (see
+ * getPulseScoreFootballLive's header in football.ts): returns this event's
+ * last WS-broadcast data only if THIS SPECIFIC event was seen within
+ * maxAgeMs, regardless of how recently any other event was broadcast. A
+ * quiet event whose own lastSeenAt has gone stale returns null here even
+ * while the connection as a whole is healthy — callers fall back to REST
+ * for that one match instead of serving frozen WS data. */
+export function getFootballWsEventIfFresh(
+  eventId: string,
+  maxAgeMs: number,
+): PulseScoreEvent | null {
+  const seenAt = lastSeenAt.get(eventId);
+  if (!seenAt || Date.now() - seenAt > maxAgeMs) return null;
+  return liveByEventId.get(eventId) ?? null;
 }
 
 export function pulseScoreFootballWsStatus(): {

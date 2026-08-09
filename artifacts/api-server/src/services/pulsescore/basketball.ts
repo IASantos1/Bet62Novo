@@ -15,6 +15,7 @@ import {
   type PulseScoreMarket,
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
+import { getBasketballWsEventIfFresh } from "./basketballWs.js";
 
 function oddsToNumber(raw: number | undefined): number | null {
   return typeof raw === "number" && Number.isFinite(raw) && raw > 1.0 ? raw : null;
@@ -300,7 +301,23 @@ async function fetchBasketballLive(): Promise<PulseScoreEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live basketball odds + score from PulseScore (bwin, normalized), REST-only.
+// How fresh a WS-broadcast reading for ONE specific event must be to be
+// trusted over REST's own value for that same event — see football.ts's
+// identical constant for the full reasoning (per-event overlay, never a
+// primary source of which matches are live).
+const BASKETBALL_WS_EVENT_FRESHNESS_MS = 4_000;
+
+/** Live basketball odds + score from PulseScore (bwin, normalized). REST is
+ * always the authoritative source for WHICH matches are live and for every
+ * market/odds field; basketballWs.ts is layered on top PER EVENT the same
+ * way football.ts's getPulseScoreFootballLive does (see that function's
+ * header for the two prior all-or-nothing WS attempts this design avoids).
+ * Built 2026-08-09 specifically because basketball's REST poll shares the
+ * "bwin" bookmaker's 1 req/s budget with football's own REST poll —
+ * confirmed in production causing basketball's odds to go stale under
+ * contention even though score/clock kept moving. A dedicated WS connection
+ * (one per sport, per real PulseScore plan docs) sidesteps that budget
+ * fight entirely for whichever events it has fresh data on.
  * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
  * fails on the very first attempt (nothing cached yet to fall back to).
  *
@@ -324,12 +341,14 @@ async function fetchBasketballLive(): Promise<PulseScoreEvent[]> {
 export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
-  if (liveCache && now - liveCache.fetchedAt < BASKETBALL_LIVE_TTL_MS) return liveCache.events;
-  if (!liveInFlight) {
+  let events: PulseScoreEvent[];
+  if (liveCache && now - liveCache.fetchedAt < BASKETBALL_LIVE_TTL_MS) {
+    events = liveCache.events;
+  } else if (!liveInFlight) {
     liveInFlight = fetchBasketballLive()
-      .then((events) => {
-        liveCache = { events, fetchedAt: Date.now() };
-        return events;
+      .then((fetched) => {
+        liveCache = { events: fetched, fetchedAt: Date.now() };
+        return fetched;
       })
       .catch((err) => {
         logger.warn(
@@ -341,6 +360,23 @@ export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> 
       .finally(() => {
         liveInFlight = null;
       });
+    events = await liveInFlight;
+  } else {
+    events = await liveInFlight;
   }
-  return liveInFlight;
+  return mergeBasketballWsFreshness(events);
+}
+
+/** Exported only for tests — mirrors football.ts's mergeFootballWsFreshness. */
+export function mergeBasketballWsFreshness(restEvents: PulseScoreEvent[]): PulseScoreEvent[] {
+  return restEvents.map((ev) => {
+    if (!ev.eventId) return ev;
+    const wsEv = getBasketballWsEventIfFresh(ev.eventId, BASKETBALL_WS_EVENT_FRESHNESS_MS);
+    if (!wsEv) return ev;
+    return {
+      ...ev,
+      matchClock: wsEv.matchClock ?? ev.matchClock,
+      score: wsEv.score ?? ev.score,
+    };
+  });
 }

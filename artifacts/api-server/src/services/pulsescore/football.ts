@@ -8,9 +8,10 @@
 // Same in-process cache + in-flight-dedup shape already used throughout
 // matches.ts for other ~1s live polls (e.g. TENNIS_LIVE_V1_TTL).
 //
-// A WS connection also exists (footballWs.ts, started at boot) but is
-// deliberately NOT used as a data source here — see getPulseScoreFootballLive
-// below for why it was tried and reverted the same day.
+// A WS connection also exists (footballWs.ts, started at boot) and is used
+// as a PER-EVENT overlay on top of REST — see getPulseScoreFootballLive
+// below for the two prior all-or-nothing attempts that got reverted and why
+// this per-event design fixes both.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -21,6 +22,7 @@ import {
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
+import { getFootballWsEventIfFresh } from "./footballWs.js";
 
 const FOOTBALL_LIVE_TTL_MS = 1_000; // matches the PRO plan's 1 req/s rate limit
 
@@ -83,12 +85,28 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live football odds from PulseScore (bwin, normalized), REST-only.
- * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
- * call fails on the very first attempt (nothing cached yet to fall back to).
+// How fresh a WS-broadcast reading for ONE specific event must be to be
+// trusted over REST's own value for that same event. Deliberately tight —
+// this only exists to shave the latency between "PulseScore knows" and "we
+// show it" for an actively-trading match; a match that hasn't broadcast
+// within this window gets REST's own (equally fresh, ~1-2s old) data
+// instead, never something stale being passed off as current.
+const FOOTBALL_WS_EVENT_FRESHNESS_MS = 4_000;
+
+/** Live football odds from PulseScore (bwin, normalized). REST is always
+ * the authoritative source for WHICH matches are live (fixes Attempt 1
+ * below — WS never adds or removes a match from this list, only overlays
+ * fields onto ones REST already returned) and for every market/odds field.
+ * WS (footballWs.ts) is layered on top PER EVENT: an event whose own
+ * lastSeenAt is within FOOTBALL_WS_EVENT_FRESHNESS_MS gets its
+ * matchClock/score refreshed from the last WS broadcast; any other event —
+ * including every event while WS is disconnected entirely — is untouched,
+ * identical to pure REST. Empty array if PULSESCORE_API_KEY isn't
+ * configured yet, or the upstream REST call fails on the very first
+ * attempt (nothing cached yet to fall back to).
  *
- * A WS-preferring version of this function has now shipped and been
- * reverted TWICE the same day (2026-08-08):
+ * A WS-preferring version of this function shipped and was reverted TWICE
+ * the same day (2026-08-08) before this per-event design:
  *
  * Attempt 1: reports of many live matches missing from the site right
  * after it went out. Suspected cause — applyFrame() in footballWs.ts
@@ -103,33 +121,32 @@ async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
  * Attempt 2 (after that fix): reports of stuck clocks (one observed
  * capped at exactly 3:00 — the frontend's own extrapolation ceiling),
  * matches that should have gone live never appearing, and finished
- * matches still showing "A Iniciar". Root cause this time: WS freshness
- * (footballWsIsFresh) is tracked PER CONNECTION, not per event — it only
- * asks "did any frame arrive recently", which stays true as long as OTHER
- * matches keep broadcasting. If PulseScore's frames really are delta-only
- * and only re-broadcast a match when its price moves, a match with quiet
- * odds can go stale (clockSec frozen) for a long time while the
- * connection as a whole looks perfectly healthy — and REST never kicks in
- * to correct that one match specifically, because the freshness check
- * that gates the fallback never sees it as stale. Fixing this for real
- * needs PER-EVENT freshness (e.g. a lastSeenAt timestamp per eventId,
- * falling back to REST for just that match once its own reading goes
- * stale, not an all-or-nothing connection-level check) — not attempted
- * yet. Back to REST-only (known-good) until that exists. The WS
- * connection (footballWs.ts) is still started at boot so its behavior/logs
- * can be observed without being trusted for real data yet — see
- * getFootballWsEvents/footballWsIsFresh, currently unused here. */
+ * matches still showing "A Iniciar". Root cause this time: that version
+ * trusted WS as the primary source gated by footballWsIsFresh, tracked PER
+ * CONNECTION, not per event — it only asked "did any frame arrive
+ * recently", which stayed true as long as OTHER matches kept broadcasting.
+ * If PulseScore's frames really are delta-only and only re-broadcast a
+ * match when its price moves, a match with quiet odds could go stale
+ * (clockSec frozen) for a long time while the connection as a whole looked
+ * perfectly healthy — and REST never kicked in to correct that one match
+ * specifically, because the freshness check that gated the fallback never
+ * saw it as stale, and because WS was the primary list source too, a match
+ * missing from WS's own view (e.g. right after (re)connecting, before its
+ * first frame) didn't appear at all. This version fixes both: REST is
+ * always the list, WS is checked per-event via getFootballWsEventIfFresh,
+ * and staleness for one event never affects any other. */
 export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
   const now = Date.now();
-  if (cache && now - cache.fetchedAt < FOOTBALL_LIVE_TTL_MS) return cache.events;
-
-  if (!inFlight) {
+  let events: PulseScoreEvent[];
+  if (cache && now - cache.fetchedAt < FOOTBALL_LIVE_TTL_MS) {
+    events = cache.events;
+  } else if (!inFlight) {
     inFlight = fetchFootballLive()
-      .then((events) => {
-        cache = { events, fetchedAt: Date.now() };
-        return events;
+      .then((fetched) => {
+        cache = { events: fetched, fetchedAt: Date.now() };
+        return fetched;
       })
       .catch((err) => {
         // This used to swallow the error and return [] unconditionally —
@@ -147,8 +164,26 @@ export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
       .finally(() => {
         inFlight = null;
       });
+    events = await inFlight;
+  } else {
+    events = await inFlight;
   }
-  return inFlight;
+  return mergeFootballWsFreshness(events);
+}
+
+/** Exported only for tests — see getPulseScoreFootballLive's header for the
+ * per-event merge rules this implements. */
+export function mergeFootballWsFreshness(restEvents: PulseScoreEvent[]): PulseScoreEvent[] {
+  return restEvents.map((ev) => {
+    if (!ev.eventId) return ev;
+    const wsEv = getFootballWsEventIfFresh(ev.eventId, FOOTBALL_WS_EVENT_FRESHNESS_MS);
+    if (!wsEv) return ev;
+    return {
+      ...ev,
+      matchClock: wsEv.matchClock ?? ev.matchClock,
+      score: wsEv.score ?? ev.score,
+    };
+  });
 }
 
 // ── canonicalMarket → our own market shape ──────────────────────────────────
