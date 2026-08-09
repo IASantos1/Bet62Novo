@@ -367,6 +367,58 @@ export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> 
   return mergeBasketballWsFreshness(events);
 }
 
+// Same reasoning as football.ts's isWsClockAtLeastAsAdvanced: WS only
+// re-broadcasts an event when something about it changes, so a frame still
+// within BASKETBALL_WS_EVENT_FRESHNESS_MS can be for a moment strictly
+// EARLIER than what REST's own most recent fetch already has. Basketball's
+// matchClock only ever carries `period` (no minute/second — see this file's
+// header), so "advanced" here means later in this local period ordering,
+// not a real timestamp comparison. Unknown periods rank last (0) so an
+// unrecognized value never wins a comparison it can't actually justify.
+const PERIOD_RANK: Record<string, number> = {
+  "not started": 0,
+  q1: 1,
+  q2: 2,
+  halftime: 3,
+  q3: 4,
+  q4: 5,
+  ot: 6,
+  overtime: 6,
+};
+
+function periodRank(period: string | undefined): number {
+  if (!period) return -1;
+  return PERIOD_RANK[period.toLowerCase()] ?? -1;
+}
+
+function isWsClockAtLeastAsAdvanced(
+  wsClock: PulseScoreEvent["matchClock"],
+  restClock: PulseScoreEvent["matchClock"],
+): boolean {
+  if (!wsClock) return false;
+  if (!restClock) return true;
+  const wsRank = periodRank(wsClock.period);
+  const restRank = periodRank(restClock.period);
+  // Either side using a period this ranking doesn't recognize means we
+  // can't safely order them — don't guess, keep REST's own reading.
+  if (wsRank < 0 || restRank < 0) return false;
+  return wsRank >= restRank;
+}
+
+function isWsScoreAtLeastAsAdvanced(
+  wsScore: PulseScoreEvent["score"],
+  restScore: PulseScoreEvent["score"],
+): boolean {
+  if (!wsScore) return false;
+  if (!restScore) return true;
+  const wsHome = Number(wsScore.home);
+  const wsAway = Number(wsScore.away);
+  const restHome = Number(restScore.home);
+  const restAway = Number(restScore.away);
+  if ([wsHome, wsAway, restHome, restAway].some((n) => Number.isNaN(n))) return false;
+  return wsHome >= restHome && wsAway >= restAway;
+}
+
 /** Exported only for tests — mirrors football.ts's mergeFootballWsFreshness. */
 export function mergeBasketballWsFreshness(restEvents: PulseScoreEvent[]): PulseScoreEvent[] {
   return restEvents.map((ev) => {
@@ -375,8 +427,10 @@ export function mergeBasketballWsFreshness(restEvents: PulseScoreEvent[]): Pulse
     if (!wsEv) return ev;
     return {
       ...ev,
-      matchClock: wsEv.matchClock ?? ev.matchClock,
-      score: wsEv.score ?? ev.score,
+      matchClock: isWsClockAtLeastAsAdvanced(wsEv.matchClock, ev.matchClock)
+        ? wsEv.matchClock
+        : ev.matchClock,
+      score: isWsScoreAtLeastAsAdvanced(wsEv.score, ev.score) ? wsEv.score : ev.score,
     };
   });
 }
