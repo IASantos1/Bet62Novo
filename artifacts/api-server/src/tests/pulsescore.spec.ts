@@ -496,6 +496,37 @@ test("teamNamesMatch: nickname-suffix fallback matches bwin's short hockey team 
   assert.equal(teamNamesMatch("Real Madrid", "Atletico Madrid"), false);
 });
 
+// Real side-by-side PulseScore/bwin vs API-Football live-feed comparison
+// (2026-08-09) — bwin keeps a national club-type prefix API-Football's own
+// name drops.
+test("teamNamesMatch: club-token stripping covers non-Western club-type prefixes (CA/FK/SK/CS/UC/SS/GKS)", () => {
+  assert.equal(teamNamesMatch("CA Atlanta", "Atlanta"), true);
+  assert.equal(teamNamesMatch("FK Borac Banja Luka", "Borac Banja Luka"), true);
+  assert.equal(teamNamesMatch("SK Sigma Olomouc", "Sigma Olomouc"), true);
+  assert.equal(teamNamesMatch("CS Dock Sud", "Dock Sud"), true);
+  assert.equal(teamNamesMatch("UC Sampdoria", "Sampdoria"), true);
+  assert.equal(teamNamesMatch("SS Arezzo", "Arezzo"), true);
+});
+
+// Same real comparison — the OPPOSITE truncation direction from the
+// nickname-suffix test above: API-Football drops a trailing city/qualifier
+// word that bwin keeps, so the shorter name's tokens are a LEADING (not
+// trailing) match of the longer one.
+test("teamNamesMatch: leading-token fallback matches when API-Football drops a trailing city/qualifier word", () => {
+  assert.equal(teamNamesMatch("FK Vojvodina Novi Sad", "Vojvodina"), true);
+  assert.equal(teamNamesMatch("SK Artis Brno", "Artis"), true);
+  assert.equal(teamNamesMatch("CA San Lorenzo de Almagro", "San Lorenzo"), true);
+});
+
+// The leading-token fallback's one real danger: a reserve/youth side shares
+// its parent club's full name as a literal prefix. Must stay two distinct,
+// separately bettable sides, never collapsed together.
+test("teamNamesMatch: leading-token fallback does not conflate a club with its reserve/youth side", () => {
+  assert.equal(teamNamesMatch("Real Madrid", "Real Madrid Castilla"), false);
+  assert.equal(teamNamesMatch("Barcelona", "Barcelona B"), false);
+  assert.equal(teamNamesMatch("Ajax", "Ajax U21"), false);
+});
+
 function makeHockeyEvent(home: string, away: string, markets: unknown[]) {
   return {
     eventId: "test-hockey-1",
