@@ -12437,16 +12437,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
-  let volleyballLiveRaw: LiveMatchState[] = [];
-  try {
-    volleyballLiveRaw = await buildVolleyballLiveFromPulseScore();
-  } catch (err) {
-    logger.error(
-      { err },
-      "[pulsescore] buildVolleyballLiveFromPulseScore failed this tick",
-    );
-  }
-  const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
+  // Reverted 2026-08-09 (same day it shipped): confirmed in production that
+  // neither PulseScore bookmaker gives usable live volleyball data — bwin
+  // carries no score field at all, and bet365's score field stayed stuck at
+  // 0-0 for a match the user confirmed was genuinely in progress. Showing
+  // "AO VIVO" with a frozen wrong score AND identical synthetic 1.85/1.85
+  // odds on both sides (reported as looking like a duplicate-odds bug) was
+  // worse than not showing volleyball live at all. buildVolleyballLiveFromPulseScore
+  // is kept below, just not called, so this can resume the moment either
+  // bookmaker's volleyball feed actually carries a real live score.
+  const volleyballLiveItems: LiveMatchState[] = [];
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
     tennisLiveRaw = await buildTennisLiveFromPulseScore();
