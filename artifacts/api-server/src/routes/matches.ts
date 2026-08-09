@@ -11709,7 +11709,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   return ranked.map((r) => r.state);
 }
 
-const TENNIS_DISAPPEAR_GRACE_MS = 3 * 60_000;
+// Shortened from 3 minutes (2026-08-09, user request: finished matches
+// should leave "Ao Vivo" immediately, for every sport, not just football).
+// Football gets a real, immediate "Finished" signal from bwin's
+// matchClock.period (see isFulltimeFreeze in buildFootballLiveFromPulseScore)
+// and finalizes the instant that fires. Tennis has no equivalent — bet365
+// (tennis's bookmaker since the 2026-08-09 revert) carries no matchClock at
+// all, and homeSetsWon/awaySetsWon reaching a "match over" count can't be
+// trusted as that signal either: it would require knowing whether THIS match
+// is best-of-3 or best-of-5 (Grand Slam men's/Davis Cup), which isn't
+// present anywhere in the real samples seen this session — guessing best-
+// of-3 would cut a live best-of-5 match at 2 sets to 1, incorrectly
+// declaring it finished (and settling bets) while it's still being played,
+// a worse failure mode than lingering. So this stays disappearance-based —
+// only shortened, not replaced. 15s still tolerates ~10 missed poll cycles
+// (TENNIS_LIVE_TTL_MS is 1.5s) before treating a real gap as finished, so a
+// single transient API hiccup still can't cause a flicker.
+const TENNIS_DISAPPEAR_GRACE_MS = 15_000;
 
 async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreTennisLive();
