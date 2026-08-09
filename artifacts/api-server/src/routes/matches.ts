@@ -38,6 +38,7 @@ import {
 import { hasDrawMarket, looksLikeTennisLeague } from "../services/pulsescore/tennisWs.js";
 import {
   getPulseScoreBasketballUpcoming,
+  getPulseScoreBasketballLive,
   extractBasketballOverride,
 } from "../services/pulsescore/basketball.js";
 import {
@@ -11102,6 +11103,125 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   return results;
 }
 
+// Coarse per-quarter minute ESTIMATE for the progress bar only — bwin gives
+// no running clock for basketball at all (see getPulseScoreBasketballLive's
+// header comment), unlike football/soccer's per-second matchClock. The UI's
+// actual displayed label is `status` (the raw period string below), not
+// this number.
+function estimateBasketballMinute(period: string): number {
+  const p = period.toLowerCase();
+  if (p === "q1" || p.includes("1st quarter")) return 6;
+  if (p === "q2" || p.includes("2nd quarter")) return 18;
+  if (p.includes("half")) return 24;
+  if (p === "q3" || p.includes("3rd quarter")) return 30;
+  if (p === "q4" || p.includes("4th quarter")) return 42;
+  if (p.includes("ot") || p.includes("overtime")) return 46;
+  return 0;
+}
+
+/**
+ * Basketball live odds + score, sourced entirely from PulseScore
+ * (getPulseScoreBasketballLive, bwin). Confirmed against a real GET
+ * /live-events?sport=basketball sample (2026-08-09) — score is
+ * {home,away} as STRINGS, matchClock only ever carries `period` (no
+ * minute/second/running fields), and pre-game fixtures are folded into the
+ * same feed with period "Not Started" (filtered out below, not live yet).
+ * No confirmed "Finished"-equivalent period value exists for basketball —
+ * unlike football's immediate-FT fast path, end-of-match here is detected
+ * purely by disappearance from the feed (finalizeStaleLiveMatch +
+ * getFootballLiveDisappearGraceMs, reused as-is — both are sport-agnostic,
+ * same pattern buildFootballLiveFromPulseScore's own GC loop uses). Same
+ * `pulsescore-basketball-${eventId}` id scheme as the prematch builder so a
+ * match's identity carries over once it goes live, and the same
+ * liveMatchState.set() call so settlement.ts/cash-out pick it up the same
+ * way football's live matches already do.
+ */
+async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await getPulseScoreBasketballLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const period = ev.matchClock?.period ?? "";
+    if (!period || period.toLowerCase().includes("not started")) continue;
+
+    const id = `pulsescore-basketball-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
+    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const override = extractBasketballOverride(ev);
+    const baseMarkets = makeBasketballMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    if (override.spread) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.spread.home,
+        awayPlusOne: override.spread.away,
+      };
+      markets._spread = -override.spread.line;
+      markets._spreadLine = -override.spread.line;
+    }
+    if (override.total) {
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over25: override.total.over,
+        under25: override.total.under,
+      };
+      markets._total = override.total.line;
+    }
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Basquetebol",
+      country: ev.country || "Internacional",
+      sport: "basketball",
+      homeScore,
+      awayScore,
+      minute: estimateBasketballMinute(period),
+      status: period,
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+      events: [],
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  // Garbage-collect matches that stopped appearing in the feed — same
+  // disappearance-based grace period every non-football PulseScore sport
+  // uses (finalizeStaleLiveMatch also enqueues settlement).
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-basketball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[pulsescore] basketball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 /** Upcoming hockey fixtures from PulseScore (bwin), each carrying its 3-Way
  * Result / Handicap / Totals prematch odds when bwin has priced it yet, with
  * makeHockeyMarketsFromTeams's synthetic model still filling every market
@@ -12161,7 +12281,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
-  const basketballLive: LiveMatchState[] = [];
+  let basketballLiveRaw: LiveMatchState[] = [];
+  try {
+    basketballLiveRaw = await buildBasketballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildBasketballLiveFromPulseScore failed this tick",
+    );
+  }
+  const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
   const hockeyLive: LiveMatchState[] = [];
   const baseballLive: LiveMatchState[] = [];
   const volleyballLiveItems: LiveMatchState[] = [];

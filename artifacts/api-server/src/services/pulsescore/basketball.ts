@@ -1,18 +1,19 @@
 // Basketball prematch odds from PulseScore. Pinned to its own "bwin"
 // bookmaker (BASKETBALL_BOOKMAKER below) as of 2026-08-09, mirroring
-// football.ts's move — same REST/cache/pacing pattern. Live is NOT
-// implemented here yet: no real /live-events?sport=basketball sample has
-// been seen for either bookmaker, only the prematch /basketball/leagues
-// catalog (whose embedded live:true event carried markets:[], same
-// "catalog never carries live odds" pattern already confirmed for
-// football/tennis) — needed before that path can be wired up without
-// guessing.
+// football.ts's move — same REST/cache/pacing pattern.
+//
+// Live: confirmed against a real GET /live-events?sport=basketball sample
+// (2026-08-09, bwin) — see getPulseScoreBasketballLive below for the shape
+// differences from football's live feed (no per-second clock, score as
+// strings).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
+  pulseScoreGet,
   pulseScoreGetWithRetry,
   type PulseScoreEvent,
   type PulseScoreMarket,
+  type PulseScoreLiveEventsResponse,
 } from "./client.js";
 
 function oddsToNumber(raw: number | undefined): number | null {
@@ -277,4 +278,69 @@ export async function getPulseScoreBasketballUpcoming(): Promise<PulseScoreBaske
       });
   }
   return upcomingInFlight;
+}
+
+// ── Live (REST poll) ─────────────────────────────────────────────────────────
+const BASKETBALL_LIVE_TTL_MS = 1_000; // same PRO-plan 1 req/s budget as football
+let liveCache: { events: PulseScoreEvent[]; fetchedAt: number } | null = null;
+let liveInFlight: Promise<PulseScoreEvent[]> | null = null;
+
+async function fetchBasketballLive(): Promise<PulseScoreEvent[]> {
+  // Confirmed real (2026-08-09, bwin): same paginated { total, page, ...,
+  // events: [...] } envelope as football's live feed. limit=200 comfortably
+  // covers real volume (7 events observed at once). The response also
+  // includes events whose matchClock.period is "Not Started" — pre-game
+  // fixtures folded into the same feed, not actually live yet; callers must
+  // filter those out (see buildBasketballLiveFromPulseScore in matches.ts).
+  const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+    "/live-events?sport=basketball&limit=200",
+    undefined,
+    BASKETBALL_BOOKMAKER,
+  );
+  return Array.isArray(data?.events) ? data.events : [];
+}
+
+/** Live basketball odds + score from PulseScore (bwin, normalized), REST-only.
+ * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
+ * fails on the very first attempt (nothing cached yet to fall back to).
+ *
+ * Real sample shape (2026-08-09) differs from football/soccer's live feed in
+ * two ways callers must account for:
+ *   1. `score` is `{home,away}` as STRINGS ("25"/"29"), not numbers.
+ *   2. `matchClock` only ever carries `period` — no minute/second/running
+ *      fields at all (unlike football's per-second clock). Real period
+ *      values seen: "Not Started", "Q1"-"Q4", "Halftime". No
+ *      "Finished"-equivalent value observed yet, so end-of-match must be
+ *      detected by the match disappearing from this feed (same
+ *      disappearance-based pattern every non-football sport used before
+ *      football's own immediate-FT fast path was added), not by a status
+ *      string.
+ * Markets reuse the exact same canonicalMarket shapes already confirmed for
+ * prematch (extractBasketballOverride) — a live event's markets array in
+ * this sample carried the same MATCH_RESULT/EUROPEAN_HANDICAP/OVER_UNDER
+ * FULL_TIME blocks, just alongside extra period-scoped variants
+ * (FIRST_QUARTER, THIRD_QUARTER, ...) extractBasketballOverride already
+ * ignores. */
+export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.PULSESCORE_API_KEY) return [];
+  const now = Date.now();
+  if (liveCache && now - liveCache.fetchedAt < BASKETBALL_LIVE_TTL_MS) return liveCache.events;
+  if (!liveInFlight) {
+    liveInFlight = fetchBasketballLive()
+      .then((events) => {
+        liveCache = { events, fetchedAt: Date.now() };
+        return events;
+      })
+      .catch((err) => {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "[pulsescore] basketball live fetch failed — serving stale cache",
+        );
+        return liveCache?.events ?? [];
+      })
+      .finally(() => {
+        liveInFlight = null;
+      });
+  }
+  return liveInFlight;
 }
