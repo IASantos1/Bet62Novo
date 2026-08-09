@@ -10377,7 +10377,14 @@ export default function Home({
       if (sport === "hockey") return Math.min(100, (minute / 60) * 100);
       if (sport === "baseball") return Math.min(100, (minute / 9) * 100);
       if (sport === "tennis") return Math.min(100, (minute / 5) * 100);
-      if (sport === "volleyball") return Math.min(100, (minute / 5) * 100);
+      // /5 was a placeholder guess from when volleyball's live minute was
+      // always 0 (no real clock source existed) — real elapsed minutes now
+      // flow in (confirmed real samples: 33, 73), so /5 pegged the bar at
+      // 100% almost immediately. Volleyball has no fixed match length
+      // (sets won, not a clock, decides the match), so ~90 is an
+      // approximation only, same caveat every other sport's divisor here
+      // already carries.
+      if (sport === "volleyball") return Math.min(100, (minute / 90) * 100);
       return Math.min(100, (minute / 90) * 100);
     })();
 
