@@ -409,7 +409,7 @@ export type LiveMatchState = {
   hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
-  events: Array<{ type: string; team: string; minute: number; player: string }>;
+  events: Array<{ type: string; team: string; minute: number; player: string; detail?: string }>;
   // Count of VAR-typed events seen so far (API-Football) — compared tick-to-
   // tick to detect a NEW VAR review vs. one already suspended for, same
   // reasoning as redCardsHome/Away being counts rather than a single flag.
@@ -513,6 +513,8 @@ export type LiveMatchState = {
     cornersTotal?: number; // football: total corners in match so far
     cardsTotal?: number; // football: total cards (yellow+red) in match so far
     // Per-team football stats
+    cornersHome?: number;
+    cornersAway?: number;
     possessionHome?: number;
     possessionAway?: number;
     shotsTotalHome?: number;
@@ -11510,6 +11512,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
           team: e.teamId === apiFixture.home.id ? home : away,
           minute: e.minute,
           player: e.playerName ?? "",
+          detail: e.detail,
         }))
       : [];
 
@@ -11811,6 +11814,35 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         clockAtMs,
         clockRunning: !isHalftimeFreeze && !isFulltimeFreeze,
         htScore,
+        // Feeds the existing "Força"/v2-statistics stat-bar UI (built for
+        // Statpal, never previously fed for PulseScore-sourced matches) —
+        // same _liveExtra.*Home/Away fields that pipeline already reads.
+        ...(apiFootballStats
+          ? {
+              possessionHome: apiFootballStats.home?.possessionPct ?? undefined,
+              possessionAway: apiFootballStats.away?.possessionPct ?? undefined,
+              shotsTotalHome: apiFootballStats.home?.shotsTotal ?? undefined,
+              shotsTotalAway: apiFootballStats.away?.shotsTotal ?? undefined,
+              shotsOnTargetHome: apiFootballStats.home?.shotsOnTarget ?? undefined,
+              shotsOnTargetAway: apiFootballStats.away?.shotsOnTarget ?? undefined,
+              foulsHome: apiFootballStats.home?.fouls ?? undefined,
+              foulsAway: apiFootballStats.away?.fouls ?? undefined,
+              cornersHome: apiFootballStats.home?.corners ?? undefined,
+              cornersAway: apiFootballStats.away?.corners ?? undefined,
+              cornersTotal: (apiFootballStats.home?.corners ?? 0) + (apiFootballStats.away?.corners ?? 0),
+              offsidesHome: apiFootballStats.home?.offsides ?? undefined,
+              offsidesAway: apiFootballStats.away?.offsides ?? undefined,
+              yellowCardsHome: apiFootballStats.home?.yellowCards ?? undefined,
+              yellowCardsAway: apiFootballStats.away?.yellowCards ?? undefined,
+              cardsTotal:
+                (apiFootballStats.home?.yellowCards ?? 0) +
+                (apiFootballStats.away?.yellowCards ?? 0) +
+                redCardsHome +
+                redCardsAway,
+              redCardsHomeCount: redCardsHome,
+              redCardsAwayCount: redCardsAway,
+            }
+          : {}),
       },
     };
     // Leave "Ao Vivo" the instant FT is detected, instead of sitting there
@@ -25580,8 +25612,12 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
       rows.push({ name: "Ataques Perigosos", home: String(lx.dangerousAttacksHome), away: String(lx.dangerousAttacksAway ?? 0) });
     if (lx?.attacksHome != null)
       rows.push({ name: "Ataques", home: String(lx.attacksHome), away: String(lx.attacksAway ?? 0) });
+    if (lx?.cornersHome != null)
+      rows.push({ name: "Cantos", home: String(lx.cornersHome), away: String(lx.cornersAway ?? 0) });
     if (lx?.foulsHome != null)
       rows.push({ name: "Faltas", home: String(lx.foulsHome), away: String(lx.foulsAway ?? 0) });
+    if (lx?.offsidesHome != null)
+      rows.push({ name: "Fora de Jogo", home: String(lx.offsidesHome), away: String(lx.offsidesAway ?? 0) });
     if (lx?.yellowCardsHome != null)
       rows.push({ name: "Cartões Amarelos", home: String(lx.yellowCardsHome), away: String(lx.yellowCardsAway ?? 0) });
     if (lx?.xgHome != null)
@@ -25591,9 +25627,9 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
         away: ((lx.xgAway as number) ?? 0).toFixed(2),
       });
 
-    // When no real stats available: show estimated possession + available tracked data.
-    // Possession estimate is derived from live 1x2 odds (implied probability ratio).
-    // This is a standard sports-analytics technique, clearly labelled "(est.)".
+    // Estimated possession from live 1x2 odds (implied probability ratio) —
+    // last resort only, when nothing real (Statpal _liveExtra or API-Football
+    // stats, both already handled above) was available at all.
     if (rows.length === 0 && liveState && sport === "football") {
       // Prefer base odds (pre-goal anchor) over current live odds for possession estimate —
       // live odds shift dramatically after a goal, making the estimate unreliable.
@@ -25612,7 +25648,13 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
           });
         }
       }
-      // Red cards tracked from provider feed
+    }
+
+    // Red cards / goals: pushed unconditionally (not gated on rows.length),
+    // since these previously only showed when NOTHING else was available —
+    // silently disappearing the instant real API-Football stats populated
+    // the rows above them.
+    if (liveState && sport === "football") {
       if ((liveState.redCardsHome ?? 0) > 0 || (liveState.redCardsAway ?? 0) > 0) {
         rows.push({
           name: "Cartões Vermelhos",
@@ -25620,7 +25662,6 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
           away: String(liveState.redCardsAway ?? 0),
         });
       }
-      // Goals tracked
       const hGoals = (lx?.homeGoalMinutes as number[] | undefined)?.length ?? liveState.homeScore;
       const aGoals = (lx?.awayGoalMinutes as number[] | undefined)?.length ?? liveState.awayScore;
       if (hGoals > 0 || aGoals > 0) {

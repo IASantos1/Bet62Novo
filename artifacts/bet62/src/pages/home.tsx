@@ -3689,6 +3689,7 @@ type Match = {
     team: string;
     minute: number;
     player: string;
+    detail?: string;
   }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
@@ -4000,7 +4001,7 @@ function MomentumChart({
     minute?: number;
     status?: string;
     _liveExtra?: Record<string, unknown>;
-    events?: Array<{ type: string; team: string; minute: number; player: string }>;
+    events?: Array<{ type: string; team: string; minute: number; player: string; detail?: string }>;
   };
   v2StatsGroups?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> | null;
 }) {
@@ -4274,6 +4275,53 @@ function MomentumChart({
                       <text x={gx + lx2} y={H - 3} fontSize="6.5" fill="#d4d4d8"
                         textAnchor={la} fontFamily="monospace" fontWeight="bold">{gMin}'</text>
                     </g>
+                  );
+                })}
+              </>
+            );
+          })()}
+
+          {/* Card & substitution minute markers 🟨🟥🔄 — from the real
+              API-Football event timeline (match.events), placed close to the
+              center axis so they read as "inside the chart" alongside the
+              existing goal markers above/below. */}
+          {(() => {
+            if (!match.events?.length) return null;
+            const homeLower = match.home.toLowerCase();
+            const homeMarks: Array<{ minute: number; icon: string }> = [];
+            const awayMarks: Array<{ minute: number; icon: string }> = [];
+            for (const ev of match.events) {
+              const typeLower = String(ev.type ?? "").toLowerCase();
+              let icon: string | null = null;
+              if (typeLower === "card") {
+                icon = String(ev.detail ?? "").toLowerCase().includes("red") ? "🟥" : "🟨";
+              } else if (typeLower === "subst" || typeLower === "substitution") {
+                icon = "🔄";
+              }
+              if (!icon) continue;
+              const teamLower = String(ev.team ?? "").toLowerCase();
+              const isHome = teamLower === homeLower || teamLower === "home" || teamLower === "1";
+              (isHome ? homeMarks : awayMarks).push({ minute: ev.minute, icon });
+            }
+            if (homeMarks.length === 0 && awayMarks.length === 0) return null;
+            return (
+              <>
+                {homeMarks.map((mk, i) => {
+                  const col = Math.min(getTargetCols(mk.minute), TOTAL_COLS - 1);
+                  const gx = col * colW + colW / 2;
+                  return (
+                    <text key={`hc-${i}`} x={gx} y={midY - 3} fontSize="7.5" textAnchor="middle">
+                      {mk.icon}
+                    </text>
+                  );
+                })}
+                {awayMarks.map((mk, i) => {
+                  const col = Math.min(getTargetCols(mk.minute), TOTAL_COLS - 1);
+                  const gx = col * colW + colW / 2;
+                  return (
+                    <text key={`ac-${i}`} x={gx} y={midY + 9} fontSize="7.5" textAnchor="middle">
+                      {mk.icon}
+                    </text>
                   );
                 })}
               </>
@@ -7851,6 +7899,7 @@ export default function Home({
       team: string;
       minute: number;
       player: string;
+      detail?: string;
     }>;
     marketSuspension?: Record<string, number>;
     _suspensionReason?: string;
