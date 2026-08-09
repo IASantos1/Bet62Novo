@@ -165,10 +165,11 @@ function connect(): void {
   if (!CONFIG.PULSESCORE_API_KEY) return; // not configured yet
   if (connected) return;
 
-  // Kept in sync with tennis.ts's TENNIS_BOOKMAKER ("bwin" since 2026-08-09)
-  // — if this ever gets reactivated, connecting to a different bookmaker
-  // than the REST poller would silently produce inconsistent event IDs.
-  const url = pulseScoreWsUrl("tennis", "bwin");
+  // Kept in sync with tennis.ts's TENNIS_BOOKMAKER (bet365 — briefly bwin on
+  // 2026-08-09, reverted same day, see tennis.ts's header) — if this ever
+  // gets reactivated, connecting to a different bookmaker than the REST
+  // poller would silently produce inconsistent event IDs.
+  const url = pulseScoreWsUrl("tennis", "bet365");
   let socket: WebSocket;
   try {
     socket = new WebSocket(url);
