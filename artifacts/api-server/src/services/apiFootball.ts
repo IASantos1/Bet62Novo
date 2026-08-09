@@ -239,3 +239,174 @@ export function latestGoalScorer(fixture: ApiFootballFixture): string | null {
   }
   return null;
 }
+
+// ── Live match statistics (shots, possession, corners, fouls, ...) ────────
+// GET /fixtures/statistics?fixture={id} — unlike /fixtures?live=all, this is
+// PER FIXTURE, not one request for every live match, so it's called on
+// demand (getApiFootballStatistics below) only for matches actually being
+// tracked in buildFootballLiveFromPulseScore, each with its own cache/TTL,
+// to stay well inside the 150k/day budget even with many concurrent live
+// matches: a 30s TTL against N concurrent matches is N requests per 30s,
+// e.g. 30 concurrent matches all day is ~86k/day, not 30 req/s.
+//
+// NOT yet verified against a real live response the way /fixtures?live=all
+// was earlier this session — API-Football's own public docs describe a
+// stable, long-standing shape (response: one entry per team, each with
+// team.{id,name} and a statistics: [{type, value}] array — type strings like
+// "Shots on Goal"/"Shots off Goal"/"Total Shots"/"Blocked Shots"/"Fouls"/
+// "Corner Kicks"/"Offsides"/"Ball Possession"/"Yellow Cards"/"Red Cards"/
+// "Goalkeeper Saves"/"Total passes"/"Passes accurate"/"Passes %", value
+// either a number or a "NN%" string), built against that rather than a
+// captured sample — extractStatValue below is defensive about both possible
+// value shapes and STAT_TYPE_MAP is matched case-insensitively so an
+// unexpected casing/wording variant degrades to "field absent", not a crash.
+// Confirm against a real live match once this ships (2026-08-09 follow-up).
+export type ApiFootballTeamStats = {
+  shotsTotal: number | null;
+  shotsOnTarget: number | null;
+  possessionPct: number | null;
+  corners: number | null;
+  fouls: number | null;
+  offsides: number | null;
+  yellowCards: number | null;
+  redCards: number | null;
+  // Every raw {type: value} pair as sent, case-preserved — lets a caller
+  // reach a stat category not promoted to its own field above without
+  // needing a code change here first (same "don't allow-list" reasoning as
+  // events/VAR elsewhere in this file).
+  raw: Record<string, string | number | null>;
+};
+
+export type ApiFootballFixtureStatistics = {
+  fixtureId: number;
+  home: ApiFootballTeamStats | null;
+  away: ApiFootballTeamStats | null;
+};
+
+type RawStatEntry = { type?: string; value?: string | number | null };
+type RawTeamStatsBlock = {
+  team?: { id?: number; name?: string };
+  statistics?: RawStatEntry[];
+};
+type RawStatisticsResponse = { response?: RawTeamStatsBlock[] };
+
+function parseStatNumber(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const cleaned = value.replace("%", "").trim();
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+const STAT_TYPE_MAP: Record<string, keyof Omit<ApiFootballTeamStats, "raw">> = {
+  "total shots": "shotsTotal",
+  "shots on goal": "shotsOnTarget",
+  "ball possession": "possessionPct",
+  "corner kicks": "corners",
+  fouls: "fouls",
+  offsides: "offsides",
+  "yellow cards": "yellowCards",
+  "red cards": "redCards",
+};
+
+/** Exported for testing against a realistic raw {team, statistics: [{type,
+ * value}]} block shape — see this section's header for why the exact shape
+ * isn't verified against a real live response yet. */
+export function extractTeamStats(block: RawTeamStatsBlock | undefined): ApiFootballTeamStats | null {
+  if (!block?.statistics) return null;
+  const out: ApiFootballTeamStats = {
+    shotsTotal: null,
+    shotsOnTarget: null,
+    possessionPct: null,
+    corners: null,
+    fouls: null,
+    offsides: null,
+    yellowCards: null,
+    redCards: null,
+    raw: {},
+  };
+  for (const entry of block.statistics) {
+    if (!entry.type) continue;
+    out.raw[entry.type] = entry.value ?? null;
+    const key = STAT_TYPE_MAP[entry.type.toLowerCase()];
+    if (key) out[key] = parseStatNumber(entry.value);
+  }
+  return out;
+}
+
+const STATS_TTL_MS = 30_000;
+const STATS_CACHE_MAX_AGE_MS = 10 * 60_000;
+const statsCache = new Map<number, { stats: ApiFootballFixtureStatistics; fetchedAt: number }>();
+const statsInFlight = new Map<number, Promise<ApiFootballFixtureStatistics | null>>();
+
+// statsCache is keyed by fixtureId and nothing ever removes an entry once a
+// match finishes and stops being fetched — left unchecked this grows for as
+// long as the process runs. Swept opportunistically on every fetch (cheap:
+// a handful of live matches at once, not thousands) rather than a separate
+// timer.
+function pruneStatsCache(): void {
+  const cutoff = Date.now() - STATS_CACHE_MAX_AGE_MS;
+  for (const [id, entry] of statsCache) {
+    if (entry.fetchedAt < cutoff) statsCache.delete(id);
+  }
+}
+
+async function fetchFixtureStatisticsUncached(
+  fixtureId: number,
+): Promise<ApiFootballFixtureStatistics> {
+  rollUsageDateIfNeeded();
+  requestsToday += 1;
+  const resp = await fetch(
+    `${CONFIG.API_FOOTBALL_BASE_URL}/fixtures/statistics?fixture=${fixtureId}`,
+    {
+      headers: { "x-apisports-key": CONFIG.API_FOOTBALL_KEY },
+      signal: AbortSignal.timeout(8_000),
+    },
+  );
+  if (!resp.ok) {
+    throw new Error(`[api-football] ${resp.status} on /fixtures/statistics?fixture=${fixtureId}`);
+  }
+  const data = (await resp.json()) as RawStatisticsResponse;
+  const blocks = data.response ?? [];
+  return {
+    fixtureId,
+    home: extractTeamStats(blocks[0]),
+    away: extractTeamStats(blocks[1]),
+  };
+}
+
+/** Live statistics (shots, possession, corners, fouls, ...) for one fixture,
+ * REST-polled and cached per-fixture for STATS_TTL_MS — see this section's
+ * header for why this is per-fixture rather than the single-request-for-
+ * everything shape /fixtures?live=all uses. Null if API_FOOTBALL_KEY isn't
+ * configured, or the upstream call fails on the very first attempt for this
+ * fixture (nothing cached yet to fall back to). */
+export async function getApiFootballFixtureStatistics(
+  fixtureId: number,
+): Promise<ApiFootballFixtureStatistics | null> {
+  if (!CONFIG.API_FOOTBALL_KEY) return null;
+  pruneStatsCache();
+  const now = Date.now();
+  const cached = statsCache.get(fixtureId);
+  if (cached && now - cached.fetchedAt < STATS_TTL_MS) return cached.stats;
+  const pending = statsInFlight.get(fixtureId);
+  if (pending) return pending;
+  const promise = fetchFixtureStatisticsUncached(fixtureId)
+    .then((stats) => {
+      statsCache.set(fixtureId, { stats, fetchedAt: Date.now() });
+      return stats;
+    })
+    .catch((err) => {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), fixtureId },
+        "[api-football] statistics fetch failed — serving stale cache if any",
+      );
+      return statsCache.get(fixtureId)?.stats ?? null;
+    })
+    .finally(() => {
+      statsInFlight.delete(fixtureId);
+    });
+  statsInFlight.set(fixtureId, promise);
+  return promise;
+}
