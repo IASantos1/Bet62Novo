@@ -10028,9 +10028,18 @@ const PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST: string[] = [
   // Add the leagues you want to show here — leave empty for "show all".
 ];
 
+// Explicit blocklist — leagues hidden regardless of the allowlist above.
+// Matching is the same case-insensitive substring check against the league
+// name PulseScore sends. Add one entry per line.
+const PULSESCORE_FOOTBALL_LEAGUE_BLOCKLIST: string[] = [
+  "nb iii", // Hungary NB III (3rd division) — user-requested block, 2026-08-09
+];
+
 function isAllowedFootballLeague(name: string): boolean {
-  if (PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.length === 0) return true;
   const n = name.toLowerCase();
+  if (PULSESCORE_FOOTBALL_LEAGUE_BLOCKLIST.some((p) => n.includes(p.toLowerCase())))
+    return false;
+  if (PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.length === 0) return true;
   return PULSESCORE_FOOTBALL_LEAGUE_ALLOWLIST.some((p) =>
     n.includes(p.toLowerCase()),
   );
