@@ -1302,14 +1302,29 @@ function getCountryFlagIso(country?: string, league?: string, homeTeam?: string)
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
     if (lk === pat) return prefer(iso);
   }
-  // 2. Prefix match (pattern ≥ 4 chars)
+  // 2. Prefix match (pattern ≥ 4 chars) — LONGEST matching pattern wins, not
+  // the first one declared in LEAGUE_ISO_MAP. Picking the first match made
+  // this order-dependent on nothing meaningful: Italy's "serie a" sits
+  // earlier in the array than Brazil's own patterns, so any Brazilian
+  // league string containing unaccented "serie a" (e.g. "Campeonato
+  // Brasileiro Serie A") matched Italy first and showed its flag/icon on a
+  // Brazilian league — reported in production 2026-08-09. The longest
+  // pattern is virtually always the more specific, correct one.
+  let bestPrefix: { pat: string; iso: string } | null = null;
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (pat.length >= 4 && lk.startsWith(pat)) return prefer(iso);
+    if (pat.length >= 4 && lk.startsWith(pat) && (!bestPrefix || pat.length > bestPrefix.pat.length)) {
+      bestPrefix = { pat, iso };
+    }
   }
-  // 3. Contains match (pattern ≥ 6 chars)
+  if (bestPrefix) return prefer(bestPrefix.iso);
+  // 3. Contains match (pattern ≥ 6 chars) — same longest-match reasoning.
+  let bestContains: { pat: string; iso: string } | null = null;
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (pat.length >= 6 && lk.includes(pat)) return prefer(iso);
+    if (pat.length >= 6 && lk.includes(pat) && (!bestContains || pat.length > bestContains.pat.length)) {
+      bestContains = { pat, iso };
+    }
   }
+  if (bestContains) return prefer(bestContains.iso);
   // 4. Country name fallback
   if (countryIso) return countryIso;
   // 5. Team name fallback (no league match at all)
@@ -1490,15 +1505,30 @@ function getLeagueLogo(league: string | null | undefined): string | undefined {
   if (!l) return undefined;
   if (LEAGUE_LOGOS[l]) return LEAGUE_LOGOS[l];
   const lLower = l.toLowerCase();
-  // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo - Grupo A", etc.
+  // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo -
+  // Grupo A", etc. LONGEST matching key wins, not the first one declared in
+  // LEAGUE_LOGOS — picking the first match made this order-dependent on
+  // nothing meaningful: Italy's "Serie A" key sits earlier in the object
+  // than Brazil's own keys, so a Brazilian league string containing
+  // unaccented "Serie A" (e.g. "Campeonato Brasileiro Serie A") matched
+  // Italy's crest first and showed it for a Brazilian league — reported in
+  // production 2026-08-09. The longest key is virtually always the more
+  // specific, correct one.
+  let bestPrefix: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && l.startsWith(key)) return url;
+    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length)) {
+      bestPrefix = { key, url };
+    }
   }
-  // Case-insensitive contains match — catches suffixed/prefixed league name variants
+  if (bestPrefix) return bestPrefix.url;
+  // Case-insensitive contains match — same longest-match reasoning.
+  let bestContains: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && lLower.includes(key.toLowerCase())) return url;
+    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length)) {
+      bestContains = { key, url };
+    }
   }
-  return undefined;
+  return bestContains?.url;
 }
 
 const TEAM_COUNTRY: Record<string, string> = {
