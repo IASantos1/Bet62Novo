@@ -27,6 +27,9 @@ const { extractTennisPrematchExtra } = await import(
 const { extractHockeyOverride } = await import(
   "../services/pulsescore/hockey.js"
 );
+const { extractVolleyballOverride } = await import(
+  "../services/pulsescore/volleyball.js"
+);
 const { __testing: footballWs } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -589,4 +592,108 @@ test("extractHockeyOverride: reads Totals line from the market, not the selectio
   assert.equal(override.total?.line, 8.5);
   assert.equal(override.total?.over, 1.8);
   assert.equal(override.total?.under, 1.87);
+});
+
+function makeVolleyballEvent(markets: unknown[]) {
+  return {
+    eventId: "5:1102893",
+    sport: "volleyball",
+    league: "Test League",
+    home: "Thailand",
+    away: "Vietnam",
+    markets,
+  } as Parameters<typeof extractVolleyballOverride>[0];
+}
+
+// bwin's volleyball Match Result and Set 1 Winner are both clean:
+// canonicalMarket "MATCH_RESULT" with explicit HOME/AWAY, no draw possible —
+// confirmed against a real /volleyball/leagues sample (2026-08-09).
+test("extractVolleyballOverride: extracts Match Result and Set 1 Winner (bwin)", () => {
+  const matchResult = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "Match Result",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:match-result",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Thailand", odds: 1.062, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Vietnam", odds: 8.75, isActive: true },
+    ],
+  };
+  const set1 = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "Set 1 Winner",
+    period: "FIRST_SET",
+    isActive: true,
+    marketId: "test:set1",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Thailand", odds: 1.21, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Vietnam", odds: 4.1, isActive: true },
+    ],
+  };
+  const override = extractVolleyballOverride(makeVolleyballEvent([matchResult, set1]));
+  assert.deepEqual(override.odds, { home: 1.062, away: 8.75 });
+  assert.deepEqual(override.set1, { home: 1.21, away: 4.1 });
+});
+
+// bwin's Total Points puts `line` on the market, never the selection (same
+// class of bug already fixed for the other sports), and lists multiple
+// alternate lines as separate market objects — all must be collected, not
+// just the first one, since AdvancedMarkets.volleyballExtra.pointsLines is
+// an array.
+test("extractVolleyballOverride: collects every Total Points alternate line (bwin)", () => {
+  const makeTotal = (line: number, over: number, under: number) => ({
+    canonicalMarket: "OVER_UNDER",
+    rawName: "Total Points",
+    period: "FULL_TIME",
+    line,
+    isActive: true,
+    marketId: `test:total-${line}`,
+    selections: [
+      { canonicalOutcome: "OVER", rawName: `Over ${line}`, odds: over, isActive: true },
+      { canonicalOutcome: "UNDER", rawName: `Under ${line}`, odds: under, isActive: true },
+    ],
+  });
+  const override = extractVolleyballOverride(
+    makeVolleyballEvent([
+      makeTotal(139.5, 1.83, 1.87),
+      makeTotal(140.5, 1.87, 1.83),
+      makeTotal(141.5, 1.9, 1.8),
+    ]),
+  );
+  assert.deepEqual(override.pointsLines, [
+    { line: 139.5, over: 1.83, under: 1.87 },
+    { line: 140.5, over: 1.87, under: 1.83 },
+    { line: 141.5, over: 1.9, under: 1.8 },
+  ]);
+});
+
+// bwin's Correct Score selections are labelled "3:0"/"3:1"/.../"0:3" — must
+// map onto the existing volleyballExtra.exactScore shape's s30/s31/s32/s03/
+// s13/s23 keys.
+test("extractVolleyballOverride: maps Correct Score selections to exactScore keys (bwin)", () => {
+  const correctScore = {
+    canonicalMarket: "CORRECT_SCORE",
+    rawName: "Correct Score",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:correct-score",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "3:0", odds: 1.75, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "3:1", odds: 3.2, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "3:2", odds: 7.25, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "2:3", odds: 16, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "1:3", odds: 18.5, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "0:3", odds: 31, isActive: true },
+    ],
+  };
+  const override = extractVolleyballOverride(makeVolleyballEvent([correctScore]));
+  assert.deepEqual(override.exactScore, {
+    s30: 1.75,
+    s31: 3.2,
+    s32: 7.25,
+    s03: 31,
+    s13: 18.5,
+    s23: 16,
+  });
 });
