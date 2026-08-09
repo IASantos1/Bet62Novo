@@ -18,6 +18,9 @@ const {
   pulseScoreEventClockSec,
   pulseScoreEventClockFinished,
 } = await import("../services/pulsescore/football.js");
+const { extractBasketballOverride } = await import(
+  "../services/pulsescore/basketball.js"
+);
 const { __testing: footballWs } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -93,6 +96,14 @@ test("teamNamesMatch: empty strings never match", () => {
 // Match Goals Over 2.5 @1.8333 vs Goal Line (0-2) Over 2.5 @1.95 on the same
 // live event) — extractFootballOverride must always prefer "Match Goals",
 // never let "Goal Line" silently win by array order.
+// `line` sits on the MARKET object, not the selections — matches bwin's real
+// shape (confirmed by scanning an entire real doc sample, 3293 market blocks
+// across football and basketball: zero selections carried their own `line`).
+// An earlier version of this helper put `line` on each selection instead,
+// which is bet365's shape, not bwin's — that mismatch let a real production
+// bug ship: extractFootballOverride's Total Goals extraction read sel.line
+// first, which is always undefined for bwin, so it silently never populated
+// real odds despite this test suite passing.
 function makeOverUnderMarket(rawName: string, line: number, overOdds: number, underOdds: number) {
   return {
     canonicalMarket: "OVER_UNDER",
@@ -100,9 +111,10 @@ function makeOverUnderMarket(rawName: string, line: number, overOdds: number, un
     period: "FULL_TIME",
     isActive: true,
     marketId: `test:${rawName}`,
+    line,
     selections: [
-      { canonicalOutcome: "OVER", rawName: "Over", odds: overOdds, isActive: true, line },
-      { canonicalOutcome: "UNDER", rawName: "Under", odds: underOdds, isActive: true, line },
+      { canonicalOutcome: "OVER", rawName: "Over", odds: overOdds, isActive: true },
+      { canonicalOutcome: "UNDER", rawName: "Under", odds: underOdds, isActive: true },
     ],
   };
 }
@@ -265,4 +277,103 @@ test("footballWs applyFrame: ignores frames/events tagged for a different sport"
     data: [{ eventId: "evt-3", sport: "basketball" } as never],
   });
   assert.equal(footballWs.liveByEventId.size, 0);
+});
+
+// ── Basketball (bwin) ────────────────────────────────────────────────────
+// Real bwin GET /basketball/leagues sample (2026-08-09): every event carries
+// its Money Line / Handicap / Totals markets THREE times (FULL_TIME,
+// FIRST_HALF, FIRST_QUARTER — all sharing the same canonicalMarket), and
+// Handicap alone often carries several alternate FULL_TIME lines too. Both
+// are exercised below since the old code's "skip if more than one market of
+// this type" guard would have made extraction silently no-op on real bwin
+// data.
+function makeBasketballEvent(markets: unknown[]) {
+  return {
+    eventId: "bball-test-1",
+    sport: "basketball",
+    league: "Test League",
+    home: "Home BC",
+    away: "Away BC",
+    markets,
+  } as Parameters<typeof extractBasketballOverride>[0];
+}
+
+function makeMoneylineMarket(period: string, homeOdds: number, awayOdds: number) {
+  return {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "Money Line",
+    period,
+    isActive: true,
+    marketId: `test:ml:${period}`,
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Home BC", odds: homeOdds, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Away BC", odds: awayOdds, isActive: true },
+    ],
+  };
+}
+
+test("extractBasketballOverride: ignores FIRST_HALF/FIRST_QUARTER Money Line duplicates (bwin)", () => {
+  const ev = makeBasketballEvent([
+    makeMoneylineMarket("FULL_TIME", 1.5, 2.6),
+    makeMoneylineMarket("FIRST_HALF", 1.4, 2.9),
+    makeMoneylineMarket("FIRST_QUARTER", 1.45, 2.5),
+  ]);
+  const override = extractBasketballOverride(ev);
+  assert.equal(override.odds?.home, 1.5);
+  assert.equal(override.odds?.away, 2.6);
+});
+
+// bwin: canonicalMarket "EUROPEAN_HANDICAP" (not bet365's "ASIAN_HANDICAP"),
+// line on the market object, and several alternate FULL_TIME lines per event
+// — confirmed against a real sample (2026-08-09): one match carried
+// Handicap at -8.5 (1.65/2.05), -9.5 (1.72/1.95), -10.5 (1.85/1.83), -11.5
+// (1.95/1.72), -12.5 (2.1/1.62) all at once. -10.5 is the "main" line (odds
+// closest to even).
+function makeHandicapMarket(period: string, line: number, homeOdds: number, awayOdds: number) {
+  return {
+    canonicalMarket: "EUROPEAN_HANDICAP",
+    rawName: "Handicap",
+    period,
+    line,
+    isActive: true,
+    marketId: `test:hcp:${line}`,
+    selections: [
+      { canonicalOutcome: "HOME", rawName: `Home BC ${line}`, odds: homeOdds, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: `Away BC ${-line}`, odds: awayOdds, isActive: true },
+    ],
+  };
+}
+
+test("extractBasketballOverride: recognizes bwin's EUROPEAN_HANDICAP and picks the most-even alternate line", () => {
+  const ev = makeBasketballEvent([
+    makeHandicapMarket("FULL_TIME", -8.5, 1.65, 2.05),
+    makeHandicapMarket("FULL_TIME", -9.5, 1.72, 1.95),
+    makeHandicapMarket("FULL_TIME", -10.5, 1.85, 1.83),
+    makeHandicapMarket("FULL_TIME", -11.5, 1.95, 1.72),
+    makeHandicapMarket("FULL_TIME", -12.5, 2.1, 1.62),
+    makeHandicapMarket("FIRST_HALF", -4.5, 1.75, 1.91),
+  ]);
+  const override = extractBasketballOverride(ev);
+  assert.equal(override.spread?.line, -10.5);
+  assert.equal(override.spread?.home, 1.85);
+  assert.equal(override.spread?.away, 1.83);
+});
+
+test("extractBasketballOverride: reads Totals line from the market, not the selection (bwin)", () => {
+  const totals = {
+    canonicalMarket: "OVER_UNDER",
+    rawName: "Totals",
+    period: "FULL_TIME",
+    line: 170.5,
+    isActive: true,
+    marketId: "test:totals",
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over 170.5", odds: 1.85, isActive: true },
+      { canonicalOutcome: "UNDER", rawName: "Under 170.5", odds: 1.83, isActive: true },
+    ],
+  };
+  const override = extractBasketballOverride(makeBasketballEvent([totals]));
+  assert.equal(override.total?.line, 170.5);
+  assert.equal(override.total?.over, 1.85);
+  assert.equal(override.total?.under, 1.83);
 });

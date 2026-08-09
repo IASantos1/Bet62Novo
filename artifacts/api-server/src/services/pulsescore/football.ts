@@ -363,11 +363,15 @@ function applyTeamGoalsMarket(
 ): void {
   const byLine = new Map<string, { over: number | null; under: number | null }>();
   for (const sel of market.selections ?? []) {
-    if (!sel.isActive || sel.line === undefined) continue;
+    // bwin puts the line on the market, not the selection — see
+    // PulseScoreMarket.line's comment in client.ts. Checking sel.line first
+    // keeps this working for bet365's per-selection shape too.
+    const line = sel.line ?? market.line;
+    if (!sel.isActive || line === undefined) continue;
     const val = oddsToNumber(sel.odds);
     if (val === null) continue;
     const raw = (sel.rawName || "").toLowerCase();
-    const key = String(sel.line);
+    const key = String(line);
     const entry = byLine.get(key) ?? { over: null, under: null };
     if (raw === "over") entry.over = val;
     else if (raw === "under") entry.under = val;
@@ -416,15 +420,20 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         out.odds = { home, draw, away };
       }
     } else if (isTotalGoalsMarket(market)) {
-      // `line` lives per-selection here (not per-market as the docs
+      // `line` lives per-selection on bet365 (not per-market as the docs
       // implied) — group selections by line, since one event can carry
-      // several O/U lines as separate market entries or within one.
+      // several O/U lines as separate market entries or within one. bwin is
+      // the opposite: every selection in an entire real doc sample (3293
+      // market blocks, 2026-08-08/09) carried NO line of its own — it's
+      // always on the market instead, one line per market object. Checking
+      // sel.line first, falling back to market.line, covers both shapes.
       const byLine = new Map<string, { over: number | null; under: number | null }>();
       for (const sel of market.selections ?? []) {
-        if (!sel.isActive || sel.line === undefined) continue;
+        const line = sel.line ?? market.line;
+        if (!sel.isActive || line === undefined) continue;
         const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        const key = String(sel.line);
+        const key = String(line);
         const entry = byLine.get(key) ?? { over: null, under: null };
         if (sel.canonicalOutcome === "OVER") entry.over = val;
         else if (sel.canonicalOutcome === "UNDER") entry.under = val;

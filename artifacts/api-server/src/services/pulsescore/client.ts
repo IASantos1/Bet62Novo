@@ -124,6 +124,14 @@ export type PulseScoreMarket = {
   isActive: boolean;
   selections: PulseScoreSelection[];
   marketId: string;
+  // The O/U or handicap line for this market. bwin ALWAYS puts it here, never
+  // on the individual selection — confirmed by scanning an entire real doc
+  // sample (2026-08-08/09, 3293 market blocks across football and
+  // basketball): zero selections carried their own `line`. bet365 apparently
+  // puts it per-selection instead (multiple lines packed into one market
+  // object) — callers should check `sel.line` first and fall back to this
+  // field, which covers both shapes.
+  line?: number;
   // Confirmed real (2026-08-07, GET /tennis/events): a market can carry its
   // own top-level moreInfo distinct from each selection's — e.g. SET_BETTING
   // markets use moreInfo.subMarket to name which player that specific
