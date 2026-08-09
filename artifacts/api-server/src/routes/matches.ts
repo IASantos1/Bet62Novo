@@ -44,6 +44,10 @@ import {
   getPulseScoreHockeyUpcoming,
   extractHockeyOverride,
 } from "../services/pulsescore/hockey.js";
+import {
+  getPulseScoreVolleyballUpcoming,
+  extractVolleyballOverride,
+} from "../services/pulsescore/volleyball.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import {
   getCachedTeamId,
@@ -11078,6 +11082,80 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+/** Upcoming volleyball fixtures from PulseScore (bwin), each carrying its
+ * Match Result / Set 1 Winner / Total Points / Correct Score prematch odds
+ * when bwin has priced it yet, merged into the existing (previously dead —
+ * see volleyball.ts's header) AdvancedMarkets.volleyballExtra shape. Fields
+ * with no real source yet (set2, set3, setHandicap, handicapPoints) stay
+ * zeroed, this codebase's existing "not priced" convention (same one
+ * tennis's builder uses for its own not-yet-real markets) — the frontend
+ * already hides/disables a market whose odds are 0. Same
+ * `pulsescore-volleyball-${eventId}` id scheme as the other PulseScore
+ * sports so a match's identity doesn't change if a live pipeline is added
+ * later. */
+async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreVolleyballUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+
+    const isDuplicate = results.some(
+      (r) => teamNamesMatch(r.home, home) && teamNamesMatch(r.away, away),
+    );
+    if (isDuplicate) continue;
+
+    const leagueName = ev.league || "Voleibol";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractVolleyballOverride(ev);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
+      set1: override.set1 ?? { home: 0, away: 0 },
+      set2: { home: 0, away: 0 },
+      set3: { home: 0, away: 0 },
+      exactScore: override.exactScore ?? {
+        s30: 0,
+        s31: 0,
+        s32: 0,
+        s03: 0,
+        s13: 0,
+        s23: 0,
+      },
+      setHandicap: { home: 0, away: 0 },
+      pointsLines: override.pointsLines ?? [],
+      handicapPoints: { line: 0, home: 0, away: 0 },
+    };
+    const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
+    // Flat neutral fallback, not makeAdvancedMarketsFromTeams's internal
+    // odds — that model is a football/soccer goals-based Poisson estimate
+    // (see soccerPoissonModel), meaningless for volleyball. Same reasoning
+    // as tennis's makeTennisBaseOdds ("better than a soccer Poisson model on
+    // player name hashes") — volleyball has no existing calibrated
+    // synthetic model of its own to lean on instead.
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { home: 1.85, draw: 0, away: 1.85 };
+
+    results.push({
+      id: `pulsescore-volleyball-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "volleyball",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+    });
+  }
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -11101,19 +11179,20 @@ let _lastGoodFootballUpcoming: UpcomingMatch[] = [];
 let _lastGoodTennisUpcoming: UpcomingMatch[] = [];
 let _lastGoodBasketballUpcoming: UpcomingMatch[] = [];
 let _lastGoodHockeyUpcoming: UpcomingMatch[] = [];
+let _lastGoodVolleyballUpcoming: UpcomingMatch[] = [];
 
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
     // ── Sports data providers still disconnected from pré-jogo, except
-    // football, tennis, basketball and hockey ───────────────────────────────
+    // football, tennis, basketball, hockey and volleyball ───────────────────
     // Same rebuild-from-scratch effort as the live side: football
-    // (2026-08-07), tennis (2026-08-07), basketball (2026-08-07) and hockey
-    // (2026-08-09, built from scratch — hockey had no prior PulseScore
-    // integration) prematch are all on PulseScore, each confirmed against a
-    // real /leagues sample. Every other sport's prematch remains
-    // disconnected pending its own real confirmed sample.
+    // (2026-08-07), tennis (2026-08-07), basketball (2026-08-07), hockey and
+    // volleyball (both 2026-08-09, built from scratch — neither had any
+    // prior PulseScore integration) prematch are all on PulseScore, each
+    // confirmed against a real /leagues sample. Every other sport's prematch
+    // remains disconnected pending its own real confirmed sample.
     let football: UpcomingMatch[];
     try {
       football = await buildFootballUpcomingFromPulseScore();
@@ -11158,7 +11237,18 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       hockey = _lastGoodHockeyUpcoming;
     }
-    const all = [...football, ...tennis, ...basketball, ...hockey];
+    let volleyball: UpcomingMatch[];
+    try {
+      volleyball = await buildVolleyballUpcomingFromPulseScore();
+      _lastGoodVolleyballUpcoming = volleyball;
+    } catch (err) {
+      logger.error(
+        { err },
+        "[pulsescore] buildVolleyballUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+      );
+      volleyball = _lastGoodVolleyballUpcoming;
+    }
+    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
@@ -12949,11 +13039,11 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // ── Sports data providers still disconnected from pré-jogo, except
-  // football, tennis, basketball and hockey ───────────────────────────────
+  // football, tennis, basketball, hockey and volleyball ───────────────────
   // Same rebuild-from-scratch effort as rebuildUpcomingCache above: football,
-  // tennis, basketball (all 2026-08-07) and hockey (2026-08-09) all on
-  // PulseScore, every other sport pending its own real confirmed sample
-  // before being rebuilt the same way.
+  // tennis, basketball (all 2026-08-07), hockey and volleyball (both
+  // 2026-08-09) all on PulseScore, every other sport pending its own real
+  // confirmed sample before being rebuilt the same way.
   let football: UpcomingMatch[] = [];
   try {
     football = await buildFootballUpcomingFromPulseScore();
@@ -12990,14 +13080,23 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       "[pulsescore] buildHockeyUpcomingFromPulseScore failed this cycle",
     );
   }
+  let volleyball: UpcomingMatch[] = [];
+  try {
+    volleyball = await buildVolleyballUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildVolleyballUpcomingFromPulseScore failed this cycle",
+    );
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball]);
   upcomingTopCache = {
     football,
     tennis,
     basketball,
     hockey,
-    volleyball: [],
+    volleyball,
     baseball: [],
     boxing: [],
     cricket: [],
