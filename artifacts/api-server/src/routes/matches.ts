@@ -11430,10 +11430,20 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       handicapPoints: { line: 0, home: 0, away: 0 },
     };
     const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
-    // Flat neutral fallback — see this function's own header on why
-    // unibetau's markets aren't extracted yet despite superficially
-    // matching shapes.
-    const odds = { home: 1.85, draw: 0, away: 1.85 };
+    // Real moneyline only — unibetau's "Match Odds" market (canonicalMarket
+    // MATCH_RESULT, period FULL_TIME) is unambiguously the whole-match
+    // winner, confirmed real (2026-08-09: Argentina 3.20 / Brazil 1.32,
+    // matching a match Brazil was already leading) — safe to wire, unlike
+    // the per-set-labelled-as-whole-match markets this function's header
+    // warns about. extractVolleyballOverride's set1/pointsLines/exactScore
+    // extraction either targets a different period (set1) or a differently-
+    // formatted selection name unibetau doesn't use ("3-1" vs the "3:1"
+    // extractExactScore requires) — those naturally come back empty rather
+    // than wrong, but stay unused here regardless, only .odds is applied.
+    const override = extractVolleyballOverride(ev);
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { home: 1.85, draw: 0, away: 1.85 };
 
     const state: LiveMatchState = {
       id,
@@ -11446,7 +11456,7 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       awayScore,
       minute,
       status: `Set ${vollSets.length + 1}`,
-      hasRealOdds: false,
+      hasRealOdds: !!override.odds,
       odds,
       markets,
       events: [],
