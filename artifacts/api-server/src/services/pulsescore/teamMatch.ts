@@ -34,7 +34,18 @@ function slugifyTeamName(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-const CLUB_TOKEN_RE = /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|esporte clube|f\.c\.)\b/gi;
+// ca/fk/sk/cs/uc/ss/gks/kv added 2026-08-09 — confirmed real (side-by-side
+// PulseScore/bwin vs API-Football live-feed comparison, same day): "CA
+// Atlanta" vs "Atlanta", "SS Arezzo" vs "Arezzo", "FK Borac Banja Luka" vs
+// "Borac Banja Luka", "UC Sampdoria" vs "Sampdoria", "CS Dock Sud" vs "Dock
+// Sud", "SK Sigma Olomouc" vs "Sigma Olomouc", "GKS Tychy" vs "Tychy 71" —
+// bwin keeps the club-type prefix (Club Atlético, Fudbalski Klub, Sportovní
+// klub, Club Sportivo, Unione Calcio, Società Sportiva, Górniczy Klub
+// Sportowy, Koninklijke Voetbalclub), API-Football's own name usually drops
+// it. None of these overlapped with the original list (which only covered
+// Western European abbreviations).
+const CLUB_TOKEN_RE =
+  /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|esporte clube|f\.c\.|ca|fk|sk|cs|uc|ss|gks|kv)\b/gi;
 function slugifyTeamNameStripped(name: string): string {
   const stripped = name.replace(CLUB_TOKEN_RE, " ").replace(/\s+/g, " ").trim();
   return slugifyTeamName(stripped || name);
@@ -139,6 +150,36 @@ export function teamNamesMatch(a: string, b: string): boolean {
     const [shorter, longer] = tokensA2.length < tokensB2.length ? [tokensA2, tokensB2] : [tokensB2, tokensA2];
     const tail = longer.slice(longer.length - shorter.length);
     if (tail.join("-") === shorter.join("-")) return true;
+
+    // Leading-token fallback — the mirror image of the trailing/nickname
+    // one just above, added 2026-08-09 after a real PulseScore/bwin vs
+    // API-Football live-feed comparison turned up the OPPOSITE truncation
+    // direction repeatedly: API-Football drops a trailing city/qualifier
+    // word bwin keeps, e.g. "FK Vojvodina Novi Sad" vs "Vojvodina" (Novi
+    // Sad dropped), "SK Artis Brno" vs "Artis" (Brno dropped), "CA San
+    // Lorenzo de Almagro" vs "San Lorenzo" (de Almagro dropped) — the
+    // fuzzy-similarity check above fails these outright for the same
+    // reason the trailing-fallback's own comment explains (the dropped
+    // words are too large a share of the longer string).
+    //
+    // Guarded against the one real danger a leading-match introduces that
+    // a trailing-match doesn't: a reserve/youth side sharing its parent
+    // club's full name as a PREFIX ("Real Madrid" vs "Real Madrid
+    // Castilla", "Barcelona" vs "Barcelona B", "Ajax" vs "Jong Ajax" —
+    // note that last one wouldn't even reach this branch since "Jong" is
+    // a genuine leading word, not trailing). If the words the longer name
+    // adds beyond the shorter one look like a reserve/youth-team marker,
+    // do NOT match — those are two different, separately bettable sides,
+    // not a naming variant of the same one.
+    const head = longer.slice(0, shorter.length);
+    if (head.join("-") === shorter.join("-")) {
+      const extra = longer.slice(shorter.length).join(" ");
+      const looksLikeReserveSide =
+        /\b(ii|iii|b|ib|reserve|reserves|reservas|castilla|academy|academia|youth|juvenil|junior|juniors|sub-?1[5-9]|sub-?2[0-3]|u1[5-9]|u2[0-3])\b/i.test(
+          extra,
+        );
+      if (!looksLikeReserveSide) return true;
+    }
   }
 
   return false;
