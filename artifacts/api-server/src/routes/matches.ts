@@ -1767,14 +1767,21 @@ export function filterFootballMarketsByTier(
   if (tier === 1) return markets;
 
   const out: AdvancedMarkets = { ...markets };
-  // Tier 2/3/4 all drop the more "exotic" extended markets.
+  // Tier 2/3/4 all drop the more "exotic" extended markets. anytimeGoalscorer
+  // was here too until 2026-08-09 — user-reported it wasn't showing on ANY
+  // match, including lower-tier leagues, and confirmed they want it
+  // available regardless of tier (unlike correctScore/htft/etc., which stay
+  // tier-1-only by design). Kept in `out` at every tier now — if bwin
+  // genuinely has no real goalscorer odds for a given league, the market
+  // just stays absent on its own (extractFootballOverride only ever
+  // populates it from real data), so this can't show a fabricated market
+  // where none exists.
   delete out.correctScore;
   delete out.htft;
   delete out.asianTotals;
   delete out.corners;
   delete out.cards;
   delete out.secondHalf;
-  delete out.anytimeGoalscorer;
 
   if (tier === 2) return out;
 
