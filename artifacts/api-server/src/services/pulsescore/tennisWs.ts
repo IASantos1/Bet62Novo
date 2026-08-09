@@ -1,7 +1,6 @@
 // Tennis live odds from PulseScore via WebSocket — CURRENTLY DORMANT.
 // startPulseScoreTennisWs() below is fully wired but has zero call sites;
-// nothing in this codebase invokes it. This module is kept only in case
-// tennis gets the PRO plan's single concurrent WS connection back.
+// nothing in this codebase invokes it.
 //
 // History: originally the WS connection was dedicated to tennis
 // specifically because point-by-point pricing benefits most from push
@@ -19,11 +18,21 @@
 // socket was not enough, so a repeat of the first attempt's silent failure
 // would degrade to the REST poller instead of going dark.
 //
-// The PRO plan only allows one concurrent WS connection, and it was moved
-// to football on 2026-08-08 (explicit user decision — football's live
+// Moved to football on 2026-08-08 (explicit user decision — football's live
 // clock/score, particularly for lower-coverage matches, was what was
-// actually causing complaints; see footballWs.ts's header). Tennis has
-// been REST-only since, via tennis.ts's getPulseScoreTennisLive().
+// actually causing complaints; see footballWs.ts's header) under the belief
+// the PRO plan allowed only one concurrent WS connection for the whole
+// account. That belief was WRONG — confirmed 2026-08-09 (real PulseScore
+// docs) the plan grants one connection PER SPORT, so football keeping its
+// connection never required tennis giving up its own (see
+// basketballWs.ts's header, which got a dedicated connection under the
+// corrected understanding). Tennis is REST-only not because of a connection
+// budget, but because this module's own per-event-freshness design was
+// never finished/reactivated after the correction — same fix football.ts
+// and basketball.ts both now use (getFootballWsEventIfFresh /
+// getBasketballWsEventIfFresh) would need to be applied here (a
+// getTennisWsEventIfFresh-equivalent, currently missing below) before this
+// is safe to wire back into tennis.ts's getPulseScoreTennisLive().
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { pulseScoreWsUrl, type PulseScoreEvent } from "./client.js";
