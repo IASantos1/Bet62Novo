@@ -56,6 +56,8 @@ import {
   fixtureHasVarReview,
   latestGoalScorer,
   getApiFootballFixtureStatistics,
+  getApiFootballTeamLogo,
+  batchResolveApiFootballTeamLogos,
   type ApiFootballFixture,
 } from "../services/apiFootball.js";
 import {
@@ -597,6 +599,11 @@ export type UpcomingMatch = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
+  // Direct crest URLs from API-Football (football only) — see the same
+  // field on LiveMatchState for why this is preferred over homeTeamId/
+  // homeImageVersion in getTeamBadgeAsset.
+  homeLogoUrl?: string;
+  awayLogoUrl?: string;
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
@@ -10910,6 +10917,26 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       isPriorityLeague: prio > 0,
     });
   }
+  // Team crests — batched once per rebuild cycle (not per match) so
+  // MAX_NEW_TEAM_LOOKUPS_PER_BATCH applies across the whole prematch list,
+  // not per team; see batchResolveApiFootballTeamLogos's own comment for why
+  // this is a separate lookup from the live cross-reference (a prematch
+  // match has no live fixture to match against). A team not yet resolved
+  // this cycle (deferred by the batch cap on a cold cache) just has no logo
+  // until a later cycle picks it up — same graceful "not yet available"
+  // degradation as everywhere else this integration touches.
+  const teamNames = new Set<string>();
+  for (const r of results) {
+    teamNames.add(r.home);
+    teamNames.add(r.away);
+  }
+  const logosByTeam = await batchResolveApiFootballTeamLogos(teamNames);
+  for (const r of results) {
+    const homeLogo = logosByTeam.get(r.home.trim().toLowerCase());
+    const awayLogo = logosByTeam.get(r.away.trim().toLowerCase());
+    if (homeLogo) r.homeLogoUrl = homeLogo;
+    if (awayLogo) r.awayLogoUrl = awayLogo;
+  }
   return results;
 }
 
@@ -11437,6 +11464,13 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // use below already treats null as "no extra data" and falls back to
     // PulseScore-only behavior, same as before this integration existed).
     const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures);
+    // Team-search fallback for when this match's live fixture wasn't found
+    // above (name-matching miss, or API-Football just doesn't carry this
+    // particular match live) — getApiFootballTeamLogo has its own 7-day
+    // per-team cache, so this is a real network call only the first time
+    // either team is seen, same reasoning as the prematch batch resolver.
+    const homeLogoUrl = apiFixture?.home.logo ?? (await getApiFootballTeamLogo(home)) ?? undefined;
+    const awayLogoUrl = apiFixture?.away.logo ?? (await getApiFootballTeamLogo(away)) ?? undefined;
     // Per-fixture request (unlike the single apiFootballFixtures fetch
     // above) — cheap here because getApiFootballFixtureStatistics caches
     // per fixtureId with its own 30s TTL, so this only actually hits the
@@ -11725,8 +11759,8 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       away,
       homeTeamId,
       awayTeamId,
-      homeLogoUrl: apiFixture?.home.logo ?? undefined,
-      awayLogoUrl: apiFixture?.away.logo ?? undefined,
+      homeLogoUrl,
+      awayLogoUrl,
       league: ev.league || "Futebol",
       country,
       sport: "football",
