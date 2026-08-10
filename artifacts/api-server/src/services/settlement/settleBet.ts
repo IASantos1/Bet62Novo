@@ -6,7 +6,7 @@ import {
 } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "../../lib/logger.js";
-import { applyBalanceDelta } from "../../lib/ledger.js";
+import { applyBalanceDelta, applyFreebetBalanceDelta } from "../../lib/ledger.js";
 import { resolveSelectionOutcome } from "../../lib/settlementHelpers.js";
 import {
   buildSettlementLogKey,
@@ -30,6 +30,7 @@ export type SettleBetDeps = {
   transaction: <T>(run: (tx: SettleBetTx) => Promise<T>) => Promise<T>;
   ensureSettlementTransitionIdempotency: typeof ensureSettlementTransitionIdempotency;
   applyBalanceDelta: typeof applyBalanceDelta;
+  applyFreebetBalanceDelta: typeof applyFreebetBalanceDelta;
   updatePendingBet: (
     tx: SettleBetTx,
     args: {
@@ -61,6 +62,7 @@ const defaultSettleBetDeps: SettleBetDeps = {
   transaction: (run) => db.transaction(run),
   ensureSettlementTransitionIdempotency,
   applyBalanceDelta,
+  applyFreebetBalanceDelta,
   updatePendingBet: async (tx, args) => {
     const rows = await (tx as typeof db)
       .update(betsTable)
@@ -151,6 +153,20 @@ function normalizeSelections(selections: any[]): SelectionRecord[] {
   return Array.isArray(selections) ? (selections as SelectionRecord[]) : [];
 }
 
+// A freebet's stake is debited from freebetBalance at placement, never real
+// balance — no real money was ever risked. Mirrors settlement.ts's
+// freebetAwareWinPayout/applyVoidRefund (same audit finding, 2026-08-10):
+// a freebet win pays winnings only (stake not returned), and a freebet void
+// refunds the stake back to freebetBalance rather than manufacturing real,
+// withdrawable money for a bet that risked nothing real. This is the
+// recovery/replay settlement path (jobs/settlementRecovery.ts,
+// lib/replayEngine.ts) — kept consistent with the primary worker so a bet
+// doesn't get treated differently depending on which path happens to
+// settle it.
+function isFreebetBet(bet: { isFreebet?: unknown }): boolean {
+  return String(bet.isFreebet ?? "") === "true";
+}
+
 export function deriveSettlementDecision(
   bet: any,
   selections: SelectionRecord[],
@@ -213,9 +229,10 @@ export function deriveSettlementDecision(
 
   const stakeNum = Number.parseFloat(String(bet.stake ?? "0"));
   const effectiveOdds = computeResolvedTicketOdds(updatedSelections, outcomes);
-  const payout = formatCurrency(
-    Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2))),
-  );
+  const rawPayout = isFreebetBet(bet)
+    ? stakeNum * (effectiveOdds - 1)
+    : stakeNum * effectiveOdds;
+  const payout = formatCurrency(Math.max(0, Number(rawPayout.toFixed(2))));
 
   return {
     status: "won",
@@ -283,21 +300,32 @@ export async function settleBet(
     await deps.clearCashoutState(tx, bet.id);
 
     if (decision.outcome === "won") {
-      await deps.applyBalanceDelta(tx, {
-        userId: bet.userId,
-        amount: decision.payout,
-        kind: "bet_settlement_payout",
-        idempotencyKey: `bet:${bet.id}:settlement:payout`,
-        refType: "bet",
-        refId: String(bet.id),
-      });
+      // A freebet win still pays real money — just winnings only, stake
+      // excluded (decision.payout already reflects that, computed in
+      // deriveSettlementDecision above). Always credits real balance; only
+      // the amount differs for a freebet, never whether to credit at all.
+      if (Number(decision.payout) > 0) {
+        await deps.applyBalanceDelta(tx, {
+          userId: bet.userId,
+          amount: decision.payout,
+          kind: "bet_settlement_payout",
+          idempotencyKey: `bet:${bet.id}:settlement:payout`,
+          refType: "bet",
+          refId: String(bet.id),
+        });
+      }
     }
 
     if (decision.outcome === "void") {
-      await deps.applyBalanceDelta(tx, {
+      const applyVoidRefund = isFreebetBet(bet)
+        ? deps.applyFreebetBalanceDelta
+        : deps.applyBalanceDelta;
+      await applyVoidRefund(tx, {
         userId: bet.userId,
         amount: decision.payout,
-        kind: "bet_settlement_void_refund",
+        kind: isFreebetBet(bet)
+          ? "bet_settlement_void_refund_freebet"
+          : "bet_settlement_void_refund",
         idempotencyKey: `bet:${bet.id}:settlement:void_refund`,
         refType: "bet",
         refId: String(bet.id),

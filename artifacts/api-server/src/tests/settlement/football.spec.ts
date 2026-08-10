@@ -262,6 +262,41 @@ const footballCases: FinishedSettlementCase[] = [
     expected: "won",
   },
   {
+    // Regression (audit, 2026-08-10): hc-hm1/hc-ap1 are INTEGER lines (can
+    // push) but were previously settled with the same threshold as the
+    // half-line hc-hm15/hc-ap15 (which can never push), with no void
+    // branch at all — a home win by exactly 1 settled hc-hm1 as a full
+    // loss and hc-ap1 as a full win instead of refunding both.
+    name: "football compact handicap home minus one voids on exact push (diff 1)",
+    selection: makeSelection("hc-hm1"),
+    ft: { home: 2, away: 1 },
+    expected: "void",
+  },
+  {
+    name: "football compact handicap away plus one voids on exact push (diff 1)",
+    selection: makeSelection("hc-ap1"),
+    ft: { home: 2, away: 1 },
+    expected: "void",
+  },
+  {
+    name: "football compact handicap home minus one is settled as lost when not covering",
+    selection: makeSelection("hc-hm1"),
+    ft: { home: 1, away: 1 },
+    expected: "lost",
+  },
+  {
+    name: "football compact handicap away plus one is settled as lost when home wins by 2+",
+    selection: makeSelection("hc-ap1"),
+    ft: { home: 2, away: 0 },
+    expected: "lost",
+  },
+  {
+    name: "football compact handicap home minus one point five never voids on the same diff (half line)",
+    selection: makeSelection("hc-hm15"),
+    ft: { home: 2, away: 1 },
+    expected: "lost",
+  },
+  {
     name: "football puck line home -1.5 alias is settled as won",
     selection: makeSelection("pl:home", { marketLine: -1.5 }),
     ft: { home: 3, away: 1 },

@@ -14,7 +14,7 @@ import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
 import Redis from "ioredis";
 import type { SettlementResult as UnifiedSettlementResult } from "./lib/settlementHelpers.js";
 import { logger } from "./lib/logger.js";
-import { applyBalanceDelta } from "./lib/ledger.js";
+import { applyBalanceDelta, applyFreebetBalanceDelta } from "./lib/ledger.js";
 import {
   ensureFinishedMatchResult,
   finishedMatchResults,
@@ -145,11 +145,77 @@ export async function acquireBetSettlementLock(
   }
 }
 
+// ── Freebet-aware settlement payout ────────────────────────────────────────
+// A freebet's stake is debited from usersTable.freebetBalance at placement
+// (routes/bets.ts), never from real usersTable.balance — no real money was
+// ever risked. Every payout site in this file previously computed the same
+// stake-inclusive payout (won: stake*odds, void: stake refund) regardless
+// of bet.isFreebet and credited it straight to real balance — meaning a
+// freebet win or void conjured real, withdrawable money that was never
+// actually staked. Confirmed exploitable via audit (2026-08-10): grant a
+// freebet, bet it, win or void it, the "stake" portion becomes real cash
+// repeatable with every freebet granted. Fixed with the industry-standard
+// "stake not returned" convention: a freebet win pays winnings only
+// (stake*(odds-1)) to real balance; a freebet void returns the stake to
+// freebetBalance (the pool it came from) instead of manufacturing real
+// money. A non-freebet bet is completely unaffected — every call site below
+// falls through to the exact original stake-inclusive formula.
+function isFreebetBet(bet: { isFreebet?: unknown }): boolean {
+  return String((bet as { isFreebet?: unknown }).isFreebet ?? "") === "true";
+}
+
+function freebetAwareWinPayout(
+  stakeNum: number,
+  effectiveOdds: number,
+  isFreebet: boolean,
+): number {
+  return isFreebet
+    ? Math.max(0, Number((stakeNum * (effectiveOdds - 1)).toFixed(2)))
+    : Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+}
+
+/** Refunds a voided bet's stake to the pool it actually came from — real
+ * balance for a real-money bet, freebetBalance for a freebet-stake bet
+ * (never real balance, which would manufacture withdrawable money for a
+ * bet that risked nothing real). Same call shape as applyBalanceDelta. */
+async function applyVoidRefund(
+  tx: unknown,
+  bet: { isFreebet?: unknown },
+  args: {
+    userId: number;
+    amount: string;
+    kind: string;
+    idempotencyKey: string;
+    refType?: string | null;
+    refId?: string | null;
+    metadata?: unknown;
+  },
+): Promise<boolean> {
+  return isFreebetBet(bet)
+    ? applyFreebetBalanceDelta(tx, { ...args, kind: `${args.kind}_freebet` })
+    : applyBalanceDelta(tx, args);
+}
+
 async function updateBetOptimistic(
   tx: any,
   bet: typeof betsTable.$inferSelect,
   values: Record<string, any>,
 ) {
+  // Guarding on id+version alone left a real double-payout race with
+  // cash-out (routes/bets.ts's POST /:id/cashout): it transitions
+  // status pending→cashed_out with its own `WHERE status='pending'` guard
+  // but never bumps `version`. If the worker had already read this bet
+  // into memory (version N, status pending) before a concurrent cash-out
+  // committed, this update's old id+version-only WHERE would still match
+  // (version is still N) and pay out the FULL settlement amount on top of
+  // the cash-out amount already paid — two payouts for one bet. Adding the
+  // status check here closes it from this side: whichever of the two
+  // commits second now correctly fails to match and backs off (logged
+  // below as "Optimistic lock failed"), since the other one already moved
+  // the row off "pending". Confirmed via audit (2026-08-10) against
+  // services/settlement/settleBet.ts, which already used this exact
+  // id+status+version pattern for the recovery/replay path — this was the
+  // one hot-path caller (autoSettlePendingBets) missing it.
   const rows = await tx
     .update(betsTable)
     .set({
@@ -160,6 +226,7 @@ async function updateBetOptimistic(
     .where(
       and(
         eq(betsTable.id, bet.id),
+        eq(betsTable.status, "pending"),
         eq(betsTable.version, bet.version),
       ),
     )
@@ -3064,11 +3131,26 @@ export function scoreOutcomeForSel(
     return null;
 
   // ── Handicap ±1 / ±1.5  (hc-hm1, hc-ap1, hc-hm15, hc-ap15) ─────────────
+  // hc-hm1/hc-ap1 are INTEGER lines (Home -1 / Away +1) — a diff of exactly
+  // 1 is a push and must void, not settle as a loss/win. hc-hm15/hc-ap15
+  // are half lines (-1.5/+1.5) and can never push. These were previously
+  // treated identically (both used the -1 win threshold, no void branch at
+  // all) — confirmed wrong via audit (2026-08-10): a home win by exactly 1
+  // (e.g. 2-1) on hc-hm1 settled as a full loss instead of a stake refund,
+  // and the same 2-1 on hc-ap1 settled as a full win instead of a refund.
   if (winning !== null) {
     /* already resolved above */
-  } else if (s === "hc-hm1" || s === "hc-hm15") {
+  } else if (s === "hc-hm1") {
+    const diff = home - away;
+    if (diff === 1) voided = true;
+    else winning = diff >= 2;
+  } else if (s === "hc-hm15") {
     winning = home - away >= 2;
-  } else if (s === "hc-ap1" || s === "hc-ap15") {
+  } else if (s === "hc-ap1") {
+    const diff = home - away;
+    if (diff === 1) voided = true;
+    else winning = diff <= 0;
+  } else if (s === "hc-ap15") {
     winning = home - away <= 1;
   } else if (s === "pl-home" || s === "pl-away") {
     const side = s.endsWith("home") ? "home" : "away";
@@ -4556,7 +4638,7 @@ export async function autoSettlePendingBets(opts?: {
                 .delete(cashoutStatesTable)
                 .where(eq(cashoutStatesTable.betId, bet.id));
 
-              await applyBalanceDelta(tx, {
+              await applyVoidRefund(tx, bet, {
                 userId: bet.userId,
                 amount: bet.stake,
                 kind: "bet_settlement_void_refund",
@@ -4591,10 +4673,7 @@ export async function autoSettlePendingBets(opts?: {
           // All resolved and not lost/void → won
           const stakeNum = parseFloat(bet.stake);
           const effectiveOdds = computeResolvedTicketOdds(selections, liveOutcomes);
-          const payoutNum = Math.max(
-            0,
-            Number((stakeNum * effectiveOdds).toFixed(2)),
-          );
+          const payoutNum = freebetAwareWinPayout(stakeNum, effectiveOdds, isFreebetBet(bet));
           const payoutStr = payoutNum.toFixed(2);
           const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
@@ -4679,10 +4758,7 @@ export async function autoSettlePendingBets(opts?: {
             if (out === "won") {
               const stakeNum = parseFloat(bet.stake);
               const effectiveOdds = Math.max(1.01, Number(sel.odd ?? 1));
-              const payoutNum = Math.max(
-                0,
-                Number((stakeNum * effectiveOdds).toFixed(2)),
-              );
+              const payoutNum = freebetAwareWinPayout(stakeNum, effectiveOdds, isFreebetBet(bet));
               const payoutStr = payoutNum.toFixed(2);
               const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
@@ -4919,7 +4995,7 @@ export async function autoSettlePendingBets(opts?: {
               .delete(cashoutStatesTable)
               .where(eq(cashoutStatesTable.betId, bet.id));
 
-            await applyBalanceDelta(tx, {
+            await applyVoidRefund(tx, bet, {
               userId: bet.userId,
               amount: bet.stake,
               kind: "bet_settlement_void_refund",
@@ -4959,10 +5035,7 @@ export async function autoSettlePendingBets(opts?: {
 
         const stakeNum = parseFloat(bet.stake);
         const effectiveOdds = computeResolvedTicketOdds(selections, outcomes);
-        const payoutNum = Math.max(
-          0,
-          Number((stakeNum * effectiveOdds).toFixed(2)),
-        );
+        const payoutNum = freebetAwareWinPayout(stakeNum, effectiveOdds, isFreebetBet(bet));
         const payoutStr = payoutNum.toFixed(2);
         const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
@@ -5195,11 +5268,7 @@ export async function regradeSettledBetsForMatch(
           newStatus = "won";
 
           const effectiveOdds = computeResolvedTicketOdds(selections, outcomes);
-
-          const payoutNum = Math.max(
-            0,
-            Number((stakeNum * effectiveOdds).toFixed(2)),
-          );
+          const payoutNum = freebetAwareWinPayout(stakeNum, effectiveOdds, isFreebetBet(bet));
           payoutStr = payoutNum.toFixed(2);
           oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
         }
@@ -5264,7 +5333,16 @@ export async function regradeSettledBetsForMatch(
             .where(eq(cashoutStatesTable.betId, bet.id));
 
           if (deltaNum !== 0) {
-            const applied = await applyBalanceDelta(tx, {
+            // A freebet bet's original settlement (won or voided) credited
+            // freebetBalance, not real balance — a correction delta for it
+            // must adjust the same pool, never real balance (which would
+            // manufacture/claw back real money for a bet that never risked
+            // any). enforceNonNegative left off deliberately, matching the
+            // unguarded applyBalanceDelta call this replaces — this delta
+            // can legitimately be negative (a correction discovering the
+            // bet should have won less, or voided → lost).
+            const applyDelta = isFreebetBet(bet) ? applyFreebetBalanceDelta : applyBalanceDelta;
+            const applied = await applyDelta(tx, {
               userId: bet.userId,
               amount: deltaStr,
               kind: "bet_regrade_delta",
@@ -5545,7 +5623,7 @@ async function expireStalePendingBets(): Promise<void> {
       await tx.delete(cashoutStatesTable)
         .where(eq(cashoutStatesTable.betId, bet.id));
 
-      await applyBalanceDelta(tx, {
+      await applyVoidRefund(tx, bet, {
         userId: bet.userId,
         amount: bet.stake,
         kind: "bet_settlement_stale_refund",

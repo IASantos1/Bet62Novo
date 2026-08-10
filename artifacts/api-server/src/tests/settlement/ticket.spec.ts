@@ -128,3 +128,56 @@ test("multi-bet aggregation settles as lost immediately even while another leg i
   assert.equal(decision.status, "lost");
   assert.equal(decision.payout, "0.00");
 });
+
+// Regression (audit, 2026-08-10): a freebet's stake is debited from
+// freebetBalance at placement, never real balance. deriveSettlementDecision
+// previously computed the same stake-inclusive payout regardless of
+// bet.isFreebet, which — combined with settleBet() crediting that full
+// amount to real balance — turned every freebet win/void into real,
+// withdrawable money never actually risked.
+test("freebet win pays winnings only — stake is not returned", () => {
+  const decision = deriveSettlementDecision(
+    {
+      id: 20,
+      stake: "10.00",
+      matchId: "freebet-1",
+      isFreebet: "true",
+    },
+    [makeSelection("home", { odd: 2.0, outcome: "won" })],
+  );
+
+  assert.equal(decision.status, "won");
+  // Non-freebet would be 10 * 2.0 = 20.00; freebet is winnings-only:
+  // 10 * (2.0 - 1) = 10.00.
+  assert.equal(decision.payout, "10.00");
+});
+
+test("a non-freebet win is unaffected — stake is included as before", () => {
+  const decision = deriveSettlementDecision(
+    {
+      id: 21,
+      stake: "10.00",
+      matchId: "freebet-2",
+      isFreebet: "false",
+    },
+    [makeSelection("home", { odd: 2.0, outcome: "won" })],
+  );
+
+  assert.equal(decision.status, "won");
+  assert.equal(decision.payout, "20.00");
+});
+
+test("freebet win at odds so low winnings would be negative floors at zero, not a real loss", () => {
+  const decision = deriveSettlementDecision(
+    {
+      id: 22,
+      stake: "10.00",
+      matchId: "freebet-3",
+      isFreebet: "true",
+    },
+    [makeSelection("home", { odd: 1.0, outcome: "won" })],
+  );
+
+  assert.equal(decision.status, "won");
+  assert.equal(decision.payout, "0.00");
+});

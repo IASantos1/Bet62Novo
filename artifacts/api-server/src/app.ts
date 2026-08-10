@@ -194,6 +194,12 @@ app.post(
         // once, but we still need to answer with the (already-updated)
         // balance either way — SilentAPI's retry logic expects the same
         // success response, not an error, on a duplicate delivery.
+        // enforceNonNegative mirrors the Palace Casino integration's own
+        // `bet` handler (casino.ts) — that path already guards against a
+        // negative balance the same way; this SilentAPI callback was
+        // missing the identical guard (audit finding, 2026-08-10),
+        // meaning a losing round's net debit could push balance below
+        // zero with nothing stopping it.
         await applyBalanceDelta(tx, {
           userId,
           amount: netAmount,
@@ -202,6 +208,7 @@ app.post(
           refType: "casino_round",
           refId: payload.game_round ?? serialNumber,
           metadata: payload,
+          enforceNonNegative: true,
         });
         const [user] = await tx
           .select({ balance: usersTable.balance })
