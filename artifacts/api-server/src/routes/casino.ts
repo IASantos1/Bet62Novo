@@ -59,13 +59,30 @@ function gameFamilyKey(name: string): string {
   return key || cleaned || name.toLowerCase();
 }
 
+// Category pills the front-end offers ("Todos", "Populares", "Novos",
+// "Slots", "Ao Vivo", "Baccarat", "Blackjack", "Roulette"). Palace Casino's
+// own category field only ever carries "Slots" or "Ao Vivo" (see
+// PalaceCasinoGame.category in services/palaceCasino/client.ts) — there is
+// no richer taxonomy (Megaways, Jackpots, Bonus Buy, Free Spins) available
+// from the aggregator, so those pills are intentionally NOT offered here
+// rather than shipping a filter that would silently return nothing or an
+// incomplete/wrong subset for a real-money catalog. Baccarat/Blackjack/
+// Roulette aren't a Palace Casino category either, but the game type is
+// reliably embedded in the title for every table game we've seen in the
+// catalog, so a name match is a genuine (not approximated) filter for
+// those three specifically.
+const NAME_KEYWORD_CATEGORIES = new Set(["baccarat", "blackjack", "roulette"]);
+
 router.get("/games", async (req: Request, res: Response) => {
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
+  const category =
+    typeof req.query["category"] === "string" ? req.query["category"].trim().toLowerCase() : "";
+  const sort = typeof req.query["sort"] === "string" ? req.query["sort"].trim().toLowerCase() : "popular";
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
-  const cacheKey = `casino:games:v2:${provider || "*"}:${search.toLowerCase()}:${page}:${limit}`;
+  const cacheKey = `casino:games:v3:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
   const cached = await statpalCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -82,7 +99,21 @@ router.get("/games", async (req: Request, res: Response) => {
   ];
   if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
+  if (category === "slots" || category === "ao vivo") {
+    conditions.push(ilike(casinoGamesTable.category, category));
+  } else if (NAME_KEYWORD_CATEGORIES.has(category)) {
+    conditions.push(ilike(casinoGamesTable.name, `%${category}%`));
+  }
+  // "todos" / "populares" / "novos" / "" carry no extra WHERE — they only
+  // affect the ORDER BY below.
   const where = and(...conditions);
+
+  const orderBy =
+    sort === "new"
+      ? [desc(casinoGamesTable.createdAt), asc(casinoGamesTable.name)]
+      : sort === "az"
+        ? [asc(casinoGamesTable.name)]
+        : [desc(casinoGamesTable.popularity), asc(casinoGamesTable.name)];
 
   const [games, [{ total }]] = await Promise.all([
     db
@@ -97,7 +128,7 @@ router.get("/games", async (req: Request, res: Response) => {
       })
       .from(casinoGamesTable)
       .where(where)
-      .orderBy(desc(casinoGamesTable.popularity), asc(casinoGamesTable.name))
+      .orderBy(...orderBy)
       .limit(limit)
       .offset((page - 1) * limit),
     db.select({ total: count() }).from(casinoGamesTable).where(where),
