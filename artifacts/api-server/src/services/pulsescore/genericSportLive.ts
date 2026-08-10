@@ -64,23 +64,28 @@ export function createPulseScoreRestSport(opts: {
   async function fetchLive(): Promise<PulseScoreEvent[]> {
     rollUsageDateIfNeeded();
     requestsToday += 1;
-    try {
-      // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
-      // not a bare array — confirmed against a real bet365 call and
-      // documented by PulseScore as the same shape for every bookmaker.
-      const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
-        `/live-events?sport=${encodeURIComponent(opts.sport)}&limit=200`,
-        4_000,
-        opts.bookmaker,
-      );
-      return Array.isArray(data?.events) ? data.events : [];
-    } catch {
-      return [];
-    }
+    // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
+    // not a bare array — confirmed against a real bet365 call and
+    // documented by PulseScore as the same shape for every bookmaker. Lets
+    // errors propagate — see getLive's .catch() below for why swallowing
+    // them here (the previous behavior) was a real bug: a transient 429/
+    // timeout silently wiped this sport's live feed to empty, the exact
+    // pattern already fixed in football.ts/tennis.ts/basketball.ts/
+    // volleyball.ts's own live pollers (audit finding, 2026-08-10 — this
+    // module hadn't gotten the same fix). Currently dormant (only feeds
+    // the admin usage endpoint, not wired into any live builder yet), but
+    // a live landmine for whenever it is.
+    const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+      `/live-events?sport=${encodeURIComponent(opts.sport)}&limit=200`,
+      4_000,
+      opts.bookmaker,
+    );
+    return Array.isArray(data?.events) ? data.events : [];
   }
 
   /** Live odds from PulseScore for this sport. Empty array if
-   * PULSESCORE_API_KEY isn't configured or the upstream call fails. */
+   * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
+   * very first attempt (nothing cached yet to fall back to). */
   async function getLive(): Promise<PulseScoreEvent[]> {
     if (!CONFIG.PULSESCORE_API_KEY) return [];
     const now = Date.now();
@@ -90,6 +95,13 @@ export function createPulseScoreRestSport(opts: {
         .then((events) => {
           cache = { events, fetchedAt: Date.now() };
           return events;
+        })
+        .catch((err) => {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err), sport: opts.label },
+            "[pulsescore] generic live fetch failed — serving stale cache",
+          );
+          return cache?.events ?? [];
         })
         .finally(() => {
           inFlight = null;

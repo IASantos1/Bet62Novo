@@ -197,11 +197,28 @@ export function findApiFootballFixture(
   away: string,
   fixtures: ApiFootballFixture[],
 ): ApiFootballFixture | null {
-  return (
-    fixtures.find(
-      (f) => teamNamesMatch(home, f.home.name) && teamNamesMatch(away, f.away.name),
-    ) ?? null
+  // Picking the FIRST match (the old .find()) risked silently attaching
+  // goals/cards/VAR events — and the betting suspension they trigger —
+  // from the WRONG match whenever more than one of the ~40+ concurrently
+  // live worldwide fixtures satisfied teamNamesMatch on both sides
+  // (audit finding, 2026-08-10, compounded by a teamNamesMatch bug fixed
+  // the same day — see teamMatch.ts's reserve-side guard). No kickoff
+  // timestamp is available here to disambiguate by (ApiFootballFixture
+  // has none, and every entry is already "live" by construction, so a
+  // time check wouldn't discriminate anyway) — so on genuine ambiguity,
+  // matching the rest of this codebase's "don't guess" convention, skip
+  // rather than risk cross-attributing a live match's events.
+  const matches = fixtures.filter(
+    (f) => teamNamesMatch(home, f.home.name) && teamNamesMatch(away, f.away.name),
   );
+  if (matches.length > 1) {
+    logger.warn(
+      { home, away, count: matches.length },
+      "[api-football] ambiguous fixture match — multiple live fixtures satisfy teamNamesMatch, skipping",
+    );
+    return null;
+  }
+  return matches[0] ?? null;
 }
 
 const RED_CARD_DETAIL = "red card";
@@ -670,6 +687,7 @@ export async function resolveApiFootballLeague(
   const params = new URLSearchParams({ name });
   if (country.trim()) params.set("country", country.trim());
   let result: { leagueId: number; season: number } | null = null;
+  let transientFailure = false;
   try {
     const resp = await fetch(`${CONFIG.API_FOOTBALL_BASE_URL}/leagues?${params.toString()}`, {
       headers: { "x-apisports-key": CONFIG.API_FOOTBALL_KEY },
@@ -685,15 +703,20 @@ export async function resolveApiFootballLeague(
       result = { leagueId, season };
     }
   } catch (err) {
+    transientFailure = true;
     logger.warn(
       { err: err instanceof Error ? err.message : String(err), name, country },
       "[api-football] league id search failed",
     );
-    // A transient failure isn't cached as "not found" (unlike a genuine
-    // empty response above) — falls through to cache `null` for this tick
-    // only via the assignment below, same as a real "not found" would, but
-    // worth flagging: the next call will just retry.
   }
+  // A transient failure (timeout, 429, momentary outage) must NOT be cached
+  // as "not found" for the full 24h TTL — the comment here previously
+  // claimed it wasn't, but the .set() below fired unconditionally either
+  // way, so one bad response silently killed real standings for a league
+  // for a day, falling back to the synthetic table. Confirmed via audit
+  // (2026-08-10). A genuine "not found" (successful response, empty
+  // result) still caches normally — that's the case this TTL exists for.
+  if (transientFailure) return result;
   leagueIdCache.set(key, { league: result, fetchedAt: Date.now() });
   return result;
 }
