@@ -7128,6 +7128,35 @@ async function persistFinishedMatchRecord(
 async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   const finishedAt = Date.now();
   const htScore = state._liveExtra?.htScore;
+  // Tennis/basketball/volleyball can never legitimately end 0-0 (sets or
+  // points) — state.homeScore/awayScore still sitting at the initial
+  // placeholder zero, with no real per-set data ever recorded either, means
+  // this match was NEVER actually tracked with real data before
+  // disappearing from the live feed (poor provider coverage for an obscure
+  // fixture — confirmed real for low-tier ITF tennis, PulseScore's own
+  // "occasional checkpoint updates" behavior for those). Settling that as a
+  // genuine "lost" for whatever was bet on it is provably wrong. Reported
+  // in production (2026-08-10): 3 different obscure ITF matches in one
+  // ticket all finalized as "0 - 0 em sets" and the whole multi got marked
+  // LOST the moment any one of them settled that way, despite the matches
+  // never having played a single game — an early parlay-loss determination
+  // built on fabricated data. Marking these "abandoned" instead of
+  // "finished" routes them through the existing
+  // IMMEDIATE_VOID_SETTLEMENT_STATUSES path (settlement.ts) — voided (that
+  // leg's stake refunded), not falsely lost. This also correctly covers a
+  // genuine early walkover/retirement, which would show the same
+  // no-real-data signature and should be voided anyway. Football is
+  // deliberately excluded — a real 0-0 draw is a completely normal
+  // outcome there, unlike a real 0-0 result in any of these three sports.
+  const looksLikeNeverTracked =
+    (state.sport === "tennis" &&
+      state.homeScore === 0 &&
+      state.awayScore === 0 &&
+      (!state._liveExtra?.sets ||
+        state._liveExtra.sets.every(([h, a]) => h === 0 && a === 0))) ||
+    ((state.sport === "basketball" || state.sport === "volleyball") &&
+      state.homeScore === 0 &&
+      state.awayScore === 0);
   const footballExtras =
     state.sport === "football"
       ? {
@@ -7154,7 +7183,7 @@ async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
     typeof htScore[1] === "number"
       ? { htHome: htScore[0], htAway: htScore[1] }
       : {}),
-    status: "finished",
+    status: looksLikeNeverTracked ? "abandoned" : "finished",
     homeTeam: state.home,
     awayTeam: state.away,
     extras: {
