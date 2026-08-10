@@ -7148,12 +7148,22 @@ async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   // no-real-data signature and should be voided anyway. Football is
   // deliberately excluded — a real 0-0 draw is a completely normal
   // outcome there, unlike a real 0-0 result in any of these three sports.
+  //
+  // Tennis specifically needs a WIDER net than plain 0-0: reported again
+  // the same day with "1 - 0" and "1 - 1" both shown as "Final" — neither
+  // is a legitimate finished tennis match. A real win requires the winner
+  // to have at least 2 sets (true for every real format: best-of-3 ends at
+  // 2-0/2-1, and even a best-of-5 retirement can only end early once the
+  // leader reaches 2), and a tie (1-1, 2-2) is by definition mid-match, not
+  // final. Whether the underlying cause is missing data (as with the 0-0
+  // cases) or a genuine early retirement we have no clean signal to
+  // distinguish from missing data, voiding is the correct call either way
+  // — a real early retirement's markets should mostly void too, and we
+  // can't safely tell the two cases apart from what we have.
+  const tennisSetsWon = [state.homeScore, state.awayScore];
   const looksLikeNeverTracked =
     (state.sport === "tennis" &&
-      state.homeScore === 0 &&
-      state.awayScore === 0 &&
-      (!state._liveExtra?.sets ||
-        state._liveExtra.sets.every(([h, a]) => h === 0 && a === 0))) ||
+      (tennisSetsWon[0] === tennisSetsWon[1] || Math.max(...tennisSetsWon) < 2)) ||
     ((state.sport === "basketball" || state.sport === "volleyball") &&
       state.homeScore === 0 &&
       state.awayScore === 0);
