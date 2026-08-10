@@ -13,6 +13,7 @@
     "test:pulsescore": "tsx --test src/tests/pulsescore.spec.ts",
     "seed:casino": "tsx src/scripts/seedCasinoGames.ts",
     "seed:palace-casino": "tsx src/scripts/seedPalaceCasinoGames.ts",
+    "seed:featured-banners": "tsx src/scripts/seedFeaturedCasinoBanners.ts",
     "betby:debug-feed": "tsx src/scripts/betbyDebugFeed.ts",
     "betby:probe-v4": "tsx src/scripts/betbyProbeV4.ts",
     "casino:disable-all": "tsx src/scripts/deactivateAllCasinoGames.ts",

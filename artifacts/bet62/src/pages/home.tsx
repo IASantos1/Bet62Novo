@@ -9040,16 +9040,51 @@ export default function Home({
   }, [activeTab]);
 
   // "Jogos Populares" showcase row — near-static (popularity doesn't churn
-  // minute to minute), fetch once the first time the tab is opened.
+  // minute to minute), fetch once the first time the tab is opened. The
+  // named headline titles are searched for individually and shown first
+  // (real catalog matches only, same curated-search pattern as
+  // homeCasinoPreview above — no fabricated entries); popularity-sorted
+  // games fill the rest of the row, skipping anything already included.
   useEffect(() => {
     if (activeTab !== "casino" || casinoPopular.length > 0) return;
     setCasinoPopularLoading(true);
-    fetch("/api/casino/games?sort=popular&limit=10")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data?.games)) setCasinoPopular(data.games);
+    const featuredTitles = [
+      "Sweet Bonanza",
+      "Gates of Olympus",
+      "Sugar Rush 1000",
+      "Big Bass Bonanza",
+      "Wanted Dead or a Wild",
+      "Book of Gold Multichance",
+      "Fruit Party 2",
+    ];
+    Promise.all(
+      featuredTitles.map((title) =>
+        fetch(`/api/casino/games?search=${encodeURIComponent(title)}&limit=1`)
+          .then((r) => r.json())
+          .then((data) => (Array.isArray(data?.games) ? data.games[0] : null))
+          .catch(() => null),
+      ),
+    )
+      .then((featuredResults) => {
+        const seen = new Set<string>();
+        const featured: CasinoGame[] = [];
+        for (const g of featuredResults) {
+          if (!g) continue;
+          const key = `${g.provider}-${g.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          featured.push(g);
+        }
+        return fetch("/api/casino/games?sort=popular&limit=10")
+          .then((r) => r.json())
+          .then((data) => {
+            const rest: CasinoGame[] = Array.isArray(data?.games)
+              ? data.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
+              : [];
+            setCasinoPopular([...featured, ...rest].slice(0, 10));
+          })
+          .catch(() => setCasinoPopular(featured));
       })
-      .catch(() => {})
       .finally(() => setCasinoPopularLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
