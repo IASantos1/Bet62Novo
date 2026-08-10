@@ -364,7 +364,18 @@ export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> 
   } else {
     events = await liveInFlight;
   }
-  return mergeBasketballWsFreshness(events);
+  // Defense in depth: an unexpected failure in the WS overlay must never
+  // take the whole REST live list down with it (this whole feed going
+  // empty is a much worse outcome than one tick without the overlay).
+  try {
+    return mergeBasketballWsFreshness(events);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "[pulsescore] basketball WS overlay failed — serving REST events unmerged",
+    );
+    return events;
+  }
 }
 
 // Same reasoning as football.ts's isWsClockAtLeastAsAdvanced: WS only
