@@ -7305,6 +7305,47 @@ export default function Home({
     scrollTabIntoView,
   ]);
 
+  // Mirrors the football effect above: tennis's own "keep only popular
+  // markets" trigger — see isLateGameTennis's definition further down for
+  // the full reasoning (2nd set or later + one player dominating the
+  // current set's games).
+  useEffect(() => {
+    if (!expandedMatch?.isLive || (expandedMatch.sport ?? "football") !== "tennis")
+      return;
+    const status = (expandedMatch as any).status as string | undefined;
+    const currentSet =
+      status?.startsWith("Set") ? parseInt(status.replace("Set ", "")) || 0 : 0;
+    if (currentSet < 2) return;
+    if ((expandedMatch.homeScore ?? 0) === (expandedMatch.awayScore ?? 0)) return;
+    const sets = (expandedMatch as any)._liveExtra?.sets as
+      | Array<[number, number]>
+      | undefined;
+    const currentGames = sets && sets.length > 0 ? sets[sets.length - 1] : undefined;
+    const leader = currentGames
+      ? Math.max(currentGames[0] ?? 0, currentGames[1] ?? 0)
+      : 0;
+    const trailer = currentGames
+      ? Math.min(currentGames[0] ?? 0, currentGames[1] ?? 0)
+      : 0;
+    const isDominant = leader >= 5 || (leader >= 4 && leader - trailer >= 3);
+    if (!isDominant) return;
+    const allowedLateTennisTabs = new Set(["todos", "resultado", "handicap", "jogos"]);
+    if (!allowedLateTennisTabs.has(modalTab)) {
+      setModalTab("todos");
+      setTimeout(() => scrollTabIntoView("todos", "instant"), 0);
+    }
+  }, [
+    expandedMatch?.id,
+    expandedMatch?.isLive,
+    expandedMatch?.sport,
+    expandedMatch?.homeScore,
+    expandedMatch?.awayScore,
+    expandedMatch?.status,
+    (expandedMatch as any)?._liveExtra?.sets,
+    modalTab,
+    scrollTabIntoView,
+  ]);
+
   // Fetch match stats when stats tab is active
   useEffect(() => {
     if (!expandedMatch || matchStats) return;
@@ -13238,6 +13279,34 @@ export default function Home({
     // Which total-goals line is most relevant late game = next line above current total goals
     const lateGameGoals = (match.homeScore ?? 0) + (match.awayScore ?? 0);
 
+    // isLateGameTennis: a player is about to close out the match (already at
+    // least into the 2nd set AND dominating the games score of the set
+    // they're currently playing) → same "keep only popular markets" reduction
+    // football does at 85'. Set-betting/exact-score props are the riskiest
+    // to keep open the moment a match is about to be decided, so those are
+    // what gets hidden here — resultado/handicap/jogos (moneyline/handicap/
+    // totals, the same "big 3" football keeps) stay available.
+    const tennisCurrentSetGames = isTennis
+      ? ((match as any)._liveExtra?.sets?.[
+          ((match as any)._liveExtra?.sets?.length ?? 0) - 1
+        ] as [number, number] | undefined)
+      : undefined;
+    const tennisGamesLeader = tennisCurrentSetGames
+      ? Math.max(tennisCurrentSetGames[0] ?? 0, tennisCurrentSetGames[1] ?? 0)
+      : 0;
+    const tennisGamesTrailer = tennisCurrentSetGames
+      ? Math.min(tennisCurrentSetGames[0] ?? 0, tennisCurrentSetGames[1] ?? 0)
+      : 0;
+    const tennisSetIsDominant =
+      tennisGamesLeader >= 5 ||
+      (tennisGamesLeader >= 4 && tennisGamesLeader - tennisGamesTrailer >= 3);
+    const isLateGameTennis =
+      isTennis &&
+      match.isLive &&
+      currentSet >= 2 &&
+      (match.homeScore ?? 0) !== (match.awayScore ?? 0) &&
+      tennisSetIsDominant;
+
     const tabs = isBasketball
       ? [
           { key: "todos", label: "Todos" },
@@ -13248,14 +13317,21 @@ export default function Home({
           { key: "times", label: "Times" },
         ]
       : isTennis
-        ? [
-            { key: "todos", label: "Todos" },
-            { key: "resultado", label: "Vencedor" },
-            { key: "sets", label: "Sets" },
-            { key: "handicap", label: "Handicap" },
-            { key: "jogos", label: "Jogos" },
-            { key: "especiais", label: "Especiais" },
-          ]
+        ? isLateGameTennis
+          ? [
+              { key: "todos", label: "Todos" },
+              { key: "resultado", label: "Vencedor" },
+              { key: "handicap", label: "Handicap" },
+              { key: "jogos", label: "Jogos" },
+            ]
+          : [
+              { key: "todos", label: "Todos" },
+              { key: "resultado", label: "Vencedor" },
+              { key: "sets", label: "Sets" },
+              { key: "handicap", label: "Handicap" },
+              { key: "jogos", label: "Jogos" },
+              { key: "especiais", label: "Especiais" },
+            ]
         : isHockey
           ? [
               { key: "todos", label: "Todos" },
@@ -14906,6 +14982,7 @@ export default function Home({
 
               {/* ── TÉNIS: SETS ── */}
               {isTennis &&
+                !isLateGameTennis &&
                 (modalTab === "sets" || modalTab === "todos") &&
                 m && (
                   <div>
@@ -17358,6 +17435,7 @@ export default function Home({
 
               {/* ── TÉNIS: ESPECIAIS ── */}
               {isTennis &&
+                !isLateGameTennis &&
                 (modalTab === "especiais" || modalTab === "todos") &&
                 m &&
                 (m as any).tennisExtra && (
