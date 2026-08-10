@@ -2396,6 +2396,24 @@ router.post(
         return;
       }
 
+      // Freebet-staked bets can't cash out. The cashout value is computed
+      // from full stake-inclusive live odds (cashoutCalcForBet below) with
+      // no awareness of isFreebet, and — unlike settlement, which now pays
+      // a freebet win winnings-only and voids a freebet to freebetBalance
+      // (see settlement.ts's freebetAwareWinPayout/applyVoidRefund) —
+      // there's no clean "winnings-only" cashout value to compute mid-match
+      // without a real stake-vs-winnings split model. Blocking outright is
+      // the safe fix: the stake was never real money, so an instant cash
+      // out here would credit real, withdrawable balance for a bet that
+      // risked nothing real — the exact freebet-laundering issue closed at
+      // settlement, now closed here too. Confirmed via audit (2026-08-10).
+      if (String(bet.isFreebet ?? "") === "true") {
+        res
+          .status(400)
+          .json({ error: "Cash out não disponível para apostas com freebet" });
+        return;
+      }
+
       // ── Block cash out if any leg is already lost (real-time check, before
       //    the 60-second settlement worker has a chance to run) ──────────────
       const selRecs = (bet.selections as SelectionRecord[]) ?? [];

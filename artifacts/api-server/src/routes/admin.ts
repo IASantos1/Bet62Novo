@@ -20,7 +20,7 @@ import {
 } from "../middlewares/adminAuth.js";
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
-import { applyBalanceDelta } from "../lib/ledger.js";
+import { applyBalanceDelta, applyFreebetBalanceDelta } from "../lib/ledger.js";
 import {
   getPulseScoreFootballLive,
   getPulseScoreFootballUsage,
@@ -1031,40 +1031,95 @@ router.put(
       }
 
       const oldStatus = bet.status;
+      const isFreebet = String(bet.isFreebet ?? "") === "true";
+      // A freebet win pays winnings only (bet.stake is never returned —
+      // same convention as the auto-settlement engine's
+      // freebetAwareWinPayout, settlement.ts) since the stake was debited
+      // from freebetBalance at placement, not real balance.
+      const winPayout = isFreebet
+        ? Math.max(
+            0,
+            Number(
+              (
+                parseFloat(bet.stake) *
+                (parseFloat(bet.totalOdds) - 1)
+              ).toFixed(2),
+            ),
+          ).toFixed(2)
+        : bet.potentialWin;
       let changed = false;
 
       await db.transaction(async (tx) => {
-        // Optimistic lock: only update if status actually changed
+        // Optimistic lock: only update if status actually changed. Bumps
+        // version for consistency with the rest of the codebase's
+        // optimistic-locking scheme (updateBetOptimistic, settlement.ts) —
+        // this endpoint previously left it untouched.
         const rows = await tx
           .update(betsTable)
-          .set({ status })
+          .set({ status, version: sql`${betsTable.version} + 1` })
           .where(
             and(eq(betsTable.id, betId), sql`${betsTable.status} != ${status}`),
           )
-          .returning({ id: betsTable.id });
+          .returning({ id: betsTable.id, version: betsTable.version });
 
         if (rows.length === 0) return; // already at desired status — no-op
         changed = true;
+        const v = rows[0]!.version;
 
-        // Credit balance atomically when marking won (only from non-won state)
-        if (status === "won" && oldStatus !== "won") {
-          await applyBalanceDelta(tx, {
+        // Claw back a previous payout/refund when moving AWAY from a status
+        // that already credited money — otherwise correcting an admin
+        // mistake (e.g. won → lost) left the earlier credit in place
+        // permanently, with no debit ever issued. Confirmed missing via
+        // audit (2026-08-10). Uses the *previous* transition's own amount
+        // (won/voided credit both reversible via a straight negation) —
+        // this can't double-claw-back since it only fires once, exactly
+        // when actually leaving that status (oldStatus check).
+        if (oldStatus === "won" && status !== "won") {
+          const clawback = isFreebet ? applyFreebetBalanceDelta : applyBalanceDelta;
+          await clawback(tx, {
             userId: bet.userId,
-            amount: bet.potentialWin,
-            kind: "admin_bet_settlement_payout",
-            idempotencyKey: `admin:bet:${betId}:status:won`,
+            amount: `-${winPayout}`,
+            kind: "admin_bet_settlement_clawback",
+            idempotencyKey: `admin:bet:${betId}:v:${v}:clawback:won`,
+            refType: "bet",
+            refId: String(betId),
+          });
+        }
+        if (oldStatus === "voided" && status !== "voided") {
+          const clawback = isFreebet ? applyFreebetBalanceDelta : applyBalanceDelta;
+          await clawback(tx, {
+            userId: bet.userId,
+            amount: `-${bet.stake}`,
+            kind: "admin_bet_settlement_clawback",
+            idempotencyKey: `admin:bet:${betId}:v:${v}:clawback:voided`,
             refType: "bet",
             refId: String(betId),
           });
         }
 
-        // Refund stake when voiding (only from non-voided state)
+        // Credit balance atomically when marking won (only from non-won state)
+        if (status === "won" && oldStatus !== "won") {
+          const credit = isFreebet ? applyFreebetBalanceDelta : applyBalanceDelta;
+          await credit(tx, {
+            userId: bet.userId,
+            amount: winPayout,
+            kind: "admin_bet_settlement_payout",
+            idempotencyKey: `admin:bet:${betId}:v:${v}:status:won`,
+            refType: "bet",
+            refId: String(betId),
+          });
+        }
+
+        // Refund stake when voiding (only from non-voided state) — to
+        // freebetBalance for a freebet bet, matching settlement.ts's
+        // applyVoidRefund (the stake was never real money to begin with).
         if (status === "voided" && oldStatus !== "voided") {
-          await applyBalanceDelta(tx, {
+          const refund = isFreebet ? applyFreebetBalanceDelta : applyBalanceDelta;
+          await refund(tx, {
             userId: bet.userId,
             amount: bet.stake,
             kind: "admin_bet_settlement_refund",
-            idempotencyKey: `admin:bet:${betId}:status:voided`,
+            idempotencyKey: `admin:bet:${betId}:v:${v}:status:voided`,
             refType: "bet",
             refId: String(betId),
           });
@@ -1083,7 +1138,7 @@ router.put(
               newStatus: status,
               payout:
                 status === "won"
-                  ? bet.potentialWin
+                  ? winPayout
                   : status === "voided"
                     ? bet.stake
                     : "0.00",

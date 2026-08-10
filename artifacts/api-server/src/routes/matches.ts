@@ -7160,11 +7160,24 @@ async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   // distinguish from missing data, voiding is the correct call either way
   // — a real early retirement's markets should mostly void too, and we
   // can't safely tell the two cases apart from what we have.
+  // Hockey/baseball added defensively (audit finding, 2026-08-10): neither
+  // currently has a live pipeline that ever calls this function with
+  // state.sport==="hockey"/"baseball" (hockey only has a PulseScore
+  // PREMATCH builder; baseball has no PulseScore integration at all —
+  // both sports' actual live data comes from Statpal's own NHL/MLB feeds
+  // through a separate cache, never through liveMatchState). So this isn't
+  // an active bug today, but the exact same fabricated-0-0 gap tennis/
+  // basketball/volleyball had would apply the moment either sport gets a
+  // live pipeline built on this same disappearance-based pattern — cheap
+  // to close now rather than rediscover later.
   const tennisSetsWon = [state.homeScore, state.awayScore];
   const looksLikeNeverTracked =
     (state.sport === "tennis" &&
       (tennisSetsWon[0] === tennisSetsWon[1] || Math.max(...tennisSetsWon) < 2)) ||
-    ((state.sport === "basketball" || state.sport === "volleyball") &&
+    ((state.sport === "basketball" ||
+      state.sport === "volleyball" ||
+      state.sport === "hockey" ||
+      state.sport === "baseball") &&
       state.homeScore === 0 &&
       state.awayScore === 0);
   const footballExtras =

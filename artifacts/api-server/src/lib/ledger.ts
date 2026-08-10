@@ -102,3 +102,68 @@ export async function applyBalanceDelta(
 
   return true;
 }
+
+/** Same shape as applyBalanceDelta but credits/debits usersTable.freebetBalance
+ * instead of the real balance — used to refund a voided freebet-stake bet
+ * back to the freebet pool it came from, rather than conjuring real,
+ * withdrawable money for a bet that never actually risked any. */
+export async function applyFreebetBalanceDelta(
+  tx: unknown,
+  args: {
+    userId: number;
+    amount: string;
+    kind: string;
+    idempotencyKey: string;
+    refType?: string | null;
+    refId?: string | null;
+    metadata?: unknown;
+    enforceNonNegative?: boolean;
+  },
+): Promise<boolean> {
+  const txDb = tx as {
+    insert: typeof import("@workspace/db")["db"]["insert"];
+    update: typeof import("@workspace/db")["db"]["update"];
+    select: typeof import("@workspace/db")["db"]["select"];
+  };
+
+  const amountStr = args.amount;
+  if (!/^-?\d+(\.\d{1,2})?$/.test(amountStr)) {
+    throw new Error("Invalid amount format");
+  }
+
+  const inserted = await txDb
+    .insert(ledgerEntriesTable)
+    .values({
+      userId: args.userId,
+      amount: amountStr,
+      currency: "EUR",
+      kind: args.kind,
+      refType: args.refType ?? null,
+      refId: args.refId ?? null,
+      idempotencyKey: args.idempotencyKey,
+      metadata: (args.metadata ?? null) as never,
+    })
+    .onConflictDoNothing()
+    .returning({ id: ledgerEntriesTable.id });
+
+  if (inserted.length === 0) return false;
+
+  const where = args.enforceNonNegative
+    ? and(
+        eq(usersTable.id, args.userId),
+        sql`${usersTable.freebetBalance}::numeric + ${amountStr}::numeric >= 0`,
+      )
+    : eq(usersTable.id, args.userId);
+
+  const updated = await txDb
+    .update(usersTable)
+    .set({ freebetBalance: sql`${usersTable.freebetBalance} + ${amountStr}::numeric` })
+    .where(where)
+    .returning({ id: usersTable.id });
+
+  if (updated.length === 0) {
+    throw Object.assign(new Error("Insufficient freebet balance"), { status: 400 });
+  }
+
+  return true;
+}
