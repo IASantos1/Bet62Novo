@@ -316,8 +316,12 @@ const BASKETBALL_WS_EVENT_FRESHNESS_MS = 4_000;
  * "bwin" bookmaker's 1 req/s budget with football's own REST poll —
  * confirmed in production causing basketball's odds to go stale under
  * contention even though score/clock kept moving. A dedicated WS connection
- * (one per sport, per real PulseScore plan docs) sidesteps that budget
- * fight entirely for whichever events it has fresh data on.
+ * would sidestep that budget fight entirely for whichever events it has
+ * fresh data on — but the real PulseScore docs (confirmed 2026-08-10)
+ * settled that connection limits are per PLAN/ACCOUNT, not per sport, so
+ * this can't run alongside football's own connection on the current PRO
+ * plan (1 concurrent connection total). basketballWs.ts is built and ready
+ * but not started — see api/index.ts for why.
  * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
  * fails on the very first attempt (nothing cached yet to fall back to).
  *

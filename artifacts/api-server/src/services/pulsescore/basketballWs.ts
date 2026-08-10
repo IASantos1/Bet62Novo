@@ -2,16 +2,26 @@
 // on top of basketball.ts's REST poller, mirroring football.ts's fixed
 // design (see getPulseScoreFootballLive's header there for the two prior
 // all-or-nothing WS attempts that got reverted and why per-event freshness
-// fixes both).
+// fixes both). CURRENTLY DORMANT — see api/index.ts for why
+// startPulseScoreBasketballWs() isn't called at boot.
 //
-// Built 2026-08-09 after confirming (real PulseScore docs, per explicit user
-// instruction) that the PRO plan grants one concurrent WS connection PER
-// SPORT, not one connection total for the whole account — the assumption
-// baked into footballWs.ts/tennisWs.ts's history (moving the single WS
-// connection between football and tennis) was wrong. Basketball gets its
-// own independent connection here rather than sharing football's.
+// Built 2026-08-09 under the belief (from an earlier, wrong assumption) that
+// the PRO plan grants one concurrent WS connection PER SPORT. The real
+// PulseScore docs (confirmed 2026-08-10, pasted in full by the user) settle
+// this definitively: connection limits are per PLAN, for the WHOLE ACCOUNT,
+// not per sport — BASIC/STARTER get 0 (REST only), PRO gets exactly 1
+// simultaneous connection, MAX gets 3. A second connection beyond the
+// plan's limit gets closed with code 4029 ("Limite de conexões atingido"),
+// documented as non-retryable. On a PRO plan, this module and footballWs.ts
+// can never both hold a connection at once — only one sport gets WS at a
+// time; every other sport is REST-only by design, not a workaround. Getting
+// basketball (or any second sport) onto WS alongside football requires
+// upgrading to the MAX plan (3 connections, €149/mês vs PRO's €79/mês) —
+// a cost decision, not something fixable in code. Kept dormant (not wired
+// into api/index.ts) rather than deleted so it's a one-line change to
+// reactivate if that upgrade happens.
 //
-// Motivation: basketball's REST live poll (basketball.ts, BASKETBALL_LIVE_TTL_MS)
+// Motivation for building it in the first place: basketball's REST live poll (basketball.ts, BASKETBALL_LIVE_TTL_MS)
 // shares the "bwin" bookmaker's 1 req/s budget with football's own REST live
 // poll (also bwin) — confirmed in production (2026-08-09) via a real bwin
 // /live-events?sport=basketball sample that took 7 retries to land a 200

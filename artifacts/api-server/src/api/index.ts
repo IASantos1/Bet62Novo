@@ -102,20 +102,17 @@ server.listen(port, () => {
   // PULSESCORE_API_KEY is set, it just no-ops until then.
   startPulseScoreFootballWs();
   // startPulseScoreBasketballWs() is DELIBERATELY NOT called here.
-  // Wired up 2026-08-09 under the belief the PRO plan grants one WS
-  // connection PER SPORT — but basketballWs.ts connects to the same "bwin"
-  // bookmaker football's connection already uses (just a different `sport`
-  // query param), and tennisWs.ts's own header documents that this
-  // connection is multiplexed PER BOOKMAKER on PulseScore's side, not
-  // scoped by the sport param at all. That means the real cap may be "one
-  // connection per bookmaker," not per sport, and a second bwin connection
-  // could collide with football's. Reported in production (2026-08-10):
-  // basketball stopped appearing in Ao Vivo entirely right after this
-  // shipped. Not calling this — REST-only (getPulseScoreBasketballLive
-  // still works standalone, mergeBasketballWsFreshness is a safe no-op with
-  // nothing ever populated in basketballWs.ts's liveByEventId) — until the
-  // per-bookmaker-vs-per-sport question is confirmed one way or the other.
-  // See basketballWs.ts's own header for the rest of this history.
+  // Confirmed via the real PulseScore docs (2026-08-10): connection limits
+  // are per PLAN for the WHOLE ACCOUNT, not per sport — PRO gets exactly 1
+  // simultaneous WS connection, MAX gets 3. A PRO account can never hold
+  // this connection AND football's at the same time; the second one gets
+  // closed with code 4029 (non-retryable per the docs). Basketball is
+  // REST-only by design on the current plan, not a workaround — REST-only
+  // is already fully functional (getPulseScoreBasketballLive works
+  // standalone, mergeBasketballWsFreshness is a safe no-op with nothing
+  // ever populated in basketballWs.ts's liveByEventId while this stays
+  // uncalled). Reactivating this needs a MAX plan upgrade — see
+  // basketballWs.ts's own header for the rest of this history.
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
