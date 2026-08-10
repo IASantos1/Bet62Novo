@@ -821,6 +821,41 @@ test("teamNamesMatch: leading-token fallback does not conflate a club with its r
   assert.equal(teamNamesMatch("Ajax", "Ajax U21"), false);
 });
 
+// Regression (audit, 2026-08-10): the TRAILING/nickname fallback
+// (Panthers vs Florida Panthers, above) had no reserve-side guard at all,
+// unlike its leading-token sibling just tested above. "Jong Ajax" reaches
+// THIS branch, not the leading one — "Jong" is a leading word on the
+// LONGER name, but the match happens on the shared trailing token
+// ("ajax" = "ajax"), so the leading-only guard never saw it.
+// teamNamesMatch("Ajax", "Jong Ajax") previously returned true.
+test("teamNamesMatch: trailing/nickname fallback does not conflate a club with its reserve/youth side", () => {
+  assert.equal(teamNamesMatch("Ajax", "Jong Ajax"), false);
+  assert.equal(teamNamesMatch("Panthers", "Youth Panthers"), false);
+  // Still matches real nickname-suffix cases with no reserve marker
+  assert.equal(teamNamesMatch("Panthers", "Florida Panthers"), true);
+});
+
+// Regression (audit, 2026-08-10): the initial+surname fallback applied to
+// a whole "/"-joined doubles pair only ever compared the FIRST player's
+// initial against the LAST player's surname, silently ignoring the other
+// half of the pair — two different pairs sharing one player's surname plus
+// the other's initial were treated as identical.
+test("teamNamesMatch: doubles pairs require BOTH players to match, not just the outer initial+surname", () => {
+  assert.equal(
+    teamNamesMatch("J. Anderson/M. Jones", "J. Smith/M. Jones"),
+    false,
+  );
+  assert.equal(
+    teamNamesMatch("J. Anderson/M. Jones", "J. Anderson/M. Jones"),
+    true,
+  );
+  // Provider order isn't guaranteed — must match cross-paired too.
+  assert.equal(
+    teamNamesMatch("J. Anderson/M. Jones", "M. Jones/J. Anderson"),
+    true,
+  );
+});
+
 function makeHockeyEvent(home: string, away: string, markets: unknown[]) {
   return {
     eventId: "test-hockey-1",

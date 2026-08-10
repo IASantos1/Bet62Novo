@@ -119,17 +119,39 @@ export function teamNamesMatch(a: string, b: string): boolean {
     name.replace(/\s*\([^)]*\)\s*$/, "").trim();
   const looksInitialAbbreviated = (name: string): boolean =>
     /^([A-Za-z]\.){1,2}$/.test(name.trim().split(/\s+/)[0] ?? "");
-  if (looksInitialAbbreviated(a) || looksInitialAbbreviated(b)) {
+  const initialSurnameMatch = (x: string, y: string): boolean => {
     const tokensOf = (name: string): string[] =>
       slugifyTeamNameStripped(stripTrailingCountrySuffix(name)).split("-").filter(Boolean);
-    const tokensA = tokensOf(a);
-    const tokensB = tokensOf(b);
-    const surnameA = tokensA[tokensA.length - 1];
-    const surnameB = tokensB[tokensB.length - 1];
-    const initialA = tokensA[0]?.[0];
-    const initialB = tokensB[0]?.[0];
-    if (surnameA && surnameB && surnameA === surnameB && initialA && initialB && initialA === initialB)
-      return true;
+    const tokensX = tokensOf(x);
+    const tokensY = tokensOf(y);
+    const surnameX = tokensX[tokensX.length - 1];
+    const surnameY = tokensY[tokensY.length - 1];
+    const initialX = tokensX[0]?.[0];
+    const initialY = tokensY[0]?.[0];
+    return !!(surnameX && surnameY && surnameX === surnameY && initialX && initialY && initialX === initialY);
+  };
+
+  // Doubles pairs ("J. Anderson/M. Jones") — applying initialSurnameMatch to
+  // the whole "/"-joined string only ever compared the FIRST player's
+  // initial against the LAST player's surname, silently ignoring the other
+  // half of the pair entirely. Confirmed exploitable via audit (2026-08-10):
+  // teamNamesMatch("J. Anderson/M. Jones", "J. Smith/M. Jones") returned
+  // true — a real risk since bwin abbreviates doubles selections exactly
+  // this way. Only takes over when BOTH sides are genuinely "/"-joined
+  // 2-player pairs; falls through to the single-player checks below
+  // otherwise (e.g. one side missing entirely, or a team name that
+  // coincidentally contains a "/"). Checked in both pairings since
+  // providers don't guarantee the same player order.
+  const slashPartsOf = (name: string): string[] =>
+    name.split("/").map((p) => p.trim()).filter(Boolean);
+  const partsA = slashPartsOf(a);
+  const partsB = slashPartsOf(b);
+  if (partsA.length === 2 && partsB.length === 2) {
+    const straightMatch = initialSurnameMatch(partsA[0]!, partsB[0]!) && initialSurnameMatch(partsA[1]!, partsB[1]!);
+    const crossMatch = initialSurnameMatch(partsA[0]!, partsB[1]!) && initialSurnameMatch(partsA[1]!, partsB[0]!);
+    if (straightMatch || crossMatch) return true;
+  } else if (looksInitialAbbreviated(a) || looksInitialAbbreviated(b)) {
+    if (initialSurnameMatch(a, b)) return true;
   }
 
   // Team-nickname suffix fallback — bwin's hockey market selections often
@@ -144,12 +166,33 @@ export function teamNamesMatch(a: string, b: string): boolean {
   // tokens — not a generic substring check — so "Rangers" only matches a
   // full name actually ending in "...Rangers", not an unrelated team whose
   // name happens to contain that word elsewhere.
+  // "jong" (Dutch "young", e.g. "Jong Ajax", "Jong PSV") added 2026-08-10 —
+  // it's a LEADING marker, so it only ever mattered for the trailing
+  // fallback below (a reserve side named "Jong X" hits that branch, not
+  // the leading one, since the shared tokens are trailing "...x").
+  const reserveSideMarker =
+    /\b(ii|iii|b|ib|reserve|reserves|reservas|castilla|academy|academia|youth|juvenil|junior|juniors|jong|sub-?1[5-9]|sub-?2[0-3]|u1[5-9]|u2[0-3])\b/i;
+
   const tokensA2 = slugifyTeamNameStripped(a).split("-").filter(Boolean);
   const tokensB2 = slugifyTeamNameStripped(b).split("-").filter(Boolean);
   if (tokensA2.length > 0 && tokensB2.length > 0 && tokensA2.length !== tokensB2.length) {
     const [shorter, longer] = tokensA2.length < tokensB2.length ? [tokensA2, tokensB2] : [tokensB2, tokensA2];
     const tail = longer.slice(longer.length - shorter.length);
-    if (tail.join("-") === shorter.join("-")) return true;
+    if (tail.join("-") === shorter.join("-")) {
+      // Same reserve/youth-side guard as the leading-token fallback below —
+      // this trailing fallback had none at all (confirmed via audit,
+      // 2026-08-10: teamNamesMatch("Ajax", "Jong Ajax") returned true, a
+      // real collision since "Jong Ajax" reaches THIS branch, not the
+      // leading one the old comment assumed — "Jong" is a leading word on
+      // the LONGER name, but matching happens on the trailing tokens
+      // ("ajax" = "ajax"), so the leading-only guard never saw it). Any
+      // words the longer name has BEFORE the shared trailing tokens are
+      // the extra part here (unlike the leading-fallback below, where the
+      // extra words come AFTER).
+      const extra = longer.slice(0, longer.length - shorter.length).join(" ");
+      if (reserveSideMarker.test(extra)) return false;
+      return true;
+    }
 
     // Leading-token fallback — the mirror image of the trailing/nickname
     // one just above, added 2026-08-09 after a real PulseScore/bwin vs
@@ -165,20 +208,17 @@ export function teamNamesMatch(a: string, b: string): boolean {
     // Guarded against the one real danger a leading-match introduces that
     // a trailing-match doesn't: a reserve/youth side sharing its parent
     // club's full name as a PREFIX ("Real Madrid" vs "Real Madrid
-    // Castilla", "Barcelona" vs "Barcelona B", "Ajax" vs "Jong Ajax" —
-    // note that last one wouldn't even reach this branch since "Jong" is
-    // a genuine leading word, not trailing). If the words the longer name
-    // adds beyond the shorter one look like a reserve/youth-team marker,
-    // do NOT match — those are two different, separately bettable sides,
-    // not a naming variant of the same one.
+    // Castilla", "Barcelona" vs "Barcelona B"). If the words the longer
+    // name adds beyond the shorter one look like a reserve/youth-team
+    // marker, do NOT match — those are two different, separately bettable
+    // sides, not a naming variant of the same one. Shares reserveSideMarker
+    // with the trailing fallback above (which needed the identical guard
+    // added, audit 2026-08-10 — see its own comment for why "Jong Ajax"
+    // actually reaches THAT branch, not this one).
     const head = longer.slice(0, shorter.length);
     if (head.join("-") === shorter.join("-")) {
       const extra = longer.slice(shorter.length).join(" ");
-      const looksLikeReserveSide =
-        /\b(ii|iii|b|ib|reserve|reserves|reservas|castilla|academy|academia|youth|juvenil|junior|juniors|sub-?1[5-9]|sub-?2[0-3]|u1[5-9]|u2[0-3])\b/i.test(
-          extra,
-        );
-      if (!looksLikeReserveSide) return true;
+      if (!reserveSideMarker.test(extra)) return true;
     }
   }
 

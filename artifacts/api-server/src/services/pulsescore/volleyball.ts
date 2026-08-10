@@ -182,9 +182,19 @@ export function extractVolleyballOverride(ev: PulseScoreEvent): PulseScoreVolley
   const pointsLines = extractPointsLines(totalPointsMarkets);
   if (pointsLines.length > 0) out.pointsLines = pointsLines;
 
-  const correctScoreMarket = markets.find((m) => m.canonicalMarket === "CORRECT_SCORE");
-  if (correctScoreMarket) {
-    const exactScore = extractExactScore(correctScoreMarket);
+  // .find() here previously grabbed the FIRST CORRECT_SCORE market
+  // unconditionally — every sibling extraction above instead uses
+  // .filter().length===1 and skips on ambiguity rather than risk mixing up
+  // markets (matchResultMarkets/set1Markets, same reasoning football.ts's
+  // own isCorrectScoreMarket requires FULL_TIME for). Not confirmed via a
+  // real bwin sample whether volleyball's CORRECT_SCORE ever carries a
+  // per-set variant alongside a whole-match one, but this brings it in
+  // line with the file's own established convention regardless — if bwin
+  // ever sends more than one, skip rather than silently pick the wrong
+  // one for a real bettable market (audit finding, 2026-08-10).
+  const correctScoreMarkets = markets.filter((m) => m.canonicalMarket === "CORRECT_SCORE");
+  if (correctScoreMarkets.length === 1) {
+    const exactScore = extractExactScore(correctScoreMarkets[0]!);
     if (exactScore) out.exactScore = exactScore;
   }
 
