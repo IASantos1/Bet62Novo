@@ -12,7 +12,8 @@ import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
 import {
   authMiddleware,
   type AuthRequest,
-  verifyAuthToken,
+  mintOpenBetStreamToken,
+  verifyOpenBetStreamToken,
 } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
@@ -2100,6 +2101,20 @@ router.get(
   },
 );
 
+// EventSource can't set custom headers, so this mints a short-lived (5m),
+// stream-scoped token via a normal authenticated header request — the
+// frontend calls this first, then opens the SSE connection with the
+// returned token instead of the full 7-day session JWT. See
+// mintOpenBetStreamToken's own comment (middlewares/auth.ts) for why.
+router.get(
+  "/open-states-stream-token",
+  authMiddleware,
+  (req: Request, res: Response): void => {
+    const authReq = req as AuthRequest;
+    res.json({ token: mintOpenBetStreamToken(authReq.user!) });
+  },
+);
+
 router.get(
   "/open-states-stream",
   async (req: Request, res: Response): Promise<void> => {
@@ -2111,7 +2126,7 @@ router.get(
 
     let user: { id: number; email: string };
     try {
-      user = verifyAuthToken(token);
+      user = verifyOpenBetStreamToken(token);
     } catch (err) {
       logger.error({ err }, "Open bet states stream auth failed");
       res.status(401).json({ error: "Invalid token" });

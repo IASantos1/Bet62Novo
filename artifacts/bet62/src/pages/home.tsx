@@ -9255,11 +9255,27 @@ export default function Home({
     }
 
     let closed = false;
-    const openStream = () => {
+    // EventSource can't set custom headers, so a short-lived (5m),
+    // stream-scoped token is minted via a normal authenticated header
+    // request first, instead of putting the full 7-day session token in
+    // the URL (which leaks into browser history and any proxy/CDN access
+    // logs not configured to redact query strings — security hardening,
+    // 2026-08-10).
+    const openStream = async () => {
       if (openBetsSseRef.current || closed) return;
       try {
+        const tokenResp = await fetch("/api/bets/open-states-stream-token", {
+          headers: { Authorization: `Bearer ${auth.token!}` },
+        });
+        if (!tokenResp.ok) throw new Error("stream token request failed");
+        const { token: streamToken } = (await tokenResp.json()) as {
+          token: string;
+        };
+        // Re-check after the await — the effect may have been cleaned up,
+        // or a concurrent reconnect attempt may have already opened one.
+        if (openBetsSseRef.current || closed) return;
         const es = new EventSource(
-          `/api/bets/open-states-stream?token=${encodeURIComponent(auth.token!)}`,
+          `/api/bets/open-states-stream?token=${encodeURIComponent(streamToken)}`,
         );
         openBetsSseRef.current = es;
         es.onmessage = (evt) => {
@@ -9288,7 +9304,7 @@ export default function Home({
               activeTabRef.current === "mybets" &&
               openBetsSseRef.current === null
             )
-              openStream();
+              void openStream();
           }, 2000);
         };
       } catch {
@@ -9296,7 +9312,7 @@ export default function Home({
       }
     };
 
-    openStream();
+    void openStream();
     return () => {
       closed = true;
       if (openBetsSseReconnectRef.current) {

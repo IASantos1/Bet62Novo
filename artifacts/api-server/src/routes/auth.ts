@@ -49,6 +49,28 @@ router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
     return;
   }
 
+  // Confirmed via audit (2026-08-10): previously only checked truthiness,
+  // so a 1-character password ("a") was accepted and hashed — a material
+  // account-takeover weakness on a real-money platform, especially
+  // combined with credential stuffing. Minimum length only (not a
+  // composition rule like "must contain a symbol") — length is the
+  // strongest single predictor of resistance to brute force, and
+  // composition rules are known (NIST 800-63B) to push users toward
+  // predictable patterns instead of actually stronger passwords.
+  if (password.length < 8) {
+    res.status(400).json({ error: "A senha deve ter pelo menos 8 caracteres" });
+    return;
+  }
+
+  // Basic format check (not exhaustive RFC 5322 validation) — catches
+  // obviously malformed addresses before they're stored and silently
+  // break transactional email delivery (KYC correspondence, password
+  // resets, settlement notifications).
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: "Email inválido" });
+    return;
+  }
+
   const nifClean = (nif ?? "").replace(/\s/g, "");
   // Optional NIF: if provided, validate it
   if (nifClean && !validatePortugueseNif(nifClean)) {
@@ -63,7 +85,10 @@ router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    // Cost 12 (was 10) — bumped per audit recommendation (2026-08-10) for a
+    // real-money/regulated platform; 10 is an acceptable minimum per
+    // current OWASP guidance but not future-proofed.
+    const passwordHash = await bcrypt.hash(password, 12);
     const [user] = await db.insert(usersTable).values({
       name,
       email,
