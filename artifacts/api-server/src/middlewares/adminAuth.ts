@@ -24,7 +24,11 @@ export const adminMiddleware = (req: AdminRequest, res: Response, next: NextFunc
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token!, SESSION_SECRET) as { username: string; isAdmin: boolean };
+    // Explicit algorithm allow-list — see middlewares/auth.ts's identical
+    // change for why (audit hardening, 2026-08-10).
+    const decoded = jwt.verify(token!, SESSION_SECRET, {
+      algorithms: ["HS256"],
+    }) as { username: string; isAdmin: boolean };
     if (!decoded.isAdmin) {
       res.status(403).json({ error: "Permissão insuficiente" });
       return;
