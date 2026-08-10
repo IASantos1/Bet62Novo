@@ -1,18 +1,31 @@
-// Generic REST-polled PulseScore live source for sports beyond football and
-// tennis, which each have their own module (football.ts, tennis.ts) — tennis
-// shares football's bet365 bookmaker rather than getting a distinct one.
+// Generic REST-polled PulseScore live source, ORIGINALLY built to cover
+// every sport beyond football/tennis. Since then, basketball and volleyball
+// each got their own dedicated module (basketball.ts → bwin, volleyball.ts
+// → unibetau — see those files' own header comments) that fully supersedes
+// what's exported here for them; hockey's real prematch source is
+// hockey.ts (bwin), not this file either. As of 2026-08-10, this file's
+// only live consumer left in the app is admin.ts's read-only
+// /pulsescore-debug diagnostic route (pulseScoreBasketball/pulseScoreHockey/
+// pulseScoreBaseball/pulseScoreVolleyball below) — it still queries THIS
+// file's bookmaker assignments (basketball → fanduel, ice-hockey → bwin,
+// baseball → draftkings, volleyball → paddypower), which for
+// basketball/volleyball no longer match the real product pipeline's
+// bookmaker (that diagnostic output is a useful cross-check against a
+// DIFFERENT bookmaker, not a description of what's actually live). Baseball
+// has no dedicated module and no live/prematch builder wired into
+// matches.ts at all — this file is baseball's only PulseScore code, purely
+// diagnostic today.
 //
 // Each sport here is deliberately assigned a *different* bookmaker prefix
-// (basketball → fanduel, ice-hockey → bwin, baseball → draftkings,
-// volleyball → paddypower) rather than piling onto bet365 alongside
-// football. The PRO plan's REST rate limit is documented per bookmaker
-// ("Cotação (por casa de apostas): 1 requisição/seg"), not per sport — if
-// every sport polled bet365 at 1s intervals, they'd all be fighting over
-// the same 1 req/s budget and none would actually get 1s freshness. One
-// API key works across every bookmaker prefix (the docs advertise this
-// explicitly: "o mesmo esquema... independentemente de usar bookmaker,
-// bookmaker2"), so spreading sports across bookmakers gives each its own
-// independent budget under a single PRO subscription.
+// rather than piling onto bet365 alongside football. The PRO plan's REST
+// rate limit is documented per bookmaker ("Cotação (por casa de apostas):
+// 1 requisição/seg"), not per sport — if every sport polled bet365 at 1s
+// intervals, they'd all be fighting over the same 1 req/s budget and none
+// would actually get 1s freshness. One API key works across every
+// bookmaker prefix (the docs advertise this explicitly: "o mesmo
+// esquema... independentemente de usar bookmaker, bookmaker2"), so
+// spreading sports across bookmakers gives each its own independent budget
+// under a single PRO subscription.
 //
 // Only the moneyline (match_winner) is mapped, same conservative approach
 // as tennis — the docs don't give a per-sport example of total-points/
