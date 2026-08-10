@@ -5011,6 +5011,90 @@ export default function Home({
     } catch {}
     return [];
   });
+
+  // Ao Vivo tab's live/"Em Breve" split, sort and dedup — moved out of the
+  // plain IIFE it used to be (inline inside the JSX render) into a real
+  // useMemo (audit finding, 2026-08-10). liveMatches updates on every SSE
+  // message (sub-second cadence) and the page also re-renders every 1s from
+  // the global minute ticker — with a plain IIFE, EVERY one of those
+  // re-renders re-filtered/re-sorted the entire live+upcoming+filler match
+  // list from scratch, even when none of liveMatches/upcomingMatches/
+  // fillerMatches/the sport filter/the search query had actually changed
+  // (e.g. the 1s ticker re-render, which touches none of them). useMemo
+  // skips that work unless one of the real inputs changed. Safe to compute
+  // unconditionally here (hooks can't be called only while the "live" tab
+  // is open) — liveMatches/upcomingMatches only change while that tab's own
+  // fetch/SSE effects are actually running (see the `activeTab !== "live"`
+  // guards on those effects), so this doesn't do new work on other tabs.
+  const liveTabLists = useMemo(() => {
+    const filterBySport = (m: Match) => {
+      const bySport =
+        liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
+      const q = liveSearchQuery.trim().toLowerCase();
+      const bySearch =
+        !q ||
+        m.home.toLowerCase().includes(q) ||
+        m.away.toLowerCase().includes(q) ||
+        (m.league ?? "").toLowerCase().includes(q);
+      return bySport && bySearch;
+    };
+    const actualLive = liveMatches.filter(
+      (m) => m.startsIn === undefined && filterBySport(m),
+    );
+    // Dedup key: match id when every source actually has a stable one,
+    // team-name pair otherwise — a bare team-name key alone would silently
+    // collapse two distinct fixtures that happen to share identical
+    // team-name strings (real risk in lower-league/esports naming), which
+    // id doesn't.
+    const matchKey = (m: Match) =>
+      m.id !== undefined && m.id !== null && m.id !== "" ? `id:${m.id}` : `${m.home}|${m.away}`;
+    // Em Breve: live-feed entries + ALL upcoming matches within 7 days
+    const _emBreveFromLive = liveMatches.filter(
+      (m) => m.startsIn !== undefined && filterBySport(m),
+    );
+    const _liveBreveKeys = new Set(_emBreveFromLive.map(matchKey));
+    const _minsUntil = (date?: string, time?: string): number => {
+      if (!date || !time) return Infinity;
+      try {
+        const [d, mo, y] = date.split(".");
+        return (new Date(`${y}-${mo}-${d}T${time}:00`).getTime() - Date.now()) / 60_000;
+      } catch {
+        return Infinity;
+      }
+    };
+    const _emBreveFromUpcoming = upcomingMatches
+      .filter((m) => {
+        if (!filterBySport(m)) return false;
+        if (_liveBreveKeys.has(matchKey(m))) return false;
+        const mins = _minsUntil(m.date, m.time);
+        return mins >= -30 && mins <= 7 * 24 * 60;
+      })
+      .sort((a, b) => _minsUntil(a.date, a.time) - _minsUntil(b.date, b.time))
+      .slice(0, 300)
+      .map((m) => ({
+        ...m,
+        startsIn: Math.max(0, Math.round(_minsUntil(m.date, m.time))),
+      }));
+    const emBreve = [..._emBreveFromLive, ...(_emBreveFromUpcoming as typeof _emBreveFromLive)];
+    // Filler matches from backend (only when no live AND emBreve is thin)
+    const _fillerKeys = new Set([
+      ..._emBreveFromLive.map(matchKey),
+      ...(_emBreveFromUpcoming as Match[]).map(matchKey),
+    ]);
+    const emBreveWithFillers = [
+      ...emBreve,
+      ...fillerMatches
+        .filter((m) => filterBySport(m) && !_fillerKeys.has(matchKey(m)))
+        .map((m) => ({ ...m, startsIn: (m as any).startsIn ?? 0 })),
+    ].sort((a, b) => {
+      const minsA = a.date && a.time ? _minsUntil(a.date, a.time) : (a.startsIn ?? Infinity);
+      const minsB = b.date && b.time ? _minsUntil(b.date, b.time) : (b.startsIn ?? Infinity);
+      return minsA - minsB;
+    }) as typeof emBreve;
+    return { actualLive, emBreveWithFillers };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMatches, upcomingMatches, fillerMatches, liveSportFilter, liveSearchQuery]);
+
   const [upcomingLoading, setUpcomingLoading] = useState(() => {
     try {
       const raw = JSON.parse(
@@ -11180,6 +11264,32 @@ export default function Home({
             </div>
             <div className="shrink-0">{liveBadge}</div>
           </div>
+          {/* Tracker access (audit finding, 2026-08-10): matchToTrackerEvent/
+              setTrackerModalEvent were only ever wired into renderMatchCard
+              (prematch/"Em Destaque" listings) — the Ao Vivo tab itself,
+              where users actually are, had no way to open the incidents
+              Tracker at all. Same pattern as renderMatchCard's own button:
+              resolved directly onto this match by team name (see
+              attachDirectTracker in matches.ts). */}
+          {match.tracker && (
+            <div
+              className="flex gap-1.5 mb-2"
+              onClick={stopCardOpen}
+              onTouchStart={stopCardOpen}
+              onTouchMove={stopCardOpen}
+              onTouchEnd={stopCardOpen}
+              onPointerDown={stopCardOpen}
+              onPointerMove={stopCardOpen}
+              onPointerUp={stopCardOpen}
+            >
+              <button
+                onClick={() => setTrackerModalEvent(matchToTrackerEvent(match))}
+                className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
+              >
+                <Activity size={10} /> Tracker
+              </button>
+            </div>
+          )}
           {rivalry && (
             <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
               {rivalry}
@@ -25367,6 +25477,31 @@ export default function Home({
                         );
                       })()}
                   </h2>
+                  {/* Connection-status indicator (audit finding, 2026-08-10):
+                      liveTransport/browserOnline were already tracked but
+                      never shown anywhere — if SSE dropped and the polling
+                      fallback also started failing, cards kept showing the
+                      last-known odds/score with no indication they were
+                      stale. Silent on "sse" (the healthy path) and "idle"
+                      (tab not active yet) so this stays out of the way
+                      normally. */}
+                  {liveTransport === "cache" && (
+                    <div className="flex items-center gap-1.5 mt-1 text-xs font-semibold text-amber-400">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-400"></span>
+                      </span>
+                      {browserOnline
+                        ? "A reconectar… a mostrar os últimos dados conhecidos"
+                        : "Sem ligação à internet — a mostrar dados em cache"}
+                    </div>
+                  )}
+                  {liveTransport === "polling" && (
+                    <div className="flex items-center gap-1.5 mt-1 text-xs font-medium text-zinc-500">
+                      <RefreshCw size={10} />
+                      Atualização em modo de reserva (polling)
+                    </div>
+                  )}
                 </div>
 
                 {/* ── Search bar ── */}
@@ -25446,69 +25581,13 @@ export default function Home({
                   })()}
 
                 {(() => {
-                  const filterBySport = (m: Match) => {
-                    const bySport =
-                      liveSportFilter === "all" ||
-                      (m.sport ?? "football") === liveSportFilter;
-                    const q = liveSearchQuery.trim().toLowerCase();
-                    const bySearch =
-                      !q ||
-                      m.home.toLowerCase().includes(q) ||
-                      m.away.toLowerCase().includes(q) ||
-                      (m.league ?? "").toLowerCase().includes(q);
-                    return bySport && bySearch;
-                  };
-                  const actualLive = liveMatches.filter(
-                    (m) => m.startsIn === undefined && filterBySport(m),
-                  );
-                  // Em Breve: live-feed entries + ALL upcoming matches within 7 days
-                  const _emBreveFromLive = liveMatches.filter(
-                    (m) => m.startsIn !== undefined && filterBySport(m),
-                  );
-                  const _liveBreveKeys = new Set(
-                    _emBreveFromLive.map((m) => `${m.home}|${m.away}`),
-                  );
-                  const _minsUntil = (date?: string, time?: string): number => {
-                    if (!date || !time) return Infinity;
-                    try {
-                      const [d, mo, y] = date.split(".");
-                      return (new Date(`${y}-${mo}-${d}T${time}:00`).getTime() - Date.now()) / 60_000;
-                    } catch { return Infinity; }
-                  };
-                  const _emBreveFromUpcoming = upcomingMatches
-                    .filter((m) => {
-                      if (!filterBySport(m)) return false;
-                      if (_liveBreveKeys.has(`${m.home}|${m.away}`)) return false;
-                      const mins = _minsUntil(m.date, m.time);
-                      return mins >= -30 && mins <= 7 * 24 * 60;
-                    })
-                    .sort((a, b) => _minsUntil(a.date, a.time) - _minsUntil(b.date, b.time))
-                    .slice(0, 300)
-                    .map((m) => ({
-                      ...m,
-                      startsIn: Math.max(0, Math.round(_minsUntil(m.date, m.time))),
-                    }));
-                  const emBreve = [..._emBreveFromLive, ...(_emBreveFromUpcoming as typeof _emBreveFromLive)];
-                  // Filler matches from backend (only when no live AND emBreve is thin)
-                  const _fillerKeys = new Set([
-                    ..._emBreveFromLive.map((m) => `${m.home}|${m.away}`),
-                    ...(_emBreveFromUpcoming as any[]).map((m: any) => `${m.home}|${m.away}`),
-                  ]);
-                  const emBreveWithFillers = [
-                    ...emBreve,
-                    ...fillerMatches
-                      .filter(
-                        (m) =>
-                          filterBySport(m) &&
-                          !_fillerKeys.has(`${m.home}|${m.away}`),
-                      )
-                      .map((m) => ({ ...m, startsIn: (m as any).startsIn ?? 0 })),
-                  ]
-                    .sort((a, b) => {
-                      const minsA = a.date && a.time ? _minsUntil(a.date, a.time) : (a.startsIn ?? Infinity);
-                      const minsB = b.date && b.time ? _minsUntil(b.date, b.time) : (b.startsIn ?? Infinity);
-                      return minsA - minsB;
-                    }) as typeof emBreve;
+                  // Data derivation lives in the liveTabLists useMemo above
+                  // (audit finding, 2026-08-10 — this used to be a plain
+                  // IIFE that re-filtered/re-sorted the entire live +
+                  // upcoming + filler match list on every render, including
+                  // the 1s minute-ticker re-render, which touches none of
+                  // its actual inputs). Only the JSX below is render-time.
+                  const { actualLive, emBreveWithFillers } = liveTabLists;
 
                   if (liveLoading && liveMatches.length === 0) {
                     return (
