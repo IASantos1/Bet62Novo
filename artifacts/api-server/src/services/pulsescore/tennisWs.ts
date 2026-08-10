@@ -20,16 +20,18 @@
 //
 // Moved to football on 2026-08-08 (explicit user decision — football's live
 // clock/score, particularly for lower-coverage matches, was what was
-// actually causing complaints; see footballWs.ts's header) under the belief
-// the PRO plan allowed only one concurrent WS connection for the whole
-// account. That belief was WRONG — confirmed 2026-08-09 (real PulseScore
-// docs) the plan grants one connection PER SPORT, so football keeping its
-// connection never required tennis giving up its own (see
-// basketballWs.ts's header, which got a dedicated connection under the
-// corrected understanding). Tennis is REST-only not because of a connection
-// budget, but because this module's own per-event-freshness design was
-// never finished/reactivated after the correction — same fix football.ts
-// and basketball.ts both now use (getFootballWsEventIfFresh /
+// actually causing complaints; see footballWs.ts's header). Confirmed via
+// the real PulseScore docs (2026-08-10): the PRO plan allows exactly ONE
+// concurrent WS connection for the WHOLE ACCOUNT, not one per sport — so
+// this move genuinely did require tennis giving up its connection, no way
+// around it on the current plan. (A mid-session guess that it might be
+// per-sport briefly led to also opening a basketball connection on
+// 2026-08-09; that got closed under the plan's cap and was reverted the
+// next day — see basketballWs.ts's header.) Tennis stays REST-only until
+// either a MAX plan upgrade (3 connections) frees up a slot, or football's
+// connection is deliberately handed back — and even then, this module's
+// own per-event-freshness design isn't finished: the same fix football.ts
+// and basketball.ts use (getFootballWsEventIfFresh /
 // getBasketballWsEventIfFresh) would need to be applied here (a
 // getTennisWsEventIfFresh-equivalent, currently missing below) before this
 // is safe to wire back into tennis.ts's getPulseScoreTennisLive().
