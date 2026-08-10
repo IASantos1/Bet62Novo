@@ -48,3 +48,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Claude Code agent worktrees (local scratch state, not project source)
+.claude/worktrees/
