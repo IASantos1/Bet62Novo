@@ -168,7 +168,17 @@ export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
   } else {
     events = await inFlight;
   }
-  return mergeFootballWsFreshness(events);
+  // Defense in depth: an unexpected failure in the WS overlay must never
+  // take the whole REST live list down with it.
+  try {
+    return mergeFootballWsFreshness(events);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "[pulsescore] football WS overlay failed — serving REST events unmerged",
+    );
+    return events;
+  }
 }
 
 // WS only re-broadcasts an event when PulseScore decides something about it

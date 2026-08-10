@@ -4007,6 +4007,32 @@ function computeLiveTennisExtras(
     1.1,
   );
 
+  // Total Sets Over/Under 2.5 — this model only ever produces a 2-set or
+  // 3-set match (h20/a02 = 2 sets, h21/a12 = 3 sets; best-of-3 is the only
+  // shape exactSetsProbs above computes), so "under 2.5" is exactly
+  // h20+a02 and "over 2.5" is exactly h21+a12, reusing the same
+  // probabilities already computed for the exact-sets market instead of a
+  // separate model. This previously fell through unchanged from
+  // computeTennisExtras's static pre-match estimate (spread via
+  // ...baseExtras below) — frozen for the entire live match regardless of
+  // score, which is why it stayed near a coinflip price even with a player
+  // one point from closing the match in straight sets, or a set from
+  // forcing a decider. Reported in production (2026-08-10).
+  const pUnder25Sets = mc(
+    (exactSetsProbs.h20 + exactSetsProbs.a02) / exactTotal,
+    0.02,
+    0.98,
+  );
+  const pOver25Sets = mc(
+    (exactSetsProbs.h21 + exactSetsProbs.a12) / exactTotal,
+    0.02,
+    0.98,
+  );
+  const [over25Sets, under25Sets] = probsToDecimalOdds(
+    [pOver25Sets, pUnder25Sets],
+    1.07,
+  );
+
   const futureSetsAfterCurrent =
     homeSetsWon === 0 && awaySetsWon === 0
       ? 1 +
@@ -4254,6 +4280,11 @@ function computeLiveTennisExtras(
       pointCtx.awayTrailing,
     ),
     exactSets: liveExactSets,
+    totalSets: capTennisLiveOverUnderOdds({
+      line: 2.5,
+      over: over25Sets!,
+      under: under25Sets!,
+    }),
     setHandicap: capTennisLiveHomeAwayOdds(
       liveSetHandicap,
       pointCtx.homeTrailing,

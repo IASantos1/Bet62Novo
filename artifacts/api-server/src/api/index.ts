@@ -97,17 +97,25 @@ server.listen(port, () => {
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
 
-  // Football and basketball each get their own dedicated WS connection —
-  // confirmed 2026-08-09 (real PulseScore docs) that the PRO plan grants one
-  // concurrent connection PER SPORT, not one connection total for the whole
-  // account (the earlier "only one, pick a sport" assumption baked into
-  // footballWs.ts/tennisWs.ts's history was wrong). Each connection layers
-  // PER-EVENT freshness on top of that sport's own REST poll — see
-  // getPulseScoreFootballLive (football.ts) / getPulseScoreBasketballLive
-  // (basketball.ts) for the merge design. Safe to call even before
-  // PULSESCORE_API_KEY is set, both just no-op until then.
+  // Football's dedicated WS connection — see getPulseScoreFootballLive
+  // (football.ts) for the per-event merge design. Safe to call even before
+  // PULSESCORE_API_KEY is set, it just no-ops until then.
   startPulseScoreFootballWs();
-  startPulseScoreBasketballWs();
+  // startPulseScoreBasketballWs() is DELIBERATELY NOT called here.
+  // Wired up 2026-08-09 under the belief the PRO plan grants one WS
+  // connection PER SPORT — but basketballWs.ts connects to the same "bwin"
+  // bookmaker football's connection already uses (just a different `sport`
+  // query param), and tennisWs.ts's own header documents that this
+  // connection is multiplexed PER BOOKMAKER on PulseScore's side, not
+  // scoped by the sport param at all. That means the real cap may be "one
+  // connection per bookmaker," not per sport, and a second bwin connection
+  // could collide with football's. Reported in production (2026-08-10):
+  // basketball stopped appearing in Ao Vivo entirely right after this
+  // shipped. Not calling this — REST-only (getPulseScoreBasketballLive
+  // still works standalone, mergeBasketballWsFreshness is a safe no-op with
+  // nothing ever populated in basketballWs.ts's liveByEventId) — until the
+  // per-bookmaker-vs-per-sport question is confirmed one way or the other.
+  // See basketballWs.ts's own header for the rest of this history.
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
