@@ -12108,6 +12108,44 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       suspensionReason = "ODDS INDISPONÍVEIS";
     }
 
+    // Hold the goal suspension open until API-Football actually confirms
+    // the goal — not just until the fixed delay above elapses. Reported in
+    // production (2026-08-10): the suspension/GOLO banner would disappear
+    // and then reappear moments later for the same goal. Root cause —
+    // API-Football's own cache is ~12s (LIVE_TTL_MS, apiFootball.ts), and
+    // the "result" market's own goal-suspension delay is ALSO 12s
+    // (REOPEN_DELAY_GOAL_LOW) — so the fixed timer regularly expired before
+    // API-Football's fixture had even caught up to PulseScore's score. Once
+    // it finally did catch up, it often carried a routine automatic VAR
+    // check alongside the goal (standard even for goals that stand, not a
+    // sign of anything under review) — newVarReview above saw that as a
+    // brand new incident and re-suspended under a different label ("VAR")
+    // seconds after the goal's own suspension had already cleared, reading
+    // to the user as the suspension flickering off then back on.
+    // goalUnconfirmedByApiFootball is true exactly while API-Football's own
+    // recorded goal tally hasn't reached PulseScore's yet — for as long as
+    // that holds, keep refreshing the suspension under the goal's own
+    // reason instead of letting it lapse or relabeling to "VAR" for what's
+    // really the same goal's aftermath. A match with no API-Football
+    // coverage at all (apiFixture null) has no confirmation signal to wait
+    // for, so it's untouched — pure timer-based behavior, same as before.
+    const apiFootballGoalTotal = apiFixture
+      ? (apiFixture.goalsHome ?? 0) + (apiFixture.goalsAway ?? 0)
+      : null;
+    const goalUnconfirmedByApiFootball =
+      apiFootballGoalTotal !== null && apiFootballGoalTotal < homeScore + awayScore;
+    if (goalUnconfirmedByApiFootball) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
+      );
+      if (!suspensionReason || !suspensionReason.startsWith("GOLO")) {
+        suspensionReason = existing?._suspensionReason?.startsWith("GOLO")
+          ? existing._suspensionReason
+          : "GOLO!";
+      }
+    }
+
     // PulseScore only ever gives us team NAMES (no id field anywhere in its
     // schema — confirmed against a real event dump). Resolve a real crest
     // via SportsAPI Pro's /search endpoint, cached and fire-and-forget
