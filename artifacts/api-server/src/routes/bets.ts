@@ -29,6 +29,7 @@ import {
   scoreOutcomeForSel,
   type SelectionRecord,
 } from "../settlement.js";
+import { detectOddsDrift } from "../lib/config.js";
 
 const router: IRouter = Router();
 
@@ -1954,6 +1955,31 @@ router.post(
                     : liveSt.sport === "baseball"
                       ? "RUN"
                       : "PONTO"),
+        });
+        return;
+      }
+
+      // Odds-drift guard (audit finding, 2026-08-10): the suspension check
+      // above is the ONLY thing that stood between an accepted bet and
+      // whatever odds the client submitted — nothing compared sel.odd
+      // against the server's own current price. A market with no
+      // suspension covering it (or one whose suspension window already
+      // lapsed a tick before this request landed) would silently accept a
+      // stale or arbitrarily-inflated client-submitted odd. Belt-and-braces
+      // on top of suspension, not a replacement for it — suspension is
+      // still the primary, immediate-reaction guard.
+      const submittedOdd = Number((sel as { odd?: unknown }).odd);
+      const curOdd = currentOddForSelection(sel as unknown as SelectionRecord, liveSt);
+      if (
+        Number.isFinite(submittedOdd) &&
+        submittedOdd > 1.0 &&
+        Number.isFinite(curOdd) &&
+        (curOdd as number) > 1.0 &&
+        detectOddsDrift(submittedOdd, curOdd as number)
+      ) {
+        res.status(409).json({
+          error: "As odds mudaram. Reveja o boletim e tente novamente.",
+          reason: "ODDS DESATUALIZADAS",
         });
         return;
       }

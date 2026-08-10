@@ -429,6 +429,13 @@ export type LiveMatchState = {
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
+  // Timestamp (ms) the goal-confirmation hold (goalUnconfirmedByApiFootball,
+  // below) first started re-arming the suspension for the CURRENT
+  // unconfirmed goal — cleared once confirmed or once the hard cap trips.
+  // Lets the hold give up and fall back to plain timer behavior instead of
+  // re-suspending forever if API-Football's own fixture cache ever gets
+  // stuck (see GOAL_HOLD_MAX_MS's comment).
+  _goalHoldSince?: number;
   // Feed health warning (must not be treated as a market suspension)
   _feedWarning?: string;
   // Statpal league ID — used for player markets (football only)
@@ -11199,6 +11206,18 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
 // header comment), unlike football/soccer's per-second matchClock. The UI's
 // actual displayed label is `status` (the raw period string below), not
 // this number.
+// Same disappearance-based finish detection as tennis (see
+// TENNIS_DISAPPEAR_GRACE_MS's comment) and for the same reason: bwin gives
+// basketball no "Finished" signal to fast-path on. This sport was wrongly
+// reusing getFootballLiveDisappearGraceMs (130-180 MINUTES) until an audit
+// (2026-08-10) found its only fast path can never fire here — it requires
+// minute >= 88, but estimateBasketballMinute() below caps out at 46 even in
+// overtime, so every finished basketball match sat in "Ao Vivo" unsettled
+// for up to 3 hours after it actually ended. 15s (same value tennis uses,
+// ~15x BASKETBALL_LIVE_TTL_MS's 1s) still tolerates a run of transient poll
+// misses without treating them as a finish.
+const BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
+
 function estimateBasketballMinute(period: string): number {
   const p = period.toLowerCase();
   if (p === "q1" || p.includes("1st quarter")) return 6;
@@ -11268,6 +11287,36 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
       : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
 
+    // Score-change market suspension (audit finding, 2026-08-10): basketball
+    // had NO suspension mechanism at all despite having real live odds
+    // (override.odds, from bwin) — a bettor could back the moneyline/
+    // handicap/total right after a basket at odds that hadn't repriced yet,
+    // a direct financial exposure to the house. Deliberately simple (one
+    // flat window, not football's per-market delay table — there's no
+    // equivalent tuned-by-risk data for basketball yet): any point change
+    // suspends "result"/"handicap"/"totalGoals" for 8s, which the frontend's
+    // generic marketSuspension["result"] fallback already turns into a
+    // full match-lock banner (home.tsx, SuspensionBanner).
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const pointsScored =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (pointsScored) {
+      const now = Date.now();
+      marketSuspension = {
+        result: now + 8_000,
+        handicap: now + 8_000,
+        totalGoals: now + 8_000,
+      };
+      suspensionReason = "PONTOS!";
+    }
+
     const state: LiveMatchState = {
       id,
       home,
@@ -11284,14 +11333,17 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       markets,
       events: [],
       _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
     };
     liveMatchState.set(id, state);
     results.push(state);
   }
 
-  // Garbage-collect matches that stopped appearing in the feed — same
-  // disappearance-based grace period every non-football PulseScore sport
-  // uses (finalizeStaleLiveMatch also enqueues settlement).
+  // Garbage-collect matches that stopped appearing in the feed — short,
+  // basketball-specific grace (BASKETBALL_DISAPPEAR_GRACE_MS), NOT the
+  // football-tuned getFootballLiveDisappearGraceMs (see that constant's
+  // comment for why reusing it here was a real bug).
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("pulsescore-basketball-")) continue;
     if (currentIds.has(id)) continue;
@@ -11300,7 +11352,7 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
       continue;
     }
-    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+    if (Date.now() - missingSince > BASKETBALL_DISAPPEAR_GRACE_MS) {
       try {
         await finalizeStaleLiveMatch(state);
       } catch (err) {
@@ -11475,6 +11527,16 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
  * "5:1106680", unibetau's are bare numeric like "1028651154" — never
  * collide), kept for consistency with every other sport's id scheme.
  */
+// Same disappearance-based finish detection as tennis/basketball — no
+// "Finished" signal from the feed to fast-path on. Volleyball's `status`
+// is always the synthetic `Set ${n}` string set below, which never matches
+// any of getFootballLiveDisappearGraceMs's football-specific substrings
+// ("2nd half", "overtime", etc.), so that function's fast path could never
+// fire here either — it was silently falling through to the 130-180
+// MINUTE football default, same bug class as basketball's (audit,
+// 2026-08-10). 15s matches tennis/basketball's own short grace.
+const VOLLEYBALL_DISAPPEAR_GRACE_MS = 15_000;
+
 async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreVolleyballLive();
   const currentIds = new Set<string>();
@@ -11528,6 +11590,31 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
       : { home: 1.85, draw: 0, away: 1.85 };
 
+    // Set-win market suspension (audit finding, 2026-08-10): volleyball had
+    // NO suspension mechanism despite the real "Match Result" moneyline
+    // above (override.odds, from unibetau) — a completed set is the single
+    // biggest whole-match win-probability swing in volleyball, and this
+    // module's own comment above already explains override.odds is
+    // genuinely real, not synthetic. Triggered on homeScore/awayScore
+    // (sets won, not points — see vollSets above) rather than every point,
+    // since individual points barely move the whole-match price and
+    // suspending on every one would make live volleyball near-unbettable.
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const setWon =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (setWon) {
+      const now = Date.now();
+      marketSuspension = { result: now + 10_000 };
+      suspensionReason = "FIM DE SET!";
+    }
+
     const state: LiveMatchState = {
       id,
       home,
@@ -11544,14 +11631,18 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       markets,
       events: [],
       _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
       _liveExtra: { vollSets, currentPts },
     };
     liveMatchState.set(id, state);
     results.push(state);
   }
 
-  // Garbage-collect matches that stopped appearing in the feed — same
-  // disappearance-based grace period every other PulseScore sport uses.
+  // Garbage-collect matches that stopped appearing in the feed — short,
+  // volleyball-specific grace (VOLLEYBALL_DISAPPEAR_GRACE_MS), NOT the
+  // football-tuned getFootballLiveDisappearGraceMs (see that constant's
+  // comment for why reusing it here was a real bug).
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("pulsescore-volleyball-")) continue;
     if (currentIds.has(id)) continue;
@@ -11560,7 +11651,7 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
       continue;
     }
-    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+    if (Date.now() - missingSince > VOLLEYBALL_DISAPPEAR_GRACE_MS) {
       try {
         await finalizeStaleLiveMatch(state);
       } catch (err) {
@@ -12147,16 +12238,47 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       : null;
     const goalUnconfirmedByApiFootball =
       apiFootballGoalTotal !== null && apiFootballGoalTotal < homeScore + awayScore;
-    if (goalUnconfirmedByApiFootball) {
+    // Hard cap on how long the hold can keep re-arming itself (audit finding,
+    // 2026-08-10): apiFootball.ts's getApiFootballLiveFixtures serves the
+    // last successful cache on any upstream failure, so if API-Football has
+    // an outage after already caching a pre-goal snapshot, apiFootballGoalTotal
+    // freezes below the real score and this hold would otherwise re-suspend
+    // every tick for the rest of the match — a bettor unable to touch this
+    // match's main markets at all. 90s is generously above any real
+    // confirmation lag seen (API-Football's own cache is ~12s), so tripping
+    // this means confirmation has genuinely stalled, not just a slow tick.
+    const GOAL_HOLD_MAX_MS = 90_000;
+    let goalHoldSince = existing?._goalHoldSince;
+    // Skip the hold entirely when a genuinely NEW, independent incident
+    // (red card / VAR review / missed penalty) fired THIS tick — audit
+    // finding, 2026-08-10: without this guard, the hold ran unconditionally
+    // whenever an earlier goal was still unconfirmed and stomped that fresh
+    // incident's "VAR"/"CARTÃO VERMELHO" reason and longer var-tier window
+    // straight back down to "GOLO!" on the shorter goal-tier window, even
+    // though the two incidents are unrelated. Doesn't affect the original
+    // flicker fix this hold exists for (a routine VAR check bundled with the
+    // SAME goal's own confirmation) — that case turns
+    // goalUnconfirmedByApiFootball false on the very tick the VAR event
+    // shows up, so the hold was never going to fire on that tick anyway.
+    const newIndependentIncident = newRedCard || newVarReview || newPenaltyEvent;
+    if (goalUnconfirmedByApiFootball && !newIndependentIncident) {
       const now = Date.now();
-      marketSuspension = Object.fromEntries(
-        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
-      );
-      if (!suspensionReason || !suspensionReason.startsWith("GOLO")) {
-        suspensionReason = existing?._suspensionReason?.startsWith("GOLO")
-          ? existing._suspensionReason
-          : "GOLO!";
+      if (!goalHoldSince) goalHoldSince = now;
+      if (now - goalHoldSince < GOAL_HOLD_MAX_MS) {
+        marketSuspension = Object.fromEntries(
+          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
+        );
+        if (!suspensionReason || !suspensionReason.startsWith("GOLO")) {
+          suspensionReason = existing?._suspensionReason?.startsWith("GOLO")
+            ? existing._suspensionReason
+            : "GOLO!";
+        }
       }
+      // else: cap tripped — stop re-arming, let whatever's already in
+      // marketSuspension expire normally so the market reopens instead of
+      // staying locked for the rest of the match.
+    } else {
+      goalHoldSince = undefined;
     }
 
     // PulseScore only ever gives us team NAMES (no id field anywhere in its
@@ -12210,6 +12332,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       _apiFootballPenaltyEventCount: penaltyEvents.length,
       marketSuspension,
       _suspensionReason: suspensionReason,
+      _goalHoldSince: goalHoldSince,
       // clockRunning gates whether the frontend extrapolates this clock
       // forward client-side between server updates (see getFootballClockLabel/
       // getDisplayMinute in home.tsx). This used to be tied to isClockStale
@@ -12427,6 +12550,35 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // for the single match a user opens (see GET /live-match/:id below).
     const markets: AdvancedMarkets = makeAdvancedMarketsFromTeams(home, away);
     const id = `pulsescore-tennis-${ev.eventId}`;
+    const existing = liveMatchState.get(id);
+
+    // Set-win market suspension, gated on hasRealOdds only (audit finding,
+    // 2026-08-10): when a real bet365 "To Win" price is active, it has the
+    // same stale-price-after-a-big-event risk as any other bookmaker feed.
+    // When it's NOT active, odds instead come from computeTennisLiveOdds — a
+    // model recomputed from the score on every tick, so there's no separate
+    // feed to go stale relative to; suspending there would only block
+    // betting with no real financial-safety benefit. Triggered on a set
+    // changing hands (the biggest single win-probability swing), not every
+    // point/game, for the same reason volleyball's trigger is set-level.
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const setWon =
+      liveOddsState.hasRealOdds &&
+      !!existing &&
+      (override.homeSetsWon !== existing.homeScore || override.awaySetsWon !== existing.awayScore);
+    if (setWon) {
+      const now = Date.now();
+      marketSuspension = { result: now + 10_000 };
+      suspensionReason = "FIM DE SET!";
+    }
+
     const state: LiveMatchState = {
       id,
       home,
@@ -12442,6 +12594,8 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       odds,
       markets,
       events: [],
+      marketSuspension,
+      _suspensionReason: suspensionReason,
       _liveExtra: {
         sets,
         ...(override.currentPoints ? { currentPoints: override.currentPoints } : {}),
