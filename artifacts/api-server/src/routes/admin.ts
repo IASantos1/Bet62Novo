@@ -2308,13 +2308,17 @@ router.delete("/sportscore-map/:id", adminMiddleware, async (req: AdminRequest, 
 });
 
 // Read-only diagnostic for the PulseScore integration (real bookmaker odds).
-// Football/tennis/basketball/hockey/baseball/volleyball live odds are
-// overlaid onto the live tracker when a confident cross-provider team match
-// is found (see applyPulseScoreFootballOverlay/applyPulseScoreTennisOverlay/
-// applyPulseScoreGenericOverlay in matches.ts). All six now come from a
-// fresh REST fetch each — tennis shares football's bet365 bookmaker (see
-// tennis.ts for why), the rest use their own distinct bookmaker prefixes
-// (genericSportLive.ts).
+// Each sport's live odds are built directly from this same feed by its own
+// buildXLiveFromPulseScore function in matches.ts (buildFootballLive.../
+// buildTennisLive.../buildBasketballLive.../buildHockeyLive.../
+// buildBaseballLive.../buildVolleyballLive...) — there is no separate
+// "overlay" step. All six come from a fresh REST fetch each tick. Bookmaker
+// pin per sport (confirmed against real samples, not a fixed convention —
+// verify against the actual *.ts extraction file before relying on this):
+// tennis=bet365, football/basketball/hockey=bwin, volleyball=unibetau.
+// Hockey and baseball currently have no LIVE builder wired into the public
+// feed (prematch/upcoming only) — this debug route still fetches their raw
+// live data for diagnostic purposes.
 router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res) => {
   if (!CONFIG.PULSESCORE_API_KEY) {
     res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
@@ -2381,8 +2385,8 @@ router.get("/pulsescore-live-check", adminMiddleware, async (_req: AdminRequest,
     res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
     return;
   }
-  const probe = async (sport: string) => {
-    const url = pulseScoreRestUrl(`/live-events?sport=${sport}&limit=5`);
+  const probe = async (sport: string, bookmaker: string) => {
+    const url = pulseScoreRestUrl(`/live-events?sport=${sport}&limit=5`, bookmaker);
     const startedAt = Date.now();
     try {
       const resp = await fetch(url, {
@@ -2407,7 +2411,17 @@ router.get("/pulsescore-live-check", adminMiddleware, async (_req: AdminRequest,
       };
     }
   };
-  const [football, tennis] = await Promise.all([probe("soccer"), probe("tennis")]);
+  // Explicit bookmaker per sport, matching each sport's real current live
+  // pipeline (bwin for football since the 2026-08-08 switch, bet365 for
+  // tennis — see football.ts/tennis.ts) — this used to omit the bookmaker
+  // and silently fall back to CONFIG.PULSESCORE_BOOKMAKER's "bet365"
+  // default for both probes, which meant football's diagnostic result no
+  // longer reflected the bookmaker football actually runs on (audit
+  // finding, 2026-08-10).
+  const [football, tennis] = await Promise.all([
+    probe("soccer", "bwin"),
+    probe("tennis", "bet365"),
+  ]);
   res.json({ football, tennis, checkedAt: new Date().toISOString() });
 });
 
