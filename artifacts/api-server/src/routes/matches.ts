@@ -423,6 +423,23 @@ export type LiveMatchState = {
   // tick-to-tick comparison reasoning, needed to catch a MISSED penalty
   // (goalScored never fires for one, since the score doesn't change).
   _apiFootballPenaltyEventCount?: number;
+  // True once apiFixture has been successfully cross-referenced at least
+  // ONCE for this match — bug report 2026-08-11 ("todos os jogos ficando
+  // suspensos direto"): _apiFootballVarEventCount/redCardsHome/Away/
+  // _apiFootballPenaltyEventCount all default to 0 the very first time
+  // they're ever read, indistinguishable from "genuinely 0 incidents so
+  // far". A match commonly goes several minutes (or longer — see the
+  // apifootball-usage admin diagnostic) before its FIRST successful
+  // apiFixture cross-reference; if a red card/VAR check/missed penalty
+  // already happened in that window, the fixture's real (nonzero) count
+  // compared against that untouched "0" baseline read as a brand NEW
+  // incident on the very first matched tick — firing an immediate false
+  // suspension for something that had already happened, for essentially
+  // every match sooner or later. Gates newRedCard/newVarReview/
+  // newPenaltyEvent below: on the first-ever matched tick, the real counts
+  // still get recorded (so future genuine increases compare correctly),
+  // just without treating that initial jump itself as a new incident.
+  _apiFootballEverMatched?: boolean;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -12203,8 +12220,14 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       : (existing?.redCardsAway ?? 0);
     const prevRedCardTotal = (existing?.redCardsHome ?? 0) + (existing?.redCardsAway ?? 0);
     const prevVarEventCount = existing?._apiFootballVarEventCount ?? 0;
-    const newRedCard = apiFixture && redCardsHome + redCardsAway > prevRedCardTotal;
-    const newVarReview = apiFixture && varEventCount > prevVarEventCount;
+    // wasEverMatchedBefore: see _apiFootballEverMatched's own comment on the
+    // LiveMatchState type for the bug this guards against (a fixture's
+    // pre-existing incident count read as "new" on its first-ever match).
+    const wasEverMatchedBefore = !!existing?._apiFootballEverMatched;
+    const newRedCard =
+      apiFixture && wasEverMatchedBefore && redCardsHome + redCardsAway > prevRedCardTotal;
+    const newVarReview =
+      apiFixture && wasEverMatchedBefore && varEventCount > prevVarEventCount;
     // Penalty (scored OR missed) — see fixturePenaltyEvents's own comment for
     // why a missed one needed its own trigger (goalScored never covers it).
     // Same hold-last-known-count fix as varEventCount above — this had the
@@ -12214,7 +12237,8 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       ? fixturePenaltyEvents(apiFixture).length
       : (existing?._apiFootballPenaltyEventCount ?? 0);
     const prevPenaltyEventCount = existing?._apiFootballPenaltyEventCount ?? 0;
-    const newPenaltyEvent = apiFixture && penaltyEventCount > prevPenaltyEventCount;
+    const newPenaltyEvent =
+      apiFixture && wasEverMatchedBefore && penaltyEventCount > prevPenaltyEventCount;
     // Real match events (goals/cards/subs, and VAR if present) for the live
     // event timeline — LiveMatchState.events already existed with this exact
     // shape (see its own comment) but had no data source until now.
@@ -12639,6 +12663,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         : undefined,
       _apiFootballVarEventCount: varEventCount,
       _apiFootballPenaltyEventCount: penaltyEventCount,
+      _apiFootballEverMatched: wasEverMatchedBefore || !!apiFixture,
       marketSuspension,
       _suspensionReason: suspensionReason,
       _goalHoldSince: goalHoldSince,
