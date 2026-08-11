@@ -1,5 +1,5 @@
 import { boolean, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
-import { competitionsTable } from "./competitions";
+import { competitionsTable } from "./competitions.js";
 
 export const eventAdminOverridesTable = pgTable("event_admin_overrides", {
   id: serial("id").primaryKey(),

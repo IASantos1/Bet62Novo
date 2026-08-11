@@ -1,5 +1,5 @@
 import { integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
-import { competitionsTable } from "./competitions";
+import { competitionsTable } from "./competitions.js";
 
 export const eventRuntimeStatesTable = pgTable("event_runtime_states", {
   id: serial("id").primaryKey(),

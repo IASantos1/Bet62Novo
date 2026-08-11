@@ -1,4 +1,4 @@
-import { pool } from "./index";
+import { pool } from "./index.js";
 
 /**
  * Initialises the database schema on first deployment.

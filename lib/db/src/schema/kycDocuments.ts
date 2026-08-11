@@ -1,5 +1,5 @@
 import { pgTable, text, serial, timestamp, integer, customType } from "drizzle-orm/pg-core";
-import { usersTable } from "./users";
+import { usersTable } from "./users.js";
 
 const bytea = customType<{ data: Buffer | null; driverData: Buffer | null }>({
   dataType() {

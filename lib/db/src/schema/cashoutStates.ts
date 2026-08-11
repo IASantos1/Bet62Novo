@@ -1,5 +1,5 @@
 import { pgTable, integer, timestamp, text } from "drizzle-orm/pg-core";
-import { betsTable } from "./bets";
+import { betsTable } from "./bets.js";
 
 export const cashoutStatesTable = pgTable("cashout_states", {
   betId: integer("bet_id").primaryKey().references(() => betsTable.id, { onDelete: "cascade" }),
