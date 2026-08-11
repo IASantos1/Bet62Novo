@@ -33,12 +33,19 @@ export interface ExecutionResult {
 //    betting OFF (event_admin_overrides.forceSuspend=true, the same lever
 //    routes/adminPro.ts already exposes to a human admin) — never
 //    unsuspends, never touches odds/margin/RTP.
-// Both entries are double-gated below: the actionType AND the agentRole
+//  - risk/suspend_event: same lever, granted to the Risk agent for a
+//    different trigger — a single event with clearly dangerous exposure
+//    concentration in pending bets. Reuses the exact same safe-direction
+//    action as odds/suspend_event (see roles/risk.ts) rather than a new
+//    per-match stake-limit mechanism, which doesn't exist in this schema
+//    (only a per-competition one, a much bigger blast radius).
+// All entries are double-gated below: the actionType AND the agentRole
 // must match together, so a bug in an unrelated role can never fall into
 // this path, and every other agent's proposals keep requiring approval.
 const AUTO_EXECUTE_PAIRS: ReadonlySet<string> = new Set([
   "ticketsettlement:finalize_bet_settlement",
   "odds:suspend_event",
+  "risk:suspend_event",
 ]);
 
 export function isAutoExecuteEligible(agentRole: string, actionType: string): boolean {
