@@ -472,6 +472,54 @@ function StatBar({ label, home, away, homePct }: { label: string; home: string |
   );
 }
 
+// Reference-image layout: a 2-column grid of stat cards, each with an
+// icon, home/away values either side of the label, and a single
+// continuous bar split blue/red at the real home-vs-away proportion
+// (unlike StatBar's two independent half-width bars above).
+type StatCardItem = { icon: string; label: string; home: number | string; away: number | string };
+
+function StatCompareCard({ icon, label, home, away }: StatCardItem) {
+  const hNum = typeof home === "number" ? home : parseFloat(String(home)) || 0;
+  const aNum = typeof away === "number" ? away : parseFloat(String(away)) || 0;
+  const total = hNum + aNum;
+  const homePct = total > 0 ? (hNum / total) * 100 : 50;
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-base leading-none flex-shrink-0">{icon}</span>
+        <span className="text-sm font-black text-blue-400 tabular-nums flex-shrink-0">{home}</span>
+        <span className="flex-1 text-center text-[9px] font-bold text-zinc-400 uppercase tracking-wide truncate">{label}</span>
+        <span className="text-sm font-black text-red-400 tabular-nums flex-shrink-0">{away}</span>
+      </div>
+      <div className="mt-2 h-1.5 rounded-full overflow-hidden bg-zinc-800 flex">
+        <motion.div
+          className="h-full bg-blue-500"
+          initial={{ width: 0 }}
+          animate={{ width: `${homePct}%` }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        />
+        <motion.div
+          className="h-full bg-red-500"
+          initial={{ width: 0 }}
+          animate={{ width: `${100 - homePct}%` }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StatCardGrid({ items }: { items: StatCardItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {items.map((it) => (
+        <StatCompareCard key={it.label} {...it} />
+      ))}
+    </div>
+  );
+}
+
 function FormBubble({ f }: { f: FormEntry }) {
   const colorMap: Record<string, string> = {
     W: "bg-emerald-500 text-white",
@@ -1054,11 +1102,10 @@ export default function MatchStatsPanel({
                 const aShotsBlk = liveExtra.shotsBlockedAway;
                 const hWood     = liveExtra.woodworkHome;
                 const aWood     = liveExtra.woodworkAway;
-
-                const ratioPct = (h?: number, a?: number) => {
-                  const t = (h ?? 0) + (a ?? 0);
-                  return t > 0 ? Math.round(((h ?? 0) / t) * 100) : 50;
-                };
+                const hPasses   = liveExtra.passesHome;
+                const aPasses   = liveExtra.passesAway;
+                const hPassAcc  = liveExtra.passAccuracyHome;
+                const aPassAcc  = liveExtra.passAccuracyAway;
 
                 // Gate on ANY per-team stat the provider might send — not just shots/attacks.
                 // Previously this only checked shots/attacks/fouls, so a match where the feed
@@ -1080,24 +1127,24 @@ export default function MatchStatsPanel({
                   { icon: "🧤", label: "Defesas", h: hSaves,   a: aSaves   },
                 ];
 
-                const atacanteRows = [
-                  { key: "goals",     label: "Golos",                h: hGoals,    a: aGoals    },
-                  { key: "shots",     label: "Total de Remates",     h: hShots,    a: aShots    },
-                  { key: "shotsOn",   label: "Remates à Baliza",     h: hShotsOn,  a: aShotsOn  },
-                  { key: "shotsOff",  label: "Remates para Fora",    h: hShotsOff, a: aShotsOff },
-                  { key: "shotsBlk",  label: "Remates Bloqueados",   h: hShotsBlk, a: aShotsBlk },
-                  { key: "woodwork",  label: "Traves",               h: hWood,     a: aWood     },
-                  { key: "corners",   label: "Cantos no Jogo",       h: hCorners,  a: aCorners  },
-                  { key: "offs",      label: "Foras de Jogo",        h: hOff,      a: aOff      },
-                  { key: "attacks",   label: "Ataques",              h: hAttacks,  a: aAttacks  },
-                  { key: "danger",    label: "Ataques Perigosos",    h: hDanger,   a: aDanger   },
-                ].filter(r => r.h !== undefined || r.a !== undefined);
-
-                const defesaRows = [
-                  { key: "fouls",  label: "Faltas",             h: hFouls,   a: aFouls   },
-                  { key: "yellow", label: "Cartões Amarelos",   h: hYellow,  a: aYellow  },
-                  { key: "red",    label: "Cartões Vermelhos",  h: hRed,     a: aRed     },
-                ].filter(r => r.h !== undefined || r.a !== undefined);
+                // Reference-image layout & order: 2-column grid of stat cards.
+                const gridStatsRaw: Array<{ icon: string; label: string; h: number | string | undefined; a: number | string | undefined }> = [
+                  { icon: "🥅", label: "Remates à Baliza",   h: hShotsOn,  a: aShotsOn  },
+                  { icon: "💨", label: "Remates Fora",       h: hShotsOff, a: aShotsOff },
+                  { icon: "🛡️", label: "Remates Bloqueados", h: hShotsBlk, a: aShotsBlk },
+                  { icon: "🧤", label: "Defesas",            h: hSaves,    a: aSaves    },
+                  { icon: "⛳", label: "Cantos no Jogo",      h: hCorners,  a: aCorners  },
+                  { icon: "🚩", label: "Foras de Jogo",       h: hOff,      a: aOff      },
+                  { icon: "🟨", label: "Cartões Amarelos",    h: hYellow,   a: aYellow   },
+                  { icon: "🟥", label: "Cartões Vermelhos",   h: hRed,      a: aRed      },
+                  { icon: "⚠️", label: "Faltas",              h: hFouls,    a: aFouls    },
+                  { icon: "⚽", label: "Posse de Bola",       h: hPoss !== undefined ? `${Math.round(hPoss)}%` : undefined, a: aPoss !== undefined ? `${Math.round(aPoss)}%` : undefined },
+                  { icon: "🔁", label: "Passes Totais",       h: hPasses,   a: aPasses   },
+                  { icon: "🎯", label: "Precisão de Passe",   h: hPassAcc !== undefined ? `${Math.round(hPassAcc)}%` : undefined, a: aPassAcc !== undefined ? `${Math.round(aPassAcc)}%` : undefined },
+                ];
+                const gridStats: StatCardItem[] = gridStatsRaw
+                  .filter((r) => r.h !== undefined || r.a !== undefined)
+                  .map((r) => ({ icon: r.icon, label: r.label, home: r.h ?? "—", away: r.a ?? "—" }));
 
                 const showGauges = (hAttacks !== undefined && aAttacks !== undefined) ||
                                    (hShotsOn !== undefined && aShotsOn !== undefined) ||
@@ -1136,62 +1183,20 @@ export default function MatchStatsPanel({
                       </div>
                     )}
 
-                    {/* Possession bar */}
-                    {hPoss !== undefined && aPoss !== undefined && (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 px-4 py-3">
-                        <StatBar
-                          label="Posse de Bola"
-                          home={`${Math.round(hPoss)}%`}
-                          away={`${Math.round(aPoss)}%`}
-                          homePct={Math.round(hPoss)}
-                        />
-                      </div>
-                    )}
-
-                    {/* Atacante section */}
-                    {atacanteRows.length > 0 && (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
-                          <span className="text-[11px] font-black text-zinc-200 uppercase tracking-widest">Atacante</span>
-                          <div className="flex items-center gap-2">
+                    {/* Detailed stat-card grid — reference-image layout */}
+                    {gridStats.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between px-1 mb-2">
+                          <div className="flex items-center gap-1.5">
                             <div className="w-2 h-2 rounded-full bg-blue-500" />
-                            <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[70px]">{homeTeam}</span>
-                            <span className="text-[9px] text-zinc-600">vs</span>
-                            <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[70px]">{awayTeam}</span>
+                            <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[100px]">{homeTeam}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[100px]">{awayTeam}</span>
                             <div className="w-2 h-2 rounded-full bg-red-500" />
                           </div>
                         </div>
-                        <div className="px-4 py-3 space-y-3.5">
-                          {atacanteRows.map(row => (
-                            <StatBar
-                              key={row.key}
-                              label={row.label}
-                              home={row.h ?? "—"}
-                              away={row.a ?? "—"}
-                              homePct={ratioPct(row.h, row.a)}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Defesa section */}
-                    {defesaRows.length > 0 && (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-                        <div className="px-4 py-2.5 border-b border-zinc-800">
-                          <span className="text-[11px] font-black text-zinc-200 uppercase tracking-widest">Defesa</span>
-                        </div>
-                        <div className="px-4 py-3 space-y-3.5">
-                          {defesaRows.map(row => (
-                            <StatBar
-                              key={row.key}
-                              label={row.label}
-                              home={row.h ?? "—"}
-                              away={row.a ?? "—"}
-                              homePct={ratioPct(row.h, row.a)}
-                            />
-                          ))}
-                        </div>
+                        <StatCardGrid items={gridStats} />
                       </div>
                     )}
 
