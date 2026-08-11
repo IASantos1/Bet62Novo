@@ -21,6 +21,15 @@ export type SettleBetInput = {
   trigger: string;
   selections: any[];
   cycleId: string;
+  // Skips deriveSettlementDecision entirely and voids+refunds the bet
+  // outright — used only by the Ticket Settlement Agent
+  // (lib/aiAgents/roles/ticketSettlement.ts) for bets stuck "pending" long
+  // after their match, where the deterministic engine can never produce a
+  // won/lost outcome (no result data will ever arrive: abandoned/cancelled
+  // event). Deliberately can only ever result in a stake refund, never a
+  // win payout — an AI misjudgement here costs at most the house's own
+  // margin on that bet, never someone else's money.
+  forceVoidReason?: string;
 };
 
 type SettleBetTx = unknown;
@@ -244,13 +253,25 @@ export function deriveSettlementDecision(
   };
 }
 
+function buildForcedVoidDecision(bet: any, selections: SelectionRecord[], reason: string): SettlementDecision {
+  return {
+    status: "voided",
+    outcome: "void",
+    updatedSelections: selections,
+    payout: formatCurrency(Number.parseFloat(String(bet.stake ?? "0"))),
+    message: `force-voided by ticket settlement agent: ${reason}`,
+  };
+}
+
 export async function settleBet(
   input: SettleBetInput,
   deps: SettleBetDeps = defaultSettleBetDeps,
 ) {
-  const { bet, trigger, selections } = input;
+  const { bet, trigger, selections, forceVoidReason } = input;
   const normalizedSelections = normalizeSelections(selections);
-  const decision = deriveSettlementDecision(bet, normalizedSelections);
+  const decision = forceVoidReason
+    ? buildForcedVoidDecision(bet, normalizedSelections, forceVoidReason)
+    : deriveSettlementDecision(bet, normalizedSelections);
 
   if (decision.status === "pending") {
     deps.logger.info(
