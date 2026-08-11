@@ -2450,6 +2450,132 @@ function makeOddsFromTeams(
   return { home: h!, draw: d!, away: a! };
 }
 
+// ─── Football extra-time / penalty-shootout synthetic markets ─────────────
+// AdvancedMarkets.etExtra/penExtra (below, in this file's type section) and
+// the frontend's full "Prorrogação"/"Penáltis" UI (home.tsx's showET/
+// showPen) both already existed, but nothing ever populated either field —
+// confirmed via a full-file search, 2026-08-11 — so a knockout match tied
+// after 90' had no ET markets to show even on ticks where it correctly
+// stayed live (see buildFootballLiveFromPulseScore's ET-detection changes
+// for the other half of this bug: it usually didn't even stay live that
+// long). Reuses soccerPoissonModel — extra time is a shorter window for the
+// same two teams' scoring rates, not a different game needing its own model.
+function computeFootballEtExtra(
+  homeName: string,
+  awayName: string,
+): NonNullable<AdvancedMarkets["etExtra"]> {
+  const m = soccerPoissonModel(homeName, awayName);
+  // 30 real minutes vs. a full match's ~97 effective playing minutes (90 +
+  // typical stoppage time) — scales the full-match goal expectancy down
+  // proportionally rather than inventing a separate ET-specific rate with
+  // no real data to calibrate it against.
+  const scale = 30 / 97;
+  const lambdaHome = mc(m.lambdaHome * scale, 0.05, 1.6);
+  const lambdaAway = mc(m.lambdaAway * scale, 0.05, 1.6);
+  const maxG = 4;
+  const pH = poissonPmf(lambdaHome, maxG);
+  const pA = poissonPmf(lambdaAway, maxG);
+  let pHW = 0,
+    pD = 0,
+    pAW = 0;
+  const scoreProbs: Record<string, number> = {};
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = pH[i]! * pA[j]!;
+      if (i > j) pHW += p;
+      else if (i < j) pAW += p;
+      else pD += p;
+      const label = i === maxG || j === maxG ? "outro" : `${i}-${j}`;
+      scoreProbs[label] = (scoreProbs[label] ?? 0) + p;
+    }
+  }
+  const s = pHW + pD + pAW;
+  const pHomeEt = s > 0 ? pHW / s : 0.4;
+  const pDrawEt = s > 0 ? pD / s : 0.2;
+  const pAwayEt = s > 0 ? pAW / s : 0.4;
+
+  const [etrH, etrD, etrA] = probsToDecimalOdds([pHomeEt, pDrawEt, pAwayEt], 1.08);
+  // Tie-winner (who advances) — a draw after ET goes to penalties, a
+  // genuine coin-flip this model has no real signal to bias beyond overall
+  // team strength, so the draw probability is split evenly between both
+  // sides rather than modeled separately.
+  const pHomeAdvance = mc(pHomeEt + pDrawEt / 2, 0.05, 0.95);
+  const [twH, twA] = probsToDecimalOdds([pHomeAdvance, 1 - pHomeAdvance], 1.05);
+
+  const totalLambda = lambdaHome + lambdaAway;
+  const ouLine = (line: number): number[] => {
+    const pUnder = poissonCdf(totalLambda, line);
+    return probsToDecimalOdds([mc(1 - pUnder, 0.02, 0.98), mc(pUnder, 0.02, 0.98)], 1.07);
+  };
+  const [o05, u05] = ouLine(0);
+  const [o15, u15] = ouLine(1);
+  const [o25, u25] = ouLine(2);
+  const [o35, u35] = ouLine(3);
+  const [o45, u45] = ouLine(4);
+
+  const pNextHome = mc(lambdaHome / Math.max(0.001, totalLambda), 0.05, 0.95);
+  const [ngH, ngA] = probsToDecimalOdds([pNextHome, 1 - pNextHome], 1.06);
+
+  const exactScore: Record<string, number> = {};
+  for (const [label, p] of Object.entries(scoreProbs)) {
+    if (p <= 0) continue;
+    exactScore[label] = mr(mc(1 / Math.max(1e-9, p * 1.15), 1.01, 100));
+  }
+
+  // Corners/cards — no reusable per-team ET-specific rate model exists
+  // elsewhere in this file, so these are flat, conservative estimates
+  // scaled to ET's shorter window rather than reusing full-match lines
+  // unscaled (which would overstate both markets for a 30-minute period).
+  const ouFromMean = (line: number, mean: number): number[] => {
+    const pUnder = poissonCdf(mean, line);
+    return probsToDecimalOdds([mc(1 - pUnder, 0.03, 0.97), mc(pUnder, 0.03, 0.97)], 1.08);
+  };
+  const [co15, cu15] = ouFromMean(1, 2.6);
+  const [co25, cu25] = ouFromMean(2, 2.6);
+  const [co35, cu35] = ouFromMean(3, 2.6);
+  const [cdo05, cdu05] = ouFromMean(0, 1.1);
+  const [cdo15, cdu15] = ouFromMean(1, 1.1);
+  const [cdo25, cdu25] = ouFromMean(2, 1.1);
+
+  return {
+    tieWinner: { home: twH!, away: twA! },
+    etResult: { home: etrH!, draw: etrD!, away: etrA! },
+    totalGoals: {
+      o05: o05!, u05: u05!,
+      o15: o15!, u15: u15!,
+      o25: o25!, u25: u25!,
+      o35: o35!, u35: u35!,
+      o45: o45!, u45: u45!,
+    },
+    nextGoal: { home: ngH!, away: ngA! },
+    // All-zero (hidden by the frontend) — API-Football's fixture status
+    // ("ET") doesn't distinguish ET's 1st/2nd half, and this codebase has no
+    // other signal for it either, matching AdvancedMarkets.etExtra's own
+    // documented convention for feeds that don't carry this split.
+    firstHalfResult: { home: 0, draw: 0, away: 0 },
+    secondHalfResult: { home: 0, draw: 0, away: 0 },
+    corners: { o15: co15!, u15: cu15!, o25: co25!, u25: cu25!, o35: co35!, u35: cu35! },
+    cards: { o05: cdo05!, u05: cdu05!, o15: cdo15!, u15: cdu15!, o25: cdo25!, u25: cdu25! },
+    exactScore,
+  };
+}
+
+// Penalty-shootout winner — deliberately compressed close to 50/50 (unlike
+// etExtra's full-strength Poisson lean): open-play scoring-rate differences
+// between two teams carry only weak signal for who wins a shootout, so the
+// same model's lean is kept but heavily dampened rather than carried over
+// at full magnitude.
+function computeFootballPenExtra(
+  homeName: string,
+  awayName: string,
+): NonNullable<AdvancedMarkets["penExtra"]> {
+  const m = soccerPoissonModel(homeName, awayName);
+  const pHomeRaw = m.pHomeWin + m.pDraw / 2;
+  const pHome = mc(0.5 + (pHomeRaw - 0.5) * 0.3, 0.42, 0.58);
+  const [h, a] = probsToDecimalOdds([pHome, 1 - pHome], 1.05);
+  return { winner: { home: h!, away: a! } };
+}
+
 function makeAdvancedMarketsFromTeams(
   homeName: string,
   awayName: string,
@@ -4515,6 +4641,63 @@ function computeVolleyballExtras(
       away: overrides?.ptsHcapA ?? s1a!,
     },
   };
+}
+
+// Estimate of P(home wins the CURRENT set), used only when unibetau hasn't
+// priced a real "Match Odds" market for a live volleyball match (see
+// buildVolleyballLiveFromPulseScore below and volleyball.ts's header for why
+// that's the common case, not the exception, right now). Two components:
+// a Beta(1,1)-smoothed read of the sets record so far (mean-reverts to 0.5
+// with no sets played, shifts toward whoever's leading as sets accumulate),
+// blended with the CURRENT set's live point differential via a logistic
+// curve (momentum inside the set in progress). Deliberately conservative —
+// clamped to [0.12, 0.88] — since this feeds real-money odds with no
+// bookmaker price backing it at all, unlike computeTennisLiveOdds's fallback
+// which at least anchors to a real prematch bwin/bet365 price.
+function estimateVolleyballSetWinProb(
+  homeSetsWon: number,
+  awaySetsWon: number,
+  homePts: number,
+  awayPts: number,
+): number {
+  const recordProb = (homeSetsWon + 1) / (homeSetsWon + awaySetsWon + 2);
+  const ptsDiff = homePts - awayPts;
+  const pointProb = 1 / (1 + Math.exp(-ptsDiff / 6));
+  const blended = recordProb * 0.65 + pointProb * 0.35;
+  return mc(blended, 0.12, 0.88);
+}
+
+// P(home wins the MATCH) given a fixed per-set win probability `sp` and the
+// sets already won by each side, via the standard race-to-N recursive
+// formula (best-of-5: first to 3 sets). f(h, a) = probability home wins
+// from a state where home still needs `h` more set wins and away needs `a`
+// more — f(0, a) = 1 (home already there), f(h, 0) = 0 (away already
+// there), f(h, a) = sp*f(h-1, a) + (1-sp)*f(h, a-1) otherwise. `sp` is
+// treated as constant across the remaining sets — a simplification (real
+// teams' per-set edge isn't perfectly stationary), but the same one
+// computeVolleyballExtras above already makes for its own exact-score
+// distribution, so this stays consistent with it.
+function volleyballMatchWinProbFromSets(
+  sp: number,
+  homeSetsWon: number,
+  awaySetsWon: number,
+): number {
+  const h = Math.max(0, 3 - homeSetsWon);
+  const a = Math.max(0, 3 - awaySetsWon);
+  if (h === 0) return 1;
+  if (a === 0) return 0;
+  const memo = new Map<string, number>();
+  function f(hh: number, aa: number): number {
+    if (hh === 0) return 1;
+    if (aa === 0) return 0;
+    const key = `${hh}:${aa}`;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
+    const result = sp * f(hh - 1, aa) + (1 - sp) * f(hh, aa - 1);
+    memo.set(key, result);
+    return result;
+  }
+  return f(h, a);
 }
 
 // ─── Sport-specific market builders for live matches ─────────────────────────
@@ -11565,16 +11748,6 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const minute = ev.matchClock?.minute ?? existing?.minute ?? 0;
 
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
-      set1: { home: 0, away: 0 },
-      set2: { home: 0, away: 0 },
-      set3: { home: 0, away: 0 },
-      exactScore: { s30: 0, s31: 0, s32: 0, s03: 0, s13: 0, s23: 0 },
-      setHandicap: { home: 0, away: 0 },
-      pointsLines: [],
-      handicapPoints: { line: 0, home: 0, away: 0 },
-    };
-    const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     // Real moneyline only — unibetau's "Match Odds" market (canonicalMarket
     // MATCH_RESULT, period FULL_TIME) is unambiguously the whole-match
     // winner, confirmed real (2026-08-09: Argentina 3.20 / Brazil 1.32,
@@ -11584,11 +11757,45 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // extraction either targets a different period (set1) or a differently-
     // formatted selection name unibetau doesn't use ("3-1" vs the "3:1"
     // extractExactScore requires) — those naturally come back empty rather
-    // than wrong, but stay unused here regardless, only .odds is applied.
+    // than wrong, so they still fall through to the computed model below.
     const override = extractVolleyballOverride(ev);
+    // sp/pHomeMatch: the score-aware synthetic model this used to be missing
+    // entirely — a flat, unmoving `1.85/1.85` regardless of team or score
+    // (bug report 2026-08-11: a match already 2 sets to 0 still showed even
+    // odds on both sides, an obvious real-money exploit for anyone watching
+    // the score). unibetau doesn't price Match Odds for every league (most
+    // notably lower-tier/international-friendly fixtures — exactly the case
+    // reported), so this fallback is the COMMON case here, not a rare edge,
+    // unlike tennis's equivalent fallback which only kicks in when bet365's
+    // real live price is briefly missing for one tick. Reuses
+    // computeVolleyballExtras (built 2026-08-09, never wired to a real
+    // caller until now — see volleyball.ts's header) for the full set of
+    // sub-markets instead of leaving them zeroed, and derives its single
+    // `pSetHomeWin` input from the actual sets record + current in-set point
+    // differential via estimateVolleyballSetWinProb, rather than treating
+    // every match as a coin flip regardless of the score on screen.
+    const sp = estimateVolleyballSetWinProb(homeScore, awayScore, currentPts[0], currentPts[1]);
+    const computedExtras = computeVolleyballExtras(sp);
+    const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
+      set1: override.set1 ?? computedExtras.set1,
+      set2: computedExtras.set2,
+      set3: computedExtras.set3,
+      exactScore: override.exactScore ?? computedExtras.exactScore,
+      setHandicap: computedExtras.setHandicap,
+      pointsLines: override.pointsLines ?? computedExtras.pointsLines,
+      handicapPoints: computedExtras.handicapPoints,
+    };
+    const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
-      : { home: 1.85, draw: 0, away: 1.85 };
+      : (() => {
+          const pHomeMatch = volleyballMatchWinProbFromSets(sp, homeScore, awayScore);
+          const [h, a] = probsToDecimalOdds(
+            [mc(pHomeMatch, 0.02, 0.98), mc(1 - pHomeMatch, 0.02, 0.98)],
+            1.08,
+          );
+          return { home: h!, draw: 0, away: a! };
+        })();
 
     // Set-win market suspension (audit finding, 2026-08-10): volleyball had
     // NO suspension mechanism despite the real "Match Result" moneyline
@@ -12073,12 +12280,53 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // window below — that heuristic stays as the only signal for bet365
     // events (no matchClock) and as a safety net for any other terminal
     // bwin period value this hasn't seen yet.
-    const isFulltimeFreeze =
+    const bwinHeuristicFulltimeFreeze =
       pulseScoreEventClockFinished(ev) ||
       (isClockStale &&
         !isHalftimeFreeze &&
         clockSec >= FULLTIME_MARK_SEC - FREEZE_TOLERANCE_SEC);
-    const liveStatus = isHalftimeFreeze ? "HT" : isFulltimeFreeze ? "FT" : "LIVE";
+    // API-Football cross-reference for extra time / penalties (bug report
+    // 2026-08-11: "prorrogação não está a entrar" — a knockout match tied
+    // after 90' never transitioned into extra time at all). The bwin-clock
+    // heuristic above has no concept of extra time — bwin's own
+    // matchClock.period has never been confirmed to report anything besides
+    // "2H"/"Finished" (see client.ts's PulseScoreEvent.matchClock comment)
+    // — and a tied knockout match's clock genuinely DOES freeze around
+    // 90:00 for the real few-minute break before extra time kicks off,
+    // which is exactly what the clock-stale branch above was built to
+    // detect as "match over". Left unchecked, that fired (and immediately
+    // settled + deleted the match — see the finalize block below) during
+    // that pre-ET break, before extra time ever had a chance to start.
+    // API-Football's fixture status codes are a documented, stable contract
+    // (1H/HT/2H/ET/BT/P/FT/AET/PEN/...) that DOES distinguish extra time
+    // and penalties from a genuine finish — when a fixture is cross-
+    // referenced (apiFixture, the same one already used for VAR/red-card/
+    // stats above), it's authoritative over the bwin-only heuristic for
+    // this decision: never let a stuck bwin clock finalize a match
+    // API-Football itself still reports as live in any form, extra time or
+    // penalties included. Only when there's NO cross-reference at all does
+    // this fall back to the bwin-only heuristic, same residual risk (no
+    // better signal available) the disappearance-based GC loop below
+    // already exists to catch eventually.
+    const API_FOOTBALL_FINISHED_STATUSES = new Set([
+      "FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO",
+    ]);
+    const API_FOOTBALL_ET_STATUSES = new Set(["ET", "BT", "P"]);
+    const apiFootballConfirmsFinished =
+      !!apiFixture && API_FOOTBALL_FINISHED_STATUSES.has(apiFixture.statusShort);
+    const apiFootballConfirmsEt =
+      !!apiFixture && API_FOOTBALL_ET_STATUSES.has(apiFixture.statusShort);
+    const apiFootballConfirmsPen = !!apiFixture && apiFixture.statusShort === "P";
+    const isFulltimeFreeze = apiFixture
+      ? apiFootballConfirmsFinished
+      : bwinHeuristicFulltimeFreeze;
+    const liveStatus = isHalftimeFreeze
+      ? "HT"
+      : apiFootballConfirmsEt
+        ? "ET"
+        : isFulltimeFreeze
+          ? "FT"
+          : "LIVE";
     // Half-time score, captured the moment HT is first confirmed and carried
     // forward unchanged for the rest of the match — settlement.ts's
     // liveDefinitiveOutcomeForSel() already knows how to settle ht-home/
@@ -12105,6 +12353,14 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // live-looking price for an already-decided outcome.
     const settledMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, liveStatus);
     const markets = filterFootballMarketsByTier(settledMarkets, tier);
+    // Populate the Prorrogação/Penáltis markets the moment API-Football
+    // confirms the match is actually in that phase (apiFootballConfirmsEt/
+    // Pen above) — computeFootballEtExtra/computeFootballPenExtra's own
+    // header explains why nothing populated these before now.
+    if (apiFootballConfirmsEt) {
+      markets.etExtra = computeFootballEtExtra(home, away);
+      if (apiFootballConfirmsPen) markets.penExtra = computeFootballPenExtra(home, away);
+    }
     // Real sample (2026-08-08, eventId 199102620): a match that had a full
     // slate of active markets 5 minutes earlier came back with just one dead
     // market (isActive:false, odds:0 throughout) while its clock (TM/TS) sat
@@ -12322,7 +12578,15 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore,
       awayScore,
-      minute: pulseScoreEventMinute(ev),
+      // During extra time bwin's own clock has never been confirmed to keep
+      // advancing past 90' (see the ET-detection comment above) — prefer
+      // API-Football's `elapsed` whenever it reads further along than
+      // bwin's, same "never regress a monotonic value, prefer whichever
+      // reading is more advanced" rule this codebase already applies to
+      // WS/REST merges elsewhere (footballWs.ts et al.), so a frozen bwin
+      // reading can't hold the displayed minute back once API-Football
+      // confirms play has moved on.
+      minute: Math.max(pulseScoreEventMinute(ev), apiFixture?.elapsed ?? 0),
       status: liveStatus,
       hasRealOdds: hasRealOddsNow,
       odds,
@@ -12406,8 +12670,12 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // below) elapses — user-reported 2026-08-09: finished matches lingered
     // in the live section far too long. isFulltimeFreeze is trustworthy
     // enough to freeze the display on already (see its own comment above —
-    // bwin's matchClock.period "Finished" is immediate and confirmed real),
-    // so it's trustworthy enough to finalize on too. Guarded on
+    // bwin's matchClock.period "Finished" is immediate and confirmed real,
+    // and now also gated behind API-Football's own status whenever a
+    // fixture is cross-referenced, so a stuck bwin clock alone can no
+    // longer finalize a match that's actually in extra time or penalties —
+    // see this function's ET-detection comment further up), so it's
+    // trustworthy enough to finalize on too. Guarded on
     // finishedMatchResults so a match PulseScore keeps reporting as
     // "Finished" for several more ticks after the first one only finalizes
     // (and enqueues settlement) ONCE, not on every tick it's still present.
