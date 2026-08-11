@@ -97,7 +97,13 @@ router.get("/games", async (req: Request, res: Response) => {
     eq(casinoGamesTable.isActive, true),
     eq(casinoGamesTable.source, "palace"),
   ];
-  if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
+  // ilike, not exact eq — the frontend's default-view provider filter
+  // ("Pragmatic") is a hardcoded substring, not necessarily Palace
+  // Casino's exact provider_name string (could be "Pragmatic Play",
+  // "PragmaticPlay", etc.) — an exact-match miss here would silently
+  // render an empty catalog instead of erroring, which is worse than a
+  // slightly loose match.
+  if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
   if (category === "slots" || category === "ao vivo") {
     conditions.push(ilike(casinoGamesTable.category, category));
@@ -169,7 +175,13 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
     eq(casinoGamesTable.isActive, true),
     eq(casinoGamesTable.source, "palace"),
   ];
-  if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
+  // ilike, not exact eq — the frontend's default-view provider filter
+  // ("Pragmatic") is a hardcoded substring, not necessarily Palace
+  // Casino's exact provider_name string (could be "Pragmatic Play",
+  // "PragmaticPlay", etc.) — an exact-match miss here would silently
+  // render an empty catalog instead of erroring, which is worse than a
+  // slightly loose match.
+  if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
 
   const rows = await db
     .select({
