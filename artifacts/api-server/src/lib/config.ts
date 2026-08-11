@@ -78,9 +78,16 @@ const API_FOOTBALL_BASE_URL =
   process.env["API_FOOTBALL_BASE_URL"]?.trim() || "https://v3.football.api-sports.io";
 
 // Optional — powers the admin "AI-assisted casino banner" copy generator
-// (routes/admin.ts POST /casino/banners/ai-generate). Falls back to a
-// deterministic template when unset, so the feature works either way.
+// (routes/admin.ts POST /casino/banners/ai-generate) and the internal
+// AI-operations agent system (lib/aiAgents/). Falls back to a deterministic
+// template / a "skipped, no key" run result when unset, so both features
+// degrade gracefully instead of erroring out.
 const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
+// Model used by the AI-operations agents (Risk/Odds/Settlement/Fraud/
+// Payments/Compliance/Support/Orchestrator — see lib/aiAgents/). These
+// agents reason over real financial/compliance data, so this defaults to a
+// stronger model than the Haiku used for banner copy above.
+const AI_AGENTS_MODEL = process.env["AI_AGENTS_MODEL"]?.trim() || "claude-sonnet-4-6";
 
 // ── BET62 Live + Match Tracker + Streaming ──
 //
@@ -135,6 +142,7 @@ export const CONFIG = {
   API_FOOTBALL_KEY,
   API_FOOTBALL_BASE_URL,
   ANTHROPIC_API_KEY,
+  AI_AGENTS_MODEL,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
   FOOTBALL_DAILY_PROVIDER,

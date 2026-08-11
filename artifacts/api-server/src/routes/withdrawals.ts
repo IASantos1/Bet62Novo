@@ -730,6 +730,117 @@ router.get("/admin/all", adminMiddleware, async (_req: AdminRequest, res: Respon
   }
 });
 
+// Core admin decision logic, extracted so callers other than the HTTP route
+// below — namely the AI Payments agent's proposal executor (lib/aiAgents),
+// once a human has approved the proposal — can apply the exact same
+// balance-hold/ledger/email/audit transaction instead of re-deriving it.
+// Money-moving logic like this must have exactly one implementation.
+export async function applyWithdrawalAdminDecision(args: {
+  id: number;
+  status: (typeof ADMIN_WITHDRAWAL_STATUSES)[number];
+  reviewedBy: string;
+  notes?: string | null;
+  decisionReason?: string | null;
+  providerReference?: string | null;
+  ip?: string | null;
+}): Promise<
+  | { ok: true; withdrawal: typeof withdrawalsTable.$inferSelect }
+  | { ok: false; httpStatus: number; error: string }
+> {
+  const { id, status, reviewedBy, notes, decisionReason, providerReference, ip } = args;
+
+  const [existing] = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.id, id)).limit(1);
+  if (!existing) {
+    return { ok: false, httpStatus: 404, error: "Levantamento não encontrado" };
+  }
+  if (!canTransitionWithdrawalStatus(existing.status, status)) {
+    return { ok: false, httpStatus: 400, error: `Transição inválida: ${existing.status} -> ${status}` };
+  }
+
+  const [user] = await db
+    .select({ email: usersTable.email, name: usersTable.name })
+    .from(usersTable)
+    .where(eq(usersTable.id, existing.userId))
+    .limit(1);
+
+  const now = new Date();
+  const [updated] = await db.transaction(async (tx) => {
+    if (status === "rejected" || status === "cancelled") {
+      await adjustWithdrawalHoldBalance(tx, {
+        userId: existing.userId,
+        amount: (-Number(existing.amount)).toFixed(2),
+      });
+      await applyBalanceDelta(tx, {
+        userId: existing.userId,
+        amount: existing.amount,
+        kind: status === "cancelled" ? "withdrawal_cancel_refund" : "withdrawal_reject_refund",
+        idempotencyKey: `withdrawal:${id}:${status === "cancelled" ? "cancel" : "refund"}`,
+        refType: "withdrawal",
+        refId: String(id),
+      });
+    }
+    if (status === "paid") {
+      await adjustWithdrawalHoldBalance(tx, {
+        userId: existing.userId,
+        amount: (-Number(existing.amount)).toFixed(2),
+      });
+      await applyBalanceDelta(tx, {
+        userId: existing.userId,
+        amount: "0.00",
+        kind: "withdrawal_paid",
+        idempotencyKey: `withdrawal:${id}:paid`,
+        refType: "withdrawal",
+        refId: String(id),
+      });
+    }
+
+    return await tx
+      .update(withdrawalsTable)
+      .set({
+        status,
+        notes: notes ?? existing.notes ?? null,
+        reviewedBy: reviewedBy ?? existing.reviewedBy ?? null,
+        reviewedAt: now,
+        decisionReason: decisionReason ?? existing.decisionReason ?? null,
+        providerReference: providerReference ?? existing.providerReference ?? null,
+        processedAt: status === "processing" || status === "paid" ? now : existing.processedAt,
+        reversedAt: status === "rejected" || status === "cancelled" ? now : existing.reversedAt,
+        updatedAt: now,
+      })
+      .where(eq(withdrawalsTable.id, id))
+      .returning();
+  });
+
+  if (user) {
+    if (status === "approved") {
+      sendWithdrawalApproved(user.email, user.name, existing.amount).catch((err: unknown) => {
+        logger.error({ err, withdrawalId: id }, "Failed to send withdrawal approved email");
+      });
+    } else if (status === "rejected" || status === "cancelled") {
+      sendWithdrawalRejected(user.email, user.name, existing.amount, notes ?? decisionReason).catch((err: unknown) => {
+        logger.error({ err, withdrawalId: id }, "Failed to send withdrawal rejected email");
+      });
+    }
+  }
+
+  await auditWithdrawalEvent({
+    actor: `admin:${reviewedBy}`,
+    action: "withdrawal_status_updated",
+    targetId: String(id),
+    ip: ip ?? null,
+    details: {
+      userId: existing.userId,
+      previousStatus: existing.status,
+      newStatus: status,
+      amount: existing.amount,
+      decisionReason: decisionReason ?? existing.decisionReason ?? null,
+      providerReference: providerReference ?? existing.providerReference ?? null,
+    },
+  });
+
+  return { ok: true, withdrawal: updated };
+}
+
 router.put("/admin/:id", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   const id = parseInt(String(req.params["id"]), 10);
   const {
@@ -745,95 +856,26 @@ router.put("/admin/:id", adminMiddleware, async (req: AdminRequest, res: Respons
   }
 
   try {
-    const [existing] = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.id, id)).limit(1);
-    if (!existing) { res.status(404).json({ error: "Levantamento não encontrado" }); return; }
-    if (!canTransitionWithdrawalStatus(existing.status, status)) {
-      res.status(400).json({ error: `Transição inválida: ${existing.status} -> ${status}` });
+    const result = await applyWithdrawalAdminDecision({
+      id,
+      status,
+      reviewedBy: req.admin?.username ?? "admin",
+      notes,
+      decisionReason,
+      providerReference,
+      ip: req.ip ?? null,
+    });
+    if (result.ok) {
+      res.json(result.withdrawal);
       return;
     }
-
-    const [user] = await db
-      .select({ email: usersTable.email, name: usersTable.name })
-      .from(usersTable)
-      .where(eq(usersTable.id, existing.userId))
-      .limit(1);
-
-    const now = new Date();
-    const [updated] = await db.transaction(async (tx) => {
-      if (status === "rejected" || status === "cancelled") {
-        await adjustWithdrawalHoldBalance(tx, {
-          userId: existing.userId,
-          amount: (-Number(existing.amount)).toFixed(2),
-        });
-        await applyBalanceDelta(tx, {
-          userId: existing.userId,
-          amount: existing.amount,
-          kind: status === "cancelled" ? "withdrawal_cancel_refund" : "withdrawal_reject_refund",
-          idempotencyKey: `withdrawal:${id}:${status === "cancelled" ? "cancel" : "refund"}`,
-          refType: "withdrawal",
-          refId: String(id),
-        });
-      }
-      if (status === "paid") {
-        await adjustWithdrawalHoldBalance(tx, {
-          userId: existing.userId,
-          amount: (-Number(existing.amount)).toFixed(2),
-        });
-        await applyBalanceDelta(tx, {
-          userId: existing.userId,
-          amount: "0.00",
-          kind: "withdrawal_paid",
-          idempotencyKey: `withdrawal:${id}:paid`,
-          refType: "withdrawal",
-          refId: String(id),
-        });
-      }
-
-      return await tx
-        .update(withdrawalsTable)
-        .set({
-          status,
-          notes: notes ?? existing.notes ?? null,
-          reviewedBy: req.admin?.username ?? existing.reviewedBy ?? null,
-          reviewedAt: now,
-          decisionReason: decisionReason ?? existing.decisionReason ?? null,
-          providerReference: providerReference ?? existing.providerReference ?? null,
-          processedAt: status === "processing" || status === "paid" ? now : existing.processedAt,
-          reversedAt: status === "rejected" || status === "cancelled" ? now : existing.reversedAt,
-          updatedAt: now,
-        })
-        .where(eq(withdrawalsTable.id, id))
-        .returning();
-    });
-
-    if (user) {
-      if (status === "approved") {
-        sendWithdrawalApproved(user.email, user.name, existing.amount).catch((err: unknown) => {
-          logger.error({ err, withdrawalId: id }, "Failed to send withdrawal approved email");
-        });
-      } else if (status === "rejected" || status === "cancelled") {
-        sendWithdrawalRejected(user.email, user.name, existing.amount, notes ?? decisionReason).catch((err: unknown) => {
-          logger.error({ err, withdrawalId: id }, "Failed to send withdrawal rejected email");
-        });
-      }
-    }
-
-    await auditWithdrawalEvent({
-      actor: `admin:${req.admin?.username ?? "admin"}`,
-      action: "withdrawal_status_updated",
-      targetId: String(id),
-      ip: req.ip ?? null,
-      details: {
-        userId: existing.userId,
-        previousStatus: existing.status,
-        newStatus: status,
-        amount: existing.amount,
-        decisionReason: decisionReason ?? existing.decisionReason ?? null,
-        providerReference: providerReference ?? existing.providerReference ?? null,
-      },
-    });
-
-    res.json(updated);
+    // Narrowing via `if (!result.ok)` doesn't eliminate the other union
+    // member under this package's tsconfig (strict: false disables the
+    // strictNullChecks machinery discriminated-union narrowing depends on
+    // here) — the `if (result.ok) { ...; return; }` shape above is the one
+    // that actually narrows, so the failure branch needs an explicit cast.
+    const failure = result as { ok: false; httpStatus: number; error: string };
+    res.status(failure.httpStatus).json({ error: failure.error });
   } catch (err) {
     logger.error({ err }, "Withdrawal update error");
     res.status(500).json({ error: "Erro interno" });

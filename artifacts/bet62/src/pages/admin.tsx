@@ -51,6 +51,8 @@ import {
   Dices,
   Image as ImageIcon,
   Power,
+  Cpu,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -251,6 +253,54 @@ type UserDetail = {
   payments: AdminPayment[];
   withdrawals: AdminWithdrawal[];
   kycDocuments: KycDocument[];
+};
+
+type AiAgentRole =
+  | "orchestrator"
+  | "risk"
+  | "odds"
+  | "settlement"
+  | "fraud"
+  | "payments"
+  | "compliance"
+  | "support";
+
+const AI_AGENT_LABELS: Record<AiAgentRole, string> = {
+  orchestrator: "Orquestrador (CEO)",
+  risk: "Risco",
+  odds: "Odds/Mercados",
+  settlement: "Liquidação",
+  fraud: "Fraude",
+  payments: "Pagamentos",
+  compliance: "Compliance",
+  support: "Suporte",
+};
+
+type AiAgentProposal = {
+  id: number;
+  agentRole: string;
+  actionType: string;
+  targetType: string;
+  targetId: string;
+  summary: string;
+  reasoning: string;
+  riskLevel: string;
+  status: string;
+  reviewedBy: string | null;
+  createdAt: string;
+  executionError: string | null;
+};
+
+type AiAgentOrchestratorReport = {
+  executiveSummary: string;
+  runs: Array<{
+    role: string;
+    status: string;
+    summary: string;
+    findingsCount: number;
+    proposalsCreated: number;
+  }>;
+  totalProposalsCreated: number;
 };
 
 type RiskData = {
@@ -735,6 +785,7 @@ type TabId =
   | "payments"
   | "withdrawals"
   | "risk"
+  | "ai-agents"
   | "analytics"
   | "events"
   | "settlement-logs"
@@ -1225,6 +1276,75 @@ export default function AdminPage() {
   const riskData = riskQuery.data ?? null;
   const riskLoading = riskQuery.isLoading;
   const refetchRisk = riskQuery.refetch;
+
+  const [aiAgentsStatusFilter, setAiAgentsStatusFilter] = useState<string>("pending");
+  const [runningAgent, setRunningAgent] = useState<AiAgentRole | null>(null);
+  const [decidingProposal, setDecidingProposal] = useState<number | null>(null);
+  const [orchestratorReport, setOrchestratorReport] = useState<AiAgentOrchestratorReport | null>(null);
+
+  const aiAgentsQuery = useQuery({
+    queryKey: ["admin", "ai-agents", "proposals", aiAgentsStatusFilter],
+    queryFn: async (): Promise<AiAgentProposal[]> => {
+      const res = await fetch(`/api/admin/ai-agents/proposals?status=${aiAgentsStatusFilter}`, {
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error("Failed to load AI agent proposals");
+      const data = await res.json();
+      return data.proposals ?? [];
+    },
+    enabled: !!token && activeTab === "ai-agents",
+  });
+  const aiAgentProposals = aiAgentsQuery.data ?? [];
+  const aiAgentsLoading = aiAgentsQuery.isLoading;
+  const refetchAiAgentProposals = aiAgentsQuery.refetch;
+
+  const handleRunAgent = async (role: AiAgentRole) => {
+    setRunningAgent(role);
+    try {
+      const res = await fetch(`/api/admin/ai-agents/run/${role}`, {
+        method: "POST",
+        headers: authHeader,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Erro ao correr o agente");
+        return;
+      }
+      if (role === "orchestrator") {
+        setOrchestratorReport(data as AiAgentOrchestratorReport);
+        toast.success(`Orquestrador concluído: ${(data as AiAgentOrchestratorReport).totalProposalsCreated} proposta(s) criada(s)`);
+      } else {
+        const proposalsCreated = (data.proposals ?? []).length;
+        toast.success(`${AI_AGENT_LABELS[role]}: ${proposalsCreated} proposta(s) criada(s)`);
+      }
+      refetchAiAgentProposals();
+    } catch {
+      toast.error("Erro ao correr o agente");
+    } finally {
+      setRunningAgent(null);
+    }
+  };
+
+  const handleDecideProposal = async (id: number, action: "approve" | "reject") => {
+    setDecidingProposal(id);
+    try {
+      const res = await fetch(`/api/admin/ai-agents/proposals/${id}/${action}`, {
+        method: "POST",
+        headers: authHeader,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Erro ao processar proposta");
+        return;
+      }
+      toast.success(action === "approve" ? "Proposta aprovada e aplicada" : "Proposta rejeitada");
+      refetchAiAgentProposals();
+    } catch {
+      toast.error("Erro ao processar proposta");
+    } finally {
+      setDecidingProposal(null);
+    }
+  };
 
   const analyticsQuery = useQuery({
     queryKey: ["admin", "analytics"],
@@ -2574,6 +2694,7 @@ export default function AdminPage() {
       refetchWithdrawals();
       fetchAuditLogs();
     } else if (activeTab === "risk") refetchRisk();
+    else if (activeTab === "ai-agents") refetchAiAgentProposals();
     else if (activeTab === "analytics") refetchAnalytics();
     else if (activeTab === "events") {
       fetchSuspended();
@@ -2714,6 +2835,12 @@ export default function AdminPage() {
       section: "pro",
     },
     {
+      id: "ai-agents",
+      icon: <Cpu size={18} />,
+      label: "IA Operações",
+      section: "pro",
+    },
+    {
       id: "analytics",
       icon: <BarChart2 size={18} />,
       label: "Analytics",
@@ -2753,6 +2880,7 @@ export default function AdminPage() {
     payments: "Depósitos",
     withdrawals: "Levantamentos",
     risk: "Gestão de Risco",
+    "ai-agents": "IA Operações",
     analytics: "Analytics",
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
@@ -4772,6 +4900,224 @@ export default function AdminPage() {
             )}
 
             {/* ── ANALYTICS ── */}
+            {/* ── IA OPERAÇÕES ── */}
+            {activeTab === "ai-agents" && (
+              <motion.div
+                key="ai-agents"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Cpu size={16} className="text-purple-400" />
+                    <span className="font-bold text-sm text-zinc-300">
+                      Agentes de IA
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 mb-4">
+                    Cada agente analisa dados reais e cria propostas. Nenhuma proposta que envolva dinheiro
+                    ou compliance (levantamentos, contas, KYC) é aplicada automaticamente — fica pendente
+                    até seres tu a aprovar ou rejeitar abaixo.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        "orchestrator",
+                        "risk",
+                        "odds",
+                        "settlement",
+                        "fraud",
+                        "payments",
+                        "compliance",
+                        "support",
+                      ] as AiAgentRole[]
+                    ).map((role) => (
+                      <button
+                        key={role}
+                        onClick={() => handleRunAgent(role)}
+                        disabled={runningAgent !== null}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          role === "orchestrator"
+                            ? "bg-purple-600/20 border-purple-500/40 text-purple-300 hover:bg-purple-600/30"
+                            : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+                        }`}
+                      >
+                        {runningAgent === role ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : role === "orchestrator" ? (
+                          <Sparkles size={12} />
+                        ) : (
+                          <Cpu size={12} />
+                        )}
+                        {AI_AGENT_LABELS[role]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {orchestratorReport && (
+                  <div className="bg-purple-950/20 border border-purple-500/30 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles size={16} className="text-purple-400" />
+                      <span className="font-bold text-sm text-purple-300">
+                        Resumo Executivo (Orquestrador)
+                      </span>
+                    </div>
+                    <p className="text-sm text-zinc-300 mb-3">
+                      {orchestratorReport.executiveSummary}
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {orchestratorReport.runs.map((r) => (
+                        <div
+                          key={r.role}
+                          className="bg-zinc-900/60 border border-zinc-800 rounded-lg px-3 py-2"
+                        >
+                          <div className="text-[11px] text-zinc-500">
+                            {AI_AGENT_LABELS[r.role as AiAgentRole] ?? r.role}
+                          </div>
+                          <div className="text-xs text-zinc-300 mt-0.5">
+                            {r.status === "ok"
+                              ? `${r.proposalsCreated} proposta(s)`
+                              : r.status === "skipped"
+                                ? "sem IA configurada"
+                                : "falhou"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2 flex-wrap">
+                    <ShieldCheck size={16} className="text-purple-400" />
+                    <span className="font-bold text-sm text-zinc-300">
+                      Propostas
+                    </span>
+                    <div className="ml-auto flex gap-1">
+                      {["pending", "approved", "rejected", "executed", "failed", "all"].map(
+                        (s) => (
+                          <button
+                            key={s}
+                            onClick={() => setAiAgentsStatusFilter(s)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-medium capitalize ${
+                              aiAgentsStatusFilter === s
+                                ? "bg-purple-600 text-white"
+                                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                            }`}
+                          >
+                            {s === "pending"
+                              ? "Pendentes"
+                              : s === "approved"
+                                ? "Aprovadas"
+                                : s === "rejected"
+                                  ? "Rejeitadas"
+                                  : s === "executed"
+                                    ? "Executadas"
+                                    : s === "failed"
+                                      ? "Falharam"
+                                      : "Todas"}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                  {aiAgentsLoading ? (
+                    <div className="flex items-center justify-center py-16">
+                      <Loader2 className="animate-spin text-purple-400" size={28} />
+                    </div>
+                  ) : aiAgentProposals.length === 0 ? (
+                    <div className="px-4 py-10 text-center text-zinc-600 text-sm">
+                      Sem propostas {aiAgentsStatusFilter !== "all" ? `com estado "${aiAgentsStatusFilter}"` : ""}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800">
+                      {aiAgentProposals.map((p) => (
+                        <div key={p.id} className="px-5 py-4">
+                          <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <Badge
+                                  cls="bg-purple-500/15 text-purple-300"
+                                  label={AI_AGENT_LABELS[p.agentRole as AiAgentRole] ?? p.agentRole}
+                                />
+                                <Badge
+                                  cls={
+                                    p.riskLevel === "high"
+                                      ? "bg-red-500/15 text-red-400"
+                                      : p.riskLevel === "low"
+                                        ? "bg-zinc-500/15 text-zinc-400"
+                                        : "bg-yellow-500/15 text-yellow-400"
+                                  }
+                                  label={p.riskLevel}
+                                />
+                                <span className="text-[11px] text-zinc-600">
+                                  {p.actionType} · {p.targetType}#{p.targetId}
+                                </span>
+                              </div>
+                              <div className="text-sm text-zinc-200 font-medium">
+                                {p.summary}
+                              </div>
+                              <div className="text-xs text-zinc-500 mt-1">
+                                {p.reasoning}
+                              </div>
+                              {p.executionError && (
+                                <div className="text-xs text-red-400 mt-1">
+                                  Erro ao aplicar: {p.executionError}
+                                </div>
+                              )}
+                              <div className="text-[11px] text-zinc-600 mt-1">
+                                {new Date(p.createdAt).toLocaleString("pt-PT")}
+                                {p.reviewedBy ? ` · revisto por ${p.reviewedBy}` : ""}
+                              </div>
+                            </div>
+                            {p.status === "pending" && (
+                              <div className="flex gap-2 shrink-0">
+                                <button
+                                  onClick={() => handleDecideProposal(p.id, "approve")}
+                                  disabled={decidingProposal === p.id}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-600/20 border border-green-500/40 text-green-300 hover:bg-green-600/30 disabled:opacity-50"
+                                >
+                                  {decidingProposal === p.id ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                  ) : (
+                                    <CheckCircle size={12} />
+                                  )}
+                                  Aprovar
+                                </button>
+                                <button
+                                  onClick={() => handleDecideProposal(p.id, "reject")}
+                                  disabled={decidingProposal === p.id}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600/20 border border-red-500/40 text-red-300 hover:bg-red-600/30 disabled:opacity-50"
+                                >
+                                  <XCircle size={12} />
+                                  Rejeitar
+                                </button>
+                              </div>
+                            )}
+                            {p.status !== "pending" && (
+                              <Badge
+                                cls={
+                                  p.status === "executed"
+                                    ? "bg-green-500/15 text-green-400"
+                                    : p.status === "failed"
+                                      ? "bg-red-500/15 text-red-400"
+                                      : "bg-zinc-500/15 text-zinc-400"
+                                }
+                                label={p.status}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === "analytics" && (
               <motion.div
                 key="analytics"

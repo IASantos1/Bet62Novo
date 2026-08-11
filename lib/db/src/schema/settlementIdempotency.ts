@@ -7,7 +7,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-import { betsTable } from "./bets";
+import { betsTable } from "./bets.js";
 
 export const settlementIdempotencyTable = pgTable(
   "settlement_idempotency",
