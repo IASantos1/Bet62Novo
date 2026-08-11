@@ -9,19 +9,16 @@
 // PulseScore itself only sends occasional checkpoint updates for those, and
 // REST polling can't do better than whatever's already there. Moved to
 // football 2026-08-08 (explicit user decision, trading tennis's WS access
-// for it) — the PRO plan allows exactly ONE concurrent WS connection for
+// for it) — the PRO plan allowed exactly ONE concurrent WS connection for
 // the whole account (confirmed via the real PulseScore docs, 2026-08-10:
 // connection limits are per plan/account, not per sport — a mid-session
 // guess to the contrary briefly led to also opening a basketball connection
 // on 2026-08-09, which got closed under the plan's 1-connection cap and was
-// reverted the next day, see basketballWs.ts's header). Only one sport can
-// hold this connection at a time; every other sport is REST-only by design,
-// not a workaround. A 2nd/3rd simultaneous sport on WS needs a MAX plan
-// upgrade (3 connections). Tennis's own connection (tennisWs.ts) remains
-// dormant for the same reason — no spare connection on the current plan —
-// plus its per-event-freshness design (this file's own fix, see
-// getPulseScoreFootballLive's header in football.ts) was never
-// applied/reactivated there.
+// reverted the next day, see basketballWs.ts's header). That constraint no
+// longer applies: 2026-08-11 MAX plan upgrade (3 concurrent connections) —
+// tennisWs.ts and basketballWs.ts are both started alongside this one now
+// (api/index.ts), each using the same per-event-freshness design this file
+// established (getFootballWsEventIfFresh below).
 //
 // Mirrors tennisWs.ts's structure exactly (see that file's history/comments
 // for why: WS was tried once before and abandoned when no frame ever

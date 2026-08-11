@@ -22,7 +22,7 @@ const {
 const { extractBasketballOverride, mergeBasketballWsFreshness } = await import(
   "../services/pulsescore/basketball.js"
 );
-const { extractTennisPrematchExtra } = await import(
+const { extractTennisPrematchExtra, mergeTennisWsFreshness } = await import(
   "../services/pulsescore/tennis.js"
 );
 const { extractHockeyOverride } = await import(
@@ -36,6 +36,9 @@ const { __testing: footballWs, getFootballWsEventIfFresh } = await import(
 );
 const { __testing: basketballWs, getBasketballWsEventIfFresh } = await import(
   "../services/pulsescore/basketballWs.js"
+);
+const { __testing: tennisWs, getTennisWsEventIfFresh } = await import(
+  "../services/pulsescore/tennisWs.js"
 );
 
 test("bookmakerPrefix: bet365 uses the versioned v3 path", () => {
@@ -694,6 +697,120 @@ test("mergeBasketballWsFreshness: a WS reading OLDER than REST's own must NOT re
   const merged = mergeBasketballWsFreshness(restEvents as never);
   assert.equal(merged[0]!.matchClock?.period, "Q3", "period must not go backward");
   assert.equal(merged[0]!.score?.home, "55", "score must not regress either");
+});
+
+test("tennisWs applyFrame: keeps an event missing from a single subsequent frame (grace period)", () => {
+  tennisWs.liveByEventId.clear();
+  tennisWs.lastSeenAt.clear();
+  tennisWs.applyFrame({
+    sport: "tennis",
+    timestamp: Date.now(),
+    count: 1,
+    data: [{ eventId: "tn-1", sport: "tennis", league: "ATP Tour" } as never],
+  });
+  assert.equal(tennisWs.liveByEventId.has("tn-1"), true);
+});
+
+test("tennisWs applyFrame: ignores frames/events tagged for a different sport", () => {
+  tennisWs.liveByEventId.clear();
+  tennisWs.lastSeenAt.clear();
+  tennisWs.applyFrame({
+    sport: "soccer",
+    timestamp: Date.now(),
+    count: 1,
+    data: [{ eventId: "tn-2", sport: "soccer" } as never],
+  });
+  assert.equal(tennisWs.liveByEventId.size, 0);
+});
+
+test("getTennisWsEventIfFresh: PER-EVENT staleness — a quiet event goes stale even while other events keep broadcasting", () => {
+  tennisWs.liveByEventId.clear();
+  tennisWs.lastSeenAt.clear();
+  tennisWs.applyFrame({
+    sport: "tennis",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      { eventId: "tn-quiet", sport: "tennis", home: "A", away: "B", league: "ATP Tour" } as never,
+      { eventId: "tn-busy", sport: "tennis", home: "C", away: "D", league: "ATP Tour" } as never,
+    ],
+  });
+  tennisWs.lastSeenAt.set("tn-quiet", Date.now() - 10_000);
+  assert.equal(getTennisWsEventIfFresh("tn-quiet", 4_000), null);
+  assert.notEqual(getTennisWsEventIfFresh("tn-busy", 4_000), null);
+});
+
+test("mergeTennisWsFreshness: overlays moreInfo.SS from a fresh WS event, keeps REST untouched otherwise", () => {
+  tennisWs.liveByEventId.clear();
+  tennisWs.lastSeenAt.clear();
+  tennisWs.applyFrame({
+    sport: "tennis",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "tn-live",
+        sport: "tennis",
+        home: "A",
+        away: "B",
+        league: "ATP Tour",
+        moreInfo: { SS: "6-4,3-2" },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "tn-live",
+      sport: "tennis",
+      home: "A",
+      away: "B",
+      markets: [],
+      moreInfo: { SS: "6-4,2-2" },
+    },
+    {
+      eventId: "tn-no-ws",
+      sport: "tennis",
+      home: "C",
+      away: "D",
+      markets: [],
+      moreInfo: { SS: "1-0" },
+    },
+  ] as never[];
+  const merged = mergeTennisWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.moreInfo?.["SS"], "6-4,3-2", "fresh WS reading should win over REST's own set score");
+  assert.equal(merged[1]!.moreInfo?.["SS"], "1-0", "an event WS hasn't seen must be untouched");
+});
+
+test("mergeTennisWsFreshness: a WS reading OLDER than REST's own must NOT regress the set score", () => {
+  tennisWs.liveByEventId.clear();
+  tennisWs.lastSeenAt.clear();
+  tennisWs.applyFrame({
+    sport: "tennis",
+    timestamp: Date.now(),
+    count: 1,
+    data: [
+      {
+        eventId: "tn-stale-ws",
+        sport: "tennis",
+        home: "A",
+        away: "B",
+        league: "ATP Tour",
+        moreInfo: { SS: "6-4" },
+      } as never,
+    ],
+  });
+  const restEvents = [
+    {
+      eventId: "tn-stale-ws",
+      sport: "tennis",
+      home: "A",
+      away: "B",
+      markets: [],
+      moreInfo: { SS: "6-4,6-2" },
+    },
+  ] as never[];
+  const merged = mergeTennisWsFreshness(restEvents as never);
+  assert.equal(merged[0]!.moreInfo?.["SS"], "6-4,6-2", "set score must not regress");
 });
 
 // bwin-only: canonicalMarket "OTHER", rawName "Anytime Goalscorer" — one

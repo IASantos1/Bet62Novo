@@ -2,8 +2,10 @@
 // on top of basketball.ts's REST poller, mirroring football.ts's fixed
 // design (see getPulseScoreFootballLive's header there for the two prior
 // all-or-nothing WS attempts that got reverted and why per-event freshness
-// fixes both). CURRENTLY DORMANT — see api/index.ts for why
-// startPulseScoreBasketballWs() isn't called at boot.
+// fixes both). Reactivated 2026-08-11 — see api/index.ts, called at boot
+// alongside football/tennis's connections now that the MAX plan (3
+// concurrent connections) removes the single-connection constraint this
+// file's own history describes below.
 //
 // Built 2026-08-09 under the belief (from an earlier, wrong assumption) that
 // the PRO plan grants one concurrent WS connection PER SPORT. The real
@@ -18,8 +20,7 @@
 // basketball (or any second sport) onto WS alongside football requires
 // upgrading to the MAX plan (3 connections, €149/mês vs PRO's €79/mês) —
 // a cost decision, not something fixable in code. Kept dormant (not wired
-// into api/index.ts) rather than deleted so it's a one-line change to
-// reactivate if that upgrade happens.
+// into api/index.ts) until that upgrade happened 2026-08-11 — see above.
 //
 // Motivation for building it in the first place: basketball's REST live poll (basketball.ts, BASKETBALL_LIVE_TTL_MS)
 // shares the "bwin" bookmaker's 1 req/s budget with football's own REST live

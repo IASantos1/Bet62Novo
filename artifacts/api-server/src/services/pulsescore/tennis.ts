@@ -1,13 +1,16 @@
-// Tennis live odds from PulseScore — REST only.
+// Tennis live odds from PulseScore — REST-polled here, with a per-event WS
+// freshness overlay (getPulseScoreTennisLive below) since the 2026-08-11
+// MAX plan upgrade (3 concurrent connections — see tennisWs.ts's header).
 //
-// WS was tried twice: first attempt (2026-08-05) never produced a single
-// confirmed frame (git history commit ede487a); second attempt (2026-08-07)
-// worked, but the PRO plan only allows one concurrent WS connection, and it
-// was moved to football on 2026-08-08 (explicit user decision — football's
-// live clock/score is what was actually causing complaints, particularly
-// for lower-coverage matches where REST polling alone couldn't keep up; see
-// footballWs.ts's header). Tennis is back to REST-only, same as it was
-// before 2026-08-07 and same as football was before this date.
+// WS was tried twice before that: first attempt (2026-08-05) never
+// produced a single confirmed frame (git history commit ede487a); second
+// attempt (2026-08-07) worked, but the PRO plan only allowed one
+// concurrent WS connection, and it was moved to football on 2026-08-08
+// (explicit user decision — football's live clock/score is what was
+// actually causing complaints, particularly for lower-coverage matches
+// where REST polling alone couldn't keep up; see footballWs.ts's header).
+// Tennis stayed REST-only from then until the MAX plan removed the
+// one-connection constraint.
 //
 // Briefly switched to bwin (2026-08-09, same explicit user decision that
 // moved football/basketball off bet365 — see football.ts's FOOTBALL_BOOKMAKER
@@ -42,6 +45,7 @@ import {
   type PulseScoreLiveEventsResponse,
 } from "./client.js";
 import { teamNamesMatch } from "./teamMatch.js";
+import { getTennisWsEventIfFresh } from "./tennisWs.js";
 
 const TENNIS_BOOKMAKER = "bet365";
 
@@ -86,7 +90,8 @@ async function fetchTennisLive(): Promise<PulseScoreEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live tennis odds from PulseScore (bet365, normalized), REST-polled.
+/** Live tennis odds from PulseScore (bet365, normalized), REST-polled, with
+ * a per-event WS freshness overlay (mergeTennisWsFreshness below).
  * Empty array if PULSESCORE_API_KEY isn't configured yet, or the upstream
  * call fails on the very first attempt (nothing cached yet to fall back
  * to). */
@@ -94,13 +99,14 @@ export async function getPulseScoreTennisLive(): Promise<PulseScoreEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
   const now = Date.now();
-  if (cache && now - cache.fetchedAt < TENNIS_LIVE_TTL_MS) return cache.events;
-
-  if (!inFlight) {
+  let events: PulseScoreEvent[];
+  if (cache && now - cache.fetchedAt < TENNIS_LIVE_TTL_MS) {
+    events = cache.events;
+  } else if (!inFlight) {
     inFlight = fetchTennisLive()
-      .then((events) => {
-        cache = { events, fetchedAt: Date.now() };
-        return events;
+      .then((fetched) => {
+        cache = { events: fetched, fetchedAt: Date.now() };
+        return fetched;
       })
       .catch((err) => {
         logger.warn(
@@ -112,8 +118,22 @@ export async function getPulseScoreTennisLive(): Promise<PulseScoreEvent[]> {
       .finally(() => {
         inFlight = null;
       });
+    events = await inFlight;
+  } else {
+    events = await inFlight;
   }
-  return inFlight;
+  // Defense in depth: an unexpected failure in the WS overlay must never
+  // take the whole REST live list down with it (this whole feed going
+  // empty is a much worse outcome than one tick without the overlay).
+  try {
+    return mergeTennisWsFreshness(events);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "[pulsescore] tennis WS overlay failed — serving REST events unmerged",
+    );
+    return events;
+  }
 }
 
 // ── match_winner → our own odds shape ───────────────────────────────────────
@@ -192,6 +212,52 @@ function parseTennisSetsFromSS(ss: unknown): Array<[number, number]> {
     sets.push([Number(m[1]), Number(m[2])]);
   }
   return sets;
+}
+
+// ── WS freshness overlay (2026-08-11 MAX plan reactivation) ────────────────
+// Same "advance-only, per-event" design as football.ts/basketball.ts's WS
+// merges, but applied to moreInfo.SS/XP instead of score/matchClock —
+// that's where tennis's real live state actually lives (see this file's
+// header and PulseScoreTennisOverride's comment on ev.score being
+// unpopulated for tennis). Odds (ev.markets) always stay from REST,
+// unchanged — only the live set/game/point data can come from WS.
+const TENNIS_WS_EVENT_FRESHNESS_MS = 4_000;
+
+// A monotonic-ish progress score from moreInfo.SS: completed/in-progress
+// sets weighted far above games within a set, so a new set always ranks
+// higher than any number of extra games in the same set — mirrors
+// basketball.ts's PERIOD_RANK approach (weight the coarser unit heavily,
+// use the finer one only to break ties within it).
+function tennisSetsProgress(ss: unknown): number {
+  const sets = parseTennisSetsFromSS(ss);
+  const games = sets.reduce((sum, [h, a]) => sum + h + a, 0);
+  return sets.length * 1000 + games;
+}
+
+function isWsMoreInfoAtLeastAsAdvanced(
+  wsMoreInfo: PulseScoreEvent["moreInfo"],
+  restMoreInfo: PulseScoreEvent["moreInfo"],
+): boolean {
+  if (!wsMoreInfo) return false;
+  if (!restMoreInfo) return true;
+  return (
+    tennisSetsProgress(wsMoreInfo["SS"]) >= tennisSetsProgress(restMoreInfo["SS"])
+  );
+}
+
+/** Exported only for tests — mirrors basketball.ts's mergeBasketballWsFreshness. */
+export function mergeTennisWsFreshness(restEvents: PulseScoreEvent[]): PulseScoreEvent[] {
+  return restEvents.map((ev) => {
+    if (!ev.eventId) return ev;
+    const wsEv = getTennisWsEventIfFresh(ev.eventId, TENNIS_WS_EVENT_FRESHNESS_MS);
+    if (!wsEv) return ev;
+    return {
+      ...ev,
+      moreInfo: isWsMoreInfoAtLeastAsAdvanced(wsEv.moreInfo, ev.moreInfo)
+        ? wsEv.moreInfo
+        : ev.moreInfo,
+    };
+  });
 }
 
 // A set only counts toward homeSetsWon/awaySetsWon if it's a real, finished
