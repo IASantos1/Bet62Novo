@@ -12171,7 +12171,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const redCardEvents = apiFixture
       ? apiFixture.events.filter((e) => e.type === "Card" && e.detail.toLowerCase().includes("red card"))
       : [];
-    const varEventCount = apiFixture ? apiFixture.events.filter((e) => e.type.toLowerCase() === "var").length : 0;
+    // Bug report 2026-08-11: "revisão VAR aparecendo aleatoriamente" — the
+    // VAR banner was re-triggering repeatedly for the SAME already-shown
+    // review. Root cause: unlike redCardsHome/Away just below (which
+    // correctly fall back to the last known count when apiFixture briefly
+    // fails to cross-reference this tick — a real, common occurrence, see
+    // findApiFootballFixture's own "skip on ambiguity" comment and the
+    // apifootball-usage admin diagnostic built for this same investigation),
+    // varEventCount used to hard-reset to 0 on every unmatched tick and get
+    // written straight back to _apiFootballVarEventCount. The very next tick
+    // that matched again and correctly reported the real (nonzero) count
+    // then read as "count WENT UP from 0" — a false "new VAR review" every
+    // time the cross-reference merely flickered, not just when a review
+    // actually happened. Same fix as redCardsHome/Away: hold the last known
+    // count instead of zeroing it.
+    const varEventCount = apiFixture
+      ? apiFixture.events.filter((e) => e.type.toLowerCase() === "var").length
+      : (existing?._apiFootballVarEventCount ?? 0);
     const redCardsHome = apiFixture
       ? redCardEvents.filter((e) => e.teamId === apiFixture.home.id).length
       : (existing?.redCardsHome ?? 0);
@@ -12184,9 +12200,14 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const newVarReview = apiFixture && varEventCount > prevVarEventCount;
     // Penalty (scored OR missed) — see fixturePenaltyEvents's own comment for
     // why a missed one needed its own trigger (goalScored never covers it).
-    const penaltyEvents = apiFixture ? fixturePenaltyEvents(apiFixture) : [];
+    // Same hold-last-known-count fix as varEventCount above — this had the
+    // identical reset-to-zero-on-unmatched-tick bug (only its length is used
+    // below, never the events themselves, so a plain count is enough here).
+    const penaltyEventCount = apiFixture
+      ? fixturePenaltyEvents(apiFixture).length
+      : (existing?._apiFootballPenaltyEventCount ?? 0);
     const prevPenaltyEventCount = existing?._apiFootballPenaltyEventCount ?? 0;
-    const newPenaltyEvent = apiFixture && penaltyEvents.length > prevPenaltyEventCount;
+    const newPenaltyEvent = apiFixture && penaltyEventCount > prevPenaltyEventCount;
     // Real match events (goals/cards/subs, and VAR if present) for the live
     // event timeline — LiveMatchState.events already existed with this exact
     // shape (see its own comment) but had no data source until now.
@@ -12610,7 +12631,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
           }
         : undefined,
       _apiFootballVarEventCount: varEventCount,
-      _apiFootballPenaltyEventCount: penaltyEvents.length,
+      _apiFootballPenaltyEventCount: penaltyEventCount,
       marketSuspension,
       _suspensionReason: suspensionReason,
       _goalHoldSince: goalHoldSince,
