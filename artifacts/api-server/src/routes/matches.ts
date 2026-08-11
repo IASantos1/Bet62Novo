@@ -12276,8 +12276,28 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // dead-until-now status-based logic (settle 1st-half markets at HT) that
     // needs the REAL status, not the hardcoded "LIVE" it used to get passed,
     // which meant that logic could never fire even once wired up.
-    const clockSec = pulseScoreEventClockSec(ev);
+    // Pre-existing user report ("relógio salta valores estranhos" — the
+    // clock jumping to weird values, distinct from the sparse-update
+    // staleness class of bug the comment below already covers): bwin's raw
+    // per-tick TM/TS-or-matchClock reading has no protection against a
+    // single glitchy tick reporting a wrong value — e.g. a brief mix-up
+    // with a stale/incorrect period reading — and unlike homeScore/
+    // awayScore just above (guarded against ever regressing), clockSec had
+    // no such floor at all. A jump FORWARD is always legitimate here (see
+    // the Vicenza v Catania case below — a real checkpoint feed can and
+    // does leap whole minutes ahead in one tick), but a jump BACKWARD
+    // within the same tracked match can never be: a live match clock does
+    // not run in reverse. Discarding a backward reading and holding the
+    // last known-good value instead — same "advance-only" rule already
+    // applied to score in this same builder — turns a corrupted one-tick
+    // glitch into a brief (sub-second, corrects on the very next real
+    // reading) hold instead of a visible jump to a wrong number.
+    const rawClockSec = pulseScoreEventClockSec(ev);
     const prevClockSec = existing?._liveExtra?.clockSec;
+    const clockSec =
+      prevClockSec !== undefined && rawClockSec < prevClockSec
+        ? prevClockSec
+        : rawClockSec;
     const clockAtMs =
       prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
         ? existing._liveExtra.clockAtMs
@@ -12637,8 +12657,16 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       // reading is more advanced" rule this codebase already applies to
       // WS/REST merges elsewhere (footballWs.ts et al.), so a frozen bwin
       // reading can't hold the displayed minute back once API-Football
-      // confirms play has moved on.
-      minute: Math.max(pulseScoreEventMinute(ev), apiFixture?.elapsed ?? 0),
+      // confirms play has moved on. Also floored against existing.minute
+      // (not just the two live readings against each other) — same
+      // backward-glitch protection as clockSec above, since a corrupted
+      // one-tick bwin reading could otherwise pull the displayed minute
+      // backward even with apiFixture.elapsed in the mix.
+      minute: Math.max(
+        pulseScoreEventMinute(ev),
+        apiFixture?.elapsed ?? 0,
+        existing?.minute ?? 0,
+      ),
       status: liveStatus,
       hasRealOdds: hasRealOddsNow,
       odds,
