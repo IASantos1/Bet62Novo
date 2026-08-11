@@ -3570,13 +3570,31 @@ function providerMatchIdPrefixesForSport(
       // kept for the same pre-migration reason as football-v2 above.
       return ["pulsescore-tennis", "tennis-v1", "tennis-v2"];
     case "basketball":
-      return ["bball-v2"];
+      // pulsescore-basketball is the current live prefix
+      // (buildBasketballLiveFromPulseScore in matches.ts, switched from bwin
+      // 2026-08-08) — bball-v2 (old SportsAPI Pro) is dead but kept for any
+      // pre-migration matchIds still sitting in finishedMatchResults/
+      // historical bets. Missing here until 2026-08-11 (audit finding,
+      // triggered by a user asking whether volleyball settlement was even
+      // configured — basketball had the identical gap): same bug class as
+      // football-v2's own comment above — resultMatchesSelectionSport()
+      // rejected every current basketball match before even attempting a
+      // team-name match, AND isProviderManagedMatchId() below never drove
+      // ensureFinishedMatchResult() for one either, silently breaking both
+      // the fuzzy-lookup fallback and the active "confirm this match is
+      // really finished" check for 100% of today's basketball bets.
+      return ["pulsescore-basketball", "bball-v2"];
     case "baseball":
       return ["baseball-v2", "mlb-v2"];
     case "hockey":
       return ["hockey-v2"];
     case "volleyball":
-      return ["volley-live", "volley-odds"];
+      // pulsescore-volleyball is the current live AND prematch prefix
+      // (buildVolleyballLiveFromPulseScore/buildVolleyballUpcomingFromPulseScore
+      // in matches.ts, built 2026-08-09) — volley-live/volley-odds are the
+      // dead Statpal-era prefixes, kept for pre-migration matchIds only.
+      // Same missing-prefix bug as basketball above (see its comment).
+      return ["pulsescore-volleyball", "volley-live", "volley-odds"];
   }
 }
 
@@ -3661,7 +3679,16 @@ function isProviderManagedMatchId(matchId: string): boolean {
   // gained a DB-recovery branch for these (matches.ts) but it was never reachable from
   // the settlement cycle's ensure-loop since this regex never matched the current live
   // id format, only the dead pre-migration ones above.
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis)-.+$/.test(
+  // pulsescore-basketball/pulsescore-volleyball added 2026-08-11 (audit finding —
+  // same gap as football/tennis had, just never caught until a user asked whether
+  // volleyball settlement was even configured): without these, the settlement
+  // cycle's "ensure this match's result exists" loop (routes/matches.ts's
+  // ensureFinishedMatchResult) never ran for a basketball/volleyball match unless
+  // finishedMatchResults already happened to have it from finalizeStaleLiveMatch's
+  // own disappearance-based GC — the active safety net football/tennis already had
+  // was silently missing for these two sports since their PulseScore live pipelines
+  // shipped (basketball 2026-08-08, volleyball 2026-08-09).
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }

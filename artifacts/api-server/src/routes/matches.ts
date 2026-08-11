@@ -7665,21 +7665,28 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
-  // ── PulseScore football/tennis match IDs (pulsescore-football-{id} /
-  // pulsescore-tennis-{id}) ────────────────────────────────────────────────
+  // ── PulseScore football/tennis/basketball/volleyball match IDs
+  // (pulsescore-{sport}-{id}) ──────────────────────────────────────────────
   // DB-only recovery path: finalizeStaleLiveMatch() already writes a
-  // complete record (score + extras.football/tennis) via
+  // complete record (score + sport-specific extras) via
   // persistFinishedMatchRecord the moment one of these matches finishes
   // while the server is running, so this only matters after a restart wipes
   // the in-memory finishedMatchResults cache before a pending bet's
-  // settlement cycle gets to it. Confirmed missing entirely (2026-08-08
-  // audit) — isProviderManagedMatchId() never recognized this prefix, so
-  // this function was never even called for these ids from the settlement
-  // cycle's ensure-loop; a bet on a match that finished across a restart had
-  // no way to recover its result. No live-feed fallback needed here (unlike
-  // tennis-v1 above) since finalizeStaleLiveMatch already persists the full
-  // record up front.
-  if (/^pulsescore-(football|tennis)-.+$/.test(matchId)) {
+  // settlement cycle gets to it. Confirmed missing entirely for football/
+  // tennis (2026-08-08 audit) — isProviderManagedMatchId() never recognized
+  // this prefix, so this function was never even called for these ids from
+  // the settlement cycle's ensure-loop; a bet on a match that finished
+  // across a restart had no way to recover its result. basketball/
+  // volleyball had the IDENTICAL gap (2026-08-11 audit, triggered by a user
+  // asking whether volleyball settlement was even configured) — their
+  // pulsescore-basketball-/pulsescore-volleyball- ids were never added to
+  // isProviderManagedMatchId at all when those two sports' PulseScore live
+  // pipelines shipped (2026-08-08/09), so this branch is now generalized to
+  // cover all four instead of being duplicated per sport. No live-feed
+  // fallback needed here (unlike tennis-v1 above) since finalizeStaleLiveMatch
+  // already persists the full record (including extras.basketball.quarters/
+  // extras.volleyball.sets, same shape read back below) up front.
+  if (/^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(matchId)) {
     const cached = finishedMatchResults.get(matchId);
     if (
       cached &&
