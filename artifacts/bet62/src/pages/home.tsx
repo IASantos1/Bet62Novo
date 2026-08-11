@@ -13780,6 +13780,7 @@ export default function Home({
                       setBets={setBets}
                       setBetMode={setBetMode}
                       setBetSlipOpenMobile={setBetSlipOpenMobile}
+                      isDarkTheme={isDarkTheme}
                     />
                   </div>
                 );

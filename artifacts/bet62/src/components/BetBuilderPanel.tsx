@@ -40,6 +40,7 @@ type Props = {
   setBets: React.Dispatch<React.SetStateAction<any[]>>;
   setBetMode: (mode: "simples" | "multipla") => void;
   setBetSlipOpenMobile: (open: boolean) => void;
+  isDarkTheme?: boolean;
 };
 
 // ── Correlação (simplificada — espelha pricing.ts do backend) ─────────────
@@ -132,7 +133,12 @@ const KNOWN_PAIRS: Array<[string, string]> = [
   ["ht-home", "ht-away"],
 ];
 
-function orderForSideBySide(opts: BuilderMarket[]): BuilderMarket[] {
+// Returns ROWS (not a flattened list) — each row renders as its own
+// flex-1 button row, exactly like MarketGroup/MarketOddsBtn do for the
+// regular "Todos" market tab (home.tsx), so a 3-way market (Resultado,
+// Dupla Chance) sits 3-wide in one row instead of wrapping 2+1 in a fixed
+// grid, and a genuine pair (Sim/Não, Mais/Menos X.5) sits 2-wide.
+function orderForSideBySide(opts: BuilderMarket[]): BuilderMarket[][] {
   const byId = new Map(opts.map((m) => [m.id, m]));
   const used = new Set<string>();
   const rows: BuilderMarket[][] = [];
@@ -157,14 +163,15 @@ function orderForSideBySide(opts: BuilderMarket[]): BuilderMarket[] {
     if (om) takePair(m.id, `u${om[1]}`);
   }
 
-  // Anything left over (draw, homeOrAway, ht-draw, escanteios, etc.) — one per row
-  for (const m of opts) {
-    if (used.has(m.id)) continue;
-    used.add(m.id);
-    rows.push([m]);
+  // Anything left over that isn't part of a known pair (draw, homeOrAway,
+  // ht-draw, escanteios, etc.) — grouped into rows of up to 3, matching
+  // Resultado/Dupla Chance's natural 3-way width on the regular tab.
+  const leftover = opts.filter((m) => !used.has(m.id));
+  for (let i = 0; i < leftover.length; i += 3) {
+    rows.push(leftover.slice(i, i + 3));
   }
 
-  return rows.flat();
+  return rows;
 }
 
 // ── Componente ────────────────────────────────────────────────────────────
@@ -186,6 +193,7 @@ export default function BetBuilderPanel({
   setBets,
   setBetMode,
   setBetSlipOpenMobile,
+  isDarkTheme = true,
 }: Props) {
   const [selected, setSelected] = useState<BuilderMarket[]>([]);
 
@@ -291,47 +299,63 @@ export default function BetBuilderPanel({
         )}
       </div>
 
-      {/* Market selector */}
+      {/* Market selector — same button look + side-by-side row layout as
+          MarketOddsBtn/MarketGroup on the regular "Todos" market tab
+          (home.tsx): each row is a flex-1 row sized to its own item
+          count (3-wide for Resultado/Dupla Chance, 2-wide for pairs),
+          not a rigid 2-column grid that leaves an odd item alone. */}
       <div className="space-y-3">
-        {categories.map(([cat, opts]) => (
+        {categories.map(([cat, rows]) => (
           <div key={cat}>
             <div className={`text-[9px] font-black uppercase tracking-widest mb-1.5 px-0.5 ${CAT_COLORS[cat] ?? "text-zinc-500"}`}>
               {cat}
             </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {opts.map((m) => {
-                const sel = isSelected(m.id);
-                const conflict = !sel && isConflicting(m.id);
-                const disabled = !sel && selected.length >= MAX_LEGS;
+            <div className="space-y-1.5">
+              {rows.map((row, rowIdx) => (
+                <div key={rowIdx} className="flex gap-1.5">
+                  {row.map((m) => {
+                    const sel = isSelected(m.id);
+                    const conflict = !sel && isConflicting(m.id);
+                    const disabled = !sel && selected.length >= MAX_LEGS;
 
-                return (
-                  <button
-                    key={m.id}
-                    onClick={() => !disabled && toggle(m)}
-                    disabled={disabled}
-                    className={`flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${
-                      sel
-                        ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30"
-                        : conflict
-                        ? "bg-zinc-900/40 border-red-900/50 opacity-40 cursor-not-allowed"
-                        : disabled
-                        ? "bg-zinc-900/30 border-zinc-800/40 opacity-30 cursor-not-allowed"
-                        : "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800"
-                    }`}
-                  >
-                    <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
-                      {m.label}
-                    </span>
-                    <span
-                      className={`text-sm font-black leading-none tabular-nums ${
-                        sel ? "text-red-400" : "text-white"
-                      }`}
-                    >
-                      {m.odds.toFixed(2)}
-                    </span>
-                  </button>
-                );
-              })}
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => !disabled && toggle(m)}
+                        disabled={disabled}
+                        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${
+                          sel
+                            ? isDarkTheme
+                              ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30"
+                              : "border-red-300 bg-red-50 ring-1 ring-red-200"
+                            : conflict
+                              ? isDarkTheme
+                                ? "bg-zinc-900/40 border-red-900/50 opacity-40 cursor-not-allowed"
+                                : "bg-red-50/60 border-red-200 opacity-50 cursor-not-allowed"
+                              : disabled
+                                ? isDarkTheme
+                                  ? "bg-zinc-900/30 border-zinc-800/40 opacity-30 cursor-not-allowed"
+                                  : "bg-zinc-100/60 border-zinc-200 opacity-40 cursor-not-allowed"
+                                : isDarkTheme
+                                  ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800"
+                                  : "border-zinc-200 bg-white hover:border-zinc-300"
+                        }`}
+                      >
+                        <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
+                          {m.label}
+                        </span>
+                        <span
+                          className={`text-sm font-black leading-none tabular-nums ${
+                            sel ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"
+                          }`}
+                        >
+                          {m.odds.toFixed(2)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </div>
         ))}
