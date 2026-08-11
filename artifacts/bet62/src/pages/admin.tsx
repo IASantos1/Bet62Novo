@@ -949,6 +949,41 @@ export default function AdminPage() {
   } | null>(null);
   const [pulsescoreUsageLoading, setPulsescoreUsageLoading] = useState(false);
 
+  // API-Football usage/health — built to diagnose VAR-review suspension
+  // reports (2026-08-11): "configured: false" means the key just isn't set;
+  // liveFixtureCount near 0 while matches are live means the plan/quota
+  // isn't covering those leagues; recentNameMismatches lists PulseScore
+  // matches that never found a matching API-Football fixture at all (see
+  // routes/admin.ts's apifootball-usage route for the full diagnosis).
+  const [apiFootballUsage, setApiFootballUsage] = useState<{
+    configured: boolean;
+    requestsToday?: number;
+    date?: string;
+    liveFixtureCount?: number;
+    recentNameMismatches?: Array<{
+      matchId: string;
+      homeTeam: string;
+      awayTeam: string;
+      league: string | null;
+      occurrenceCount: number;
+      lastSeenAt: string;
+    }>;
+  } | null>(null);
+  const [apiFootballUsageLoading, setApiFootballUsageLoading] = useState(false);
+
+  const fetchApiFootballUsage = useCallback(async () => {
+    if (!token) return;
+    setApiFootballUsageLoading(true);
+    try {
+      const res = await fetch("/api/admin/apifootball-usage", { headers: authHeader });
+      if (res.ok) setApiFootballUsage(await res.json());
+    } catch {
+      /* ignore */
+    } finally {
+      setApiFootballUsageLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Raw uncached probe of PulseScore's own /live-events endpoint (bypasses
   // the football/tennis pollers' cache-and-swallow-errors behavior) — lets
   // us see the actual HTTP status/body PulseScore returns right now, from
@@ -2009,6 +2044,7 @@ export default function AdminPage() {
     if (activeTab === "dashboard") {
       fetchStatpalUsage();
       fetchPulsescoreUsage();
+      fetchApiFootballUsage();
     }
     else if (activeTab === "withdrawals") {
       fetchAuditLogs();
@@ -3422,6 +3458,99 @@ export default function AdminPage() {
                       ) : (
                         <div className="text-center text-zinc-600 text-sm py-4">
                           Não foi possível obter dados da PulseScore.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── API-Football usage/health — diagnose VAR-review suspension reports ── */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
+                          <AlertTriangle size={16} className="text-orange-400" />
+                          API-Football — Utilização (VAR, cartões, eventos)
+                        </h3>
+                        <button
+                          onClick={fetchApiFootballUsage}
+                          disabled={apiFootballUsageLoading}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Atualizar"
+                        >
+                          <RefreshCw size={14} className={apiFootballUsageLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
+
+                      {apiFootballUsageLoading && !apiFootballUsage ? (
+                        <div className="flex items-center justify-center py-6">
+                          <Loader2 size={22} className="animate-spin text-orange-400" />
+                        </div>
+                      ) : apiFootballUsage && !apiFootballUsage.configured ? (
+                        <div className="text-center text-red-400 text-sm py-4">
+                          API_FOOTBALL_KEY não configurada — VAR, cartões e outros eventos ao vivo
+                          dependentes desta API não vão funcionar até definir a chave nas variáveis
+                          de ambiente do Railway.
+                        </div>
+                      ) : apiFootballUsage ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                            <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                              <div className="text-3xl font-black text-orange-400 tabular-nums">
+                                {Number(apiFootballUsage.requestsToday ?? 0).toLocaleString("pt-PT")}
+                              </div>
+                              <div className="text-xs text-zinc-400 mt-1">Pedidos hoje</div>
+                            </div>
+                            <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                              <div className="text-base font-black text-white tabular-nums">
+                                {apiFootballUsage.date
+                                  ? (() => {
+                                      const [y, m, d] = String(apiFootballUsage.date).split("-");
+                                      return `${d}/${m}/${y}`;
+                                    })()
+                                  : "—"}
+                              </div>
+                              <div className="text-xs text-zinc-400 mt-1">Data (UTC)</div>
+                            </div>
+                            <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                              <div className="text-3xl font-black text-white tabular-nums">
+                                {apiFootballUsage.liveFixtureCount ?? 0}
+                              </div>
+                              <div className="text-xs text-zinc-400 mt-1">Jogos ao vivo encontrados</div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-bold text-zinc-400 mb-2">
+                              Jogos PulseScore sem correspondência na API-Football (últimos)
+                            </div>
+                            {apiFootballUsage.recentNameMismatches && apiFootballUsage.recentNameMismatches.length > 0 ? (
+                              <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                                {apiFootballUsage.recentNameMismatches.map((m) => (
+                                  <div
+                                    key={m.matchId}
+                                    className="bg-zinc-800/60 rounded-lg p-2.5 flex items-center justify-between text-xs"
+                                  >
+                                    <div className="text-zinc-300 truncate">
+                                      <span className="font-bold">{m.homeTeam}</span> vs{" "}
+                                      <span className="font-bold">{m.awayTeam}</span>
+                                      {m.league && <span className="text-zinc-500"> · {m.league}</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-zinc-500 shrink-0 ml-2">
+                                      <span>{m.occurrenceCount}x</span>
+                                      <span>{new Date(m.lastSeenAt).toLocaleString("pt-PT")}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-center text-zinc-600 text-xs py-3">
+                                Nenhuma divergência registada — todos os jogos ao vivo têm sido
+                                encontrados corretamente na API-Football.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center text-zinc-600 text-sm py-4">
+                          Não foi possível obter dados da API-Football.
                         </div>
                       )}
                     </div>
