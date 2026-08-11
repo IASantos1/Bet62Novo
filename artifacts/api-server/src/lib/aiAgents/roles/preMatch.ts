@@ -9,14 +9,20 @@
 // market catalog likely wasn't populated correctly; (3) recently added
 // sportscore_match_map rows created manually (source = "manual") — i.e.
 // cases where automatic name-matching between Statpal and SportScore
-// failed and a human had to intervene, worth a second look for a pattern.
+// failed and a human had to intervene, worth a second look for a pattern;
+// (4) recent PulseScore↔API-Football team-name misses
+// (api_football_name_mismatches, written by routes/matches.ts whenever a
+// live football match with real priced odds gets no API-Football fixture
+// match by team name) — the same "compare names between APIs" job, this
+// time for goal/card/VAR enrichment instead of competition catalog data.
 //
 // Read-only: there is no schema-level "market catalog" table to action
-// against, and no code path lets this agent edit aliases/configs directly.
-// The only action is "flag_for_human_review" (targetType "match", using
-// the competitionId or match-map id as targetId), so a human can confirm
-// the mapping/market gap in the admin panel.
-import { db, competitionAliasesTable, competitionConfigsTable, competitionsTable, sportscoreMatchMapTable } from "@workspace/db";
+// against, and no code path lets this agent edit aliases/configs/team-name
+// matching directly. The only action is "flag_for_human_review"
+// (targetType "match", using the competitionId/match-map id/match id as
+// targetId), so a human can confirm the mapping/market gap in the admin
+// panel.
+import { db, competitionAliasesTable, competitionConfigsTable, competitionsTable, sportscoreMatchMapTable, apiFootballNameMismatchesTable } from "@workspace/db";
 import { and, desc, eq, gte, or, sql } from "drizzle-orm";
 import { runAgentAnalysis } from "../client.js";
 import type { AgentAnalysisResult } from "../types.js";
@@ -25,14 +31,14 @@ const LOW_MARKET_COUNT_THRESHOLD = 15;
 
 const SYSTEM_PROMPT = `És o Agente Pré-Jogo (Pre-Match Agent) da operação interna de uma casa de apostas desportivas real-money (Bet62), em Portugal.
 A tua função é vigiar APENAS a qualidade dos dados de pré-jogo — nomes de equipas/competições e cobertura de mercados — nunca placares ou eventos ao vivo (isso é o Agente Ao Vivo).
-Recebes três conjuntos de dados: (1) nomes de competições que aparecem mapeados para mais do que um ID interno de competição — isto significa que diferentes fornecedores de dados (APIs) estão a usar nomes ligeiramente diferentes para o que é provavelmente a mesma competição, ou que há uma colisão de nomes genuína entre competições distintas; a tua função é comparar os nomes e decidir qual é mais provável; (2) competições atualmente ativas (ao vivo ou pré-jogo) com um número de mercados configurado anormalmente baixo, o que pode indicar que faltam mercados por adicionar/mapear; (3) mapeamentos recentes entre Statpal e SportScore criados manualmente porque a correspondência automática de nomes falhou — vale a pena verificar se há um padrão (ex: mesma competição a falhar repetidamente).
-Não tens autoridade para editar aliases, configs de competição ou mapeamentos diretamente — isso não existe como ação automatizável nesta plataforma. A tua única ação possível é "flag_for_human_review" (targetType "match", targetId = o ID relevante fornecido nos dados), para um humano confirmar a correção nos dados.
-Sê conservador: só assinala quando o nome ou a lacuna de mercado é claramente suspeita, não qualquer variação menor de nome esperada entre fornecedores.`;
+Recebes quatro conjuntos de dados: (1) nomes de competições que aparecem mapeados para mais do que um ID interno de competição — isto significa que diferentes fornecedores de dados (APIs) estão a usar nomes ligeiramente diferentes para o que é provavelmente a mesma competição, ou que há uma colisão de nomes genuína entre competições distintas; a tua função é comparar os nomes e decidir qual é mais provável; (2) competições atualmente ativas (ao vivo ou pré-jogo) com um número de mercados configurado anormalmente baixo, o que pode indicar que faltam mercados por adicionar/mapear; (3) mapeamentos recentes entre Statpal e SportScore criados manualmente porque a correspondência automática de nomes falhou — vale a pena verificar se há um padrão (ex: mesma competição a falhar repetidamente); (4) jogos de futebol ao vivo recentes em que a PulseScore/bwin tinham odds reais mas nenhum jogo da API-Football correspondeu por nome de equipa — recebes também os nomes das equipas que a API-Football tinha disponíveis nesse momento, para comparares e perceberes se é só uma grafia diferente do mesmo nome (ex: acentos, abreviação, "FC" a mais/a menos) ou se a API-Football simplesmente não cobre aquela liga ao vivo (nesse caso não é um problema de nomes, não assinales).
+Não tens autoridade para editar aliases, configs de competição, mapeamentos ou lógica de correspondência de nomes diretamente — isso não existe como ação automatizável nesta plataforma. A tua única ação possível é "flag_for_human_review" (targetType "match", targetId = o ID relevante fornecido nos dados), para um humano confirmar a correção nos dados.
+Sê conservador: só assinala quando o nome ou a lacuna de mercado é claramente suspeita, não qualquer variação menor de nome esperada entre fornecedores, e nunca assinales um caso de liga simplesmente não coberta pela API-Football como se fosse um erro de nomes.`;
 
 export async function runPreMatchAgent(): Promise<AgentAnalysisResult | null> {
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const [aliasCollisions, lowMarketCompetitions, manualMatchMaps] = await Promise.all([
+  const [aliasCollisions, lowMarketCompetitions, manualMatchMaps, apiFootballMismatches] = await Promise.all([
     db
       .select({
         normalizedAlias: competitionAliasesTable.normalizedAlias,
@@ -80,10 +86,29 @@ export async function runPreMatchAgent(): Promise<AgentAnalysisResult | null> {
       .where(and(eq(sportscoreMatchMapTable.source, "manual"), gte(sportscoreMatchMapTable.createdAt, since7d)))
       .orderBy(desc(sportscoreMatchMapTable.createdAt))
       .limit(20),
+    db
+      .select({
+        matchId: apiFootballNameMismatchesTable.matchId,
+        homeTeam: apiFootballNameMismatchesTable.homeTeam,
+        awayTeam: apiFootballNameMismatchesTable.awayTeam,
+        league: apiFootballNameMismatchesTable.league,
+        apiFootballCandidateNames: apiFootballNameMismatchesTable.apiFootballCandidateNames,
+        occurrenceCount: apiFootballNameMismatchesTable.occurrenceCount,
+        lastSeenAt: apiFootballNameMismatchesTable.lastSeenAt,
+      })
+      .from(apiFootballNameMismatchesTable)
+      .where(gte(apiFootballNameMismatchesTable.lastSeenAt, since7d))
+      .orderBy(desc(apiFootballNameMismatchesTable.occurrenceCount), desc(apiFootballNameMismatchesTable.lastSeenAt))
+      .limit(30),
   ]);
 
-  if (aliasCollisions.length === 0 && lowMarketCompetitions.length === 0 && manualMatchMaps.length === 0) {
-    return { summary: "Sem colisões de nomes, lacunas de mercado ou mapeamentos manuais recentes a assinalar.", findings: [], proposals: [] };
+  if (
+    aliasCollisions.length === 0 &&
+    lowMarketCompetitions.length === 0 &&
+    manualMatchMaps.length === 0 &&
+    apiFootballMismatches.length === 0
+  ) {
+    return { summary: "Sem colisões de nomes, lacunas de mercado, mapeamentos manuais ou falhas PulseScore↔API-Football a assinalar.", findings: [], proposals: [] };
   }
 
   return runAgentAnalysis({
@@ -93,6 +118,7 @@ export async function runPreMatchAgent(): Promise<AgentAnalysisResult | null> {
       competitionNameCollisionsAcrossProviders: aliasCollisions,
       activeCompetitionsWithLowMarketCount: lowMarketCompetitions,
       recentManualStatpalSportscoreMatches: manualMatchMaps,
+      recentPulseScoreVsApiFootballNameMisses: apiFootballMismatches,
     },
   });
 }

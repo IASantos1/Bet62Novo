@@ -14,7 +14,7 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import { db, matchResultsTable } from "@workspace/db";
+import { db, matchResultsTable, apiFootballNameMismatchesTable } from "@workspace/db";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
@@ -11768,10 +11768,11 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
-// TEMPORARY (remove alongside the "[DIAG apifootball-miss]" log site below,
-// once the goal/VAR/card/penalty-enrichment question it's diagnosing is
-// answered) — dedupes that log to once per match id instead of once per
-// ~1-2s tick for the whole match's lifetime.
+// Dedupes the "[DIAG apifootball-miss]" log+persist site below to once per
+// match id per process, instead of once per ~1-2s tick for the whole
+// match's lifetime — the api_football_name_mismatches row it upserts
+// already tracks repeat occurrences across restarts, so this Set only
+// needs to prevent same-process log/write spam.
 const _apiFootballMissLogged = new Set<string>();
 
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
@@ -11897,18 +11898,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // use below already treats null as "no extra data" and falls back to
     // PulseScore-only behavior, same as before this integration existed).
     const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures);
-    // TEMPORARY diagnostic (remove once answered, 2026-08-09): user-reported
-    // goal/VAR/card/penalty enrichment "still not coming through correctly"
-    // — need to know WHY apiFixture stays unmatched for a given match: a
-    // team-name mismatch between PulseScore/bwin and API-Football, or
-    // API-Football simply not covering that particular league live. Logged
-    // once per match id (not every ~1-2s tick), only when API-Football's own
-    // live batch came back non-empty (rules out "key missing"/"fetch failed
-    // this tick" as the cause) but this specific match — one bet365/bwin
-    // has real priced odds for, i.e. one that actually matters — wasn't in
-    // it. Grep prod logs for "[DIAG apifootball-miss]".
+    // Originally a TEMPORARY diagnostic (2026-08-09) for a user report that
+    // goal/VAR/card/penalty enrichment "still wasn't coming through
+    // correctly" — need to know WHY apiFixture stays unmatched for a given
+    // match: a team-name mismatch between PulseScore/bwin and API-Football,
+    // or API-Football simply not covering that particular league live.
+    // Kept, and now also persisted to api_football_name_mismatches (not
+    // just logged) so the Pré-Jogo Agent (lib/aiAgents/roles/preMatch.ts)
+    // can tell a one-off/league-not-covered miss apart from a pair that
+    // keeps failing across restarts and is actually worth fixing in
+    // teamNamesMatch. Still only once per match id per process (not every
+    // ~1-2s tick), only when API-Football's own live batch came back
+    // non-empty (rules out "key missing"/"fetch failed this tick" as the
+    // cause) but this specific match — one bet365/bwin has real priced
+    // odds for, i.e. one that actually matters — wasn't in it.
     if (!apiFixture && apiFootballFixtures.length > 0 && override?.odds && !_apiFootballMissLogged.has(id)) {
       _apiFootballMissLogged.add(id);
+      const candidateNames = apiFootballFixtures.map((f) => `${f.home.name} v ${f.away.name}`);
       logger.warn(
         {
           id,
@@ -11916,10 +11922,21 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
           away,
           league: ev.league,
           apiFootballFixtureCount: apiFootballFixtures.length,
-          apiFootballTeamNames: apiFootballFixtures.map((f) => `${f.home.name} v ${f.away.name}`),
+          apiFootballTeamNames: candidateNames,
         },
         "[DIAG apifootball-miss] no API-Football fixture matched this PulseScore match — check team-name spelling above against apiFootballTeamNames",
       );
+      db.insert(apiFootballNameMismatchesTable)
+        .values({ matchId: id, homeTeam: home, awayTeam: away, league: ev.league || null, apiFootballCandidateNames: candidateNames })
+        .onConflictDoUpdate({
+          target: apiFootballNameMismatchesTable.matchId,
+          set: {
+            occurrenceCount: sql`${apiFootballNameMismatchesTable.occurrenceCount} + 1`,
+            lastSeenAt: new Date(),
+            apiFootballCandidateNames: candidateNames,
+          },
+        })
+        .catch((err) => logger.warn({ err, id }, "[api-football] failed to persist name mismatch"));
     }
     // Team-search fallback for when this match's live fixture wasn't found
     // above (name-matching miss, or API-Football just doesn't carry this

@@ -493,6 +493,69 @@ export async function initDb(): Promise<void> {
       -- exact timestamp it was issued with, not "now" — must be captured
       -- and stored alongside the key, never regenerated per request.
       ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS video_timestamp INTEGER;
+
+      -- Backing the internal "IA Operações" agent system (schema/aiAgents.ts).
+      -- These two were missing from this file when that system first
+      -- shipped (2026-08-11) — schema/aiAgents.ts existed but nothing ever
+      -- created the tables it describes, since this file (not drizzle-kit
+      -- push) is the only thing that actually applies schema in dev/prod.
+      -- Added here alongside the Ao Vivo/Pré-Jogo/Liquidação de Bilhetes
+      -- agents, which depend on these existing to record their runs.
+      CREATE TABLE IF NOT EXISTS ai_agent_runs (
+        id                  SERIAL PRIMARY KEY,
+        agent_role          TEXT NOT NULL,
+        trigger             TEXT NOT NULL DEFAULT 'manual',
+        triggered_by        TEXT,
+        status              TEXT NOT NULL DEFAULT 'ok',
+        summary             TEXT,
+        proposals_created   INTEGER NOT NULL DEFAULT 0,
+        error_message       TEXT,
+        duration_ms         INTEGER,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ai_agent_proposals (
+        id                SERIAL PRIMARY KEY,
+        agent_role        TEXT NOT NULL,
+        action_type       TEXT NOT NULL,
+        target_type       TEXT NOT NULL,
+        target_id         TEXT NOT NULL,
+        summary           TEXT NOT NULL,
+        reasoning         TEXT NOT NULL,
+        payload           JSONB,
+        risk_level        TEXT NOT NULL DEFAULT 'normal',
+        status            TEXT NOT NULL DEFAULT 'pending',
+        reviewed_by       TEXT,
+        reviewed_at       TIMESTAMPTZ,
+        execution_error   TEXT,
+        executed_at       TIMESTAMPTZ,
+        run_id            INTEGER,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Persists the "[DIAG apifootball-miss]" signal (routes/matches.ts,
+      -- buildFootballLiveFromPulseScore): a PulseScore/bwin live football
+      -- match with real priced odds that no API-Football fixture matched
+      -- by team name. Was pino-log-only (2026-08-09) until the Pré-Jogo
+      -- Agent needed something queryable to tell a one-off miss (API-
+      -- Football just doesn't cover that league live) apart from a
+      -- persistently-failing name pair worth fixing in team-name matching.
+      -- One row per PulseScore match id, upserted on every fresh
+      -- occurrence rather than growing unbounded per tick/restart.
+      CREATE TABLE IF NOT EXISTS api_football_name_mismatches (
+        id                             SERIAL PRIMARY KEY,
+        match_id                       TEXT NOT NULL,
+        home_team                      TEXT NOT NULL,
+        away_team                      TEXT NOT NULL,
+        league                         TEXT,
+        api_football_candidate_names   JSONB,
+        occurrence_count               INTEGER NOT NULL DEFAULT 1,
+        first_seen_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS api_football_name_mismatches_match_idx
+        ON api_football_name_mismatches (match_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");
