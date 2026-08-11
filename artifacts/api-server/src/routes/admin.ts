@@ -12,6 +12,7 @@ import {
   casinoGamesTable,
   ledgerEntriesTable,
   casinoBannersTable,
+  apiFootballNameMismatchesTable,
 } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
@@ -30,6 +31,7 @@ import {
   getPulseScoreTennisUsage,
 } from "../services/pulsescore/tennis.js";
 import { pulseScoreFootballWsStatus } from "../services/pulsescore/footballWs.js";
+import { getApiFootballUsage, getApiFootballLiveFixtures } from "../services/apiFootball.js";
 import {
   pulseScoreBasketball,
   pulseScoreHockey,
@@ -2368,6 +2370,52 @@ router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res)
     baseball: pulseScoreBaseball.getUsage(),
     volleyball: pulseScoreVolleyball.getUsage(),
   });
+});
+
+// API-Football usage/health — built to diagnose a user report (2026-08-11)
+// that VAR-review suspension "isn't working". VAR/red-card/missed-penalty
+// detection (matches.ts's newVarReview et al.) only ever fires when a
+// PulseScore live match successfully matched an API-Football fixture
+// (findApiFootballFixture) AND that fixture happened to carry a real VAR
+// incident in the sampled window — both silent, unobservable failure modes
+// with nothing in the admin panel to check before this route existed:
+// API_FOOTBALL_KEY simply unset/wrong, the account's plan/quota not
+// covering live fixtures for the leagues actually being watched, or a
+// team-name mismatch (see api_football_name_mismatches, written by
+// routes/matches.ts and read by the Pré-Jogo AI agent) silently leaving
+// apiFixture null for a specific match. Surfaces all three causes in one
+// place instead of needing Railway log access to even start diagnosing.
+router.get("/apifootball-usage", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
+  if (!CONFIG.API_FOOTBALL_KEY) {
+    res.json({ configured: false });
+    return;
+  }
+  try {
+    const [liveFixtures, recentMismatches] = await Promise.all([
+      getApiFootballLiveFixtures(),
+      db
+        .select({
+          matchId: apiFootballNameMismatchesTable.matchId,
+          homeTeam: apiFootballNameMismatchesTable.homeTeam,
+          awayTeam: apiFootballNameMismatchesTable.awayTeam,
+          league: apiFootballNameMismatchesTable.league,
+          occurrenceCount: apiFootballNameMismatchesTable.occurrenceCount,
+          lastSeenAt: apiFootballNameMismatchesTable.lastSeenAt,
+        })
+        .from(apiFootballNameMismatchesTable)
+        .orderBy(desc(apiFootballNameMismatchesTable.lastSeenAt))
+        .limit(20),
+    ]);
+    res.json({
+      configured: true,
+      ...getApiFootballUsage(),
+      liveFixtureCount: liveFixtures.length,
+      recentNameMismatches: recentMismatches,
+    });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/apifootball-usage error");
+    res.status(500).json({ error: "Erro ao consultar API-Football" });
+  }
 });
 
 // Raw, uncached probe of PulseScore's /live-events endpoint — bypasses
