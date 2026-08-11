@@ -12,7 +12,7 @@ import { AGENT_ROLES, isAgentRole } from "../lib/aiAgents/types.js";
 import { AGENT_REGISTRY } from "../lib/aiAgents/roles/index.js";
 import { runOrchestrator } from "../lib/aiAgents/orchestrator.js";
 import { recordRun, createProposals, listProposals, listRuns, getProposal, markProposalStatus } from "../lib/aiAgents/proposals.js";
-import { executeProposal } from "../lib/aiAgents/executor.js";
+import { executeProposal, autoExecuteIfEligible } from "../lib/aiAgents/executor.js";
 
 const router: IRouter = Router();
 
@@ -63,7 +63,8 @@ router.post("/ai-agents/run/:role", adminMiddleware, async (req: AdminRequest, r
       proposalsCreated: result.proposals.length,
       durationMs,
     });
-    const proposals = await createProposals(role, run.id, result.proposals);
+    const createdProposals = await createProposals(role, run.id, result.proposals);
+    const proposals = await autoExecuteIfEligible(createdProposals);
 
     res.json({ role, run, findings: result.findings, proposals });
   } catch (err) {

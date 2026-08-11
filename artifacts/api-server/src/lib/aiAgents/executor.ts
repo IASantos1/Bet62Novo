@@ -9,14 +9,55 @@
 // transaction and customer emails — see applyWithdrawalAdminDecision in
 // routes/withdrawals.ts), this reuses that exact function instead of
 // re-deriving the money-moving logic a second time.
-import { db, usersTable, manualReviewQueueTable, kycDocumentsTable, type AiAgentProposal } from "@workspace/db";
+import { db, usersTable, manualReviewQueueTable, kycDocumentsTable, betsTable, type AiAgentProposal } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { applyWithdrawalAdminDecision } from "../../routes/withdrawals.js";
+import { settleBet } from "../../services/settlement/settleBet.js";
+import { markProposalStatus } from "./proposals.js";
 
 export interface ExecutionResult {
   ok: boolean;
   error?: string;
+}
+
+// The one actionType allowed to run without an admin clicking approve
+// first — explicit user request, 2026-08-11, follow-up to the "só propõe,
+// humano aprova" rule specifically for stuck ticket settlement ("agente
+// liquida sozinho, sem aprovação"). Double-gated in
+// autoExecuteIfEligible below: both the actionType AND the agentRole must
+// match, so a bug in an unrelated role can never fall into this path.
+const AUTO_EXECUTE_ACTION_TYPES: ReadonlySet<string> = new Set(["finalize_bet_settlement"]);
+
+export function isAutoExecuteEligible(agentRole: string, actionType: string): boolean {
+  return agentRole === "ticketsettlement" && AUTO_EXECUTE_ACTION_TYPES.has(actionType);
+}
+
+// Called right after a "ticketsettlement" run creates its proposals
+// (routes/adminAiAgents.ts, orchestrator.ts) — executes each
+// finalize_bet_settlement proposal immediately and records the outcome,
+// instead of leaving it "pending" for /proposals/:id/approve like every
+// other agent's proposals. Returns the input array with any
+// auto-executed proposals replaced by their post-execution row, so
+// callers can hand back accurate status in the same response instead of
+// showing a stale "pending".
+export async function autoExecuteIfEligible(proposals: AiAgentProposal[]): Promise<AiAgentProposal[]> {
+  const result: AiAgentProposal[] = [];
+  for (const proposal of proposals) {
+    if (!isAutoExecuteEligible(proposal.agentRole, proposal.actionType)) {
+      result.push(proposal);
+      continue;
+    }
+    const execResult = await executeProposal(proposal, "sistema (auto-liquidação)");
+    const updated = await markProposalStatus({
+      id: proposal.id,
+      status: execResult.ok ? "executed" : "failed",
+      reviewedBy: "ai-agent:ticketsettlement (auto)",
+      executionError: execResult.ok ? null : (execResult.error ?? "Erro desconhecido"),
+    });
+    result.push(updated ?? proposal);
+  }
+  return result;
 }
 
 export async function executeProposal(proposal: AiAgentProposal, adminUsername: string): Promise<ExecutionResult> {
@@ -88,6 +129,25 @@ export async function executeProposal(proposal: AiAgentProposal, adminUsername: 
         if (updated.length === 0) {
           return { ok: false, error: "Item da fila de revisão manual não encontrado para esta aposta" };
         }
+        return { ok: true };
+      }
+
+      case "finalize_bet_settlement": {
+        const betId = Number(proposal.targetId);
+        if (!Number.isFinite(betId)) return { ok: false, error: "targetId de aposta inválido" };
+        const [bet] = await db.select().from(betsTable).where(eq(betsTable.id, betId)).limit(1);
+        if (!bet) return { ok: false, error: "Aposta não encontrada" };
+        if (bet.status !== "pending") return { ok: true }; // already resolved elsewhere — nothing to do, not an error
+        const decision = await settleBet({
+          bet,
+          trigger: "ai-agent:ticketsettlement",
+          selections: Array.isArray(bet.selections) ? bet.selections : [],
+          cycleId: `ai-agent:ticketsettlement:${proposal.id}`,
+          forceVoidReason: proposal.reasoning,
+        });
+        // undefined means settleBet's own idempotency/optimistic-lock guard
+        // caught a race (already settled elsewhere) — not a failure.
+        void decision;
         return { ok: true };
       }
 

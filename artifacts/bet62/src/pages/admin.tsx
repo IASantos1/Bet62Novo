@@ -265,7 +265,8 @@ type AiAgentRole =
   | "compliance"
   | "support"
   | "livematch"
-  | "prematch";
+  | "prematch"
+  | "ticketsettlement";
 
 const AI_AGENT_LABELS: Record<AiAgentRole, string> = {
   orchestrator: "Orquestrador (CEO)",
@@ -278,6 +279,7 @@ const AI_AGENT_LABELS: Record<AiAgentRole, string> = {
   support: "Suporte",
   livematch: "Ao Vivo",
   prematch: "Pré-Jogo",
+  ticketsettlement: "Liquidação de Bilhetes",
 };
 
 type AiAgentProposal = {
@@ -4923,7 +4925,9 @@ export default function AdminPage() {
                   <p className="text-xs text-zinc-500 mb-4">
                     Cada agente analisa dados reais e cria propostas. Nenhuma proposta que envolva dinheiro
                     ou compliance (levantamentos, contas, KYC) é aplicada automaticamente — fica pendente
-                    até seres tu a aprovar ou rejeitar abaixo.
+                    até seres tu a aprovar ou rejeitar abaixo. Exceção: o agente Liquidação de Bilhetes
+                    anula e reembolsa bilhetes presos automaticamente, sem esperar aprovação — nunca decide
+                    "ganhou", só devolve a aposta.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {(
@@ -4938,6 +4942,7 @@ export default function AdminPage() {
                         "support",
                         "livematch",
                         "prematch",
+                        "ticketsettlement",
                       ] as AiAgentRole[]
                     ).map((role) => (
                       <button

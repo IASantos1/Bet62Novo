@@ -24,6 +24,7 @@ const VALID_ACTION_TYPES: readonly string[] = [
   "annotate_review_queue",
   "draft_support_reply",
   "flag_for_human_review",
+  "finalize_bet_settlement",
 ];
 const VALID_TARGET_TYPES: readonly string[] = ["withdrawal", "user", "bet", "kyc_document", "match"];
 const VALID_SEVERITY: readonly string[] = ["low", "medium", "high"];
@@ -34,7 +35,7 @@ const RESPONSE_CONTRACT = `Responde APENAS com um objeto JSON válido, sem markd
   "summary": string (resumo da análise, 1-3 frases, em português europeu),
   "findings": [{ "description": string, "severity": "low"|"medium"|"high" }],
   "proposals": [{
-    "actionType": "approve_withdrawal"|"reject_withdrawal"|"approve_kyc"|"reject_kyc"|"block_account"|"unblock_account"|"annotate_review_queue"|"draft_support_reply"|"flag_for_human_review",
+    "actionType": "approve_withdrawal"|"reject_withdrawal"|"approve_kyc"|"reject_kyc"|"block_account"|"unblock_account"|"annotate_review_queue"|"draft_support_reply"|"flag_for_human_review"|"finalize_bet_settlement",
     "targetType": "withdrawal"|"user"|"bet"|"kyc_document"|"match",
     "targetId": string,
     "summary": string (curto, para um admin ler numa lista),

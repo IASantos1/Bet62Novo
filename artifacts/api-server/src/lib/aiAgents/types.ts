@@ -13,6 +13,7 @@ export const AGENT_ROLES = [
   "support",
   "livematch",
   "prematch",
+  "ticketsettlement",
 ] as const;
 export type AgentRole = (typeof AGENT_ROLES)[number];
 
@@ -27,6 +28,14 @@ export function isAgentRole(value: string): value is AgentRole {
 // binding product decision (user request, 2026-08-11: "só propõe, humano
 // aprova"), not a per-agent choice. There is no code path that lets an
 // agent execute one of these directly.
+//
+// "finalize_bet_settlement" is the one deliberate, explicit exception (same
+// user, same day, follow-up request: "agente liquida sozinho, sem
+// aprovação" specifically for stuck ticket settlement) — see
+// executor.ts's AUTO_EXECUTE_ACTION_TYPES and roles/ticketSettlement.ts.
+// It is gated to only ever be auto-executed when agentRole ===
+// "ticketsettlement", and even then it can only force a stake refund
+// (void), never invent a win payout — see settleBet.ts's forceVoidReason.
 export type ProposalActionType =
   | "approve_withdrawal"
   | "reject_withdrawal"
@@ -36,7 +45,8 @@ export type ProposalActionType =
   | "unblock_account"
   | "annotate_review_queue"
   | "draft_support_reply"
-  | "flag_for_human_review";
+  | "flag_for_human_review"
+  | "finalize_bet_settlement";
 
 export interface ProposalDraft {
   actionType: ProposalActionType;
