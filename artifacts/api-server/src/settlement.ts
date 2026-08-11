@@ -444,6 +444,24 @@ function normalizeSettlementStatus(status: string | undefined): string {
     .replace(/\s+/g, " ");
 }
 
+// Bug report 2026-08-11 (screenshot evidence): an open multi-leg ticket's
+// still-pending racket-sport doubles legs briefly showed "Anulada" (void)
+// and then flipped to a real "won" result on a later poll — for a bet
+// whose overall status was still "pending" the whole time, so this was a
+// live-preview read, not an actual settled/reverted payout, but still a
+// real bug in what that preview computed. Root cause: the old
+// `normalized.includes(candidate)` fallback below did a blind SUBSTRING
+// match against every candidate, including short 2-3 letter abbreviations
+// like "wo" (walkover) and "ret" (retired) — "wo" is a substring of any
+// status text containing the word "Won" ("Home Won", "X Won the match",
+// ...), so a genuinely FINISHED match whose raw status happened to say
+// something like that got misclassified as a walkover/void on whichever
+// poll saw that exact status string, then correctly reclassified as
+// "won" once a later poll's status text didn't collide. Fixed by requiring
+// single-word candidates to match a WHOLE token in the normalized status,
+// not appear anywhere inside an unrelated word — multi-word candidates
+// (e.g. "rain delay") keep the substring check since they can't collide
+// with an ordinary short word by accident.
 function matchesSettlementStatus(
   status: string | undefined,
   candidates: Set<string>,
@@ -451,13 +469,20 @@ function matchesSettlementStatus(
   const normalized = normalizeSettlementStatus(status);
   if (!normalized) return false;
   if (candidates.has(normalized)) return true;
+  const tokens = normalized.split(" ");
   for (const candidate of candidates) {
-    if (normalized.includes(candidate)) return true;
+    if (candidate.includes(" ")) {
+      if (normalized.includes(candidate)) return true;
+    } else if (tokens.includes(candidate)) {
+      return true;
+    }
   }
   return false;
 }
 
-function resolveSettlementStatusOutcome(
+// Exported for direct unit testing — see matchesSettlementStatus's own
+// comment for the false-positive bug this guards against.
+export function resolveSettlementStatusOutcome(
   status: string | undefined,
   finishedAt?: number,
 ): "void" | "pending" | null {

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveSelectionSettlement } from "../../settlement.js";
+import {
+  resolveSelectionSettlement,
+  resolveSettlementStatusOutcome,
+} from "../../settlement.js";
 import { makeSelection } from "./helpers.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -113,4 +116,29 @@ test("unresolved market auto-voids after settlement timeout", () => {
 
   assert.equal(result.outcome, "void");
   assert.equal(result.settlementNote, "auto_void_timeout");
+});
+
+// Bug report 2026-08-11 (screenshot evidence): an open ticket's still-
+// pending racket-sport doubles legs briefly showed "Anulada" (void) then
+// flipped to a real "won" result on a later poll. Root cause: the void-
+// status matcher did a blind substring check against short abbreviations
+// like "wo" (walkover) — a substring of any status text containing the
+// word "Won" — so a genuinely finished match's own status text could
+// falsely trigger a walkover void. These tests lock in the fix: a
+// short abbreviation must match a whole status TOKEN, not appear inside
+// an unrelated word.
+test("a status merely containing the word 'Won' is not misread as a walkover void", () => {
+  assert.equal(resolveSettlementStatusOutcome("Home Won"), null);
+  assert.equal(resolveSettlementStatusOutcome("X Won the match"), null);
+});
+
+test("a genuine walkover status (standalone 'WO') is still voided", () => {
+  assert.equal(resolveSettlementStatusOutcome("WO"), "void");
+  assert.equal(resolveSettlementStatusOutcome("Match WO"), "void");
+});
+
+test("a genuine retired status is still voided, but 'Great' is not", () => {
+  assert.equal(resolveSettlementStatusOutcome("Retired"), "void");
+  assert.equal(resolveSettlementStatusOutcome("ret"), "void");
+  assert.equal(resolveSettlementStatusOutcome("Great match"), null);
 });
