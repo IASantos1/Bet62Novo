@@ -1,6 +1,17 @@
-// Tennis live odds from PulseScore via WebSocket — CURRENTLY DORMANT.
-// startPulseScoreTennisWs() below is fully wired but has zero call sites;
-// nothing in this codebase invokes it.
+// Tennis live odds from PulseScore via WebSocket.
+//
+// Reactivated 2026-08-11: user upgraded to the MAX plan (€149/mês, 3
+// concurrent WS connections) specifically to run football + tennis +
+// basketball on WS simultaneously — the PRO-plan single-connection
+// constraint described below no longer applies. The missing piece this
+// module's own header used to call out (a getTennisWsEventIfFresh
+// per-event-freshness function, mirroring football/basketball) is now
+// implemented below, and getPulseScoreTennisLive() (tennis.ts) merges it
+// in via mergeTennisWsFreshness — same "advance-only, per-event" design
+// as football/basketball, applied to moreInfo.SS/XP (where tennis's real
+// live data actually lives) instead of score/matchClock, which tennis
+// doesn't meaningfully populate (see tennis.ts's PulseScoreTennisOverride
+// comment on why homeSetsWon/awaySetsWon come from moreInfo, not ev.score).
 //
 // History: originally the WS connection was dedicated to tennis
 // specifically because point-by-point pricing benefits most from push
@@ -46,6 +57,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let startedOnce = false;
 
 const liveByEventId = new Map<string, PulseScoreEvent>();
+const lastSeenAt = new Map<string, number>();
 let lastFrameAt = 0;
 
 // Same "count our own usage" reasoning as the REST pollers — PulseScore has
@@ -135,6 +147,7 @@ function applyFrame(frame: BroadcastFrame): void {
   rollUsageDateIfNeeded();
   framesToday += 1;
   if (frame.sport !== "tennis") return;
+  const now = Date.now();
   const seenIds = new Set<string>();
   for (const ev of frame.data ?? []) {
     if (!ev?.eventId) continue;
@@ -154,11 +167,15 @@ function applyFrame(frame: BroadcastFrame): void {
       continue;
     }
     liveByEventId.set(ev.eventId, ev);
+    lastSeenAt.set(ev.eventId, now);
     seenIds.add(ev.eventId);
   }
   // Drop events no longer present in the feed (match ended / went off live).
   for (const id of liveByEventId.keys()) {
-    if (!seenIds.has(id)) liveByEventId.delete(id);
+    if (!seenIds.has(id)) {
+      liveByEventId.delete(id);
+      lastSeenAt.delete(id);
+    }
   }
 }
 
@@ -236,9 +253,7 @@ function connect(): void {
   });
 }
 
-/** Call once at server startup to use tennis's WS connection. Not currently
- * called anywhere — the PRO plan's single WS connection is presently given
- * to football instead (see startPulseScoreFootballWs in footballWs.ts).
+/** Call once at server startup to use tennis's WS connection (api/index.ts).
  * Safe to call even without an API key yet — it's a no-op until
  * PULSESCORE_API_KEY is set (nothing to retry-loop). */
 export function startPulseScoreTennisWs(): void {
@@ -246,6 +261,11 @@ export function startPulseScoreTennisWs(): void {
   startedOnce = true;
   connect();
 }
+
+// Exposed only for unit tests (mirrors footballWs.ts's/basketballWs.ts's
+// __testing) — lets them feed synthetic frames and inspect per-event
+// freshness without opening a real WebSocket.
+export const __testing = { applyFrame, liveByEventId, lastSeenAt };
 
 /** Live tennis events from the last WebSocket frame (~1s old at most while
  * connected). Empty until connected or if no tennis matches are currently
@@ -257,9 +277,26 @@ export function getTennisWsEvents(): PulseScoreEvent[] {
 /** True only if a frame has actually arrived within maxAgeMs — deliberately
  * NOT just `connected`, since a socket can sit open without ever pushing
  * real data (exactly what happened the first time this was tried). Callers
- * should fall back to REST whenever this is false. */
+ * should fall back to REST whenever this is false. Connection-level only —
+ * use getTennisWsEventIfFresh for any per-match trust decision (see
+ * footballWs.ts's footballWsIsFresh comment for the production bug this
+ * per-event design fixes: a quiet event can go stale while other events
+ * keep the connection looking healthy overall). */
 export function tennisWsIsFresh(maxAgeMs: number): boolean {
   return connected && lastFrameAt > 0 && Date.now() - lastFrameAt < maxAgeMs;
+}
+
+/** PER-EVENT freshness check — mirrors getFootballWsEventIfFresh/
+ * getBasketballWsEventIfFresh. Returns this event's last WS-broadcast data
+ * only if THIS SPECIFIC event was seen within maxAgeMs, regardless of how
+ * recently any other event was broadcast. */
+export function getTennisWsEventIfFresh(
+  eventId: string,
+  maxAgeMs: number,
+): PulseScoreEvent | null {
+  const seenAt = lastSeenAt.get(eventId);
+  if (!seenAt || Date.now() - seenAt > maxAgeMs) return null;
+  return liveByEventId.get(eventId) ?? null;
 }
 
 export function pulseScoreTennisWsStatus(): {

@@ -6,6 +6,7 @@ import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startPulseScoreFootballWs } from "../services/pulsescore/footballWs.js";
 import { startPulseScoreBasketballWs } from "../services/pulsescore/basketballWs.js";
+import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -97,22 +98,24 @@ server.listen(port, () => {
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
 
-  // Football's dedicated WS connection — see getPulseScoreFootballLive
-  // (football.ts) for the per-event merge design. Safe to call even before
-  // PULSESCORE_API_KEY is set, it just no-ops until then.
+  // Football/Tennis/Basketball's dedicated WS connections — see
+  // getPulseScoreFootballLive (football.ts), getPulseScoreTennisLive
+  // (tennis.ts), and getPulseScoreBasketballLive (basketball.ts) for each
+  // sport's per-event merge design. Safe to call even before
+  // PULSESCORE_API_KEY is set, they just no-op until then.
+  //
+  // All three calls together were the actual reason for the 2026-08-11 MAX
+  // plan upgrade (€149/mês, 3 concurrent connections) — until then, PulseScore
+  // docs confirm connection limits are per PLAN for the WHOLE ACCOUNT, not
+  // per sport (PRO's 1 connection meant only one sport at a time; a second
+  // simultaneous connection gets closed with non-retryable code 4029). Each
+  // REST poller already tolerates its WS overlay being empty/stale/absent —
+  // if the account ever drops back to a lower tier, whichever connections
+  // get closed by PulseScore simply degrade to REST-only for that sport,
+  // nothing needs to change here.
   startPulseScoreFootballWs();
-  // startPulseScoreBasketballWs() is DELIBERATELY NOT called here.
-  // Confirmed via the real PulseScore docs (2026-08-10): connection limits
-  // are per PLAN for the WHOLE ACCOUNT, not per sport — PRO gets exactly 1
-  // simultaneous WS connection, MAX gets 3. A PRO account can never hold
-  // this connection AND football's at the same time; the second one gets
-  // closed with code 4029 (non-retryable per the docs). Basketball is
-  // REST-only by design on the current plan, not a workaround — REST-only
-  // is already fully functional (getPulseScoreBasketballLive works
-  // standalone, mergeBasketballWsFreshness is a safe no-op with nothing
-  // ever populated in basketballWs.ts's liveByEventId while this stays
-  // uncalled). Reactivating this needs a MAX plan upgrade — see
-  // basketballWs.ts's own header for the rest of this history.
+  startPulseScoreTennisWs();
+  startPulseScoreBasketballWs();
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
