@@ -9,10 +9,9 @@ import { Router, type IRouter, type Response } from "express";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
 import { logger } from "../lib/logger.js";
 import { AGENT_ROLES, isAgentRole } from "../lib/aiAgents/types.js";
-import { AGENT_REGISTRY } from "../lib/aiAgents/roles/index.js";
-import { runOrchestrator } from "../lib/aiAgents/orchestrator.js";
-import { recordRun, createProposals, listProposals, listRuns, getProposal, markProposalStatus } from "../lib/aiAgents/proposals.js";
-import { executeProposal, autoExecuteIfEligible } from "../lib/aiAgents/executor.js";
+import { listProposals, listRuns } from "../lib/aiAgents/proposals.js";
+import { runSingleAgent, approveProposal, rejectProposal } from "../lib/aiAgents/runner.js";
+import { runConsoleCommand } from "../lib/aiAgents/console.js";
 
 const router: IRouter = Router();
 
@@ -30,46 +29,41 @@ router.post("/ai-agents/run/:role", adminMiddleware, async (req: AdminRequest, r
   }
 
   try {
-    if (role === "orchestrator") {
-      const report = await runOrchestrator(req.admin?.username ?? null);
-      res.json({ role, orchestrator: true, ...report });
+    const outcome = await runSingleAgent(role, req.admin?.username ?? null);
+    if (outcome.orchestrator) {
+      res.json({ role, orchestrator: true, ...outcome.result });
       return;
     }
-
-    const startedAt = Date.now();
-    const result = await AGENT_REGISTRY[role]();
-    const durationMs = Date.now() - startedAt;
-
-    if (result === null) {
-      const run = await recordRun({
-        role,
-        trigger: "manual",
-        triggeredBy: req.admin?.username ?? null,
-        status: "skipped",
-        summary: "Sem resposta da IA (AI_AGENTS_API_KEY não configurada, ou falha na chamada — ver logs).",
-        proposalsCreated: 0,
-        durationMs,
-      });
-      res.json({ role, run, findings: [], proposals: [] });
-      return;
-    }
-
-    const run = await recordRun({
-      role,
-      trigger: "manual",
-      triggeredBy: req.admin?.username ?? null,
-      status: "ok",
-      summary: result.summary,
-      proposalsCreated: result.proposals.length,
-      durationMs,
-    });
-    const createdProposals = await createProposals(role, run.id, result.proposals);
-    const proposals = await autoExecuteIfEligible(createdProposals);
-
-    res.json({ role, run, findings: result.findings, proposals });
+    // Narrowing via the implicit negative branch doesn't eliminate the
+    // other union member under this package's tsconfig (strict: false —
+    // see the identical note in routes/withdrawals.ts) — cast explicitly.
+    const single = outcome as Extract<typeof outcome, { orchestrator: false }>;
+    res.json({ role, run: single.run, findings: single.findings, proposals: single.proposals });
   } catch (err) {
     logger.error({ err, role }, "POST /api/admin/ai-agents/run/:role error");
     res.status(500).json({ error: "Erro ao correr o agente" });
+  }
+});
+
+// POST /api/admin/ai-agents/console — the "BET62 Brain" natural-language
+// panel (user request, 2026-08-11): an admin types a command in Portuguese
+// and the model maps it to one of a small, fixed set of safe tools
+// (console.ts) — it can never invent SQL or an arbitrary action, only pick
+// from that allow-list. Every tool just calls the exact same functions the
+// REST routes above already use, so a typed command has no more power than
+// the equivalent button in this same panel.
+router.post("/ai-agents/console", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  if (!message) {
+    res.status(400).json({ error: "Mensagem em falta" });
+    return;
+  }
+  try {
+    const result = await runConsoleCommand(message, req.admin?.username ?? "admin");
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/ai-agents/console error");
+    res.status(500).json({ error: "Erro ao processar o comando" });
   }
 });
 
@@ -107,32 +101,13 @@ router.post("/ai-agents/proposals/:id/approve", adminMiddleware, async (req: Adm
   const adminUsername = req.admin?.username ?? "admin";
 
   try {
-    const proposal = await getProposal(id);
-    if (!proposal) {
-      res.status(404).json({ error: "Proposta não encontrada" });
+    const result = await approveProposal(id, adminUsername);
+    if (!result.ok) {
+      const status = result.error === "Proposta não encontrada" ? 404 : result.proposal ? 500 : 409;
+      res.status(status).json({ error: result.error, proposal: result.proposal });
       return;
     }
-    if (proposal.status !== "pending") {
-      res.status(409).json({ error: "Proposta já foi processada", status: proposal.status });
-      return;
-    }
-
-    await markProposalStatus({ id, status: "approved", reviewedBy: adminUsername });
-
-    const execResult = await executeProposal(proposal, adminUsername);
-    const updated = await markProposalStatus({
-      id,
-      status: execResult.ok ? "executed" : "failed",
-      reviewedBy: adminUsername,
-      executionError: execResult.ok ? null : (execResult.error ?? "Erro desconhecido"),
-    });
-
-    if (!execResult.ok) {
-      res.status(500).json({ error: `Proposta aprovada mas falhou ao aplicar: ${execResult.error}`, proposal: updated });
-      return;
-    }
-
-    res.json({ proposal: updated });
+    res.json({ proposal: result.proposal });
   } catch (err) {
     logger.error({ err, id }, "POST /api/admin/ai-agents/proposals/:id/approve error");
     res.status(500).json({ error: "Erro ao aprovar proposta" });
@@ -147,22 +122,12 @@ router.post("/ai-agents/proposals/:id/reject", adminMiddleware, async (req: Admi
   }
 
   try {
-    const proposal = await getProposal(id);
-    if (!proposal) {
-      res.status(404).json({ error: "Proposta não encontrada" });
+    const result = await rejectProposal(id, req.admin?.username ?? "admin");
+    if (!result.ok) {
+      res.status(result.error === "Proposta não encontrada" ? 404 : 409).json({ error: result.error });
       return;
     }
-    if (proposal.status !== "pending") {
-      res.status(409).json({ error: "Proposta já foi processada", status: proposal.status });
-      return;
-    }
-
-    const updated = await markProposalStatus({
-      id,
-      status: "rejected",
-      reviewedBy: req.admin?.username ?? "admin",
-    });
-    res.json({ proposal: updated });
+    res.json({ proposal: result.proposal });
   } catch (err) {
     logger.error({ err, id }, "POST /api/admin/ai-agents/proposals/:id/reject error");
     res.status(500).json({ error: "Erro ao rejeitar proposta" });

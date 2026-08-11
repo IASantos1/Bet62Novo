@@ -53,6 +53,8 @@ import {
   Power,
   Cpu,
   Sparkles,
+  Send,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1303,6 +1305,43 @@ export default function AdminPage() {
   const aiAgentProposals = aiAgentsQuery.data ?? [];
   const aiAgentsLoading = aiAgentsQuery.isLoading;
   const refetchAiAgentProposals = aiAgentsQuery.refetch;
+
+  const [consoleMessages, setConsoleMessages] = useState<
+    Array<{ role: "user" | "assistant"; text: string; toolUsed?: string | null; ok?: boolean }>
+  >([]);
+  const [consoleInput, setConsoleInput] = useState("");
+  const [consoleSending, setConsoleSending] = useState(false);
+
+  const handleSendConsoleCommand = async () => {
+    const message = consoleInput.trim();
+    if (!message || consoleSending) return;
+    setConsoleMessages((prev) => [...prev, { role: "user", text: message }]);
+    setConsoleInput("");
+    setConsoleSending(true);
+    try {
+      const res = await fetch("/api/admin/ai-agents/console", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConsoleMessages((prev) => [...prev, { role: "assistant", text: data.error || "Erro ao processar o comando.", ok: false }]);
+        return;
+      }
+      setConsoleMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: data.message || "Sem resposta.", toolUsed: data.toolUsed, ok: data.ok },
+      ]);
+      if (data.ok && data.toolUsed) {
+        refetchAiAgentProposals();
+      }
+    } catch {
+      setConsoleMessages((prev) => [...prev, { role: "assistant", text: "Erro de rede ao processar o comando.", ok: false }]);
+    } finally {
+      setConsoleSending(false);
+    }
+  };
 
   const handleRunAgent = async (role: AiAgentRole) => {
     setRunningAgent(role);
@@ -4967,6 +5006,62 @@ export default function AdminPage() {
                         {AI_AGENT_LABELS[role]}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Bot size={16} className="text-purple-400" />
+                    <span className="font-bold text-sm text-zinc-300">BET62 Brain</span>
+                  </div>
+                  <p className="text-xs text-zinc-500 mb-3">
+                    Escreve um comando em português — ex: "Qual é a exposição atual?", "Suspende eventos com
+                    exposição acima de €10.000", "Liquida os bilhetes presos", "Mostra as propostas pendentes".
+                    A IA só pode escolher entre um conjunto fixo de ações seguras — nunca executa código livre.
+                  </p>
+                  {consoleMessages.length > 0 && (
+                    <div className="space-y-2 mb-3 max-h-80 overflow-y-auto pr-1">
+                      {consoleMessages.map((m, i) => (
+                        <div
+                          key={i}
+                          className={`text-xs rounded-lg px-3 py-2 max-w-[85%] ${
+                            m.role === "user"
+                              ? "ml-auto bg-purple-600/20 border border-purple-500/30 text-purple-100"
+                              : m.ok === false
+                                ? "bg-red-500/10 border border-red-500/30 text-red-300"
+                                : "bg-zinc-800 border border-zinc-700 text-zinc-300"
+                          }`}
+                        >
+                          {m.text}
+                          {m.toolUsed && (
+                            <div className="text-[10px] text-zinc-500 mt-1">via {m.toolUsed}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={consoleInput}
+                      onChange={(e) => setConsoleInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendConsoleCommand();
+                        }
+                      }}
+                      placeholder="Escreve um comando..."
+                      disabled={consoleSending}
+                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-purple-500/50 disabled:opacity-50"
+                    />
+                    <button
+                      onClick={handleSendConsoleCommand}
+                      disabled={consoleSending || !consoleInput.trim()}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {consoleSending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                    </button>
                   </div>
                 </div>
 

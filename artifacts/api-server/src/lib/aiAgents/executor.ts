@@ -78,6 +78,22 @@ export async function autoExecuteIfEligible(proposals: AiAgentProposal[]): Promi
   return result;
 }
 
+// Shared by the "suspend_event" proposal action above and by the natural-
+// language console's suspend_events_above_exposure tool (console.ts) —
+// same underlying mutation either way: force-suspend one event via the
+// event_admin_overrides lever routes/adminPro.ts already exposes to a
+// human admin. Kept here (not duplicated) so there is exactly one place
+// that writes this override.
+export async function forceSuspendEvent(eventId: string, note: string, actor: string): Promise<void> {
+  await db
+    .insert(eventAdminOverridesTable)
+    .values({ eventId, forceSuspend: true, overrideNote: note, updatedBy: actor })
+    .onConflictDoUpdate({
+      target: eventAdminOverridesTable.eventId,
+      set: { forceSuspend: true, overrideNote: note, updatedBy: actor, updatedAt: new Date() },
+    });
+}
+
 export async function executeProposal(proposal: AiAgentProposal, adminUsername: string): Promise<ExecutionResult> {
   const reviewedBy = `ai-agent:${proposal.agentRole} (aprovado por ${adminUsername})`;
 
@@ -172,23 +188,7 @@ export async function executeProposal(proposal: AiAgentProposal, adminUsername: 
       case "suspend_event": {
         const eventId = proposal.targetId;
         if (!eventId) return { ok: false, error: "targetId de evento inválido" };
-        await db
-          .insert(eventAdminOverridesTable)
-          .values({
-            eventId,
-            forceSuspend: true,
-            overrideNote: `[IA - ${proposal.agentRole}] ${proposal.reasoning}`,
-            updatedBy: reviewedBy,
-          })
-          .onConflictDoUpdate({
-            target: eventAdminOverridesTable.eventId,
-            set: {
-              forceSuspend: true,
-              overrideNote: `[IA - ${proposal.agentRole}] ${proposal.reasoning}`,
-              updatedBy: reviewedBy,
-              updatedAt: new Date(),
-            },
-          });
+        await forceSuspendEvent(eventId, `[IA - ${proposal.agentRole}] ${proposal.reasoning}`, reviewedBy);
         return { ok: true };
       }
 

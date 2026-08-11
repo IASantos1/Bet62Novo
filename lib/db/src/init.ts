@@ -556,6 +556,21 @@ export async function initDb(): Promise<void> {
 
       CREATE UNIQUE INDEX IF NOT EXISTS api_football_name_mismatches_match_idx
         ON api_football_name_mismatches (match_id);
+
+      -- Audit trail for the "BET62 Brain" natural-language admin console
+      -- (lib/aiAgents/console.ts, 2026-08-11) — see that file's header for
+      -- the safety design (fixed tool allow-list, no free-form execution).
+      CREATE TABLE IF NOT EXISTS ai_console_commands (
+        id               SERIAL PRIMARY KEY,
+        admin_username   TEXT NOT NULL,
+        message          TEXT NOT NULL,
+        tool_used        TEXT,
+        params           JSONB,
+        result_summary   TEXT,
+        ok               BOOLEAN NOT NULL DEFAULT TRUE,
+        error            TEXT,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
 
     console.info("[db/init] Schema initialisation complete.");
