@@ -11,7 +11,7 @@
 // 2. For bets STILL pending after that fresh deterministic pass — meaning
 //    the settlement engine genuinely cannot derive an outcome (typically:
 //    the event was abandoned/cancelled/postponed and no result will ever
-//    arrive) — Claude reviews the match data and decides whether it's safe
+//    arrive) — the model reviews the match data and decides whether it's safe
 //    to force-void (refund the stake) so the customer's money isn't frozen
 //    forever.
 //

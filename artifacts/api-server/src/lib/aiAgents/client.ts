@@ -1,15 +1,28 @@
-// Shared Claude caller for the internal AI-operations agent system. Reuses
-// the exact call shape already proven in routes/admin.ts's
-// POST /casino/banners/ai-generate (direct fetch to the Messages API, not
-// the SDK) rather than inventing a second integration pattern.
+// Shared LLM caller for the internal AI-operations agent system. Talks to
+// any OpenAI-compatible chat-completions endpoint (POST {baseUrl}/chat/
+// completions, { model, messages, ... } in, choices[0].message.content
+// out) rather than a specific vendor's SDK/API shape — user request,
+// 2026-08-11: run this system on a free/open-source model instead of a
+// paid one, without needing to self-host a GPU server. CONFIG.AI_AGENTS_*
+// (config.ts) defaults to OpenRouter, which fronts open-source models
+// (Llama, Qwen, GPT-OSS, ...) behind that same protocol, including a
+// genuinely free ":free" tier — but this same code works unchanged against
+// Groq, Together AI, or a self-hosted Ollama/vLLM server later by just
+// changing AI_AGENTS_BASE_URL/AI_AGENTS_MODEL/AI_AGENTS_API_KEY. (Not to be
+// confused with the unrelated Anthropic-specific call in routes/admin.ts's
+// POST /casino/banners/ai-generate, which this does not touch.)
 //
 // Every agent role gets the same strict JSON response contract
 // (RESPONSE_CONTRACT below) so this module can validate and normalize the
 // output once, in one place, instead of every role re-implementing parsing.
-// A response Claude can't produce validly, or any failure to reach the API
-// at all, returns null — callers log/record the run as failed rather than
-// guessing at a fallback (unlike the banner-copy generator, there is no
-// safe deterministic template for "what should the Risk agent conclude").
+// A response the model can't produce validly, or any failure to reach the
+// API at all, returns null — callers log/record the run as failed rather
+// than guessing at a fallback (unlike the banner-copy generator, there is
+// no safe deterministic template for "what should the Risk agent
+// conclude"). parseAgentResponse below already tolerates a model wrapping
+// its JSON in a ```json fence or adding stray prose around it (extracts
+// the outermost {...}), which matters more here than it did with Claude —
+// smaller open models follow "JSON only" instructions less reliably.
 import { CONFIG } from "../config.js";
 import { logger } from "../logger.js";
 import type { AgentAnalysisResult, AgentFinding, AgentRole, ProposalActionType, ProposalDraft } from "./types.js";
@@ -54,23 +67,27 @@ export async function runAgentAnalysis(args: {
   contextData: unknown;
   maxTokens?: number;
 }): Promise<AgentAnalysisResult | null> {
-  if (!CONFIG.ANTHROPIC_API_KEY) {
-    logger.warn({ role: args.role }, "[aiAgents] ANTHROPIC_API_KEY not set, skipping run");
+  if (!CONFIG.AI_AGENTS_API_KEY) {
+    logger.warn({ role: args.role }, "[aiAgents] AI_AGENTS_API_KEY not set, skipping run");
     return null;
   }
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await fetch(`${CONFIG.AI_AGENTS_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": CONFIG.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
+        Authorization: `Bearer ${CONFIG.AI_AGENTS_API_KEY}`,
+        // OpenRouter-specific attribution headers — harmless no-ops on
+        // other OpenAI-compatible providers (Groq/Together/self-hosted).
+        "HTTP-Referer": "https://bet62.pt",
+        "X-Title": "Bet62 IA Operações",
       },
       body: JSON.stringify({
         model: CONFIG.AI_AGENTS_MODEL,
         max_tokens: args.maxTokens ?? 2000,
-        system: `${args.roleSystemPrompt}\n\n${RESPONSE_CONTRACT}`,
+        temperature: 0.2,
         messages: [
+          { role: "system", content: `${args.roleSystemPrompt}\n\n${RESPONSE_CONTRACT}` },
           {
             role: "user",
             content: `Dados atuais para análise:\n${JSON.stringify(args.contextData, null, 2)}`,
@@ -80,14 +97,14 @@ export async function runAgentAnalysis(args: {
       signal: AbortSignal.timeout(60_000),
     });
     if (!resp.ok) {
-      logger.warn({ role: args.role, status: resp.status }, "[aiAgents] Anthropic call failed");
+      logger.warn({ role: args.role, status: resp.status, body: await resp.text().catch(() => "") }, "[aiAgents] LLM call failed");
       return null;
     }
-    const data = (await resp.json()) as { content?: Array<{ text?: string }> };
-    const text = data.content?.[0]?.text ?? "";
+    const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = data.choices?.[0]?.message?.content ?? "";
     return parseAgentResponse(args.role, text);
   } catch (err) {
-    logger.warn({ err, role: args.role }, "[aiAgents] Anthropic call errored");
+    logger.warn({ err, role: args.role }, "[aiAgents] LLM call errored");
     return null;
   }
 }

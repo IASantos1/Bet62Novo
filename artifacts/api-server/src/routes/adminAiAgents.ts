@@ -46,7 +46,7 @@ router.post("/ai-agents/run/:role", adminMiddleware, async (req: AdminRequest, r
         trigger: "manual",
         triggeredBy: req.admin?.username ?? null,
         status: "skipped",
-        summary: "Sem resposta da IA (ANTHROPIC_API_KEY não configurada, ou falha na chamada — ver logs).",
+        summary: "Sem resposta da IA (AI_AGENTS_API_KEY não configurada, ou falha na chamada — ver logs).",
         proposalsCreated: 0,
         durationMs,
       });

@@ -1,6 +1,6 @@
 // Orchestrator ("CEO agent") — runs every specialist agent in sequence,
 // records each one's run + proposals exactly like a standalone run would,
-// then asks Claude for a short executive rollup across all of them. It
+// then asks the model for a short executive rollup across all of them. It
 // never creates proposals of its own; its job is coordination and
 // reporting, not decisions — every actionable item still comes from the
 // specialist that actually gathered the relevant data.

@@ -78,16 +78,36 @@ const API_FOOTBALL_BASE_URL =
   process.env["API_FOOTBALL_BASE_URL"]?.trim() || "https://v3.football.api-sports.io";
 
 // Optional — powers the admin "AI-assisted casino banner" copy generator
-// (routes/admin.ts POST /casino/banners/ai-generate) and the internal
-// AI-operations agent system (lib/aiAgents/). Falls back to a deterministic
-// template / a "skipped, no key" run result when unset, so both features
-// degrade gracefully instead of erroring out.
+// (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
+// deterministic template when unset. Kept separate from the AI_AGENTS_*
+// vars below on purpose: the banner generator and the ops-agent system are
+// unrelated features that happen to have both used Anthropic at first —
+// they no longer have to share a provider.
 const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
-// Model used by the AI-operations agents (Risk/Odds/Settlement/Fraud/
-// Payments/Compliance/Support/Orchestrator — see lib/aiAgents/). These
-// agents reason over real financial/compliance data, so this defaults to a
-// stronger model than the Haiku used for banner copy above.
-const AI_AGENTS_MODEL = process.env["AI_AGENTS_MODEL"]?.trim() || "claude-sonnet-4-6";
+
+// The internal AI-operations agent system (Risk/Odds/Settlement/Fraud/
+// Payments/Compliance/Support/Orchestrator/Ao Vivo/Pré-Jogo/Liquidação de
+// Bilhetes — see lib/aiAgents/). Deliberately NOT tied to Anthropic — user
+// request, 2026-08-11: run this on a free/open-source model instead of a
+// paid one, without needing to self-host a GPU server. Talks to any
+// OpenAI-compatible chat-completions endpoint (client.ts), so the default
+// below points at OpenRouter, which fronts open-source models (Llama,
+// Qwen, GPT-OSS, ...) including a genuinely free ":free" tier — but the
+// same code works unchanged against Groq, Together AI, or a self-hosted
+// Ollama/vLLM server later by just changing these two vars.
+const AI_AGENTS_API_KEY = process.env["AI_AGENTS_API_KEY"] ?? "";
+const AI_AGENTS_BASE_URL =
+  process.env["AI_AGENTS_BASE_URL"]?.trim() || "https://openrouter.ai/api/v1";
+// meta-llama/llama-3.3-70b-instruct:free — a 70B model, not a tiny 7-8B
+// one, specifically because these agents reason over real financial/
+// compliance data and need to reliably follow the strict JSON contract in
+// client.ts. OpenRouter's free-tier roster changes over time (verify at
+// openrouter.ai/models) and free models are capped at 20 req/min and
+// 50 req/day with no credits purchased (1,000/day after a one-time $10
+// credit purchase) — the agents are meant to be run on demand from the
+// admin panel, not on a tight schedule, to stay well under that.
+const AI_AGENTS_MODEL =
+  process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
 // ── BET62 Live + Match Tracker + Streaming ──
 //
@@ -142,6 +162,8 @@ export const CONFIG = {
   API_FOOTBALL_KEY,
   API_FOOTBALL_BASE_URL,
   ANTHROPIC_API_KEY,
+  AI_AGENTS_API_KEY,
+  AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
