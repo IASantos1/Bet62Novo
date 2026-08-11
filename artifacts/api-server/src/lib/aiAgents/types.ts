@@ -29,13 +29,19 @@ export function isAgentRole(value: string): value is AgentRole {
 // aprova"), not a per-agent choice. There is no code path that lets an
 // agent execute one of these directly.
 //
-// "finalize_bet_settlement" is the one deliberate, explicit exception (same
-// user, same day, follow-up request: "agente liquida sozinho, sem
-// aprovação" specifically for stuck ticket settlement) — see
-// executor.ts's AUTO_EXECUTE_ACTION_TYPES and roles/ticketSettlement.ts.
-// It is gated to only ever be auto-executed when agentRole ===
-// "ticketsettlement", and even then it can only force a stake refund
-// (void), never invent a win payout — see settleBet.ts's forceVoidReason.
+// "finalize_bet_settlement" and "suspend_event" are the deliberate, explicit
+// exceptions (same user, 2026-08-11, follow-up requests to give specific
+// agents real execution authority instead of only proposing) — see
+// executor.ts's AUTO_EXECUTE_ACTION_TYPES. Each is gated to exactly one
+// agentRole and, just as importantly, each can only ever act in the SAFE
+// direction: "finalize_bet_settlement" (role "ticketsettlement") can only
+// force a stake refund, never invent a win payout — see settleBet.ts's
+// forceVoidReason. "suspend_event" (role "odds") can only turn betting OFF
+// on an event (forceSuspend=true in event_admin_overrides, the same lever
+// routes/adminPro.ts already exposes to a human admin) — it never
+// unsuspends, never changes odds/margin/RTP (no such lever exists in this
+// schema to hand it), and an admin can always reverse it from the existing
+// admin-pro panel exactly like a manual suspension.
 export type ProposalActionType =
   | "approve_withdrawal"
   | "reject_withdrawal"
@@ -46,7 +52,8 @@ export type ProposalActionType =
   | "annotate_review_queue"
   | "draft_support_reply"
   | "flag_for_human_review"
-  | "finalize_bet_settlement";
+  | "finalize_bet_settlement"
+  | "suspend_event";
 
 export interface ProposalDraft {
   actionType: ProposalActionType;

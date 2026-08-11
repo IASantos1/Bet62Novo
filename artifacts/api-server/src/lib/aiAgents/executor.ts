@@ -9,7 +9,7 @@
 // transaction and customer emails — see applyWithdrawalAdminDecision in
 // routes/withdrawals.ts), this reuses that exact function instead of
 // re-deriving the money-moving logic a second time.
-import { db, usersTable, manualReviewQueueTable, kycDocumentsTable, betsTable, type AiAgentProposal } from "@workspace/db";
+import { db, usersTable, manualReviewQueueTable, kycDocumentsTable, betsTable, eventAdminOverridesTable, type AiAgentProposal } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { applyWithdrawalAdminDecision } from "../../routes/withdrawals.js";
@@ -21,26 +21,37 @@ export interface ExecutionResult {
   error?: string;
 }
 
-// The one actionType allowed to run without an admin clicking approve
-// first — explicit user request, 2026-08-11, follow-up to the "só propõe,
-// humano aprova" rule specifically for stuck ticket settlement ("agente
-// liquida sozinho, sem aprovação"). Double-gated in
-// autoExecuteIfEligible below: both the actionType AND the agentRole must
-// match, so a bug in an unrelated role can never fall into this path.
-const AUTO_EXECUTE_ACTION_TYPES: ReadonlySet<string> = new Set(["finalize_bet_settlement"]);
+// The only (agentRole, actionType) pairs allowed to run without an admin
+// clicking approve first — explicit, one-at-a-time user requests,
+// 2026-08-11, each a deliberate follow-up to the platform's general "só
+// propõe, humano aprova" rule:
+//  - ticketsettlement/finalize_bet_settlement: "agente liquida sozinho,
+//    sem aprovação" for stuck ticket settlement. Can only force a stake
+//    refund, never invent a win payout (settleBet.ts's forceVoidReason).
+//  - odds/suspend_event: real execution authority for the Odds agent to
+//    protect the house when a live feed goes unstable. Can only turn
+//    betting OFF (event_admin_overrides.forceSuspend=true, the same lever
+//    routes/adminPro.ts already exposes to a human admin) — never
+//    unsuspends, never touches odds/margin/RTP.
+// Both entries are double-gated below: the actionType AND the agentRole
+// must match together, so a bug in an unrelated role can never fall into
+// this path, and every other agent's proposals keep requiring approval.
+const AUTO_EXECUTE_PAIRS: ReadonlySet<string> = new Set([
+  "ticketsettlement:finalize_bet_settlement",
+  "odds:suspend_event",
+]);
 
 export function isAutoExecuteEligible(agentRole: string, actionType: string): boolean {
-  return agentRole === "ticketsettlement" && AUTO_EXECUTE_ACTION_TYPES.has(actionType);
+  return AUTO_EXECUTE_PAIRS.has(`${agentRole}:${actionType}`);
 }
 
-// Called right after a "ticketsettlement" run creates its proposals
-// (routes/adminAiAgents.ts, orchestrator.ts) — executes each
-// finalize_bet_settlement proposal immediately and records the outcome,
-// instead of leaving it "pending" for /proposals/:id/approve like every
-// other agent's proposals. Returns the input array with any
-// auto-executed proposals replaced by their post-execution row, so
-// callers can hand back accurate status in the same response instead of
-// showing a stale "pending".
+// Called right after a run creates its proposals (routes/adminAiAgents.ts,
+// orchestrator.ts) — executes any auto-execute-eligible proposal
+// immediately and records the outcome, instead of leaving it "pending"
+// for /proposals/:id/approve like every other agent's proposals. Returns
+// the input array with any auto-executed proposals replaced by their
+// post-execution row, so callers can hand back accurate status in the
+// same response instead of showing a stale "pending".
 export async function autoExecuteIfEligible(proposals: AiAgentProposal[]): Promise<AiAgentProposal[]> {
   const result: AiAgentProposal[] = [];
   for (const proposal of proposals) {
@@ -48,11 +59,11 @@ export async function autoExecuteIfEligible(proposals: AiAgentProposal[]): Promi
       result.push(proposal);
       continue;
     }
-    const execResult = await executeProposal(proposal, "sistema (auto-liquidação)");
+    const execResult = await executeProposal(proposal, "sistema (auto-execução)");
     const updated = await markProposalStatus({
       id: proposal.id,
       status: execResult.ok ? "executed" : "failed",
-      reviewedBy: "ai-agent:ticketsettlement (auto)",
+      reviewedBy: `ai-agent:${proposal.agentRole} (auto)`,
       executionError: execResult.ok ? null : (execResult.error ?? "Erro desconhecido"),
     });
     result.push(updated ?? proposal);
@@ -148,6 +159,29 @@ export async function executeProposal(proposal: AiAgentProposal, adminUsername: 
         // undefined means settleBet's own idempotency/optimistic-lock guard
         // caught a race (already settled elsewhere) — not a failure.
         void decision;
+        return { ok: true };
+      }
+
+      case "suspend_event": {
+        const eventId = proposal.targetId;
+        if (!eventId) return { ok: false, error: "targetId de evento inválido" };
+        await db
+          .insert(eventAdminOverridesTable)
+          .values({
+            eventId,
+            forceSuspend: true,
+            overrideNote: `[IA - ${proposal.agentRole}] ${proposal.reasoning}`,
+            updatedBy: reviewedBy,
+          })
+          .onConflictDoUpdate({
+            target: eventAdminOverridesTable.eventId,
+            set: {
+              forceSuspend: true,
+              overrideNote: `[IA - ${proposal.agentRole}] ${proposal.reasoning}`,
+              updatedBy: reviewedBy,
+              updatedAt: new Date(),
+            },
+          });
         return { ok: true };
       }
 

@@ -4925,9 +4925,11 @@ export default function AdminPage() {
                   <p className="text-xs text-zinc-500 mb-4">
                     Cada agente analisa dados reais e cria propostas. Nenhuma proposta que envolva dinheiro
                     ou compliance (levantamentos, contas, KYC) é aplicada automaticamente — fica pendente
-                    até seres tu a aprovar ou rejeitar abaixo. Exceção: o agente Liquidação de Bilhetes
+                    até seres tu a aprovar ou rejeitar abaixo. Duas exceções: o agente Liquidação de Bilhetes
                     anula e reembolsa bilhetes presos automaticamente, sem esperar aprovação — nunca decide
-                    "ganhou", só devolve a aposta.
+                    "ganhou", só devolve a aposta; e o agente Odds/Mercados pode suspender sozinho um evento
+                    ao vivo com feed instável — nunca reabre, nunca mexe em odds/margem/RTP, e podes reverter
+                    a qualquer momento no painel de eventos.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {(
