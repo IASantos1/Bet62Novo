@@ -482,6 +482,13 @@ type CasinoGame = {
   img: string | null;
   source?: string; // "silentapi" (default) | "palace"
 };
+// Casino's default/first-page view is pinned to this provider (user
+// request, 2026-08-11: every game shown before picking a category/
+// searching should be Pragmatic Play). A bare substring, not the exact
+// Palace Casino provider_name string — /api/casino/games matches it with
+// ilike specifically so this doesn't have to be byte-perfect (see
+// routes/casino.ts's provider filter comment).
+const CASINO_DEFAULT_PROVIDER = "Pragmatic";
 // BET62 Live + Match Tracker + Streaming (BetBY live list + StatScore/
 // Statpal tracker + SMYTDRYT stream) — separate pipeline/ID scheme from the
 // existing Statpal/SportsAPI-backed live matches above. GET /api/live is a
@@ -9129,6 +9136,13 @@ export default function Home({
   // (real catalog matches only, same curated-search pattern as
   // homeCasinoPreview above — no fabricated entries); popularity-sorted
   // games fill the rest of the row, skipping anything already included.
+  // Both fetches are pinned to Pragmatic Play (CASINO_DEFAULT_PROVIDER) —
+  // user request, 2026-08-11: every game on the casino's first/default
+  // view should be Pragmatic Play. Titles among featuredTitles that turn
+  // out not to be a real Pragmatic Play game in the catalog (e.g. "Wanted
+  // Dead or a Wild" is Hacksaw Gaming, not Pragmatic) simply won't match
+  // here and get silently dropped — no manual curation needed, the
+  // provider filter self-corrects against whatever's actually real.
   useEffect(() => {
     if (activeTab !== "casino" || casinoPopular.length > 0) return;
     setCasinoPopularLoading(true);
@@ -9143,7 +9157,9 @@ export default function Home({
     ];
     Promise.all(
       featuredTitles.map((title) =>
-        fetch(`/api/casino/games?search=${encodeURIComponent(title)}&limit=1`)
+        fetch(
+          `/api/casino/games?search=${encodeURIComponent(title)}&provider=${encodeURIComponent(CASINO_DEFAULT_PROVIDER)}&limit=1`,
+        )
           .then((r) => r.json())
           .then((data) => (Array.isArray(data?.games) ? data.games[0] : null))
           .catch(() => null),
@@ -9159,7 +9175,9 @@ export default function Home({
           seen.add(key);
           featured.push(g);
         }
-        return fetch("/api/casino/games?sort=popular&limit=10")
+        return fetch(
+          `/api/casino/games?sort=popular&provider=${encodeURIComponent(CASINO_DEFAULT_PROVIDER)}&limit=10`,
+        )
           .then((r) => r.json())
           .then((data) => {
             const rest: CasinoGame[] = Array.isArray(data?.games)
@@ -9296,6 +9314,7 @@ export default function Home({
   const casinoGridParams = useCallback(
     (page: number): URLSearchParams => {
       const params = new URLSearchParams({ page: String(page), limit: String(CASINO_PAGE_SIZE) });
+      const isDefaultView = casinoCategory === "Todos" || casinoCategory === "Populares" || casinoCategory === "Novos";
       if (casinoCategory === "Populares") params.set("sort", "popular");
       else if (casinoCategory === "Novos") params.set("sort", "new");
       else {
@@ -9303,6 +9322,13 @@ export default function Home({
         if (casinoCategory !== "Todos") params.set("category", casinoCategory);
       }
       if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
+      // Casino's default view (no category pill picked away from Todos/
+      // Populares/Novos, no search) is pinned to Pragmatic Play — see
+      // CASINO_DEFAULT_PROVIDER. Not applied once the user searches or
+      // picks an explicit different category (Slots/Ao Vivo/Baccarat/
+      // Blackjack/Roulette) — those are the user actively asking to see
+      // something else, not "the first page" anymore.
+      if (isDefaultView && !casinoSearchDebounced) params.set("provider", CASINO_DEFAULT_PROVIDER);
       return params;
     },
     [casinoCategory, casinoSort, casinoSearchDebounced],
@@ -25718,19 +25744,19 @@ export default function Home({
                   <img
                     src={banner.imageUrl}
                     alt={banner.title}
-                    className="w-full h-36 sm:h-52 object-cover"
+                    className="w-full h-44 sm:h-64 object-cover"
                     loading="lazy"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent flex flex-col justify-end p-3 sm:p-4">
-                    <span className="text-white font-black text-base sm:text-xl uppercase italic tracking-tight">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent flex flex-col justify-end p-3 sm:p-5">
+                    <span className="text-white font-black text-lg sm:text-2xl uppercase italic tracking-tight">
                       {banner.title}
                     </span>
                     {banner.subtitle && (
-                      <span className="text-zinc-300 text-xs sm:text-sm mt-0.5">
+                      <span className="text-zinc-300 text-xs sm:text-base mt-0.5">
                         {banner.subtitle}
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg bg-red-600 group-hover:bg-red-700 transition-colors text-white text-xs font-bold w-fit">
+                    <span className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg bg-red-600 group-hover:bg-red-700 transition-colors text-white text-xs sm:text-sm font-bold w-fit">
                       {banner.ctaText || "Jogue Agora"}
                     </span>
                   </div>
@@ -25838,7 +25864,7 @@ export default function Home({
                         className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0"
                       >
                         {casinoTopBanners.map((b, i) =>
-                          renderBanner(b, i === 0 ? "w-[85%] sm:w-[58%]" : "w-[70%] sm:w-[28%]"),
+                          renderBanner(b, i === 0 ? "w-[90%] sm:w-[62%]" : "w-[76%] sm:w-[32%]"),
                         )}
                       </div>
                     </div>
