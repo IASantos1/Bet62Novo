@@ -4517,6 +4517,63 @@ function computeVolleyballExtras(
   };
 }
 
+// Estimate of P(home wins the CURRENT set), used only when unibetau hasn't
+// priced a real "Match Odds" market for a live volleyball match (see
+// buildVolleyballLiveFromPulseScore below and volleyball.ts's header for why
+// that's the common case, not the exception, right now). Two components:
+// a Beta(1,1)-smoothed read of the sets record so far (mean-reverts to 0.5
+// with no sets played, shifts toward whoever's leading as sets accumulate),
+// blended with the CURRENT set's live point differential via a logistic
+// curve (momentum inside the set in progress). Deliberately conservative —
+// clamped to [0.12, 0.88] — since this feeds real-money odds with no
+// bookmaker price backing it at all, unlike computeTennisLiveOdds's fallback
+// which at least anchors to a real prematch bwin/bet365 price.
+function estimateVolleyballSetWinProb(
+  homeSetsWon: number,
+  awaySetsWon: number,
+  homePts: number,
+  awayPts: number,
+): number {
+  const recordProb = (homeSetsWon + 1) / (homeSetsWon + awaySetsWon + 2);
+  const ptsDiff = homePts - awayPts;
+  const pointProb = 1 / (1 + Math.exp(-ptsDiff / 6));
+  const blended = recordProb * 0.65 + pointProb * 0.35;
+  return mc(blended, 0.12, 0.88);
+}
+
+// P(home wins the MATCH) given a fixed per-set win probability `sp` and the
+// sets already won by each side, via the standard race-to-N recursive
+// formula (best-of-5: first to 3 sets). f(h, a) = probability home wins
+// from a state where home still needs `h` more set wins and away needs `a`
+// more — f(0, a) = 1 (home already there), f(h, 0) = 0 (away already
+// there), f(h, a) = sp*f(h-1, a) + (1-sp)*f(h, a-1) otherwise. `sp` is
+// treated as constant across the remaining sets — a simplification (real
+// teams' per-set edge isn't perfectly stationary), but the same one
+// computeVolleyballExtras above already makes for its own exact-score
+// distribution, so this stays consistent with it.
+function volleyballMatchWinProbFromSets(
+  sp: number,
+  homeSetsWon: number,
+  awaySetsWon: number,
+): number {
+  const h = Math.max(0, 3 - homeSetsWon);
+  const a = Math.max(0, 3 - awaySetsWon);
+  if (h === 0) return 1;
+  if (a === 0) return 0;
+  const memo = new Map<string, number>();
+  function f(hh: number, aa: number): number {
+    if (hh === 0) return 1;
+    if (aa === 0) return 0;
+    const key = `${hh}:${aa}`;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
+    const result = sp * f(hh - 1, aa) + (1 - sp) * f(hh, aa - 1);
+    memo.set(key, result);
+    return result;
+  }
+  return f(h, a);
+}
+
 // ─── Sport-specific market builders for live matches ─────────────────────────
 
 function makeBasketballMarketsFromTeams(
@@ -11565,16 +11622,6 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const minute = ev.matchClock?.minute ?? existing?.minute ?? 0;
 
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
-      set1: { home: 0, away: 0 },
-      set2: { home: 0, away: 0 },
-      set3: { home: 0, away: 0 },
-      exactScore: { s30: 0, s31: 0, s32: 0, s03: 0, s13: 0, s23: 0 },
-      setHandicap: { home: 0, away: 0 },
-      pointsLines: [],
-      handicapPoints: { line: 0, home: 0, away: 0 },
-    };
-    const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     // Real moneyline only — unibetau's "Match Odds" market (canonicalMarket
     // MATCH_RESULT, period FULL_TIME) is unambiguously the whole-match
     // winner, confirmed real (2026-08-09: Argentina 3.20 / Brazil 1.32,
@@ -11584,11 +11631,45 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // extraction either targets a different period (set1) or a differently-
     // formatted selection name unibetau doesn't use ("3-1" vs the "3:1"
     // extractExactScore requires) — those naturally come back empty rather
-    // than wrong, but stay unused here regardless, only .odds is applied.
+    // than wrong, so they still fall through to the computed model below.
     const override = extractVolleyballOverride(ev);
+    // sp/pHomeMatch: the score-aware synthetic model this used to be missing
+    // entirely — a flat, unmoving `1.85/1.85` regardless of team or score
+    // (bug report 2026-08-11: a match already 2 sets to 0 still showed even
+    // odds on both sides, an obvious real-money exploit for anyone watching
+    // the score). unibetau doesn't price Match Odds for every league (most
+    // notably lower-tier/international-friendly fixtures — exactly the case
+    // reported), so this fallback is the COMMON case here, not a rare edge,
+    // unlike tennis's equivalent fallback which only kicks in when bet365's
+    // real live price is briefly missing for one tick. Reuses
+    // computeVolleyballExtras (built 2026-08-09, never wired to a real
+    // caller until now — see volleyball.ts's header) for the full set of
+    // sub-markets instead of leaving them zeroed, and derives its single
+    // `pSetHomeWin` input from the actual sets record + current in-set point
+    // differential via estimateVolleyballSetWinProb, rather than treating
+    // every match as a coin flip regardless of the score on screen.
+    const sp = estimateVolleyballSetWinProb(homeScore, awayScore, currentPts[0], currentPts[1]);
+    const computedExtras = computeVolleyballExtras(sp);
+    const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
+      set1: override.set1 ?? computedExtras.set1,
+      set2: computedExtras.set2,
+      set3: computedExtras.set3,
+      exactScore: override.exactScore ?? computedExtras.exactScore,
+      setHandicap: computedExtras.setHandicap,
+      pointsLines: override.pointsLines ?? computedExtras.pointsLines,
+      handicapPoints: computedExtras.handicapPoints,
+    };
+    const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
-      : { home: 1.85, draw: 0, away: 1.85 };
+      : (() => {
+          const pHomeMatch = volleyballMatchWinProbFromSets(sp, homeScore, awayScore);
+          const [h, a] = probsToDecimalOdds(
+            [mc(pHomeMatch, 0.02, 0.98), mc(1 - pHomeMatch, 0.02, 0.98)],
+            1.08,
+          );
+          return { home: h!, draw: 0, away: a! };
+        })();
 
     // Set-win market suspension (audit finding, 2026-08-10): volleyball had
     // NO suspension mechanism despite the real "Match Result" moneyline
