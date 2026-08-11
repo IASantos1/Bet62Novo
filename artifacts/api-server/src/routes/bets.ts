@@ -1884,6 +1884,16 @@ router.post(
         liveSt?.sport === "baseball" ||
         liveSt?.sport === "volleyball"
       ) {
+        // Same "already missing from the feed, don't accept a doomed bet"
+        // guard as the per-selection loop below (see its comment) —
+        // ticket BT62-000074, 2026-08-11.
+        if (liveSt._missingSinceAt) {
+          res.status(409).json({
+            error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
+            reason: "SEM DADOS AO VIVO",
+          });
+          return;
+        }
         const anySuspended =
           liveSt.marketSuspension != null &&
           Object.values(liveSt.marketSuspension).some((ts: any) => ts > now);
@@ -1926,6 +1936,25 @@ router.post(
         liveSt.sport !== "volleyball"
       )
         continue;
+
+      // Real incident, 2026-08-11 (ticket BT62-000074): a match already
+      // missing from the provider feed (liveSt._missingSinceAt set) is on
+      // its way to being voided by finalizeStaleLiveMatch (matches.ts) —
+      // for tennis/basketball/volleyball that's typically within 15s (see
+      // TENNIS_DISAPPEAR_GRACE_MS and friends). Accepting a bet on it isn't
+      // wrong exactly (it gets a correct void+refund once finalized, not a
+      // false loss), but it's pointless and confusing: the user ties up
+      // stake on a bet already headed for an instant void. Reject up front
+      // instead — same shape as the suspension response below, since from
+      // the bettor's perspective "can't bet on this right now" is the same
+      // message either way.
+      if (liveSt._missingSinceAt) {
+        res.status(409).json({
+          error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
+          reason: "SEM DADOS AO VIVO",
+        });
+        return;
+      }
 
       const marketKey =
         typeof sel.market === "string" && sel.market.trim() !== ""
