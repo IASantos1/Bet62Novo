@@ -26430,8 +26430,63 @@ export default function Home({
                                     };
                           // Compact per-leg status dots for multiples — mirrors the
                           // little icon row the reference shows next to "Múltipla (N)".
+                          // Bet Builder same-game combos store real, independently-
+                          // gradeable conditions on every leg but a "1.00" PLACEHOLDER
+                          // odd on every leg after the first (the true combined price
+                          // lives only on leg 1 — see the "shouldn't be shown" comment
+                          // in the selection list below, which already treats these
+                          // placeholder legs as not meaningful on their own). This row
+                          // used to call getSelOutcome per RAW leg regardless, so a
+                          // 3-condition Bet Builder combo showed 3 separate dots that
+                          // could each flip red-pulsing → green independently as the
+                          // match progressed — user-reported (2026-08-11) as tickets
+                          // "piscando pendente/vencido": what looked like one flaky
+                          // ticket was actually several placeholder-leg dots updating
+                          // out of sync with each other and with the ticket's own
+                          // "Pendente"/"Ganha" badge above. Now grouped by comboTag so
+                          // one same-game combo renders exactly ONE dot — green only
+                          // once every real condition in the group is won, red the
+                          // instant any one is lost — matching how the backend actually
+                          // grades the combo as a whole instead of implying each
+                          // fragment settles independently.
                           const legIcons = isMultiple
-                            ? sels.map((sel) => getSelOutcome(sel, bet.status))
+                            ? (() => {
+                                const isBuilderTag = (s: StoredSelection) =>
+                                  typeof s.comboTag === "string" &&
+                                  s.comboTag.startsWith("builder-")
+                                    ? s.comboTag
+                                    : null;
+                                const combineOutcomes = (
+                                  outcomes: SelOutcome[],
+                                ): SelOutcome => {
+                                  if (outcomes.some((o) => o === "cashout")) return "cashout";
+                                  if (outcomes.some((o) => o === "red" || o === "live-lose")) return "red";
+                                  if (outcomes.every((o) => o === "void")) return "void";
+                                  if (
+                                    outcomes.every(
+                                      (o) => o === "green" || o === "live-win" || o === "void",
+                                    )
+                                  )
+                                    return "green";
+                                  return "pending";
+                                };
+                                const icons: SelOutcome[] = [];
+                                const seenTags = new Set<string>();
+                                sels.forEach((sel) => {
+                                  const tag = isBuilderTag(sel);
+                                  if (!tag) {
+                                    icons.push(getSelOutcome(sel, bet.status));
+                                    return;
+                                  }
+                                  if (seenTags.has(tag)) return;
+                                  seenTags.add(tag);
+                                  const groupOutcomes = sels
+                                    .filter((s) => isBuilderTag(s) === tag)
+                                    .map((s) => getSelOutcome(s, bet.status));
+                                  icons.push(combineOutcomes(groupOutcomes));
+                                });
+                                return icons;
+                              })()
                             : [];
 
                           return (
