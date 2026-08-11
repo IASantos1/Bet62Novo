@@ -13117,15 +13117,43 @@ function sportWithFallback(
 }
 
 // ── Per-match sticky live cache ───────────────────────────────────────────────
-// Once a match enters the live feed it stays for STICKY_LIVE_TTL_MS even when
-// the API temporarily omits it (API hiccup, rate-limit, V1 rotation).
-// Score/status shown is the last known snapshot — better than making the match
-// disappear and reappear mid-game.
-const STICKY_LIVE_TTL_MS = 5 * 60_000; // 5 minutes since last seen
+// Once a match enters the live feed it stays for its TTL even when the API
+// temporarily omits it (API hiccup, rate-limit, V1 rotation). Score/status
+// shown is the last known snapshot — better than making the match disappear
+// and reappear mid-game.
+const STICKY_LIVE_TTL_MS = 5 * 60_000; // 5 minutes since last seen — default
 const _stickyLive = new Map<
   string,
   { match: LiveMatchState; lastSeenAt: number }
 >();
+
+// Real incident, 2026-08-11 (ticket BT62-000074): a 3-leg tennis multi got
+// accepted and voided within the same minute, on 3 different obscure ITF
+// matches. Root cause was this cache's flat 5-minute TTL applying to EVERY
+// sport, including tennis/basketball/volleyball — whose own disappearance-
+// based finish detection (TENNIS_DISAPPEAR_GRACE_MS / BASKETBALL_.../
+// VOLLEYBALL_..., all 15s) considers a match that vanished from the feed
+// as good as over, poor-coverage sports where "missing" essentially never
+// means "temporary hiccup". With the sticky cache keeping that same vanished
+// match visible and BETTABLE on the frontend for up to 5 more minutes, a bet
+// could be placed on a match the backend had already started (or was about
+// to start) voiding — accepted correctly (finalizeStaleLiveMatch hadn't run
+// yet), then voided moments later once it did. Football is unaffected (its
+// own GC grace is 130-180 MINUTES — far longer than 5 minutes, so the sticky
+// cache was never the binding constraint there); this only matters for
+// sports whose own grace is shorter than the default 5 minutes.
+function stickyLiveTtlMs(sport: string): number {
+  switch (sport) {
+    case "tennis":
+      return TENNIS_DISAPPEAR_GRACE_MS;
+    case "basketball":
+      return BASKETBALL_DISAPPEAR_GRACE_MS;
+    case "volleyball":
+      return VOLLEYBALL_DISAPPEAR_GRACE_MS;
+    default:
+      return STICKY_LIVE_TTL_MS;
+  }
+}
 
 function mergeStickyLive(freshMatches: LiveMatchState[]): LiveMatchState[] {
   const now = Date.now();
@@ -13135,9 +13163,13 @@ function mergeStickyLive(freshMatches: LiveMatchState[]): LiveMatchState[] {
     _stickyLive.set(String(m.id), { match: m, lastSeenAt: now });
   }
 
-  // Evict expired entries (not seen for > STICKY_LIVE_TTL_MS)
+  // Evict expired entries — sport-specific TTL (see stickyLiveTtlMs), not a
+  // single flat value, so this cache never keeps showing/allowing bets on a
+  // match longer than that sport's own GC is willing to keep tracking it.
   for (const [id, entry] of _stickyLive) {
-    if (now - entry.lastSeenAt > STICKY_LIVE_TTL_MS) _stickyLive.delete(id);
+    if (now - entry.lastSeenAt > stickyLiveTtlMs(entry.match.sport ?? "")) {
+      _stickyLive.delete(id);
+    }
   }
 
   // Build lookup sets for deduplication
