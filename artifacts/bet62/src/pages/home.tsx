@@ -26758,7 +26758,19 @@ export default function Home({
                                         >
                                           {boxBodyLine}
                                         </div>
-                                        {liveOdd !== null &&
+                                        {/* Live odds-movement indicator (▼/▲) is deliberately
+                                            NOT shown once the selection is live — user
+                                            request, 2026-08-11: the open-ticket box should
+                                            only show the score while live, not an odds
+                                            update (the bet's own odds are already locked in
+                                            at placement time and don't change what's paid
+                                            out; this indicator only tracks the market's
+                                            current price for reference, which was reading
+                                            as noisy/confusing here). Still shown for a
+                                            not-yet-live selection, where odds drift before
+                                            kickoff is a more meaningful signal. */}
+                                        {!isSelectionLive &&
+                                          liveOdd !== null &&
                                           Math.abs(liveOdd - sel.odd) > 0.01 && (
                                             <div
                                               className={`text-[10px] font-bold text-center mt-1 ${liveOdd < sel.odd ? tagWinCls : tagLoseCls}`}
