@@ -263,7 +263,9 @@ type AiAgentRole =
   | "fraud"
   | "payments"
   | "compliance"
-  | "support";
+  | "support"
+  | "livematch"
+  | "prematch";
 
 const AI_AGENT_LABELS: Record<AiAgentRole, string> = {
   orchestrator: "Orquestrador (CEO)",
@@ -274,6 +276,8 @@ const AI_AGENT_LABELS: Record<AiAgentRole, string> = {
   payments: "Pagamentos",
   compliance: "Compliance",
   support: "Suporte",
+  livematch: "Ao Vivo",
+  prematch: "Pré-Jogo",
 };
 
 type AiAgentProposal = {
@@ -4932,6 +4936,8 @@ export default function AdminPage() {
                         "payments",
                         "compliance",
                         "support",
+                        "livematch",
+                        "prematch",
                       ] as AiAgentRole[]
                     ).map((role) => (
                       <button

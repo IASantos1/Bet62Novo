@@ -11,6 +11,8 @@ export const AGENT_ROLES = [
   "payments",
   "compliance",
   "support",
+  "livematch",
+  "prematch",
 ] as const;
 export type AgentRole = (typeof AGENT_ROLES)[number];
 
