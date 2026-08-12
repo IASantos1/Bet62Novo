@@ -1395,6 +1395,34 @@ export function countryForLeagueName(leagueName: string): string | null {
   return LEAGUE_NAME_TO_COUNTRY.get(lower) ?? null;
 }
 
+// Bug report 2026-08-12 (recurring — home.tsx's getLeagueLogo already
+// carries a 2026-08-09 fix comment for half of this same problem): bwin
+// sometimes reports Brazil's top flight as bare "Serie A"/"Série A" with
+// no qualifying word at all — textually identical to Italy's league name,
+// distinguished only by the separate country field bwin also sends.
+// Confirmed real: DOMESTIC_PRIORITY below already needs explicit
+// "brazil: serie a"/"brazil: série a" entries alongside the expected
+// "brazil: brasileirão série a" ones, which wouldn't be necessary if bwin
+// never actually sent the bare form. The frontend's league icon/label
+// lookups (getLeagueLogo/leaguePt, home.tsx) work from this league string
+// ALONE, with no country parameter — so a bare "Serie A" reaching them
+// for a Brazilian match renders Italy's crest and Italy's name, no matter
+// how correct `country` is elsewhere on the same match object.
+// Disambiguated once, here, using the country already resolved for this
+// event — cheaper and more robust than teaching every frontend league
+// lookup about country too. Scoped to the display value only: the raw
+// `ev.league` string is still used unchanged for priority/tier/allow-list
+// matching elsewhere, which already expects (and handles) the bare form.
+function normalizeBrazilLeagueDisplayName(
+  leagueName: string,
+  countryKey: string | null,
+): string {
+  if (countryKey !== "brazil") return leagueName;
+  const bare = leagueName.trim().toLowerCase();
+  if (bare === "serie a" || bare === "série a") return "Brasileirão Série A";
+  return leagueName;
+}
+
 /** Country lookup for a PulseScore football event, preferring the event's
  * own `country` field (bwin populates this with a real value — "Brazil",
  * "Chile", ... — confirmed against a real /live-events?sport=soccer sample,
@@ -11226,7 +11254,7 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       id: `pulsescore-football-${ev.eventId}`,
       home,
       away,
-      league: leagueName,
+      league: normalizeBrazilLeagueDisplayName(leagueName, countryKey),
       country,
       time,
       date,
@@ -12685,7 +12713,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       awayTeamId,
       homeLogoUrl,
       awayLogoUrl,
-      league: ev.league || "Futebol",
+      league: normalizeBrazilLeagueDisplayName(ev.league || "Futebol", countryKey),
       country,
       sport: "football",
       homeScore,
