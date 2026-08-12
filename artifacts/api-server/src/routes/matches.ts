@@ -12910,6 +12910,35 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
 // (TENNIS_LIVE_TTL_MS is 1.5s) before treating a real gap as finished, so a
 // single transient API hiccup still can't cause a flicker.
 const TENNIS_DISAPPEAR_GRACE_MS = 15_000;
+// Bug report 2026-08-12 (recurrence of the exact incident TENNIS_DISAPPEAR_
+// GRACE_MS's own 15s value was tuned against — see this file's stickyLiveTtlMs
+// comment for "ticket BT62-000074": a real, still-in-progress match went
+// quiet on bet365's feed and got voided): a bettor placed a leg on
+// Hiromi Abe v Katarina Kujovic at real odds (1.04), the match was mid
+// 2nd set (1 set already completed, 0-1) — genuinely being played, not
+// abandoned — and it was voided within roughly 15 seconds of one gap in
+// bet365's feed. finalizeStaleLiveMatch's own tennis-specific
+// looksLikeNeverTracked check (routes/matches.ts) is deliberately
+// conservative about calling a match "finished" (needs a winner with 2+
+// sets, per this function's header above) — but it has ONLY that one
+// signal once disappearance triggers it at all, so a match that's simply
+// mid-way through set 2 (1 set won, 0 by the other side — exactly this
+// case) always reads as "looks never tracked" the instant 15s of silence
+// elapses, indistinguishable from a match that genuinely never started.
+// 15s is a reasonable bar for REMOVING a clearly-finished match from Ao
+// Vivo quickly (this constant's original 2026-08-09 goal), but far too
+// short a bar for VOIDING REAL MONEY on a match that's merely between
+// polls on a sparsely-covered feed — those are different decisions with
+// very different acceptable error costs, and this file has repeated,
+// explicit evidence (Vicenza v Catania; this exact BT62-000074 class)
+// that bet365/bwin/PulseScore's coverage gaps for lower-tier matches can
+// run far longer than 15s. Split into two grace windows: a match that
+// hasn't yet reached ANY legitimate finishing signal (no side has won 2+
+// sets — the exact ambiguous state a coverage gap and a genuine early
+// end both produce) gets this much longer window before finalizing,
+// giving a sparse feed real time to resume; a match that already shows a
+// clear winner keeps the original fast 15s removal.
+const TENNIS_AMBIGUOUS_DISAPPEAR_GRACE_MS = 6 * 60_000;
 
 async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreTennisLive();
@@ -13074,7 +13103,20 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
       continue;
     }
-    if (Date.now() - missingSince > TENNIS_DISAPPEAR_GRACE_MS) {
+    // See TENNIS_AMBIGUOUS_DISAPPEAR_GRACE_MS's own comment: only a match
+    // that's already reached a real finishing signal (someone has won 2+
+    // sets) gets the fast 15s grace: it's SAFE to be quick there, no
+    // ambiguity left to protect against. A match still short of that gets
+    // the much longer window before this loop is trusted to void it —
+    // this is the ONLY thing standing between a sparse-coverage gap and a
+    // real-money bet getting wrongly voided, so it errs toward patience.
+    const setsWonSoFar = [state.homeScore, state.awayScore];
+    const hasLegitimateFinishSignal =
+      setsWonSoFar[0] !== setsWonSoFar[1] && Math.max(...setsWonSoFar) >= 2;
+    const graceMs = hasLegitimateFinishSignal
+      ? TENNIS_DISAPPEAR_GRACE_MS
+      : TENNIS_AMBIGUOUS_DISAPPEAR_GRACE_MS;
+    if (Date.now() - missingSince > graceMs) {
       // Same reasoning as the per-event try/catch above: this awaits
       // DB/settlement writes, and buildLivePayload() awaits this whole
       // function — an uncaught failure here (not just a bad live event)
