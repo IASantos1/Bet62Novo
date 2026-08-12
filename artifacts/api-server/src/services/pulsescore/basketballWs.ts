@@ -200,6 +200,15 @@ export function startPulseScoreBasketballWs(): void {
 /** PER-EVENT freshness check — see footballWs.ts's own version for the
  * production bug (Attempt 2) this design fixes. Returns this event's last
  * WS-broadcast data only if THIS SPECIFIC event was seen within maxAgeMs. */
+export function getBasketballWsEvents(): PulseScoreEvent[] {
+  return Array.from(liveByEventId.values());
+}
+
+export function basketballWsIsFresh(maxAgeMs: number): boolean {
+  if (lastFrameAt <= 0) return false;
+  return Date.now() - lastFrameAt <= maxAgeMs;
+}
+
 export function getBasketballWsEventIfFresh(
   eventId: string,
   maxAgeMs: number,

@@ -21,6 +21,7 @@ async function buildAll() {
     platform: "node",
     bundle: true,
     format: "esm",
+    resolveExtensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"],
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
