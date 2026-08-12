@@ -31,6 +31,7 @@ import {
   Wallet,
   Plus,
   Clock,
+  Circle,
   Lock,
   Check,
   ShieldCheck,
@@ -43,13 +44,14 @@ import {
   Star,
   Dices,
   CalendarDays,
-  Grid3X3,
+  Grid3x3,
   Flame,
   Sparkles,
   CreditCard,
   Crown,
   SortAsc,
   ChevronLeft,
+  CircleDot,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -25829,15 +25831,15 @@ export default function Home({
               // NAME_KEYWORD_CATEGORIES comment) — Megaways/Jackpots/Compre
               // Bônus/Rodadas Grátis aren't offered since Palace Casino's
               // catalog carries no reliable signal for them.
-              const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3X3 }[] = [
-                { key: "Todos", label: "Todos", icon: Grid3X3 },
+              const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3x3 }[] = [
+                { key: "Todos", label: "Todos", icon: Grid3x3 },
                 { key: "Populares", label: "Populares", icon: Flame },
                 { key: "Novos", label: "Novos", icon: Sparkles },
                 { key: "Slots", label: "Slots", icon: Dices },
                 { key: "Ao Vivo", label: "Ao Vivo", icon: Radio },
                 { key: "baccarat", label: "Baccarat", icon: CreditCard },
                 { key: "blackjack", label: "Blackjack", icon: Crown },
-                { key: "roulette", label: "Roleta", icon: Dices },
+                { key: "roulette", label: "Roleta", icon: CircleDot },
               ];
 
               const handleBannerClick = (banner: CasinoBanner) => {
