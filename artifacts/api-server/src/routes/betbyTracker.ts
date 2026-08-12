@@ -68,7 +68,7 @@ async function resolveBetbyEventIdByName(
   }
 }
 
-router.get("/betby-live-tracker", async (req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response) => {
   const home = typeof req.query.home === "string" ? req.query.home.trim() : "";
   const away = typeof req.query.away === "string" ? req.query.away.trim() : "";
   const betbyEventId = typeof req.query.betbyEventId === "string"
@@ -134,7 +134,7 @@ router.get("/betby-live-tracker", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/betby-live-tracker/:betbyEventId", async (req: Request, res: Response) => {
+router.get("/:betbyEventId", async (req: Request, res: Response) => {
   try {
     const betbyEventId = String(req.params.betbyEventId);
     if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {

@@ -9,7 +9,7 @@ const router: IRouter = Router();
 // (score/minute/incidents) is served from /api/matches — see
 // resolveDirectTracker/attachDirectTracker in routes/matches.ts.
 
-router.get("/stream/:id", async (req: Request, res: Response) => {
+router.get("/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const video = await resolveVideoInfo(id);
