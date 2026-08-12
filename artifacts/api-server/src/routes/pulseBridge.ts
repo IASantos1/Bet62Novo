@@ -22,7 +22,7 @@ function write(res: Response, s: string): boolean {
   }
 }
 
-router.get("/pulsebridge/betby/:betbyEventId", async (req: Request, res: Response) => {
+router.get("/betby/:betbyEventId", async (req: Request, res: Response) => {
   const betbyEventId = String(req.params.betbyEventId || "");
   if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {
     return res.status(400).type("text/plain").send("Invalid betbyEventId");

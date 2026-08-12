@@ -31,7 +31,7 @@ function getOriginFromRequest(req: Request): string | undefined {
   return undefined;
 }
 
-router.get("/statscore-tracker/:betbyEventId", async (req: Request, res: Response) => {
+router.get("/:betbyEventId", async (req: Request, res: Response) => {
   try {
     const betbyEventId = String(req.params.betbyEventId);
     if (!betbyEventId || betbyEventId.length < 6) {
