@@ -156,7 +156,6 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
-import MiniFieldView from "@/components/MiniFieldView";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -4595,7 +4594,10 @@ function BetbyTrackerIframe({
       away,
       lang,
     });
-    return `/betby-live-tracker?${q.toString()}`;
+    const base = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
+      ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
+      : "";
+    return `${base}/api/betby-live-tracker?${q.toString()}`;
   }, [home, away, lang]);
   useEffect(() => {
     let cancelled = false;
@@ -19136,41 +19138,12 @@ export default function Home({
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
-                      <div className="mb-3 space-y-3">
+                      <div className="mb-3">
                         <BetbyTrackerIframe
                           home={expandedMatch.home}
                           away={expandedMatch.away}
                           lang="pt-br"
                           aspectRatio="16 / 9"
-                        />
-                        <MiniFieldView
-                          sport={expandedMatch.sport}
-                          homeTeam={teamNamePt(expandedMatch.home)}
-                          awayTeam={teamNamePt(expandedMatch.away)}
-                          homeFormation={expandedMatch.tracker?.homeFormation}
-                          awayFormation={expandedMatch.tracker?.awayFormation}
-                          homeHalfTimeScore={
-                            expandedMatch.tracker?.homeHalfTimeScore
-                          }
-                          awayHalfTimeScore={
-                            expandedMatch.tracker?.awayHalfTimeScore
-                          }
-                          lineupConfirmed={expandedMatch.tracker?.lineupConfirmed}
-                          liveClockLabel={(() => {
-                            if (!expandedMatch.isLive) return null;
-                            const isFootball =
-                              !expandedMatch.sport ||
-                              expandedMatch.sport === "football";
-                            if (!isFootball) return "AO VIVO";
-                            const m = getDisplayMinute(expandedMatch);
-                            const tag = getFootballPhaseTag(expandedMatch, m);
-                            if (m <= 0) return "AO VIVO";
-                            if (tag === "HT") return "HT";
-                            if (tag === "FT") return "FT";
-                            if (tag)
-                              return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                            return `${m}'`;
-                          })()}
                         />
                       </div>
                     ) : (
