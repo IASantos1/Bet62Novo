@@ -125,6 +125,12 @@ export function buildBetbyTrackerUpstreamUrl(
   return url.toString();
 }
 
+export function buildBetbyTrackerPublicUrl(
+  input: { betbyEventId?: string; lang?: string; sportId?: string },
+): string {
+  return buildBetbyTrackerUpstreamUrl(input);
+}
+
 export async function resolveStatscoreEventIdFromBetby(
   betbyEventId: string,
   timeoutMs = 8000,
