@@ -7,6 +7,7 @@ import { startSettlementWorker } from "../settlement.js";
 import { startPulseScoreFootballWs } from "../services/pulsescore/footballWs.js";
 import { startPulseScoreBasketballWs } from "../services/pulsescore/basketballWs.js";
 import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
+import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -119,4 +120,9 @@ server.listen(port, () => {
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
+
+  // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
+  // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY
+  // is unset or AI_CRON_ENABLED=false. No user traffic is affected.
+  startAiAgentsCron();
 });

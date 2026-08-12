@@ -14,7 +14,7 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import { db, matchResultsTable, apiFootballNameMismatchesTable } from "@workspace/db";
+import { db, matchResultsTable, apiFootballNameMismatchesTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
@@ -51,6 +51,7 @@ import {
   extractVolleyballOverride,
 } from "../services/pulsescore/volleyball.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
+import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 import {
   getApiFootballLiveFixtures,
   findApiFootballFixture,
@@ -63,6 +64,9 @@ import {
   getApiFootballFixtureStatistics,
   getApiFootballTeamLogo,
   batchResolveApiFootballTeamLogos,
+  getMappedApiFootballFixtureId,
+  recordConfirmedFixtureMapping,
+  recordConfirmedTeamMapping,
   type ApiFootballFixture,
 } from "../services/apiFootball.js";
 import {
@@ -453,6 +457,19 @@ export type LiveMatchState = {
   // fresh fuzzy matching only when this id stops appearing in the live
   // batch (API-Football's own hiccup, or the match genuinely ended there).
   _apiFootballFixtureId?: number;
+  // Count of consecutive live-feed ticks where a candidate API-Football
+  // fixture's score was cross-validated against PulseScore's own score
+  // and both sides matched (or one was null). Used as a confidence gate
+  // BEFORE the fixture id is persisted into api_football_fixture_mappings
+  // (the cross-session DB table) — user-requested 2026-08-12 fix for a
+  // class of "wrong match attached" cases where a very-early-in-match
+  // score (0-0 everywhere) looked like it matched from the fuzzer's point
+  // of view despite actually pointing at a different 0-0 fixture. Increment
+  // resets to 0 on any score DISAGREEMENT (non-null sides differ). Only
+  // ticks ≥ 3 are considered trustworthy enough to write to the DB
+  // permanently. Hitting ≥ 3 also clears this field on the next tick since
+  // the DB table takes over as the primary fixture-id anchor from then on.
+  _apiFootballScoreAlignTicks?: number;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -12173,30 +12190,107 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // signals (2026-08-12, user-requested: matching on team names alone
     // occasionally collides when a fuzzy name match satisfies more than one
     // live fixture) — ev.league is PulseScore's own bare league name for
-    // this event; approxKickoffMs has no dedicated field to read (PulseScore
-    // doesn't expose a live match's original kickoff timestamp — see
-    // findApiFootballFixture's own comment) so it's derived from the one
-    // thing already available every tick: current elapsed minute back-
-    // computed against wall-clock time. Coarse (ignores stoppage time,
-    // ±1 real minute of drift) but paired with a generous 20-minute
-    // tolerance in findApiFootballFixture, which is what actually matters —
-    // this only needs to be right within league-competition-sized margins,
-    // not to the second.
-    // Prefer a remembered fixtureId (see _apiFootballEverMatched/
-    // _apiFootballFixtureId's own comments on the LiveMatchState type) —
-    // an exact id lookup in this tick's batch, not another round of fuzzy
-    // matching. Only re-runs findApiFootballFixture from scratch when
-    // there's no memory yet, or the remembered fixture isn't in today's
-    // batch (API-Football hiccup or the fixture genuinely left "live").
-    const rememberedFixtureId = existing?._apiFootballFixtureId;
-    const apiFixture =
+    // this event; approxKickoffMs is derived with the best available signal
+    // in priority order:
+    //
+    //   1. ev.startTime (ISO string, present when bwin leaks the prematch
+    //      startTime into a live event or the event arrived from a path
+    //      that actually includes it — matches.ts handles this with a
+    //      defensive opt-in cast, PulseScoreEvent's type doesn't formally
+    //      declare it because the upstream docs don't list it).
+    //   2. ev.moreInfo.updatedAtUTC (seconds, a real-world proxy that
+    //      drifts but is still a better anchor than a pure computed value
+    //      when a match is in its very first minutes and the elapsed
+    //      time is near zero so "now - 0" collapses every fresh match into
+    //      the exact same window).
+    //   3. Date.now() - minute * 60000 fallback as before, used only when
+    //      the two stronger anchors are missing.
+    const approxFromElapsed = Date.now() - pulseScoreEventMinute(ev) * 60_000;
+    const startTimeIso =
+      (ev as PulseScoreEvent & { startTime?: string }).startTime || null;
+    const updatedAtSec =
+      (ev.moreInfo?.updatedAtUTC as number | undefined) &&
+      Number.isFinite(ev.moreInfo.updatedAtUTC as number)
+        ? (ev.moreInfo.updatedAtUTC as number)
+        : null;
+    const approxKickoffMs = startTimeIso
+      ? (Number.isFinite(Date.parse(startTimeIso)) ? Date.parse(startTimeIso) : approxFromElapsed)
+      : updatedAtSec !== null
+        ? updatedAtSec * 1000 - pulseScoreEventMinute(ev) * 60_000
+        : approxFromElapsed;
+    // Persistent remembered fixtureId (DB table api_football_fixture_mappings,
+    // cross-session, survives process restart — see apiFootballFixtureMappings.ts
+    // header for rationale). Tried BEFORE the in-memory LiveMatchState field
+    // because the DB table is the "ground truth" that outlives any individual
+    // process instance; in-memory field stays as a per-process performance
+    // anchor for the common case where this same instance saw the match before.
+    const persistentFixtureId = getMappedApiFootballFixtureId(id);
+    const rememberedFixtureId =
+      persistentFixtureId !== null ? persistentFixtureId : existing?._apiFootballFixtureId;
+    let apiFixture =
       (rememberedFixtureId !== undefined
         ? apiFootballFixtures.find((f) => f.fixtureId === rememberedFixtureId)
         : undefined) ??
       findApiFootballFixture(home, away, apiFootballFixtures, {
         league: ev.league,
-        approxKickoffMs: Date.now() - pulseScoreEventMinute(ev) * 60_000,
+        approxKickoffMs,
       });
+    // Cross-validation gate before trusting a NEW (first-time for this
+    // process) apiFixture enough to persist its id in the DB for future
+    // restarts. Scoring-rule agreement (the most obvious, most failure-
+    // resistant cross-check we have — PulseScore's score text field AND the
+    // API-Football goals.home/away numbers both describe the same real
+    // match). Two non-null values that DISAGREE on either side means the
+    // fixture mapping is almost certainly wrong; in that case discard the
+    // match as if it wasn't found (falls back to PulseScore-only behavior,
+    // which doesn't enrich but also can't mis-attribute a rival's goals/
+    // cards to this match). Persistent DB write (recordConfirmedFixtureMapping)
+    // only happens AFTER 3 ticks in a row with ALIGNED scores (or when
+    // existing?._apiFootballEverMatched already reached "once trusted,
+    // trusted forever" — the DB write is the same threshold so a process
+    // restart doesn't make us re-run the confidence check from scratch).
+    let tickAlignment = existing?._apiFootballScoreAlignTicks ?? 0;
+    if (apiFixture) {
+      const psHome = Number(score?.home ?? null);
+      const psAway = Number(score?.away ?? null);
+      const afHome = typeof apiFixture.goalsHome === "number" ? apiFixture.goalsHome : null;
+      const afAway = typeof apiFixture.goalsAway === "number" ? apiFixture.goalsAway : null;
+      const scoreAligns =
+        psHome === null || afHome === null || psHome === afHome ?
+          (psAway === null || afAway === null || psAway === afAway) :
+          false;
+      if (scoreAligns) {
+        tickAlignment += 1;
+      } else {
+        // Clear mismatch — throw away fixture, don't re-count a mismatched tick
+        logger.warn(
+          {
+            id,
+            home, away,
+            pulseScore: { home: psHome, away: psAway },
+            apiFootball: { home: afHome, away: afAway, fixtureId: apiFixture.fixtureId },
+          },
+          "[api-football] score mismatch — discarding candidate fixture (did not reach 3 consecutive aligned ticks)",
+        );
+        apiFixture = null;
+        tickAlignment = 0;
+      }
+    }
+    const canPersistFixture =
+      !!apiFixture && tickAlignment >= 3 && !persistentFixtureId;
+    if (canPersistFixture) {
+      recordConfirmedFixtureMapping({
+        pulsescoreMatchId: id,
+        pulsescoreEventId: ev.eventId,
+        apiFootballFixtureId: apiFixture!.fixtureId,
+        homeTeam: home,
+        awayTeam: away,
+        league: ev.league || null,
+        kickoffMs: Number.isFinite(approxKickoffMs) ? approxKickoffMs : null,
+      });
+      recordConfirmedTeamMapping(home, apiFixture!.home.id, apiFixture!.home.name);
+      recordConfirmedTeamMapping(away, apiFixture!.away.id, apiFixture!.away.name);
+    }
     // Originally a TEMPORARY diagnostic (2026-08-09) for a user report that
     // goal/VAR/card/penalty enrichment "still wasn't coming through
     // correctly" — need to know WHY apiFixture stays unmatched for a given
@@ -12761,6 +12855,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       _apiFootballPenaltyEventCount: penaltyEventCount,
       _apiFootballEverMatched: wasEverMatchedBefore || !!apiFixture,
       _apiFootballFixtureId: apiFixture?.fixtureId ?? rememberedFixtureId,
+      _apiFootballScoreAlignTicks: tickAlignment,
       marketSuspension,
       _suspensionReason: suspensionReason,
       _goalHoldSince: goalHoldSince,

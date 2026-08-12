@@ -1,0 +1,4 @@
+# Bet62 — Node.js version pin.
+# Prefer .nvmrc (widest support: nvm, fnm, volta, asdf, etc.).
+# .node-version kept here for extra hosts (Replit pins 20; Railway buildpack reads it).
+20.18.0
