@@ -130,7 +130,10 @@ export async function resolveStatscoreEventIdFromBetby(
   timeoutMs = 8000,
 ): Promise<string | null> {
   if (!betbyEventId) return null;
-  const BETBY_BRAND_ID_LIVE = "1653815133341880320";
+  const BETBY_BRAND_ID_LIVE = process.env.BETBY_BRAND_ID || "1653815133341880320";
+  const BETBY_API_HOST = process.env.BETBY_API_HOST ?? "demoapi.betby.com";
+  const BETBY_WEB_HOST = process.env.BETBY_WEB_HOST ?? "demo.betby.com";
+  const BETBY_LANG = process.env.BETBY_LANG_DEFAULT ?? "en";
   const controller = new AbortController();
   const to = setTimeout(() => controller.abort(), timeoutMs);
   const commonHttpHeaders = {
@@ -165,7 +168,7 @@ export async function resolveStatscoreEventIdFromBetby(
     let candidateUrls: string[] = [];
     // (1) Melhor caminho: puxar slugs reais via REST /api/v4/live/brand/.../event/en/ID
     try {
-      const restUrl = `https://demoapi.betby.com/api/v4/live/brand/${BETBY_BRAND_ID_LIVE}/event/en/${betbyEventId}`;
+      const restUrl = `https://${BETBY_API_HOST}/api/v4/live/brand/${BETBY_BRAND_ID_LIVE}/event/${BETBY_LANG}/${betbyEventId}`;
       const restRes = await fetch(restUrl, {
         method: "GET",
         headers: jsonHeaders,
@@ -189,9 +192,8 @@ export async function resolveStatscoreEventIdFromBetby(
             const catSlug = String(categories?.[catId]?.slug ?? "").trim() || "x";
             const tourSlug = String(tournaments?.[tourId]?.slug ?? "").trim() || "x";
             if (matchSlug) {
-              // URL canonical que o próprio BetBY usa
               candidateUrls.push(
-                `https://demo.betby.com/sportsbook/classic/${sportSlug}/${catSlug}/${tourSlug}/${matchSlug}-${betbyEventId}`,
+                `https://${BETBY_WEB_HOST}/sportsbook/classic/${sportSlug}/${catSlug}/${tourSlug}/${matchSlug}-${betbyEventId}`,
               );
             }
           }
@@ -204,9 +206,9 @@ export async function resolveStatscoreEventIdFromBetby(
     }
     // (2) Fallbacks sintéticos + rota curta /event/ID
     candidateUrls = candidateUrls.concat([
-      `https://demo.betby.com/event/${betbyEventId}`,
-      `https://demo.betby.com/sportsbook/classic/soccer/international/placeholder/placeholder-${betbyEventId}`,
-      `https://demo.betby.com/sportsbook/classic/soccer/x/x/placeholder-${betbyEventId}`,
+      `https://${BETBY_WEB_HOST}/event/${betbyEventId}`,
+      `https://${BETBY_WEB_HOST}/sportsbook/classic/soccer/international/placeholder/placeholder-${betbyEventId}`,
+      `https://${BETBY_WEB_HOST}/sportsbook/classic/soccer/x/x/placeholder-${betbyEventId}`,
     ]);
 
     for (const url of candidateUrls) {

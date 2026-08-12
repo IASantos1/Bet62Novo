@@ -102,11 +102,11 @@ export async function resolveBetbyMatchMeta(
   betbyEventId: string,
   timeoutMs = 5500,
 ): Promise<BetbyMatchMeta | null> {
-  const BETBY_BRAND_ID_LIVE = "1653815133341880320";
+  const BETBY_BRAND_ID_LIVE = process.env.BETBY_BRAND_ID || "1653815133341880320";
   const controller = new AbortController();
   const to = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = `https://demoapi.betby.com/api/v4/live/brand/${BETBY_BRAND_ID_LIVE}/event/en/${betbyEventId}`;
+    const url = `https://${process.env.BETBY_API_HOST ?? "demoapi.betby.com"}/api/v4/live/brand/${BETBY_BRAND_ID_LIVE}/event/${process.env.BETBY_LANG_DEFAULT ?? "en"}/${betbyEventId}`;
     const res = await fetch(url, {
       method: "GET",
       headers: {
