@@ -7,6 +7,7 @@ import {
   createContext,
   useContext,
   Children,
+  Component,
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -4571,6 +4572,35 @@ function isWCMatch(league: string | null | undefined): boolean {
 
 function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
+class TrackerErrorBoundary extends Component<
+  { children: ReactNode; home?: string; away?: string; className?: string; aspectRatio?: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError(_e: unknown) { return { hasError: true }; }
+  componentDidCatch(error: unknown) { try { console.error("[tracker-error-boundary]", error); } catch {} }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          className={this.props.className}
+          style={{ aspectRatio: this.props.aspectRatio ?? "16 / 9", position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
+        >
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none text-zinc-400 text-xs px-6 text-center">
+            {this.props.home || this.props.away ? (
+              <div>
+                <div className="font-bold text-zinc-200 mb-1">{this.props.home ?? "?"} vs {this.props.away ?? "?"}</div>
+                Tracker indisponível neste momento.
+              </div>
+            ) : ("Tracker indisponível.")}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
 // self-contained so its lifecycle (start/stop polling) doesn't entangle
 // with the rest of the page's state.
@@ -4594,31 +4624,31 @@ function BetbyTrackerIframe({
     : "";
   const useDirect = String(import.meta.env.VITE_USE_BETBY_DIRECT_IFRAME ?? "").trim().toLowerCase() === "direct";
   if (useDirect) {
-    console.warn("[BetbyTrackerIframe] DIRECT mode: Verifique se o BetBY liberou frame-ancestors para seu domínio. Caso o tracker esteja com tela preta, remova a variável VITE_USE_BETBY_DIRECT_IFRAME para usar PROXY (sem bloqueios).");
+    try { console.warn("[BetbyTrackerIframe] DIRECT mode: Verifique se o BetBY liberou frame-ancestors para seu domínio. Caso o tracker esteja com tela preta, remova a variável VITE_USE_BETBY_DIRECT_IFRAME para usar PROXY (sem bloqueios)."); } catch {}
   }
-  const { data: urlInfo, isFetching } = useQuery({
+  const { data: urlInfo, isFetching, error: queryError } = useQuery({
     queryKey: ["betby-tracker-url", home, away, lang, apiBase],
     queryFn: async () => {
-      const q = new URLSearchParams({ home, away, lang, sportId: "1" });
-      const endpoint = `${apiBase}/api/betby-live-tracker/url?${q.toString()}`;
-      const res = await fetch(endpoint, { method: "GET", headers: { Accept: "application/json" } });
-      if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        throw new Error(t || `HTTP ${res.status}`);
-      }
-      const json = (await res.json()) as {
-        ok: boolean;
-        finalBetbyEventId: string | null;
-        upstream: string | null;
-        proxy: string | null;
-        pulseSse: string | null;
-      };
-      if (!json.ok || !json.finalBetbyEventId) throw new Error("BetBY event not resolved");
-      return json;
+      try {
+        const q = new URLSearchParams({ home, away, lang, sportId: "1" });
+        const endpoint = `${apiBase}/api/betby-live-tracker/url?${q.toString()}`;
+        const res = await fetch(endpoint, { method: "GET", headers: { Accept: "application/json" } });
+        if (!res.ok) return null;
+        const json = (await res.json().catch(() => null)) as null | {
+          ok?: boolean;
+          finalBetbyEventId?: string | null;
+          upstream?: string | null;
+          proxy?: string | null;
+          pulseSse?: string | null;
+        };
+        if (!json || !json.ok || !json.finalBetbyEventId) return null;
+        return json as Required<Omit<NonNullable<typeof json>, never>>;
+      } catch { return null; }
     },
     staleTime: 120_000,
     gcTime: 300_000,
-    retry: 1,
+    retry: false,
+    throwOnError: false,
   });
 
   const finalUrl = useMemo(() => {
@@ -4683,8 +4713,8 @@ function BetbyTrackerIframe({
   }, [urlInfo, useDirect]);
 
   useEffect(() => {
-    setFailed(!(urlInfo && finalUrl));
-  }, [urlInfo, finalUrl]);
+    setFailed(!(urlInfo && finalUrl) || !!queryError);
+  }, [urlInfo, finalUrl, queryError]);
 
   useEffect(() => {
     if (!finalUrl) return;
@@ -4869,12 +4899,14 @@ function TrackerModal({
               </div>
             </div>
             <div className="mb-4 rounded-[24px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] overflow-hidden">
-              <BetbyTrackerIframe
-                home={event.home}
-                away={event.away}
-                lang="pt-br"
-                aspectRatio="16 / 9"
-              />
+              <TrackerErrorBoundary home={event.home} away={event.away} aspectRatio="16 / 9">
+                <BetbyTrackerIframe
+                  home={event.home}
+                  away={event.away}
+                  lang="pt-br"
+                  aspectRatio="16 / 9"
+                />
+              </TrackerErrorBoundary>
             </div>
             <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
               Incidentes
@@ -19295,12 +19327,14 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        <BetbyTrackerIframe
-                          home={expandedMatch.home}
-                          away={expandedMatch.away}
-                          lang="pt-br"
-                          aspectRatio="16 / 9"
-                        />
+                        <TrackerErrorBoundary home={expandedMatch.home} away={expandedMatch.away} aspectRatio="16 / 9">
+                          <BetbyTrackerIframe
+                            home={expandedMatch.home}
+                            away={expandedMatch.away}
+                            lang="pt-br"
+                            aspectRatio="16 / 9"
+                          />
+                        </TrackerErrorBoundary>
                       </div>
                     ) : (
                       <>
