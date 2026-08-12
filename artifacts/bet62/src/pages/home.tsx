@@ -23,7 +23,6 @@ import {
   Flag,
   LogOut,
   User,
-  Loader2,
   Zap,
   ChevronRight,
   ChevronDown,
@@ -45,14 +44,14 @@ import {
   Star,
   Dices,
   CalendarDays,
-  Grid3X3,
+  Grid3x3,
   Flame,
   Sparkles,
   CreditCard,
   Crown,
-  CircleDot,
   SortAsc,
   ChevronLeft,
+  CircleDot,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -4575,6 +4574,70 @@ function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 // Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
 // self-contained so its lifecycle (start/stop polling) doesn't entangle
 // with the rest of the page's state.
+function BetbyTrackerIframe({
+  home,
+  away,
+  lang = "pt-br",
+  aspectRatio = "16 / 9",
+  className,
+}: {
+  home: string;
+  away: string;
+  lang?: string;
+  aspectRatio?: string;
+  className?: string;
+}) {
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const url = useMemo(() => {
+    const q = new URLSearchParams({
+      home,
+      away,
+      lang,
+    });
+    return `/betby-live-tracker?${q.toString()}`;
+  }, [home, away, lang]);
+  useEffect(() => {
+    let cancelled = false;
+    let to: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      if (!cancelled && !ready) setFailed(true);
+    }, 15_000);
+    fetch(url, { method: "HEAD" })
+      .then((r) => {
+        if (cancelled) return;
+        if (!r.ok) setFailed(true);
+        if (to) { clearTimeout(to); to = null; }
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => {
+      cancelled = true;
+      if (to) clearTimeout(to);
+    };
+  }, [url, ready]);
+  if (failed) return null;
+  return (
+    <div
+      className={className}
+      style={{ aspectRatio, position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
+    >
+      {!ready && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
+          <RefreshCw className="animate-spin text-green-500/80" size={24} />
+        </div>
+      )}
+      <iframe
+        src={url}
+        title={`BetBY Live Tracker · ${home} vs ${away}`}
+        className="w-full h-full border-0 block"
+        allow="autoplay; fullscreen; clipboard-read; clipboard-write"
+        onLoad={() => setReady(true)}
+        onError={() => setFailed(true)}
+        referrerPolicy="strict-origin-when-cross-origin"
+      />
+    </div>
+  );
+}
+
 function TrackerModal({
   event,
   onClose,
@@ -4634,7 +4697,7 @@ function TrackerModal({
       <div className="flex-1 min-h-0 bg-zinc-950 overflow-y-auto p-4">
         {!tracker ? (
           <div className="text-center text-zinc-600 text-sm py-8">
-            <Loader2 className="animate-spin mx-auto mb-2 opacity-60" size={22} />
+            <RefreshCw className="animate-spin mx-auto mb-2 opacity-60" size={22} />
             A carregar tracker…
           </div>
         ) : (
@@ -4647,14 +4710,14 @@ function TrackerModal({
                 {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
               </div>
             </div>
-            {/* SportScore iframe intentionally removed: it embeds a
-                widgets-v2.thesports01.com frame with SportScore branding that
-                we cannot strip. Instead, Bet62 renders its own white-label
-                SVG pitch elsewhere (MiniFieldView on the expanded card) with
-                live incidents/clock/formations/HT scores from SportScore JSON.
-                The only data the iframe used to have that we DON'T have as
-                JSON is ball/player x,y live positions — nothing about odds
-                or live match narrative was lost. */}
+            <div className="mb-4 rounded-[24px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] overflow-hidden">
+              <BetbyTrackerIframe
+                home={event.home}
+                away={event.away}
+                lang="pt-br"
+                aspectRatio="16 / 9"
+              />
+            </div>
             <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
               Incidentes
             </div>
@@ -12735,7 +12798,7 @@ export default function Home({
                 </>
               ) : isPlacingBet ? (
                 <>
-                  <Loader2 className="animate-spin" size={16} /> A PROCESSAR...
+                  <RefreshCw className="animate-spin" size={16} /> A PROCESSAR...
                 </>
               ) : auth.user ? (
                 "APOSTAR AGORA"
@@ -18650,7 +18713,7 @@ export default function Home({
                 aria-label="Desbloquear"
               >
                 {biometricLoading ? (
-                  <Loader2 size={22} className="animate-spin text-zinc-300" />
+                  <RefreshCw size={22} className="animate-spin text-zinc-300" />
                 ) : (
                   <Lock size={34} className="text-red-500" />
                 )}
@@ -19073,7 +19136,13 @@ export default function Home({
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
-                      <div className="mb-3">
+                      <div className="mb-3 space-y-3">
+                        <BetbyTrackerIframe
+                          home={expandedMatch.home}
+                          away={expandedMatch.away}
+                          lang="pt-br"
+                          aspectRatio="16 / 9"
+                        />
                         <MiniFieldView
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
@@ -19087,18 +19156,8 @@ export default function Home({
                             expandedMatch.tracker?.awayHalfTimeScore
                           }
                           lineupConfirmed={expandedMatch.tracker?.lineupConfirmed}
-                          // Incidents timeline intentionally NOT passed here
-                          // anymore — goals/cards now show on the Momentum
-                          // chart instead (see trackerFootballExtra above),
-                          // per explicit request not to duplicate them under
-                          // the mini-campo.
                           liveClockLabel={(() => {
                             if (!expandedMatch.isLive) return null;
-                            // Minute/phase computation below is football-
-                            // specific (clock seconds, HT detection...) — for
-                            // every other sport just show "AO VIVO" rather
-                            // than feeding it values it wasn't built to
-                            // interpret (this was the reported tennis bug).
                             const isFootball =
                               !expandedMatch.sport ||
                               expandedMatch.sport === "football";
@@ -19321,7 +19380,7 @@ export default function Home({
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     {standingsLoading ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2
+                        <RefreshCw
                           className="animate-spin text-blue-400"
                           size={28}
                         />
@@ -20830,7 +20889,7 @@ export default function Home({
                             Estatística Avançada
                           </div>
                           {v2IncidentsLoading && (
-                            <Loader2
+                            <RefreshCw
                               className="animate-spin text-blue-400"
                               size={14}
                             />
@@ -21528,7 +21587,7 @@ export default function Home({
                     </div>
                     {allOddsLoading || !allOddsData ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2
+                        <RefreshCw
                           className="animate-spin text-blue-400"
                           size={28}
                         />
@@ -21782,7 +21841,7 @@ export default function Home({
                     </div>
                     {lineupsLoading || !lineupsData ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2
+                        <RefreshCw
                           className="animate-spin text-blue-400"
                           size={28}
                         />
@@ -21891,7 +21950,7 @@ export default function Home({
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     {confrontosLoading ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2
+                        <RefreshCw
                           className="animate-spin text-blue-400"
                           size={28}
                         />
@@ -22213,7 +22272,7 @@ export default function Home({
                           >
                             {casinoLoadingGame === game.id ? (
                               <div className="absolute inset-0 flex items-center justify-center">
-                                <Loader2 className="animate-spin text-zinc-400" size={22} />
+                                <RefreshCw className="animate-spin text-zinc-400" size={22} />
                               </div>
                             ) : game.img ? (
                               <img
@@ -25772,8 +25831,8 @@ export default function Home({
               // NAME_KEYWORD_CATEGORIES comment) — Megaways/Jackpots/Compre
               // Bônus/Rodadas Grátis aren't offered since Palace Casino's
               // catalog carries no reliable signal for them.
-              const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3X3 }[] = [
-                { key: "Todos", label: "Todos", icon: Grid3X3 },
+              const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3x3 }[] = [
+                { key: "Todos", label: "Todos", icon: Grid3x3 },
                 { key: "Populares", label: "Populares", icon: Flame },
                 { key: "Novos", label: "Novos", icon: Sparkles },
                 { key: "Slots", label: "Slots", icon: Dices },
@@ -25844,7 +25903,7 @@ export default function Home({
                   className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
                 >
                   {casinoLoadingGame === game.id ? (
-                    <Loader2 className="animate-spin text-zinc-400" size={28} />
+                    <RefreshCw className="animate-spin text-zinc-400" size={28} />
                   ) : game.img ? (
                     // Game artwork already has its title baked in — no
                     // overlay caption here, it only fought with that text
@@ -25944,7 +26003,7 @@ export default function Home({
                       </div>
                       {casinoPopular.length === 0 ? (
                         <div className="flex items-center gap-2 text-zinc-500 py-6">
-                          <Loader2 className="animate-spin" size={18} />
+                          <RefreshCw className="animate-spin" size={18} />
                         </div>
                       ) : (
                         <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
@@ -26046,7 +26105,7 @@ export default function Home({
 
                   {casinoGames.length === 0 && casinoLoadingPage ? (
                     <div className="text-center text-zinc-500 py-16">
-                      <Loader2 className="animate-spin mx-auto mb-3 opacity-60" size={32} />
+                      <RefreshCw className="animate-spin mx-auto mb-3 opacity-60" size={32} />
                       <p className="font-medium">A carregar catálogo…</p>
                     </div>
                   ) : casinoGames.length === 0 ? (
@@ -26067,7 +26126,7 @@ export default function Home({
                             className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-red-600 hover:bg-red-700 transition-colors text-white text-sm font-black uppercase italic tracking-tight disabled:opacity-60"
                           >
                             {casinoLoadingPage ? (
-                              <Loader2 className="animate-spin" size={16} />
+                              <RefreshCw className="animate-spin" size={16} />
                             ) : (
                               <RefreshCw size={16} />
                             )}
@@ -26161,7 +26220,7 @@ export default function Home({
                   </div>
                   {myBetsLoading ? (
                     <div className="flex items-center justify-center py-12">
-                      <Loader2
+                      <RefreshCw
                         className="animate-spin text-red-600"
                         size={28}
                       />
@@ -26335,7 +26394,7 @@ export default function Home({
 
                 {myBetsLoading && !myBetsInitialized.current ? (
                   <div className="flex items-center justify-center py-20">
-                    <Loader2 className="animate-spin text-red-600" size={32} />
+                    <RefreshCw className="animate-spin text-red-600" size={32} />
                   </div>
                 ) : (
                   (() => {
@@ -27045,7 +27104,7 @@ export default function Home({
                                         className="bg-white text-green-700 font-black text-sm px-4 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
                                       >
                                         {cashingOut === bet.id ? (
-                                          <Loader2
+                                          <RefreshCw
                                             size={13}
                                             className="animate-spin"
                                           />
@@ -27617,7 +27676,7 @@ export default function Home({
               >
                 {isPlacingBet ? (
                   <>
-                    <Loader2 className="animate-spin" size={16} /> A
+                    <RefreshCw className="animate-spin" size={16} /> A
                     PROCESSAR...
                   </>
                 ) : auth.user ? (
@@ -27856,7 +27915,7 @@ export default function Home({
                     disabled={authLoading}
                   >
                     {authLoading ? (
-                      <Loader2 className="animate-spin mr-2" size={16} />
+                      <RefreshCw className="animate-spin mr-2" size={16} />
                     ) : null}
                     ENTRAR
                   </Button>
@@ -28005,7 +28064,7 @@ export default function Home({
                     disabled={authLoading}
                   >
                     {authLoading ? (
-                      <Loader2 className="animate-spin mr-2" size={16} />
+                      <RefreshCw className="animate-spin mr-2" size={16} />
                     ) : null}
                     CRIAR CONTA
                   </Button>
@@ -29034,7 +29093,7 @@ function CardDepositInlineForm({
         className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
       >
         {submitting ? (
-          <Loader2 className="animate-spin" size={16} />
+          <RefreshCw className="animate-spin" size={16} />
         ) : (
           <Lock size={16} />
         )}
@@ -29659,7 +29718,7 @@ function DepositWithdrawModal({
                   className="w-full bg-red-600 hover:bg-red-500 text-white font-black h-11"
                 >
                   {loading ? (
-                    <Loader2 className="animate-spin mr-2" size={16} />
+                    <RefreshCw className="animate-spin mr-2" size={16} />
                   ) : (
                     <span className="mr-2">🔒</span>
                   )}
@@ -29767,7 +29826,7 @@ function DepositWithdrawModal({
                   className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black h-11"
                 >
                   {loading ? (
-                    <Loader2 className="animate-spin mr-2" size={16} />
+                    <RefreshCw className="animate-spin mr-2" size={16} />
                   ) : (
                     <ChevronUp size={16} className="mr-2" />
                   )}
@@ -29898,7 +29957,7 @@ function DepositWithdrawModal({
                         className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
                       >
                         {loading ? (
-                          <Loader2 className="animate-spin" size={16} />
+                          <RefreshCw className="animate-spin" size={16} />
                         ) : (
                           <img
                             src="/logo-multibanco.png"
@@ -30002,7 +30061,7 @@ function DepositWithdrawModal({
                         className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
                       >
                         {loading ? (
-                          <Loader2 className="animate-spin" size={16} />
+                          <RefreshCw className="animate-spin" size={16} />
                         ) : (
                           <img
                             src="/logo-mbway.png"
@@ -30076,7 +30135,7 @@ function DepositWithdrawModal({
                       className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
                     >
                       {loading ? (
-                        <Loader2 className="animate-spin" size={16} />
+                        <RefreshCw className="animate-spin" size={16} />
                       ) : (
                         <div className="flex items-center gap-1">
                           <img
