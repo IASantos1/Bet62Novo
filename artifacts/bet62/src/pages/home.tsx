@@ -4588,10 +4588,14 @@ function BetbyTrackerIframe({
   className?: string;
 }) {
   const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
   const apiBase = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
     : "";
   const useDirect = String(import.meta.env.VITE_USE_BETBY_DIRECT_IFRAME ?? "").trim().toLowerCase() === "direct";
+  if (useDirect) {
+    console.warn("[BetbyTrackerIframe] DIRECT mode: Verifique se o BetBY liberou frame-ancestors para seu domínio. Caso o tracker esteja com tela preta, remova a variável VITE_USE_BETBY_DIRECT_IFRAME para usar PROXY (sem bloqueios).");
+  }
   const { data: urlInfo, isFetching } = useQuery({
     queryKey: ["betby-tracker-url", home, away, lang, apiBase],
     queryFn: async () => {
@@ -4678,7 +4682,9 @@ function BetbyTrackerIframe({
     };
   }, [urlInfo, useDirect]);
 
-  const failed = !!(urlInfo && !finalUrl);
+  useEffect(() => {
+    setFailed(!(urlInfo && finalUrl));
+  }, [urlInfo, finalUrl]);
 
   useEffect(() => {
     if (!finalUrl) return;
@@ -4687,7 +4693,13 @@ function BetbyTrackerIframe({
       if (!cancelled && !ready) setFailed(true);
     }, 18_000);
     setReady(false);
-    fetch(finalUrl, { method: useDirect ? "GET" : "HEAD" })
+    if (useDirect) {
+      if (to) { clearTimeout(to); to = null; }
+      return () => {
+        cancelled = true;
+      };
+    }
+    fetch(finalUrl, { method: "HEAD" })
       .then((r) => {
         if (cancelled) return;
         if (!r.ok) setFailed(true);
@@ -4699,8 +4711,8 @@ function BetbyTrackerIframe({
       if (to) clearTimeout(to);
     };
   }, [finalUrl, useDirect, ready]);
-  if (failed || (!useDirect && isFetching)) {
-    if (isFetching && !failed) {
+  if (failed) {
+    if (isFetching) {
       return (
         <div
           className={className}
