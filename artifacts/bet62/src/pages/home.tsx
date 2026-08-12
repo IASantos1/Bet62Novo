@@ -1513,11 +1513,39 @@ const LEAGUE_LOGOS: Record<string, string> = {
   "CAF Champions League": "https://media.api-sports.io/football/leagues/20.png",
 };
 
+// Does a LEAGUE_LOGOS candidate key belong (per LEAGUE_ISO_MAP — the same
+// table getCountryFlagIso already trusts for this exact ambiguity) to a
+// specific country other than the match's own known country? Bug report
+// 2026-08-12: "Gaucho Serie A2" (a Rio Grande do Sul state competition) and
+// "Brasileiro Serie A" both still matched Italy's "Serie A" logo — the
+// 2026-08-09 longest-match fix only helps when a Brazilian variant is long
+// enough to out-rank "Serie A", but these two never contain any of the
+// Brazil-specific substrings ("brasileirao"/"campeonato brasileiro") the
+// keys/patterns require, so "Serie A" (7 chars) stayed the only, and thus
+// longest, match. The match's real `country` (bwin sends this reliably —
+// see countryForPulseScoreFootballEvent on the backend) is a strictly
+// better signal than trying to hand-enumerate every regional/lower-tier
+// Brazilian league name variant, so it's used here as a veto: a candidate
+// logo key whose own known country conflicts with the match's real country
+// is skipped, same as getCountryFlagIso already does for flags.
+function leagueLogoKeyConflictsWithCountry(key: string, countryIso: string | undefined): boolean {
+  if (!countryIso) return false;
+  const kl = key.toLowerCase();
+  for (const [pat, iso] of LEAGUE_ISO_MAP) {
+    if (kl === pat) return iso !== "" && iso !== countryIso;
+  }
+  return false;
+}
+
 /** Exact match first, then prefix match, then contains match for dynamically-named competitions (e.g. "FIFA World Cup - Round of 32"). */
-function getLeagueLogo(league: string | null | undefined): string | undefined {
+function getLeagueLogo(league: string | null | undefined, country?: string | null): string | undefined {
   const l = league ?? "";
   if (!l) return undefined;
-  if (LEAGUE_LOGOS[l]) return LEAGUE_LOGOS[l];
+  const countryIso = (() => {
+    const ck = (country ?? "").trim().toLowerCase();
+    return ck ? COUNTRY_ISO[ck] : undefined;
+  })();
+  if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso)) return LEAGUE_LOGOS[l];
   const lLower = l.toLowerCase();
   // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo -
   // Grupo A", etc. LONGEST matching key wins, not the first one declared in
@@ -1530,7 +1558,7 @@ function getLeagueLogo(league: string | null | undefined): string | undefined {
   // specific, correct one.
   let bestPrefix: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length)) {
+    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso)) {
       bestPrefix = { key, url };
     }
   }
@@ -1538,7 +1566,7 @@ function getLeagueLogo(league: string | null | undefined): string | undefined {
   // Case-insensitive contains match — same longest-match reasoning.
   let bestContains: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length)) {
+    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso)) {
       bestContains = { key, url };
     }
   }
@@ -3477,7 +3505,7 @@ function SidebarTreeContent({
                   <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
                     {leagues.map((league) => {
                       const active = selectedLeague === league;
-                      const logo = getLeagueLogo(league);
+                      const logo = getLeagueLogo(league, name);
                       return (
                         <button
                           key={league}
@@ -10496,7 +10524,7 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const leagueLogo = getLeagueLogo(match.league);
+            const leagueLogo = getLeagueLogo(match.league, match.country);
             const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -11260,7 +11288,7 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const leagueLogo = getLeagueLogo(match.league);
+                const leagueLogo = getLeagueLogo(match.league, match.country);
                 const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
@@ -11774,7 +11802,7 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const leagueLogo = getLeagueLogo(match.league);
+              const leagueLogo = getLeagueLogo(match.league, match.country);
               const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -22796,13 +22824,27 @@ export default function Home({
                   // bug here meant a Brazilian match could be FILTERED INTO
                   // the "Serie A" (Italy) chip's results, not just show its
                   // icon wrong.
-                  const _fml = (n: string) => {
+                  // Country veto (bug report 2026-08-12): "Gaucho Serie A2"
+                  // and "Brasileiro Serie A" both matched the "serie a"
+                  // pattern (Italy) since neither contains "brasileirao"/
+                  // "campeonato brasileiro" — same root cause as
+                  // getLeagueLogo's leagueLogoKeyConflictsWithCountry, same
+                  // fix: skip a candidate pattern whose own known country
+                  // (via LEAGUE_ISO_MAP) conflicts with the match's real
+                  // country instead of only relying on pattern length.
+                  const _fml = (n: string, country?: string | null) => {
                     const ln = (n ?? "").toLowerCase();
+                    const ck = (country ?? "").trim().toLowerCase();
+                    const countryIso = ck ? COUNTRY_ISO[ck] : undefined;
                     let best: (typeof _mlPats)[number] | null = null;
                     let bestLen = 0;
                     for (const ml of _mlPats) {
                       for (const p of ml.p) {
-                        if (ln.includes(p) && p.length > bestLen) {
+                        if (
+                          ln.includes(p) &&
+                          p.length > bestLen &&
+                          !leagueLogoKeyConflictsWithCountry(p, countryIso)
+                        ) {
                           best = ml;
                           bestLen = p.length;
                         }
@@ -22813,7 +22855,7 @@ export default function Home({
                   const seen = new Set<string>();
                   return combined
                     .filter((m) => {
-                      const ml = _fml(m.league);
+                      const ml = _fml(m.league, m.country);
                       return (
                         (ml && ml.label === selectedLeague) ||
                         leagueMatchesFilter(m.league, selectedLeague)
@@ -23247,13 +23289,26 @@ export default function Home({
                         // badge). Same fix already applied to
                         // getCountryFlagIso/getLeagueLogo for the same
                         // underlying bug, just a separate copy of the pattern.
-                        const findML = (name: string) => {
+                        // Country veto (bug report 2026-08-12): same fix as
+                        // _fml above and getLeagueLogo's
+                        // leagueLogoKeyConflictsWithCountry — "Gaucho Serie
+                        // A2"/"Brasileiro Serie A" still matched "serie a"
+                        // (Italy) here too since length-only ranking can't
+                        // tell a same-named-but-wrong-country league apart
+                        // from the real one.
+                        const findML = (name: string, country?: string | null) => {
                           const n = name.toLowerCase();
+                          const ck = (country ?? "").trim().toLowerCase();
+                          const countryIso = ck ? COUNTRY_ISO[ck] : undefined;
                           let best: (typeof ML)[number] | null = null;
                           let bestLen = 0;
                           for (const ml of ML) {
                             for (const pt of ml.p) {
-                              if (n.includes(pt) && pt.length > bestLen) {
+                              if (
+                                n.includes(pt) &&
+                                pt.length > bestLen &&
+                                !leagueLogoKeyConflictsWithCountry(pt, countryIso)
+                              ) {
                                 best = ml;
                                 bestLen = pt.length;
                               }
@@ -23270,7 +23325,7 @@ export default function Home({
                         for (const m of filteredUpcoming) {
                           const key = m.league ?? "";
                           if (key) {
-                            const ml = findML(key);
+                            const ml = findML(key, m.country);
                             if (ml && !seenLabels.has(ml.label)) {
                               seenLabels.add(ml.label);
                               chips.push({
