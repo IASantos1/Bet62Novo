@@ -21,7 +21,7 @@
 // every event's raw `type`/`detail` through unfiltered rather than allow-
 // listing known types, so a VAR event is captured the instant one is seen,
 // without needing a code change to recognise it.
-import { db, apiFootballTeamMappingsTable } from "@workspace/db";
+import { db, apiFootballTeamMappingsTable, apiFootballFixtureMappingsTable } from "../../../../lib/db/src/index.js";
 import { sql } from "drizzle-orm";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
@@ -208,13 +208,73 @@ export async function getApiFootballLiveFixtures(): Promise<ApiFootballFixture[]
 // name), same "same or one-is-a-substring-of-the-other" tolerance already
 // proven safe for club names via teamNamesMatch's own stripped-prefix
 // fallback.
+//
+// Hard-coded CANONICAL MAP added 2026-08-12 for the leagues we see the most
+// mismatches on in production: bwin (PulseScore) and API-Football very
+// rarely use the EXACT same wording for the big-5 + Brasil. Examples:
+//   bwin "LaLiga"                        vs api-football "La Liga"
+//   bwin "Serie A"                       vs api-football "Serie A TIM"
+//   bwin "Premier League"                vs api-football "England — Premier League"
+//   bwin "1. Bundesliga"                 vs api-football "Bundesliga"
+//   bwin "Ligue 1"                       vs api-football "Ligue 1 McDonald's"
+//   bwin "Brasileirão Série A"           vs api-football "Brazil Serie A" / "Campeonato Brasileiro Série A"
+//   bwin "Copa do Brasil"                vs api-football "Brazil Cup"
+//   bwin "Copa Libertadores"             vs api-football "Copa Libertadores de América"
+//   bwin "Champions League"              vs api-football "UEFA Champions League"
+//   bwin "Europa League"                 vs api-football "UEFA Europa League"
+//   bwin "Conference League"             vs api-football "UEFA Conference League"
+//   bwin "Campeonato Carioca"            vs api-football "Brazil Carioca 1"
+//   bwin "Campeonato Paulista"           vs api-football "Brazil Paulista A1"
+//
+// This map runs BEFORE the generic substring check so the heavy hitters
+// never fall through to the ambiguous branch. Deliberately tiny (only
+// leagues that actually appear repeatedly in the live feed) — a sprawling
+// list would be wrong here; for anything not listed the generic logic
+// below is still good enough.
+const LEAGUE_CANONICAL: Array<{ re: RegExp; canon: string }> = [
+  { re: /brasileir[ãa]o|campeonato brasileiro|brazil.*serie\s*a/, canon: "brasil serie a" },
+  { re: /serie\s*b\s*brasil|brasileir[ãa]o.*serie\s*b|brazil.*serie\s*b/, canon: "brasil serie b" },
+  { re: /brasil.*copa\s*do\s*brasil|copa\s*do\s*brasil|brazil\s*cup/, canon: "brasil copa do brasil" },
+  { re: /libertadores|copa libertadores/, canon: "libertadores" },
+  { re: /sul.?americana|copa sudamericana/, canon: "sudamericana" },
+  { re: /carioca|campeonato carioca|brazil.*carioca/, canon: "brasil carioca" },
+  { re: /paulista|campeonato paulista|brazil.*paulista/, canon: "brasil paulista" },
+  { re: /mineiro|campeonato mineiro|brazil.*mineiro/, canon: "brasil mineiro" },
+  { re: /ga[uú]cho|campeonato gaucho|brazil.*gaucho|brasil.*gaucho/, canon: "brasil gaucho" },
+  { re: /1\.\s*bundesliga|bundesliga/i, canon: "bundesliga" },
+  { re: /2\.\s*bundesliga/, canon: "2 bundesliga" },
+  { re: /laliga|la liga|primera.*division.*espana|primera.*divisi[óo]n.*espa[ñn]a|spanish la liga|spain la liga/, canon: "laliga" },
+  { re: /laliga2|la liga 2|segunda.*division.*espana|segunda.*divisi[óo]n/, canon: "laliga2" },
+  { re: /serie\s*a.*italy|italy.*serie\s*a|serie\s*a\s*tim|serie\s*a[^b]/, canon: "serie a italy" },
+  { re: /serie\s*b.*italy|italy.*serie\s*b/, canon: "serie b italy" },
+  { re: /ligue\s*1.*france|france.*ligue\s*1|ligue\s*1[^2]/, canon: "ligue 1 france" },
+  { re: /ligue\s*2.*france|france.*ligue\s*2/, canon: "ligue 2 france" },
+  { re: /premier\s*league|england.*premier|epl|english premier/, canon: "premier league" },
+  { re: /fa\s*cup|emirates fa cup|england fa cup/, canon: "fa cup" },
+  { re: /efl\s*cup|carabao\s*cup|league\s*cup\s*england|english league cup/, canon: "league cup england" },
+  { re: /champions\s*league|uefa champions/, canon: "ucl" },
+  { re: /europa\s*league|uefa europa league/, canon: "uel" },
+  { re: /conference\s*league|uefa conference/, canon: "uecl" },
+  { re: /super\s*liga.*turkey|turkish super lig|turkey super lig|s[uü]per lig/i, canon: "turkiye super lig" },
+  { re: /eredivisie|netherlands eredivisie|dutch eredivisie/, canon: "eredivisie" },
+  { re: /liga\s*portugal|primeira\s*liga|portugal.*primeira/, canon: "portugal primeira liga" },
+  { re: /liga\s*mx|liga\s*mexicana|mexico liga mx/, canon: "liga mx" },
+  { re: /mls|major league soccer|usa.*major league/, canon: "mls" },
+  { re: /copa\s*america/, canon: "copa america" },
+  { re: /euro\s*20\d{2}|uefa euro/, canon: "euro" },
+  { re: /world\s*cup|copa\s*mundo|fifa world cup/, canon: "world cup" },
+];
 function normalizeLeagueName(name: string): string {
-  return name
+  let base = name
     .normalize("NFD")
     .replace(/\p{Mn}/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  for (const entry of LEAGUE_CANONICAL) {
+    if (entry.re.test(base)) return entry.canon;
+  }
+  return base;
 }
 function leagueNamesMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -222,6 +282,115 @@ function leagueNamesMatch(a: string, b: string): boolean {
   const nb = normalizeLeagueName(b);
   if (!na || !nb) return false;
   return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+// ── Persistent FIXTURE-ID cache (2026-08-12) ──────────────────────────────
+// Cross-session cache of confirmed pulsescoreMatchId -> API-Football
+// fixtureId. See apiFootballFixtureMappings.ts's own header for the full
+// rationale. Lives alongside (not instead of) team-mappings because
+// team-mappings are per-team and don't disambiguate between multiple
+// fixtures between the SAME two teams (e.g. a Cup Final rematch vs the
+// previous league match of the same pair 2 weeks earlier).
+const FIXTURE_MAPPING_CACHE_TTL_MS = 5 * 60_000;
+let fixtureMappingCache = new Map<string, number>();
+let fixtureMappingCacheLoadedAt = 0;
+let fixtureMappingCacheLoading: Promise<void> | null = null;
+
+async function ensureFixtureMappingCacheFresh(): Promise<void> {
+  if (!db) return;
+  if (Date.now() - fixtureMappingCacheLoadedAt < FIXTURE_MAPPING_CACHE_TTL_MS) return;
+  if (fixtureMappingCacheLoading) return fixtureMappingCacheLoading;
+  fixtureMappingCacheLoading = (async () => {
+    try {
+      const rows = await db!
+        .select({
+          pulsescoreMatchId: apiFootballFixtureMappingsTable.pulsescoreMatchId,
+          apiFootballFixtureId: apiFootballFixtureMappingsTable.apiFootballFixtureId,
+        })
+        .from(apiFootballFixtureMappingsTable);
+      const next = new Map<string, number>();
+      for (const row of rows) next.set(row.pulsescoreMatchId, row.apiFootballFixtureId);
+      fixtureMappingCache = next;
+      fixtureMappingCacheLoadedAt = Date.now();
+    } catch (err) {
+      logger.warn({ err }, "[api-football] failed to load fixture-mapping cache");
+    } finally {
+      fixtureMappingCacheLoading = null;
+    }
+  })();
+  return fixtureMappingCacheLoading;
+}
+
+/** Confirmed fixture id for a PulseScore match id if already mapped cross-
+ * session. Null otherwise (still call findApiFootballFixture normally). */
+export function getMappedApiFootballFixtureId(pulsescoreMatchId: string): number | null {
+  void ensureFixtureMappingCacheFresh();
+  return fixtureMappingCache.get(pulsescoreMatchId) ?? null;
+}
+
+/** Persists a fully-validated PulseScore match → fixture pairing. Validity
+ * rules are UP TO THE CALLER (see matches.ts's buildFootballLiveFromPulseScore
+ * for the actual cross-validation logic that decides whether a pair is
+ * trustworthy enough to remember across restarts). This function just writes
+ * the row (fire-and-forget) and updates the in-process cache. */
+export function recordConfirmedFixtureMapping(args: {
+  pulsescoreMatchId: string;
+  pulsescoreEventId: string;
+  apiFootballFixtureId: number;
+  homeTeam?: string | null;
+  awayTeam?: string | null;
+  league?: string | null;
+  kickoffMs?: number | null;
+}): void {
+  fixtureMappingCache.set(args.pulsescoreMatchId, args.apiFootballFixtureId);
+  if (!db) return;
+  try {
+    db.insert(apiFootballFixtureMappingsTable)
+      .values({
+        pulsescoreMatchId: args.pulsescoreMatchId,
+        pulsescoreEventId: args.pulsescoreEventId,
+        apiFootballFixtureId: args.apiFootballFixtureId,
+        homeTeam: args.homeTeam ?? null,
+        awayTeam: args.awayTeam ?? null,
+        league: args.league ?? null,
+        kickoffMs:
+          typeof args.kickoffMs === "number" && Number.isFinite(args.kickoffMs)
+            ? Math.round(args.kickoffMs)
+            : null,
+      })
+      .onConflictDoUpdate({
+        target: apiFootballFixtureMappingsTable.pulsescoreMatchId,
+        set: {
+          apiFootballFixtureId: args.apiFootballFixtureId,
+          homeTeam: args.homeTeam ?? null,
+          awayTeam: args.awayTeam ?? null,
+          league: args.league ?? null,
+          kickoffMs:
+            typeof args.kickoffMs === "number" && Number.isFinite(args.kickoffMs)
+              ? Math.round(args.kickoffMs)
+              : null,
+          confirmationCount: sql`${apiFootballFixtureMappingsTable.confirmationCount} + 1`,
+          lastConfirmedAt: new Date(),
+        },
+      })
+      .catch((err: unknown) =>
+        logger.warn(
+          { err, pulsescoreMatchId: args.pulsescoreMatchId },
+          "[api-football] failed to persist fixture mapping",
+        ),
+      );
+  } catch (err) {
+    logger.warn(
+      { err, pulsescoreMatchId: args.pulsescoreMatchId },
+      "[api-football] failed to persist fixture mapping",
+    );
+  }
+}
+
+/** Test-only: resets the in-process fixture-mapping cache. */
+export function __resetFixtureMappingCacheForTests(): void {
+  fixtureMappingCache = new Map();
+  fixtureMappingCacheLoadedAt = 0;
 }
 
 // ── Persistent team-identity cache (2026-08-12) ─────────────────────────────

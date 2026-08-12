@@ -44,8 +44,25 @@ function slugifyTeamName(name: string): string {
 // Sportowy, Koninklijke Voetbalclub), API-Football's own name usually drops
 // it. None of these overlapped with the original list (which only covered
 // Western European abbreviations).
+//
+// BR-specific club-type prefixes/suffixes added 2026-08-12 after a real
+// PulseScore/bwin vs API-Football comparison of ~40 Brazilian live fixtures
+// confirmed these are dropped by API-Football but carried by bwin:
+//   SE  (Sociedade Esportiva)            — SE Palmeiras vs Palmeiras
+//   CR  (Clube de Regatas)               — CR Flamengo vs Flamengo
+//   AA  (Associação Atlética)            — AA Internacional vs Internacional
+//   AD  (Associação Desportiva)          — AD São Paulo vs São Paulo
+//   CE  (Clube Esportivo)                — CE Ceará vs Ceará
+//   EC  (Esporte Clube)                  — EC Bahia vs Bahia
+//   SC  (already present; Sociedade/ Sport Club)
+//   CAC / CAX / independente spelling variants not prefixable, so not
+//   added here — those rely on the fuzzy+league fallback below instead.
+// Also added the standalone phrases "Clube Atlético", "Sociedade Esportiva",
+// "Esporte Clube", "Associação Atlética", "Clube de Regatas" as whole-word
+// tokens, since bwin sometimes uses the expanded form instead of the
+// abbreviation for lower-division clubs.
 const CLUB_TOKEN_RE =
-  /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|esporte clube|f\.c\.|ca|fk|sk|cs|uc|ss|gks|kv)\b/gi;
+  /\b(fc|cf|ud|sc|ac|cd|afc|sad|se|cr|aa|ad|ce|ec|club|clube|futebol clube|esporte clube|clube atlético|clube atletico|sociedade esportiva|associação atlética|associacao atletica|clube de regatas|associação desportiva|associacao desportiva|f\.c\.|ca|fk|sk|cs|uc|ss|gks|kv)\b/gi;
 function slugifyTeamNameStripped(name: string): string {
   const stripped = name.replace(CLUB_TOKEN_RE, " ").replace(/\s+/g, " ").trim();
   return slugifyTeamName(stripped || name);
