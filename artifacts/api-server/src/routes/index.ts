@@ -14,6 +14,9 @@ import trackingRouter from "./tracking.js";
 import predictionsRouter from "./predictions.js";
 import casinoRouter from "./casino.js";
 import liveStreamRouter from "./liveStream.js";
+import statscoreTrackerRouter from "./statscoreTracker.js";
+import betbyTrackerRouter from "./betbyTracker.js";
+import pulseBridgeRouter from "./pulseBridge.js";
 
 const router: IRouter = Router();
 
@@ -32,5 +35,8 @@ router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/predictions", predictionsRouter);
 router.use("/casino", casinoRouter);
+router.use(statscoreTrackerRouter);
+router.use(betbyTrackerRouter);
+router.use(pulseBridgeRouter);
 
 export default router;
