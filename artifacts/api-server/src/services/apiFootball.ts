@@ -43,6 +43,13 @@ export type ApiFootballFixture = {
   elapsed: number | null;
   leagueName: string;
   leagueCountry: string;
+  // Kickoff timestamp (ms since epoch), parsed from the real API's
+  // fixture.date (ISO8601) — added 2026-08-12 for name+time+league
+  // cross-referencing (see findApiFootballFixture below). Previously
+  // fetched but silently dropped by toFixture(): the raw field existed in
+  // every real sample this integration was built against (this file's own
+  // header), just never typed/read.
+  kickoffMs: number | null;
   home: { id: number; name: string; logo: string | null };
   away: { id: number; name: string; logo: string | null };
   goalsHome: number | null;
@@ -63,6 +70,7 @@ type RawApiFootballEvent = {
 type RawApiFootballFixture = {
   fixture?: {
     id?: number;
+    date?: string;
     status?: { short?: string; elapsed?: number | null };
   };
   league?: { name?: string; country?: string };
@@ -103,12 +111,14 @@ function toFixture(raw: RawApiFootballFixture): ApiFootballFixture | null {
   const home = raw.teams?.home;
   const away = raw.teams?.away;
   if (fixtureId === undefined || !home?.name || !away?.name) return null;
+  const kickoffTs = raw.fixture?.date ? Date.parse(raw.fixture.date) : NaN;
   return {
     fixtureId,
     statusShort: raw.fixture?.status?.short ?? "",
     elapsed: raw.fixture?.status?.elapsed ?? null,
     leagueName: raw.league?.name ?? "",
     leagueCountry: raw.league?.country ?? "",
+    kickoffMs: Number.isFinite(kickoffTs) ? kickoffTs : null,
     home: { id: home.id ?? 0, name: home.name, logo: home.logo ?? null },
     away: { id: away.id ?? 0, name: away.name, logo: away.logo ?? null },
     goalsHome: raw.goals?.home ?? null,
@@ -187,38 +197,97 @@ export async function getApiFootballLiveFixtures(): Promise<ApiFootballFixture[]
   return inFlight;
 }
 
-/** Finds the API-Football fixture matching a tracked match by team name
- * (tolerant cross-provider match, same helper used throughout the PulseScore
- * integration). `fixtures` should be one already-fetched
- * getApiFootballLiveFixtures() batch — never call this per-match against a
- * fresh fetch, it would multiply request count. */
+// League-name comparator for fixture disambiguation — deliberately lighter
+// weight than teamNamesMatch (team names above have far more real-world
+// abbreviation/variant patterns to cover; league names are comparatively
+// standardized across providers). Normalizes case/diacritics/punctuation
+// and accepts either an exact match or one name containing the other
+// (handles e.g. bwin's "Cup" suffix vs API-Football's bare competition
+// name), same "same or one-is-a-substring-of-the-other" tolerance already
+// proven safe for club names via teamNamesMatch's own stripped-prefix
+// fallback.
+function normalizeLeagueName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Mn}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+function leagueNamesMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const na = normalizeLeagueName(a);
+  const nb = normalizeLeagueName(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+/** Finds the API-Football fixture matching a tracked match by team name,
+ * league, and kickoff time (tolerant cross-provider match, same helper used
+ * throughout the PulseScore integration). `fixtures` should be one already-
+ * fetched getApiFootballLiveFixtures() batch — never call this per-match
+ * against a fresh fetch, it would multiply request count.
+ *
+ * `context.league`/`context.approxKickoffMs` are optional (existing call
+ * sites that don't pass them keep today's team-name-only behavior) — pass
+ * them whenever available for genuinely robust matching: team names alone
+ * DO occasionally collide (two same-ish-named clubs live at once, or a
+ * name-matching gap not yet covered by teamMatch.ts), and previously any
+ * such collision meant giving up entirely (returning null, audit finding
+ * 2026-08-10) even when the kickoff time and league would have made the
+ * right answer obvious to a human glancing at both lists side by side. */
 export function findApiFootballFixture(
   home: string,
   away: string,
   fixtures: ApiFootballFixture[],
+  context?: { league?: string; approxKickoffMs?: number },
 ): ApiFootballFixture | null {
   // Picking the FIRST match (the old .find()) risked silently attaching
   // goals/cards/VAR events — and the betting suspension they trigger —
   // from the WRONG match whenever more than one of the ~40+ concurrently
   // live worldwide fixtures satisfied teamNamesMatch on both sides
   // (audit finding, 2026-08-10, compounded by a teamNamesMatch bug fixed
-  // the same day — see teamMatch.ts's reserve-side guard). No kickoff
-  // timestamp is available here to disambiguate by (ApiFootballFixture
-  // has none, and every entry is already "live" by construction, so a
-  // time check wouldn't discriminate anyway) — so on genuine ambiguity,
-  // matching the rest of this codebase's "don't guess" convention, skip
-  // rather than risk cross-attributing a live match's events.
+  // the same day — see teamMatch.ts's reserve-side guard). Team names
+  // stay a hard requirement below — league/time never override a team-name
+  // mismatch, they only PICK BETWEEN candidates that already satisfy it.
   const matches = fixtures.filter(
     (f) => teamNamesMatch(home, f.home.name) && teamNamesMatch(away, f.away.name),
   );
-  if (matches.length > 1) {
-    logger.warn(
-      { home, away, count: matches.length },
-      "[api-football] ambiguous fixture match — multiple live fixtures satisfy teamNamesMatch, skipping",
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0]!;
+
+  // Ambiguous on team names alone — score each candidate on the two extra
+  // signals and pick the one that's decisively best, instead of always
+  // giving up (the pre-2026-08-12 behavior, kept as the fallback below
+  // whenever context isn't available or no candidate scores above 0).
+  const KICKOFF_TOLERANCE_MS = 20 * 60_000; // wide: bwin/API-Football onboarding lag, stoppage time, HT length
+  const scored = matches.map((f) => {
+    let score = 0;
+    if (context?.league && leagueNamesMatch(context.league, f.leagueName)) score += 2;
+    if (
+      context?.approxKickoffMs !== undefined &&
+      typeof f.kickoffMs === "number" &&
+      Math.abs(f.kickoffMs - context.approxKickoffMs) <= KICKOFF_TOLERANCE_MS
+    ) {
+      score += 1;
+    }
+    return { fixture: f, score };
+  });
+  const bestScore = Math.max(...scored.map((s) => s.score));
+  const best = scored.filter((s) => s.score === bestScore);
+  if (bestScore > 0 && best.length === 1) {
+    logger.info(
+      { home, away, league: context?.league, fixtureId: best[0]!.fixture.fixtureId, score: bestScore },
+      "[api-football] ambiguous team-name match resolved via league/kickoff-time",
     );
-    return null;
+    return best[0]!.fixture;
   }
-  return matches[0] ?? null;
+
+  logger.warn(
+    { home, away, count: matches.length },
+    "[api-football] ambiguous fixture match — multiple live fixtures satisfy teamNamesMatch, league/kickoff-time did not resolve it, skipping",
+  );
+  return null;
 }
 
 const RED_CARD_DETAIL = "red card";

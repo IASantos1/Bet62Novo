@@ -12128,7 +12128,23 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // whenever API_FOOTBALL_KEY isn't configured or that fetch failed; every
     // use below already treats null as "no extra data" and falls back to
     // PulseScore-only behavior, same as before this integration existed).
-    const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures);
+    // League + approximate kickoff time passed as extra disambiguation
+    // signals (2026-08-12, user-requested: matching on team names alone
+    // occasionally collides when a fuzzy name match satisfies more than one
+    // live fixture) — ev.league is PulseScore's own bare league name for
+    // this event; approxKickoffMs has no dedicated field to read (PulseScore
+    // doesn't expose a live match's original kickoff timestamp — see
+    // findApiFootballFixture's own comment) so it's derived from the one
+    // thing already available every tick: current elapsed minute back-
+    // computed against wall-clock time. Coarse (ignores stoppage time,
+    // ±1 real minute of drift) but paired with a generous 20-minute
+    // tolerance in findApiFootballFixture, which is what actually matters —
+    // this only needs to be right within league-competition-sized margins,
+    // not to the second.
+    const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures, {
+      league: ev.league,
+      approxKickoffMs: Date.now() - pulseScoreEventMinute(ev) * 60_000,
+    });
     // Originally a TEMPORARY diagnostic (2026-08-09) for a user report that
     // goal/VAR/card/penalty enrichment "still wasn't coming through
     // correctly" — need to know WHY apiFixture stays unmatched for a given

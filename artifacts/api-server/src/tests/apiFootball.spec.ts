@@ -18,6 +18,7 @@ function makeFixture(overrides: Partial<Record<string, unknown>> = {}) {
     elapsed: 70,
     leagueName: "Test League",
     leagueCountry: "Testland",
+    kickoffMs: null,
     home: { id: 10, name: "Home FC", logo: "https://example.com/home.png" },
     away: { id: 20, name: "Away FC", logo: "https://example.com/away.png" },
     goalsHome: 0,
@@ -243,6 +244,52 @@ test("findApiFootballFixture: returns null when no fixture matches", () => {
     makeFixture({ fixtureId: 1, home: { id: 10, name: "Real Madrid", logo: null }, away: { id: 20, name: "Barcelona", logo: null } }),
   ];
   const found = findApiFootballFixture("Home FC", "Away FC", fixtures);
+  assert.equal(found, null);
+});
+
+// 2026-08-12: user-requested robustness — team names alone can be
+// ambiguous (two same-ish-named clubs live worldwide at once); league name
+// and approximate kickoff time now disambiguate instead of always giving
+// up when both fixtures satisfy teamNamesMatch.
+test("findApiFootballFixture: without context, ambiguous team names still skip (unchanged default)", () => {
+  const fixtures = [
+    makeFixture({ fixtureId: 1, leagueName: "Premier League", home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
+    makeFixture({ fixtureId: 2, leagueName: "Championship", home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
+  ];
+  const found = findApiFootballFixture("Home FC", "Away FC", fixtures);
+  assert.equal(found, null);
+});
+
+test("findApiFootballFixture: league name resolves an ambiguous team-name match", () => {
+  const fixtures = [
+    makeFixture({ fixtureId: 1, leagueName: "Premier League", home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
+    makeFixture({ fixtureId: 2, leagueName: "Championship", home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
+  ];
+  const found = findApiFootballFixture("Home FC", "Away FC", fixtures, { league: "Championship" });
+  assert.equal(found?.fixtureId, 2);
+});
+
+test("findApiFootballFixture: kickoff-time proximity resolves an ambiguous team-name match", () => {
+  const now = Date.parse("2026-08-12T20:00:00.000Z");
+  const fixtures = [
+    makeFixture({ fixtureId: 1, kickoffMs: now - 6 * 60 * 60_000, home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
+    makeFixture({ fixtureId: 2, kickoffMs: now - 40 * 60_000, home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
+  ];
+  // 40 real minutes elapsed → kicked off ~40 min ago, matching fixture 2 within the 20-min tolerance.
+  const found = findApiFootballFixture("Home FC", "Away FC", fixtures, { approxKickoffMs: now - 40 * 60_000 });
+  assert.equal(found?.fixtureId, 2);
+});
+
+test("findApiFootballFixture: still skips when league/kickoff-time don't discriminate either", () => {
+  const now = Date.now();
+  const fixtures = [
+    makeFixture({ fixtureId: 1, leagueName: "Cup", kickoffMs: now - 40 * 60_000, home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
+    makeFixture({ fixtureId: 2, leagueName: "Cup", kickoffMs: now - 45 * 60_000, home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
+  ];
+  const found = findApiFootballFixture("Home FC", "Away FC", fixtures, {
+    league: "Cup",
+    approxKickoffMs: now - 42 * 60_000,
+  });
   assert.equal(found, null);
 });
 
