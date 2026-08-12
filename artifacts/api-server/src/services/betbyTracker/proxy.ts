@@ -126,9 +126,16 @@ export function buildBetbyTrackerUpstreamUrl(
 }
 
 export function buildBetbyTrackerPublicUrl(
-  input: { betbyEventId?: string; lang?: string; sportId?: string },
+  input: { betbyEventId?: string; statscoreEventId?: string | number; lang?: string; sportId?: string },
 ): string {
-  return buildBetbyTrackerUpstreamUrl(input);
+  const fallback = String(input.betbyEventId ?? input.statscoreEventId ?? "1").trim() || "1";
+  const safe: BetbyTrackerProxyInput & { statscoreEventId?: string | number } = {
+    betbyEventId: fallback,
+    lang: input.lang,
+    sportId: input.sportId,
+    statscoreEventId: input.statscoreEventId,
+  };
+  return buildBetbyTrackerUpstreamUrl(safe);
 }
 
 export async function resolveStatscoreEventIdFromBetby(
