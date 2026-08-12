@@ -9,6 +9,7 @@ const {
   latestGoalIsPenalty,
   fixturePenaltyEvents,
   extractTeamStats,
+  __resetTeamMappingCacheForTests,
 } = await import("../services/apiFootball.js");
 
 function makeFixture(overrides: Partial<Record<string, unknown>> = {}) {
@@ -231,6 +232,7 @@ test("fixturePenaltyEvents: empty when the fixture has no penalty-outcome events
 // across the PulseScore integration) is reused here, not reimplemented —
 // this just confirms findApiFootballFixture wires it correctly.
 test("findApiFootballFixture: finds the fixture matching both team names", () => {
+  __resetTeamMappingCacheForTests();
   const fixtures = [
     makeFixture({ fixtureId: 1, home: { id: 10, name: "Real Madrid", logo: null }, away: { id: 20, name: "Barcelona", logo: null } }),
     makeFixture({ fixtureId: 2, home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
@@ -240,6 +242,7 @@ test("findApiFootballFixture: finds the fixture matching both team names", () =>
 });
 
 test("findApiFootballFixture: returns null when no fixture matches", () => {
+  __resetTeamMappingCacheForTests();
   const fixtures = [
     makeFixture({ fixtureId: 1, home: { id: 10, name: "Real Madrid", logo: null }, away: { id: 20, name: "Barcelona", logo: null } }),
   ];
@@ -252,6 +255,7 @@ test("findApiFootballFixture: returns null when no fixture matches", () => {
 // and approximate kickoff time now disambiguate instead of always giving
 // up when both fixtures satisfy teamNamesMatch.
 test("findApiFootballFixture: without context, ambiguous team names still skip (unchanged default)", () => {
+  __resetTeamMappingCacheForTests();
   const fixtures = [
     makeFixture({ fixtureId: 1, leagueName: "Premier League", home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
     makeFixture({ fixtureId: 2, leagueName: "Championship", home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
@@ -261,6 +265,7 @@ test("findApiFootballFixture: without context, ambiguous team names still skip (
 });
 
 test("findApiFootballFixture: league name resolves an ambiguous team-name match", () => {
+  __resetTeamMappingCacheForTests();
   const fixtures = [
     makeFixture({ fixtureId: 1, leagueName: "Premier League", home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
     makeFixture({ fixtureId: 2, leagueName: "Championship", home: { id: 30, name: "Home FC", logo: null }, away: { id: 40, name: "Away FC", logo: null } }),
@@ -270,6 +275,7 @@ test("findApiFootballFixture: league name resolves an ambiguous team-name match"
 });
 
 test("findApiFootballFixture: kickoff-time proximity resolves an ambiguous team-name match", () => {
+  __resetTeamMappingCacheForTests();
   const now = Date.parse("2026-08-12T20:00:00.000Z");
   const fixtures = [
     makeFixture({ fixtureId: 1, kickoffMs: now - 6 * 60 * 60_000, home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),
@@ -281,6 +287,7 @@ test("findApiFootballFixture: kickoff-time proximity resolves an ambiguous team-
 });
 
 test("findApiFootballFixture: still skips when league/kickoff-time don't discriminate either", () => {
+  __resetTeamMappingCacheForTests();
   const now = Date.now();
   const fixtures = [
     makeFixture({ fixtureId: 1, leagueName: "Cup", kickoffMs: now - 40 * 60_000, home: { id: 10, name: "Home FC", logo: null }, away: { id: 20, name: "Away FC", logo: null } }),

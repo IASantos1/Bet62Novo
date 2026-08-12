@@ -21,6 +21,8 @@
 // every event's raw `type`/`detail` through unfiltered rather than allow-
 // listing known types, so a VAR event is captured the instant one is seen,
 // without needing a code change to recognise it.
+import { db, apiFootballTeamMappingsTable } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
 import { teamNamesMatch } from "./pulsescore/teamMatch.js";
@@ -222,6 +224,105 @@ function leagueNamesMatch(a: string, b: string): boolean {
   return na === nb || na.includes(nb) || nb.includes(na);
 }
 
+// ── Persistent team-identity cache (2026-08-12) ─────────────────────────────
+// Cross-session cache of confirmed PulseScore team name -> API-Football team
+// id pairings (api_football_team_mappings table) — see
+// apiFootballTeamMappings.ts's own header for the full reasoning. Loaded
+// lazily and refreshed periodically rather than queried on every live tick;
+// a stale-for-a-few-minutes cache is harmless here (a NEW team mapping just
+// isn't usable as a shortcut yet, same as before this cache existed — it
+// still gets found via the normal fuzzy path that populates it).
+const TEAM_MAPPING_CACHE_TTL_MS = 5 * 60_000;
+let teamMappingCache = new Map<string, number>();
+let teamMappingCacheLoadedAt = 0;
+let teamMappingCacheLoading: Promise<void> | null = null;
+
+async function ensureTeamMappingCacheFresh(): Promise<void> {
+  if (!db) return;
+  if (Date.now() - teamMappingCacheLoadedAt < TEAM_MAPPING_CACHE_TTL_MS) return;
+  if (teamMappingCacheLoading) return teamMappingCacheLoading;
+  teamMappingCacheLoading = (async () => {
+    try {
+      const rows = await db!
+        .select({
+          pulsescoreTeamName: apiFootballTeamMappingsTable.pulsescoreTeamName,
+          apiFootballTeamId: apiFootballTeamMappingsTable.apiFootballTeamId,
+        })
+        .from(apiFootballTeamMappingsTable);
+      const next = new Map<string, number>();
+      for (const row of rows) next.set(row.pulsescoreTeamName, row.apiFootballTeamId);
+      teamMappingCache = next;
+      teamMappingCacheLoadedAt = Date.now();
+    } catch (err) {
+      logger.warn({ err }, "[api-football] failed to load team-mapping cache");
+    } finally {
+      teamMappingCacheLoading = null;
+    }
+  })();
+  return teamMappingCacheLoading;
+}
+
+/** Confirmed API-Football team id for a PulseScore team name, if this exact
+ * name has been seen and confirmed before (any session) — null on a cache
+ * miss, INCLUDING when the cache hasn't loaded yet (call
+ * ensureTeamMappingCacheFresh() first if a caller can afford to await it;
+ * findApiFootballFixture below deliberately doesn't, so the very first
+ * lookup after a cold start falls through to the normal fuzzy path instead
+ * of blocking a live tick on a DB round trip). */
+export function getMappedApiFootballTeamId(pulsescoreTeamName: string): number | null {
+  void ensureTeamMappingCacheFresh();
+  return teamMappingCache.get(pulsescoreTeamName) ?? null;
+}
+
+/** Upserts a confirmed PulseScore-name -> API-Football-id pairing — called
+ * once a match resolves via the fuzzy name+league+kickoff-time path
+ * (matches.ts), so future matches involving the same team can skip straight
+ * to an exact id lookup. Fire-and-forget, same pattern as the existing
+ * api_football_name_mismatches upsert this mirrors — a failed write here
+ * just means one more match re-derives the mapping the slow way, not a
+ * correctness issue. */
+export function recordConfirmedTeamMapping(
+  pulsescoreTeamName: string,
+  apiFootballTeamId: number,
+  apiFootballTeamName: string,
+): void {
+  teamMappingCache.set(pulsescoreTeamName, apiFootballTeamId);
+  if (!db) return;
+  // Wrapped in try/catch, not just a trailing .catch() — the db proxy
+  // (@workspace/db) throws SYNCHRONOUSLY on first property access when
+  // DATABASE_URL isn't set (confirmed via this file's own unit tests,
+  // which run without a database), before db.insert() ever returns a
+  // thenable for .catch() to attach to.
+  try {
+    db.insert(apiFootballTeamMappingsTable)
+      .values({ pulsescoreTeamName, apiFootballTeamId, apiFootballTeamName })
+      .onConflictDoUpdate({
+        target: apiFootballTeamMappingsTable.pulsescoreTeamName,
+        set: {
+          apiFootballTeamId,
+          apiFootballTeamName,
+          confirmedCount: sql`${apiFootballTeamMappingsTable.confirmedCount} + 1`,
+          lastConfirmedAt: new Date(),
+        },
+      })
+      .catch((err: unknown) =>
+        logger.warn({ err, pulsescoreTeamName }, "[api-football] failed to persist team mapping"),
+      );
+  } catch (err) {
+    logger.warn({ err, pulsescoreTeamName }, "[api-football] failed to persist team mapping");
+  }
+}
+
+/** Test-only: clears the in-memory team-mapping cache so each test starts
+ * isolated — findApiFootballFixture's own tests reuse generic names like
+ * "Home FC"/"Away FC" across cases with different fixture ids, which would
+ * otherwise leak a mapping recorded by one test into a later one via the
+ * module-level cache. */
+export function __resetTeamMappingCacheForTests(): void {
+  teamMappingCache = new Map();
+  teamMappingCacheLoadedAt = 0;
+}
+
 /** Finds the API-Football fixture matching a tracked match by team name,
  * league, and kickoff time (tolerant cross-provider match, same helper used
  * throughout the PulseScore integration). `fixtures` should be one already-
@@ -242,6 +343,21 @@ export function findApiFootballFixture(
   fixtures: ApiFootballFixture[],
   context?: { league?: string; approxKickoffMs?: number },
 ): ApiFootballFixture | null {
+  // Persistent team-id mapping first, if both sides have one confirmed
+  // from a PREVIOUS match (this session or an earlier one) — an exact id
+  // match, stronger than any fuzzy comparison below. Requires BOTH teams
+  // mapped and matching exactly one fixture; falls through to the fuzzy
+  // path otherwise (a new/unmapped team, or the mapped ids not appearing
+  // in today's batch — e.g. neither team is live right now).
+  const homeId = getMappedApiFootballTeamId(home);
+  const awayId = getMappedApiFootballTeamId(away);
+  if (homeId !== null && awayId !== null) {
+    const idMatches = fixtures.filter(
+      (f) => f.home.id === homeId && f.away.id === awayId,
+    );
+    if (idMatches.length === 1) return idMatches[0]!;
+  }
+
   // Picking the FIRST match (the old .find()) risked silently attaching
   // goals/cards/VAR events — and the betting suspension they trigger —
   // from the WRONG match whenever more than one of the ~40+ concurrently
@@ -254,7 +370,11 @@ export function findApiFootballFixture(
     (f) => teamNamesMatch(home, f.home.name) && teamNamesMatch(away, f.away.name),
   );
   if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0]!;
+  if (matches.length === 1) {
+    recordConfirmedTeamMapping(home, matches[0]!.home.id, matches[0]!.home.name);
+    recordConfirmedTeamMapping(away, matches[0]!.away.id, matches[0]!.away.name);
+    return matches[0]!;
+  }
 
   // Ambiguous on team names alone — score each candidate on the two extra
   // signals and pick the one that's decisively best, instead of always
@@ -280,6 +400,8 @@ export function findApiFootballFixture(
       { home, away, league: context?.league, fixtureId: best[0]!.fixture.fixtureId, score: bestScore },
       "[api-football] ambiguous team-name match resolved via league/kickoff-time",
     );
+    recordConfirmedTeamMapping(home, best[0]!.fixture.home.id, best[0]!.fixture.home.name);
+    recordConfirmedTeamMapping(away, best[0]!.fixture.away.id, best[0]!.fixture.away.name);
     return best[0]!.fixture;
   }
 

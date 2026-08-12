@@ -45,3 +45,4 @@ export * from "./liveStreamMappings.js";
 export * from "./aiAgents.js";
 export * from "./apiFootballNameMismatches.js";
 export * from "./aiConsoleCommands.js";
+export * from "./apiFootballTeamMappings.js";

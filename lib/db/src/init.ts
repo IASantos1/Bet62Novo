@@ -571,6 +571,27 @@ export async function initDb(): Promise<void> {
         error            TEXT,
         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Persistent, cross-session team-identity cache between PulseScore/
+      -- bwin's team names and API-Football's team ids (2026-08-12,
+      -- user-requested architecture hardening) — see
+      -- apiFootballTeamMappings.ts's own header for the full reasoning.
+      -- Grown organically: upserted whenever findApiFootballFixture
+      -- resolves a match via fuzzy name+league+kickoff-time matching, so
+      -- future matches involving the same team can look it up by exact id
+      -- instead of re-deriving the match from scratch.
+      CREATE TABLE IF NOT EXISTS api_football_team_mappings (
+        id                     SERIAL PRIMARY KEY,
+        pulsescore_team_name   TEXT NOT NULL,
+        api_football_team_id   INTEGER NOT NULL,
+        api_football_team_name TEXT NOT NULL,
+        confirmed_count        INTEGER NOT NULL DEFAULT 1,
+        first_confirmed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_confirmed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS api_football_team_mappings_name_idx
+        ON api_football_team_mappings (pulsescore_team_name);
     `);
 
     console.info("[db/init] Schema initialisation complete.");
