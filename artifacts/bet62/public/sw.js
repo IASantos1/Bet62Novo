@@ -1,7 +1,33 @@
-const VERSION = "v2026-08-06-1";
+const VERSION = "v2026-08-12-1";
 const SHELL_CACHE = `bet62-shell-${VERSION}`;
 const ASSET_CACHE = `bet62-assets-${VERSION}`;
 const DATA_CACHE = `bet62-data-${VERSION}`;
+
+// PWA crash-loop report (2026-08-12, "problema ocorreu repetidamente" on
+// /ao-vivo): DATA_CACHE/ASSET_CACHE had no eviction policy at all — every
+// distinct request URL ever cached (staleWhileRevalidate/networkFirst below)
+// stayed in Cache Storage forever within one SW version, only cleared on a
+// deploy bumping VERSION. /api/matches/* alone covers a dozen+ per-match
+// endpoints (v2-statistics, v2-incidents, v2-standings, v2-match-odds,
+// v2-lineups, stats, storylines, confrontos, ...), each keyed by matchId —
+// a long live-betting session tapping through many different matches over
+// hours/days without an app update could accumulate an unbounded number of
+// cache entries with nothing ever pruning old ones, real memory/storage
+// pressure on a mobile PWA (iOS Safari enforces tighter storage/memory
+// ceilings for installed PWAs than a regular browser tab). Capped both
+// caches to MAX_CACHE_ENTRIES, evicting the oldest entry (Cache API
+// preserves insertion order) whenever a put would exceed it.
+const MAX_CACHE_ENTRIES = 120;
+
+async function putWithEviction(cache, request, response) {
+  await cache.put(request, response);
+  const keys = await cache.keys();
+  if (keys.length > MAX_CACHE_ENTRIES) {
+    await Promise.all(
+      keys.slice(0, keys.length - MAX_CACHE_ENTRIES).map((key) => cache.delete(key)),
+    );
+  }
+}
 
 function getScopePath() {
   const scopeUrl = new URL(self.registration.scope);
@@ -19,10 +45,20 @@ function isSameScope(url) {
 
 function isLiveApi(url) {
   const scopePath = getScopePath();
+  // Widened 2026-08-12 from just the 3 live-stream paths to ALL of
+  // /api/matches/ and /api/bets/ — every one of these is real-time sports/
+  // betting data (odds, scores, lineups, standings, a user's own bet
+  // status) that's actively WRONG once stale, not just slower: serving a
+  // cached response here on a flaky connection means a bettor could see
+  // out-of-date odds or a ticket status that's already changed, a real-
+  // money correctness risk on top of the unbounded-cache-growth pressure
+  // these per-matchId/per-bet endpoints put on Cache Storage (see
+  // MAX_CACHE_ENTRIES above). Never worth caching either way — a network
+  // failure here should surface as an error the page's own retry logic
+  // handles, not a silently-stale answer.
   return (
-    url.pathname.startsWith(`${scopePath}api/matches/live`) ||
-    url.pathname.startsWith(`${scopePath}api/matches/live-stream`) ||
-    url.pathname.startsWith(`${scopePath}api/matches/ws`)
+    url.pathname.startsWith(`${scopePath}api/matches/`) ||
+    url.pathname.startsWith(`${scopePath}api/bets/`)
   );
 }
 
@@ -43,7 +79,7 @@ async function networkFirst(request, cacheName, fallbackUrl) {
   try {
     const response = await fetch(request);
     if (response && response.ok) {
-      cache.put(request, response.clone());
+      putWithEviction(cache, request, response.clone());
     }
     return response;
   } catch (error) {
@@ -68,7 +104,7 @@ async function staleWhileRevalidate(request, cacheName) {
   const networkPromise = fetch(request)
     .then((response) => {
       if (response && response.ok) {
-        cache.put(request, response.clone());
+        putWithEviction(cache, request, response.clone());
       }
       return response;
     })
