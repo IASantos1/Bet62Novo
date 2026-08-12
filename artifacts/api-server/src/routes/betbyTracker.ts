@@ -3,6 +3,7 @@ import {
   BETBY_TRACKER_RESPONSE_HEADERS,
   fetchBetbyTrackerHtml,
   buildBetbyTrackerUpstreamUrl,
+  buildBetbyTrackerPublicUrl,
   type BetbyThemeInjection,
 } from "../services/betbyTracker/proxy.js";
 import { listMappings } from "../services/liveStream/mapping.js";
@@ -68,40 +69,111 @@ async function resolveBetbyEventIdByName(
   }
 }
 
-router.get("/", async (req: Request, res: Response) => {
+/** Resolve o betbyEventId se não foi passado (query home+away) e retorna o
+ *  objeto com o id final + url pública direta do BetBY + url via proxy.
+ *  Opcionalmente usado pelo frontend quando VITE_USE_BETBY_DIRECT_IFRAME=true
+ *  (iframe aponta DIRETO para demo.betby.com sem passar HTML pelo node). */
+async function resolveFinalBetbyEventId(
+  req: Request,
+): Promise<{ finalBetbyEventId: string | null; error?: { code: number; msg: string } }> {
   const home = typeof req.query.home === "string" ? req.query.home.trim() : "";
   const away = typeof req.query.away === "string" ? req.query.away.trim() : "";
   const betbyEventId = typeof req.query.betbyEventId === "string"
     ? req.query.betbyEventId.trim()
     : "";
+  let finalBetbyEventId = betbyEventId;
+  if (!finalBetbyEventId) {
+    if (!home || !away) {
+      return {
+        finalBetbyEventId: null,
+        error: { code: 400, msg: "Missing required query params: betbyEventId OR (home AND away)" },
+      };
+    }
+    const byName = await resolveBetbyEventIdByName(home, away);
+    if (!byName) {
+      return {
+        finalBetbyEventId: null,
+        error: { code: 404, msg: `No BetBY match mapping found for "${home}" vs "${away}".` },
+      };
+    }
+    finalBetbyEventId = byName.betbyEventId;
+  }
+
+  if (!finalBetbyEventId || finalBetbyEventId.length < 6 || !/^\d+$/.test(finalBetbyEventId)) {
+    return {
+      finalBetbyEventId: null,
+      error: { code: 400, msg: "Invalid betbyEventId (expected numeric id)" },
+    };
+  }
+  return { finalBetbyEventId };
+}
+
+router.get("/url", async (req: Request, res: Response) => {
+  try {
+    const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
+      ? req.query.lang
+      : "pt-br";
+    const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
+      ? req.query.sportId
+      : "1";
+    const parentOrigin = getOriginFromRequest(req) ?? "*";
+    const resolved = await resolveFinalBetbyEventId(req);
+    if (resolved.error) {
+      return res.status(resolved.error.code).json({
+        ok: false,
+        error: resolved.error.msg,
+        upstream: null,
+        proxy: null,
+        finalBetbyEventId: null,
+      });
+    }
+    const finalBetbyEventId = resolved.finalBetbyEventId!;
+    const publicDirectUrl = buildBetbyTrackerPublicUrl({
+      betbyEventId: finalBetbyEventId,
+      lang,
+      sportId,
+    });
+    const apiBase = `${req.protocol}://${req.get("host") ?? ""}`;
+    const proxyUrl = `${apiBase}/api/betby-live-tracker/${encodeURIComponent(finalBetbyEventId)}?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`;
+    void resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null);
+    return res.status(200).json({
+      ok: true,
+      finalBetbyEventId,
+      upstream: publicDirectUrl,
+      direct: true,
+      lang,
+      sportId,
+      parentOrigin,
+      proxy: proxyUrl,
+      pulseSse: `${apiBase}/api/pulsebridge/betby/${encodeURIComponent(finalBetbyEventId)}`,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({
+      ok: false,
+      error: msg,
+      upstream: null,
+      proxy: null,
+      finalBetbyEventId: null,
+    });
+  }
+});
+
+router.get("/", async (req: Request, res: Response) => {
   const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
     ? req.query.lang
     : "pt-br";
   const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
     ? req.query.sportId
     : "1";
-  let finalBetbyEventId = betbyEventId;
-
-  if (!finalBetbyEventId) {
-    if (!home || !away) {
-      return res
-        .status(400)
-        .type("text/plain")
-        .send("Missing required query params: betbyEventId OR (home AND away)");
-    }
-    const byName = await resolveBetbyEventIdByName(home, away);
-    if (!byName) {
-      return res
-        .status(404)
-        .type("text/plain")
-        .send(`No BetBY match mapping found for "${home}" vs "${away}".`);
-    }
-    finalBetbyEventId = byName.betbyEventId;
+  const resolved = await resolveFinalBetbyEventId(req);
+  if (resolved.error) {
+    return res
+      .status(resolved.error.code)
+      .type("text/plain")
+      .send(resolved.error.msg);
   }
-
-  if (!finalBetbyEventId || finalBetbyEventId.length < 6 || !/^\d+$/.test(finalBetbyEventId)) {
-    return res.status(400).type("text/plain").send("Invalid betbyEventId (expected numeric id)");
-  }
+  const finalBetbyEventId = resolved.finalBetbyEventId!;
 
   try {
     const parentOrigin = getOriginFromRequest(req) ?? "*";
