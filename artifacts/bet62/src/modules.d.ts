@@ -140,11 +140,11 @@ declare module "lucide-react" {
   export const Settings: any; export const User: any; export const Users: any; export const Search: any;
   export const Plus: any; export const Minus: any; export const Edit: any; export const Trash: any;
   export const Eye: any; export const EyeOff: any; export const Lock: any; export const Unlock: any;
-  export const Mail: any; export const Phone: any; export const Calendar: any; export const Clock: any;
+  export const Mail: any; export const Phone: any; export const Calendar: any; export const CalendarDays: any; export const Clock: any;
   export const DollarSign: any; export const CreditCard: any; export const Wallet: any; export const Banknote: any;
   export const Trophy: any; export const Medal: any; export const Star: any; export const Crown: any;
   export const Ticket: any; export const Dice1: any; export const Dice2: any; export const Dice3: any;
-  export const Dice4: any; export const Dice5: any; export const Dice6: any; export const SlotMachine: any;
+  export const Dice4: any; export const Dice5: any; export const Dice6: any; export const SlotMachine: any; export const Dices: any;
   export const BarChart3: any; export const PieChart: any; export const TrendingUp: any; export const TrendingDown: any;
   export const Info: any; export const AlertCircle: any; export const AlertTriangle: any; export const AlertOctagon: any;
   export const HelpCircle: any; export const MessageCircle: any; export const Send: any; export const Share: any;
@@ -156,7 +156,7 @@ declare module "lucide-react" {
   export const Sun: any; export const Moon: any; export const Monitor: any; export const Palette: any;
   export const ShoppingCart: any; export const Package: any; export const Gift: any; export const Sparkles: any;
   export const Zap: any; export const Flame: any; export const Heart: any; export const ThumbsUp: any;
-  export const Filter: any; export const SortAsc: any; export const SortDesc: any; export const Grid3X3: any;
+  export const Filter: any; export const SortAsc: any; export const SortDesc: any; export const Grid3x3: any; export const Grid3X3: any;
   export const List: any; export const LayoutDashboard: any; export const Flag: any; export const Bell: any;
   export const Gamepad2: any; export const Target: any; export const Percent: any; export const BadgePercent: any;
   export const Shield: any; export const ShieldCheck: any; export const ShieldAlert: any; export const ShieldX: any;
