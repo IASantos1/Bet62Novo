@@ -12939,6 +12939,34 @@ const TENNIS_DISAPPEAR_GRACE_MS = 15_000;
 // giving a sparse feed real time to resume; a match that already shows a
 // clear winner keeps the original fast 15s removal.
 const TENNIS_AMBIGUOUS_DISAPPEAR_GRACE_MS = 6 * 60_000;
+// Bug report 2026-08-12: "M15 Trier" (Chazal 6-3/6-3 over Mathes — a clear
+// 2-0 finish) stayed in Ao Vivo, still bettable at 1.01, because bet365 kept
+// reporting the event as live on every tick. Nothing above helps there — the
+// disappearance-based finalize loop only ever fires once a match STOPS being
+// reported at all, and this one never did. TENNIS_DISAPPEAR_GRACE_MS's own
+// header explains why sets-won was never trusted as a same-tick finish
+// signal on its own: 2 sets to 0/1 means "over" in best-of-3 but only
+// "one set from over" in best-of-5 (Grand Slam men's singles, Davis Cup),
+// and nothing in the live event carried that distinction. The league name
+// does, though, for the two real best-of-5 contexts that exist — matching
+// against those lets the overwhelming majority (every ITF/Challenger/WTA/
+// ATP-non-Slam match, which is what M15/M25/W15/W35-tier events like this
+// one always are) be finalized the instant a side reaches 2 sets, without
+// waiting for the feed to go quiet at all. Grand Slam-named leagues
+// (women's included, since gender isn't reliably distinguishable from the
+// league string either) stay on the conservative disappearance path.
+const TENNIS_BEST_OF_FIVE_LEAGUE_PATTERNS = [
+  "australian open",
+  "roland garros",
+  "french open",
+  "wimbledon",
+  "us open",
+  "davis cup",
+];
+function isTennisBestOfFiveLeague(leagueName: string): boolean {
+  const lower = (leagueName || "").toLowerCase();
+  return TENNIS_BEST_OF_FIVE_LEAGUE_PATTERNS.some((p) => lower.includes(p));
+}
 
 async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const events = await getPulseScoreTennisLive();
@@ -13070,6 +13098,27 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
         realExtra: extractTennisLiveExtra(ev),
       },
     };
+    // Immediate same-tick finish check (see TENNIS_BEST_OF_FIVE_LEAGUE_
+    // PATTERNS's header) — a decisive 2-set lead in a league that isn't a
+    // known best-of-5 context means the match is over right now, even
+    // though the provider is still reporting it as live. Finalize and drop
+    // it here instead of publishing one more live tick and waiting for the
+    // disappearance loop below to eventually catch it.
+    const decisiveSetLead =
+      override.homeSetsWon !== override.awaySetsWon &&
+      Math.max(override.homeSetsWon, override.awaySetsWon) >= 2;
+    if (decisiveSetLead && !isTennisBestOfFiveLeague(ev.league || "")) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error(
+          { err, id },
+          "[pulsescore] tennis immediate-finish finalizeStaleLiveMatch failed",
+        );
+      }
+      liveMatchState.delete(id);
+      continue;
+    }
     currentIds.add(id);
     // Same liveMatchState wiring football needed from the start — settlement
     // (ensureFinishedMatchResult / in-play resolution) and cash-out both
