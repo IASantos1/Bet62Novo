@@ -440,6 +440,19 @@ export type LiveMatchState = {
   // still get recorded (so future genuine increases compare correctly),
   // just without treating that initial jump itself as a new incident.
   _apiFootballEverMatched?: boolean;
+  // Once findApiFootballFixture resolves a fixture for this PulseScore
+  // match, its fixtureId is remembered here and preferred on every later
+  // tick (direct id lookup) instead of re-running fuzzy team-name/league/
+  // kickoff-time matching from scratch each time — user-requested
+  // (2026-08-12) architecture hardening: re-matching by name every ~1-2s
+  // tick, even with the league/time disambiguation added the same day, is
+  // still probabilistic and was the actual mechanism behind several bugs
+  // fixed this session (VAR/red-card counts spuriously resetting, etc.) —
+  // an id, once confirmed, is exact and can't independently drift the way
+  // two fuzzy string comparisons on two different ticks can. Falls back to
+  // fresh fuzzy matching only when this id stops appearing in the live
+  // batch (API-Football's own hiccup, or the match genuinely ended there).
+  _apiFootballFixtureId?: number;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -12141,10 +12154,21 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // tolerance in findApiFootballFixture, which is what actually matters —
     // this only needs to be right within league-competition-sized margins,
     // not to the second.
-    const apiFixture = findApiFootballFixture(home, away, apiFootballFixtures, {
-      league: ev.league,
-      approxKickoffMs: Date.now() - pulseScoreEventMinute(ev) * 60_000,
-    });
+    // Prefer a remembered fixtureId (see _apiFootballEverMatched/
+    // _apiFootballFixtureId's own comments on the LiveMatchState type) —
+    // an exact id lookup in this tick's batch, not another round of fuzzy
+    // matching. Only re-runs findApiFootballFixture from scratch when
+    // there's no memory yet, or the remembered fixture isn't in today's
+    // batch (API-Football hiccup or the fixture genuinely left "live").
+    const rememberedFixtureId = existing?._apiFootballFixtureId;
+    const apiFixture =
+      (rememberedFixtureId !== undefined
+        ? apiFootballFixtures.find((f) => f.fixtureId === rememberedFixtureId)
+        : undefined) ??
+      findApiFootballFixture(home, away, apiFootballFixtures, {
+        league: ev.league,
+        approxKickoffMs: Date.now() - pulseScoreEventMinute(ev) * 60_000,
+      });
     // Originally a TEMPORARY diagnostic (2026-08-09) for a user report that
     // goal/VAR/card/penalty enrichment "still wasn't coming through
     // correctly" — need to know WHY apiFixture stays unmatched for a given
@@ -12708,6 +12732,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       _apiFootballVarEventCount: varEventCount,
       _apiFootballPenaltyEventCount: penaltyEventCount,
       _apiFootballEverMatched: wasEverMatchedBefore || !!apiFixture,
+      _apiFootballFixtureId: apiFixture?.fixtureId ?? rememberedFixtureId,
       marketSuspension,
       _suspensionReason: suspensionReason,
       _goalHoldSince: goalHoldSince,
