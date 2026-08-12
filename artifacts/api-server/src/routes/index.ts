@@ -21,7 +21,7 @@ import pulseBridgeRouter from "./pulseBridge.js";
 const router: IRouter = Router();
 
 router.use(healthRouter);
-router.use("/api", liveStreamRouter);
+router.use(liveStreamRouter);
 router.use("/auth", authRouter);
 router.use("/bets", betsRouter);
 router.use("/matches", matchesRouter);
@@ -35,8 +35,8 @@ router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/predictions", predictionsRouter);
 router.use("/casino", casinoRouter);
-router.use("/api", statscoreTrackerRouter);
-router.use("/api", betbyTrackerRouter);
-router.use("/api", pulseBridgeRouter);
+router.use(statscoreTrackerRouter);
+router.use(betbyTrackerRouter);
+router.use(pulseBridgeRouter);
 
 export default router;
