@@ -145,6 +145,24 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
       expiresAt,
     });
 
+    // Self-heal sync: if Stripe somehow immediately returned succeeded (edge
+    // case — Multibanco is usually async but for test cards/some flows it can
+    // happen), credit right now; otherwise webhook + cron polling will catch.
+    if (intent.status === "succeeded") {
+      await creditPayment(orderId);
+      res.json({
+        orderId,
+        entity,
+        reference,
+        amount: amount.toFixed(2),
+        expiresAt: expiresAt.toISOString(),
+        clientSecret: intent.client_secret,
+        hostedVoucherUrl: multibanco?.hosted_voucher_url ?? null,
+        status: "completed",
+      });
+      return;
+    }
+
     res.json({
       orderId,
       entity,

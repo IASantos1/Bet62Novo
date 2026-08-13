@@ -4782,23 +4782,23 @@ function BetbyTrackerIframe({
   //   inválido → NÃO RENDERIZA NADA, nem manda DATA.available=false,
   //   container fica VAZIO, cor do fundo = preto → parece "tela preta".
   //
-  // Estratégia: 10s APÓS ficar ready, checar:
-  //   (A) NUNCA recebemos resize com altura REAL (> 700px) → gotRealResize=false
-  //   (B) OU widget Statscore mandou DATA.available=false explicitamente
-  //   (C) E a altura REAL do container é MENOR DO QUE o esperado para um
-  //       widget com dados (continua exatamente no aspectRatio 16/9 fixo)
-  // └─> QUALQUER CENÁRIO A/B acima: setFailed(true) + mostra mensagem amigável
+  // Estratégia (MÚLTIPLOS FALLBACKS, nenhum depende só de ready):
+  //   (A) 4s APÓS ficar ready, checa flags → widget que carregou rápido
+  //   (B) WALL-CLOCK ABSOLUTO 12s APÓS montar finalUrl → NÃO DEPENDE de
+  //       ready ser true. Se até 12s não pintou nada (nenhum resize real
+  //       > 700), setFailed — resolve cenários onde bridge nunca enviou
+  //       ready (por ex: network stall)
+  //   Em ambas as checagens:
+  //     * dataExplicitUnavailable=true (DATA.available=false) → falha
+  //     * Nenhum resize > 700 E container ainda aspect 16/9 E h<700 → falha
   useEffect(() => {
     if (!finalUrl || !ready || failed) return;
     const t = setTimeout(() => {
       if (dataExplicitUnavailable.current) {
-        // Caso B: widget já disse available=false, não tem dado.
         setFailed(true);
         return;
       }
       if (!gotRealResize.current && containerRef.current) {
-        // Caso A/C: Nenhum resize > 700 chegou. Verificamos se o container
-        // realmente ainda está na proporção 16:9 inicial (realmente vazio).
         const rect = containerRef.current.getBoundingClientRect();
         const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
         const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
@@ -4806,9 +4806,31 @@ function BetbyTrackerIframe({
           setFailed(true);
         }
       }
-    }, 10_000);
+    }, 4_000);
     return () => clearTimeout(t);
   }, [finalUrl, ready, failed]);
+
+  useEffect(() => {
+    if (!finalUrl || failed) return;
+    const t = setTimeout(() => {
+      if (dataExplicitUnavailable.current) {
+        setFailed(true);
+        return;
+      }
+      if (!gotRealResize.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
+        const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
+        // Wall-clock 12s: se ainda não tem resize real, e a altura real
+        // do container não passou de 700px (widget grande com dados) →
+        // declara falha de vez. Nunca mais "fica preto para sempre".
+        if (stillFixedAspect || rect.height < 700) {
+          setFailed(true);
+        }
+      }
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, [finalUrl, failed]);
 
   const showLoading = (!ready || isFetching) && !failed;
 
@@ -4819,17 +4841,27 @@ function BetbyTrackerIframe({
       style={{
         aspectRatio,
         position: "relative",
-        // Overflow hidden + 16:9 = cortava o conteúdo de widgets de vôlei
-        // (5 sets) ou tênis (tie-break longo) que ficam MAIS ALTOS do que
-        // a proporção inicial. Vamos deixar overflow clip e ainda assim
-        // respeitar borderRadius com isolation.
-        overflow: "clip",
+        // ── BUG FIX 2026-08-13 (TELA PRETA) ──────────────────────────
+        // Antes: minHeight só no iframe FILHO, não no container PAI.
+        // Container pai usava só aspectRatio "16 / 9" → altura ~220px
+        // no mobile. Overflow clip CORTAVA os 250px INFERIORES do iframe
+        // (que tinha minHeight 470px) → só aparecia topo PRETO VAZIO
+        // (o conteúdo do Statscore começa no meio). Resultado: usuário
+        // via "tracker preto sem conteúdo", achava quebrado.
+        // Agora: minHeight no CONTAINER PAI também, GARANTINDO que o
+        // widget não seja cortado, MESMO que nenhum postMessage de
+        // resize chegue a tempo.
+        minHeight: 470,
+        overflow: "hidden",
         borderRadius: 20,
         isolation: "isolate",
-        // Fundo zinc-950 (mesmo do app, cor do bridge). Se o widget não
-        // pintar nada, o usuário vê cinza escuro coerente (não preto 100%
-        // puro que parece mais "quebrado").
-        backgroundColor: "#09090b",
+        // ── BUG FIX 2026-08-13 (PRETO = ZINC-900 VISÍVEL) ─────────
+        // #09090b (zinc-950) RGB(9,9,11) é INDISTINGUÍVEL de preto
+        // puro #000 em telas OLED (iPhone/Samsung A tops) → usuário
+        // chama tudo de "preto quebrado". Substituímos por #18181b
+        // (zinc-900) RGB(24,24,27). Essa cor é um CINZA ESCURO, não
+        // preto qualquer usuário percebe a diferença vs preto puro.
+        backgroundColor: "#18181b",
       }}
     >
       {showLoading && (
@@ -4844,7 +4876,7 @@ function BetbyTrackerIframe({
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
           className="w-full h-full border-0 block"
-          style={{ backgroundColor: "#09090b", minHeight: 470 }}
+          style={{ backgroundColor: "#18181b", minHeight: 470 }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => setReady(true)}
           onError={() => setFailed(true)}

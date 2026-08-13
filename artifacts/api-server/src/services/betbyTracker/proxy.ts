@@ -535,7 +535,7 @@ export function buildBetbyThemeInjectionStyle(
       function getContainer() {
         return document.getElementById("bt-tracker-container") || document.body;
       }
-      const BG_COLOR = "#09090b"; /* zinc-950: cor do app Bet62, não preto puro */
+      const BG_COLOR = "#18181b"; /* zinc-900: RGB (24,24,27) — cinza escuro, DIFERENCIÁVEL de preto puro em telas OLED. Antes usávamos #09090b zinc-950, mas RGB 9/9/11 é indistinguível de preto 0x000000 em AMOLED — usuário reportava "tela preta" mesmo quando widget só estava vazio. */
       const MIN_HEIGHT = "470px";
       function ensureVisible() {
         try {

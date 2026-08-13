@@ -29,6 +29,100 @@ initDb()
 
 // ── Stripe webhook MUST be registered before express.json() ─────────────────
 // Stripe requires a raw Buffer body for signature verification.
+// ── Shared creditPayment helper (used by webhook + polling cron below) ─────
+// Duplicates the logic in payments.ts's creditPayment because the route
+// module is not imported here (and importing would pull auth middleware etc).
+// Ledger's applyBalanceDelta idempotency key prevents double credits even if
+// both paths (webhook + cron) fire for the same orderId.
+async function creditPaymentHelper(orderId: string): Promise<void> {
+  try {
+    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.orderId, orderId)).limit(1);
+    if (!payment || payment.status === "completed") return;
+    await db.transaction(async (tx) => {
+      await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.orderId, orderId));
+      await applyBalanceDelta(tx, {
+        userId: payment.userId,
+        amount: payment.amount,
+        kind: "payment_deposit_credit",
+        idempotencyKey: `payment:${orderId}:credit`,
+        refType: "payment",
+        refId: orderId,
+      });
+    });
+    logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment balance credited (webhook or cron)");
+    // First deposit freebet (safe to run multiple times — guarded by firstDepositGranted !== none on read + update IF still none)
+    try {
+      const [u] = await db.select({ firstDepositGranted: usersTable.firstDepositGranted }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1);
+      if (u?.firstDepositGranted === "none") {
+        const [{ c }] = (await db.select({ c: count() }).from(paymentsTable).where(eq(paymentsTable.userId, payment.userId))) as unknown as [{ c: number }];
+        if (Number(c) === 1) {
+          const dep = parseFloat(payment.amount);
+          const fb = dep >= 20 ? "10.00" : dep >= 10 ? "5.00" : null;
+          const lvl = dep >= 20 ? "20" : dep >= 10 ? "10" : null;
+          if (fb && lvl) {
+            await db.update(usersTable).set({ freebetBalance: sql`${usersTable.freebetBalance} + ${fb}`, firstDepositGranted: lvl }).where(eq(usersTable.id, payment.userId));
+            logger.info({ userId: payment.userId, fb, lvl }, "First-deposit freebet granted (webhook or cron)");
+          }
+        }
+      }
+    } catch (_fbErr) { /* non-critical, idempotent on next cron tick */ }
+    // Confirmation email (best-effort, swallow errors)
+    db.select({ email: usersTable.email, name: usersTable.name }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1)
+      .then(([u]) => { if (u) sendDepositConfirmed(u.email, u.name, payment.amount, payment.method).catch(() => {}); })
+      .catch(() => {});
+  } catch (err) {
+    logger.error({ err, orderId }, "creditPaymentHelper failed");
+  }
+}
+
+// ── CRON POLLING: self-heal pending payments even if webhook missed ─────────
+// Root cause of "depósito 10€ não creditado, foi para admin aprovar":
+//   - Stripe webhook fails to arrive (Railway restart, network drop, HTTP 5xx)
+//   - User never re-opens /payments/status/:orderId (which had inline self-heal)
+//   - Payment sits PENDING forever in DB
+// Solution: every 60 seconds, scan PENDING payments younger than 48h,
+// verify live status with Stripe API, credit if actually paid. Startup run
+// catches anything pending while the server was down.
+async function pollPendingPayments() {
+  const stripeSecret = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecret) return;
+  try {
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const pending = await db
+      .select({ orderId: paymentsTable.orderId, requestId: paymentsTable.requestId, status: paymentsTable.status, method: paymentsTable.method, userId: paymentsTable.userId })
+      .from(paymentsTable)
+      .where(sql`${paymentsTable.status} = 'pending' AND ${paymentsTable.createdAt} >= ${cutoff.toISOString()}`)
+      .limit(200);
+    if (!pending.length) return;
+    const stripe = new Stripe(stripeSecret, { apiVersion: "2026-06-24.dahlia" });
+    for (const p of pending) {
+      if (!p.requestId) continue;
+      try {
+        let paid = false;
+        if (p.requestId.startsWith("pi_")) {
+          const pi = await stripe.paymentIntents.retrieve(p.requestId);
+          paid = pi.status === "succeeded";
+        } else if (p.requestId.startsWith("cs_")) {
+          const session = await stripe.checkout.sessions.retrieve(p.requestId);
+          paid = session.payment_status === "paid";
+        }
+        if (paid) {
+          logger.info({ orderId: p.orderId, method: p.method, requestId: p.requestId, userId: p.userId }, "Cron: pending payment verified paid on Stripe — crediting now");
+          await creditPaymentHelper(p.orderId);
+        }
+      } catch (perr) {
+        logger.warn({ err: perr, orderId: p.orderId, requestId: p.requestId }, "Cron: single pending payment verify failed (will retry next tick)");
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Cron: pollPendingPayments top-level failed");
+  }
+}
+
+// Startup: run once immediately to catch pendings from before restart, then every 60s.
+void pollPendingPayments();
+setInterval(() => void pollPendingPayments(), 60 * 1000).unref?.();
+
 app.post(
   "/api/payments/stripe-webhook",
   express.raw({ type: "application/json" }),
@@ -50,48 +144,28 @@ app.post(
     }
 
     try {
-      const creditPayment = async (orderId: string) => {
-        const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.orderId, orderId)).limit(1);
-        if (!payment || payment.status === "completed") return;
-        await db.transaction(async (tx) => {
-          await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.orderId, orderId));
-          await applyBalanceDelta(tx, {
-            userId: payment.userId,
-            amount: payment.amount,
-            kind: "payment_deposit_credit",
-            idempotencyKey: `payment:${orderId}:credit`,
-            refType: "payment",
-            refId: orderId,
-          });
-        });
-        logger.info({ orderId, userId: payment.userId }, "Stripe webhook: balance credited");
-        // Freebet
-        try {
-          const [u] = await db.select({ firstDepositGranted: usersTable.firstDepositGranted }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1);
-          if (u?.firstDepositGranted === "none") {
-            const [{ c }] = await db.select({ c: count() }).from(paymentsTable).where(eq(paymentsTable.userId, payment.userId)) as [{ c: number }];
-            if (Number(c) === 1) {
-              const dep = parseFloat(payment.amount);
-              const fb = dep >= 20 ? "10.00" : dep >= 10 ? "5.00" : null;
-              const lvl = dep >= 20 ? "20" : dep >= 10 ? "10" : null;
-              if (fb && lvl) {
-                await db.update(usersTable).set({ freebetBalance: sql`${usersTable.freebetBalance} + ${fb}`, firstDepositGranted: lvl }).where(eq(usersTable.id, payment.userId));
-              }
-            }
-          }
-        } catch { /* non-critical */ }
-        // Email
-        db.select({ email: usersTable.email, name: usersTable.name }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1)
-          .then(([u]) => { if (u) sendDepositConfirmed(u.email, u.name, payment.amount, payment.method).catch(() => {}); })
-          .catch(() => {});
-      };
-
       if (event.type === "checkout.session.completed") {
         const s = event.data.object as Stripe.Checkout.Session;
-        if (s.metadata?.orderId && s.payment_status === "paid") await creditPayment(s.metadata.orderId);
+        if (s.metadata?.orderId && s.payment_status === "paid") await creditPaymentHelper(s.metadata.orderId);
       } else if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object as Stripe.PaymentIntent;
-        if (pi.metadata?.orderId) await creditPayment(pi.metadata.orderId);
+        if (pi.metadata?.orderId) await creditPaymentHelper(pi.metadata.orderId);
+      } else if (event.type === "charge.succeeded") {
+        // Fallback for MB WAY / Multibanco (async) — sometimes Stripe emits
+        // charge.succeeded with no prior payment_intent.succeeded visible in
+        // webhook timeline, especially with late capture from the Portuguese
+        // interbank network. Pull the linked PI and check its metadata.
+        const ch = event.data.object as Stripe.Charge;
+        const piId = typeof ch.payment_intent === "string" ? ch.payment_intent : null;
+        if (piId) {
+          try {
+            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-06-24.dahlia" });
+            const pi = await stripe.paymentIntents.retrieve(piId);
+            if (pi.metadata?.orderId) await creditPaymentHelper(pi.metadata.orderId);
+          } catch (inner) {
+            logger.warn({ err: inner, chargeId: ch.id, piId }, "Webhook: charge.succeeded PI fetch failed (cron will retry)");
+          }
+        }
       }
 
       res.json({ received: true });
