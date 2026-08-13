@@ -1032,15 +1032,32 @@ const INTL_TOURNAMENTS = [
   "leagues cup",
 ];
 
+// Bug report 2026-08-13: no Europa League matches showing at all during a
+// real qualifying-round window. This gate gets bypassed-around (see its
+// call sites: any league name it returns false for falls through to the
+// per-country allowlist, which has no entries for the small nations that
+// populate early qualifying rounds \u2014 Kazakhstan, Andorra, Gibraltar, San
+// Marino, Faroe Islands, etc. \u2014 so a false negative here silently drops
+// the match instead of just mis-sorting it). Previously only checked the
+// text BEFORE the first " - ", on the assumption the round/stage
+// descriptor is always a SUFFIX ("Europa League - Qualifying Round 3").
+// The only confirmed real bwin sample for this competition (apiFootball.ts)
+// predates this season's qualifiers, so that assumption is unverified for
+// the actual round-naming bwin uses right now \u2014 and if it's ever reversed
+// for some competition/provider combination ("Qualifying Round 3 - Europa
+// League"), the old code would silently misclassify it as domestic. INTL_
+// TOURNAMENTS entries are specific multi-word competition names, not
+// generic words, so checking the whole string instead of just one half of
+// it is safe: there's no real risk of a domestic league's name spuriously
+// containing "europa league" or "champions league" as a substring.
 function isIntlTournamentName(leagueName: string): boolean {
-  const base = String(leagueName ?? "")
+  const full = String(leagueName ?? "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .split(" - ")[0]
     .trim();
-  if (!base) return false;
-  return INTL_TOURNAMENTS.some((p) => base.includes(p));
+  if (!full) return false;
+  return INTL_TOURNAMENTS.some((p) => full.includes(p));
 }
 
 // DOMESTIC_PRIORITY: [pattern, priority]
@@ -1771,12 +1788,26 @@ function leaguePriority(name: string, country?: string): number {
   )
     return 999;
 
-  // Main part of league name (before first " - "), lowercased
-  const mainPart = lower.split(" - ")[0];
-
+  // Checked against the FULL lowercased name, not just the part before the
+  // first " - " — see isIntlTournamentName's own comment for why: the only
+  // confirmed real bwin sample for these competitions predates this
+  // season's qualifying rounds, so which side of a " - " the round/stage
+  // descriptor lands on for a competition like Europa League qualifiers
+  // isn't something this codebase can assume either way, and a false
+  // negative here silently drops the match (falls through to the
+  // domestic-country allowlist, which has no entries for the small
+  // nations early qualifying rounds are full of) rather than just
+  // mis-sorting it.
   for (let i = 0; i < INTL_TOURNAMENTS.length; i++) {
-    if (mainPart.includes(INTL_TOURNAMENTS[i])) return i;
+    if (lower.includes(INTL_TOURNAMENTS[i])) return i;
   }
+
+  // Main part of league name (before first " - "), lowercased — used only
+  // for the domestic-league lookup below, where patterns like "primeira
+  // liga" are short enough that checking the full string (instead of just
+  // the league-name portion before a stage/round suffix) risks a spurious
+  // match inside unrelated composite league strings.
+  const mainPart = lower.split(" - ")[0];
 
   // Domestic leagues — first match wins (order matters for specificity)
   for (const [pattern, rank] of DOMESTIC_PRIORITY) {
