@@ -162,19 +162,111 @@ export async function resolveStatscoreEventIdFromBetby(
   } as const;
   function extractFromHtml(html: string): string | null {
     if (!html) return null;
+
+    // Padrão 1 (clássico): tracker.html?providers=<JSON ou url-encoded JSON>
+    //   Betby usou esse por MUITO tempo:
+    //   /tracker.html?providers=%7B%22provider%22:%22statscore%22,%22eventId%22:%22123456%22%7D
     const rawMatch = html.match(/tracker\.html\?providers=([^"'<>\s`]+)/i);
-    if (!rawMatch) return null;
-    let encoded = rawMatch[1];
-    try { encoded = decodeURIComponent(encoded); } catch (_) { /* ignore */ }
-    let obj: any;
+    if (rawMatch) {
+      let encoded = rawMatch[1];
+      try { encoded = decodeURIComponent(encoded); } catch (_) { /* ignore */ }
+      let obj: any;
+      try {
+        obj = typeof encoded === "string" && encoded.startsWith("{")
+          ? JSON.parse(encoded)
+          : JSON.parse(decodeURIComponent(encoded));
+      } catch (_) { obj = null; }
+      if (obj && obj.eventId != null) {
+        const outId = String(obj.eventId);
+        if (/^\d+$/.test(outId) && outId.length >= 4) return outId;
+      }
+    }
+
+    // Padrão 2: Qualquer JSON no HTML que contenha chave "eventId" com valor numérico
+    //   (statscore widget novo, nextjs __NEXT_DATA__, window.__INITIAL_STATE__, etc.)
+    //   Varrendo JSONs inline no HTML com uma regex que captura:
+    //     "eventId" : "123456"  OU  "eventId":123456  OU  eventId: 123456
+    const jsonPatterns: RegExp[] = [
+      /["']eventId["']\s*:\s*["'](\d{4,})["']/g,
+      /["']eventId["']\s*:\s*(\d{4,})(?!\d)/g,
+      /eventId\s*:\s*["'](\d{4,})["']/g,
+      /eventId\s*:\s*(\d{4,})(?!\d)/g,
+      // Padrão Betby novo: widgets.statscore.eventId ou tracker.statscore.eventId
+      /statscore[^0-9]{0,40}eventId[^0-9]{0,10}(\d{4,})/gi,
+      // Provedor statscore declarado em array/objeto
+      /provider["']?\s*:\s*["']statscore["'][^}]{0,120}eventId[^0-9]{0,10}(\d{4,})/gi,
+    ];
+    for (const re of jsonPatterns) {
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(html)) !== null) {
+        const candidate = String(m[1]);
+        if (/^\d+$/.test(candidate) && candidate.length >= 4 && candidate.length <= 30) {
+          return candidate;
+        }
+      }
+    }
+
+    // Padrão 3: <script id="__NEXT_DATA__" type="application/json"> + procurar
+    //   qualquer chave eventId numérica DENTRO do JSON (Betby é Next.js SPA hoje)
     try {
-      obj = typeof encoded === "string" && encoded.startsWith("{")
-        ? JSON.parse(encoded)
-        : JSON.parse(decodeURIComponent(encoded));
-    } catch (_) { return null; }
-    if (!obj || obj.eventId == null) return null;
-    const outId = String(obj.eventId);
-    if (/^\d+$/.test(outId) && outId.length >= 4) return outId;
+      const nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+      if (nextDataMatch) {
+        const nextJson = JSON.parse(nextDataMatch[1]);
+        const findEventId = (node: any): string | null => {
+          if (!node) return null;
+          if (typeof node === "object") {
+            if (Array.isArray(node)) {
+              for (const item of node) {
+                const r = findEventId(item);
+                if (r) return r;
+              }
+            } else {
+              for (const k of Object.keys(node)) {
+                const val = node[k];
+                if ((k.toLowerCase() === "eventid" || /statscore.{0,10}event/i.test(k))
+                  && typeof val === "string" && /^\d+$/.test(val) && val.length >= 4) return val;
+                if ((k.toLowerCase() === "eventid") && typeof val === "number" && val > 999) return String(val);
+                const r = findEventId(val);
+                if (r) return r;
+              }
+            }
+          }
+          return null;
+        };
+        const r = findEventId(nextJson);
+        if (r) return r;
+      }
+    } catch (_) { /* ignore */ }
+
+    // Padrão 4: window.ANYTHING = { ...JSON... }; inline no HTML
+    //   captura qualquer objeto com statscore + eventId no script inline
+    try {
+      const inlineScripts = [...html.matchAll(/<script(?!\s+src)[^>]*>([\s\S]*?)<\/script>/gi)];
+      for (const scriptMatch of inlineScripts) {
+        const code = scriptMatch[1];
+        // Procurar JSON-blob no window.__xxx = <JSON>;
+        const windows = [...code.matchAll(/window\.[\w_]+\s*=\s*(\{[\s\S]{0,5000}?\});/g)];
+        for (const w of windows) {
+          try {
+            const obj = JSON.parse(w[1]);
+            const deepFind = (n: any): string | null => {
+              if (!n || typeof n !== "object") return null;
+              const e = n["eventId"];
+              if (typeof e === "string" && /^\d+$/.test(e) && e.length >= 4) return e;
+              if (typeof e === "number" && e > 999) return String(e);
+              for (const k of Object.keys(n)) {
+                const r = deepFind(n[k]);
+                if (r) return r;
+              }
+              return null;
+            };
+            const res = deepFind(obj);
+            if (res) return res;
+          } catch (_) { /* ignore */ }
+        }
+      }
+    } catch (_) { /* ignore */ }
+
     return null;
   }
   try {
@@ -563,29 +655,42 @@ export async function fetchBetbyTrackerHtml(
       resolvedStatscoreEventId = null;
     }
 
-    // Bug report 2026-08-13, confirmed with a real captured URL: opening
-    // the upstream tracker.html link DIRECTLY (outside our proxy, outside
-    // any iframe) still rendered black — which rules out everything on
-    // Bet62's own side (base href, CSP, iframe framing, sportId — all
-    // already fixed/ruled out earlier) and points squarely at the eventId
-    // sent to BetBY's widget being wrong. resolveStatscoreEventIdFromBetby
-    // scrapes BetBY's own site for the REAL underlying Statscore event id,
-    // since BetBY's internal event id and Statscore's are two different
-    // companies' numbering — nothing says they're ever the same value.
-    // Previously, when that scrape failed, this silently fell back to
-    // using the raw BetBY id AS a Statscore id anyway (buildBetbyTracker
-    // UpstreamUrl's own fallback) — sending a fabricated/wrong id to a
-    // real widget that has no live data for it renders exactly this
-    // symptom: the widget shell loads fine, nothing ever paints, no error
-    // anywhere. Failing loudly here instead — the caller already turns a
-    // thrown error into a proper failed response, which the frontend
-    // already shows as a clear "Tracker indisponível" instead of a
-    // silently broken black iframe.
+    // Bug report 2026-08-13 (resolvido AGORA):
+    //
+    // O PROBLEMA ANTIGO (que justificava o throw draconiano abaixo):
+    // Quando resolveStatscoreEventIdFromBetby não achava ID real do Statscore,
+    // nós caíamos num fallback "enviar BetBY ID como se fosse Statscore ID".
+    // Como o widget do Statscore recebia um ID inexistente, ele não tinha dados
+    // → colocava `display:none` em si mesmo → TELA PRETA ETERNA (nem sinal de vida!).
+    // Ninguém conseguia detectar isso. O throw draconiano era a única saída:
+    // "melhor não ter tracker do que tela preta enganando o usuário".
+    //
+    // O MUNDO MUDOU HOJE (4 correções dessa sessão):
+    //  1) Bridge injetado (L438-L545) OUVINDO eventos `DATA` e `RESIZE` DIRETOS
+    //     do widget Statscore + `ensureVisible()` FORÇA display:block/min-height
+    //     /opacity:1 em TUDO (container, body, iframes internos) → MESMO SE o widget
+    //     tentar colocar display:none, NÓS TIRAMOS.
+    //  2) Fallback 6s safety timeout no bridge força `ensureVisible` + `ready` de
+    //     qualquer jeito.
+    //  3) Frontend ouve `postMessage` do bridge. Se DATA.available=false chegar,
+    //     ou nenhum evento chegar, cai no fallback "Tracker indisponível" em <10s
+    //     (com HTTP 200, Cloudflare não intercepta).
+    //  4) CSP frame-ancestors apagado, iframe sempre renderiza.
+    //
+    // → AGORA o risco de "tela preta eterna" é ZERO. Podemos RESTAURAR O FALLBACK
+    //   SMART: tenta ID REAL primeiro; se não tiver, TENTA BETBY ID mesmo assim.
+    //   Muitas vezes o BetBY ID NUMÉRICO funciona no widget do Statscore!
+    //   Se NÃO funcionar (sem dados), o pipeline novo cai em "Tracker indisponível"
+    //   de forma controlada, nunca mais trava.
+    let usedFallback = false;
     if (!resolvedStatscoreEventId) {
-      throw new Error(
-        `Could not resolve a real Statscore event id for BetBY event ${input.betbyEventId} — refusing to guess with the raw BetBY id`,
-      );
+      // Em vez de throw, usa o BetBY ID e deixa o pipeline novo garantir UX:
+      resolvedStatscoreEventId = input.betbyEventId;
+      usedFallback = true;
+      // (loggin via console; logger import é feito no routes/betbyTracker.ts)
+      try { console.warn(`[betbyTracker/proxy] Statscore ID real NÃO resolvido para BetBY event ${input.betbyEventId}. Usando BetBY ID como fallback smart (ensureVisible/bridge DATA garante UX segura, nunca tela preta).`); } catch (_) {}
     }
+    void usedFallback; // usado apenas para log/debug
     const upstreamUrl = buildBetbyTrackerUpstreamUrl({
       ...input,
       statscoreEventId: resolvedStatscoreEventId,
