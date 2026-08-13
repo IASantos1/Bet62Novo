@@ -4704,10 +4704,10 @@ function BetbyTrackerIframe({
   // load degrades to the same clear "Tracker indisponível" message a
   // resolved failure already shows, instead of spinning indefinitely.
   useEffect(() => {
-    if (!finalUrl || ready) return;
+    if (!finalUrl) return;
     const t = setTimeout(() => setFailed(true), 12_000);
     return () => clearTimeout(t);
-  }, [finalUrl, ready]);
+  }, [finalUrl]);
 
   // Listen to postMessage bridge signals from the proxied tracker HTML.
   // Our own bridge script (proxy.ts) sends: { source: "bet62-betby-tracker", payload: { type, ... } }
@@ -4798,11 +4798,22 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      if (!gotRealResize.current && containerRef.current) {
+      // (MESMA ORIGEM) Detector infalível 1: acessa DOM do iframe diretamente
+      // (proxy é mesma origem bet62.plus/api/betby-live-tracker → cross-origin
+      // NAO BLOQUEIA accesso a contentDocument). Se innerText do body é
+      // curto demais (< 50 chars) → widget Statscore VAZIO sem conteúdo.
+      try {
+        const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
+        if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
+          setFailed(true);
+          return;
+        }
+      } catch (_) { /* cross-origin raro, ignora */ }
+      if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
         const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if (stillFixedAspect && rect.height < 700) {
+        if ((stillFixedAspect && rect.height < 700) || rect.height < 300) {
           setFailed(true);
         }
       }
@@ -4817,13 +4828,17 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      if (!gotRealResize.current && containerRef.current) {
+      try {
+        const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
+        if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
+          setFailed(true);
+          return;
+        }
+      } catch (_) { /* ignora cross-origin raro */ }
+      if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
         const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        // Wall-clock 12s: se ainda não tem resize real, e a altura real
-        // do container não passou de 700px (widget grande com dados) →
-        // declara falha de vez. Nunca mais "fica preto para sempre".
         if (stillFixedAspect || rect.height < 700) {
           setFailed(true);
         }
@@ -4864,6 +4879,15 @@ function BetbyTrackerIframe({
         backgroundColor: "#18181b",
       }}
     >
+      {/* CAMADA BASE GARANTIDA: fundo cinza #18181b (z-0, na frente de container).
+         Nunca some, independente de iframe/failed/ready. Garante que se iframe
+         for transparente ou carregar widget vazio = usuario ve CINZA,
+         nunca preto puro #000. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 pointer-events-none"
+        style={{ backgroundColor: "#18181b", zIndex: 0 }}
+      />
       {showLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
           <RefreshCw className="animate-spin text-green-500/80" size={24} />
@@ -4875,10 +4899,24 @@ function BetbyTrackerIframe({
           key={finalUrl}
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
-          className="w-full h-full border-0 block"
-          style={{ backgroundColor: "#18181b", minHeight: 470 }}
+          className="w-full h-full border-0 block relative"
+          style={{ backgroundColor: "#18181b", minHeight: 470, zIndex: 1 }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
-          onLoad={() => setReady(true)}
+          onLoad={() => {
+            setReady(true);
+            // (MESMA ORIGEM) Detector rápido pós-onLoad: se iframe carregou mas
+            // body.innerText < 50 chars = widget Statscore VAZIO (ID invalido)
+            // Marca falha em 1.5s sem esperar os 4/12s dos detectors gerais.
+            const fastTimer = window.setTimeout(() => {
+              try {
+                const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
+                if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
+                  setFailed(true);
+                }
+              } catch (_) { /* noop cross-origin raro */ }
+            }, 1500);
+            (iframeRef.current as HTMLIFrameElement | null)?.addEventListener?.("load", () => window.clearTimeout(fastTimer), { once: true });
+          }}
           onError={() => setFailed(true)}
           referrerPolicy="strict-origin-when-cross-origin"
         />
