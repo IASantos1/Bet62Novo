@@ -10848,12 +10848,19 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         primary.push(ev);
       }
     } else if (!isLeagueUniversallyBlocked(`${leagueName} ${home} ${away}`)) {
-      // Small/non-priority leagues: only ever show for today, regardless of
-      // how far the fetch window reaches — keeps the default and month views
-      // from being flooded with minor-league fixtures weeks out.
+      // Small/non-priority leagues: now shown up to 7 days ahead by default
+      // (user request 2026-08-13). Previously only today was shown to avoid
+      // flooding the prematch view with minor-league fixtures weeks out; the
+      // 7-day window still keeps it manageable while giving users visibility
+      // into upcoming regional/small-league fixtures.
+      const evStartMs = (ev.startTimestamp ?? 0) * 1000;
+      const daysAhead = Math.floor(
+        (evStartMs - Date.now()) / (24 * 60 * 60 * 1000),
+      );
       if (
         fallback.length < FOOTBALL_UPCOMING_FALLBACK_TODAY_CAP &&
-        lisbonDateKey(ev.startTimestamp ?? 0) === todayKey
+        daysAhead >= 0 &&
+        daysAhead <= 7
       )
         fallback.push(ev);
     }
@@ -17077,13 +17084,13 @@ router.get("/upcoming", async (req: Request, res: Response) => {
         return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
       })() &&
       (() => {
-        // Only football currently carries league-priority tagging. Default
-        // view: today's games from any league, plus priority ("big") league
-        // games up to UPCOMING_DEFAULT_PRIORITY_DAYS ahead. ?range=month
-        // lifts that cap so priority-league fixtures for the whole fetched
-        // window (see FOOTBALL_UPCOMING_FETCH_DAYS) are included too.
-        if (range === "month" || m.sport !== "football" || !m.isPriorityLeague)
-          return true;
+        // Default view: ALL matches (any sport / any league) shown up to
+        // UPCOMING_DEFAULT_PRIORITY_DAYS (7 days) ahead. This replaces the
+        // previous "only priority football leagues had a cap; everything else
+        // could stretch to the full fetched window" behaviour — user request
+        // 2026-08-13: filtering on the prematch tab should default to 7 days.
+        // ?range=month lifts this cap so all cached fixtures are included.
+        if (range === "month") return true;
         const kickoffMs = parseUpcomingKickoffMs(m);
         if (kickoffMs == null) return true;
         const daysAhead = Math.floor(

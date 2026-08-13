@@ -4717,45 +4717,8 @@ function BetbyTrackerIframe({
   }, [urlInfo, finalUrl, queryError]);
 
   useEffect(() => {
-    if (!finalUrl) return;
-    let cancelled = false;
-    let to: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-      if (!cancelled && !ready) setFailed(true);
-    }, 18_000);
     setReady(false);
-    if (useDirect) {
-      if (to) { clearTimeout(to); to = null; }
-      return () => {
-        cancelled = true;
-      };
-    }
-    fetch(finalUrl, { method: "HEAD" })
-      .then((r) => {
-        if (cancelled) return;
-        if (!r.ok) setFailed(true);
-        if (to) { clearTimeout(to); to = null; }
-      })
-      .catch(() => { if (!cancelled) setFailed(true); });
-    return () => {
-      cancelled = true;
-      if (to) clearTimeout(to);
-    };
-  }, [finalUrl, useDirect, ready]);
-  if (failed) {
-    if (isFetching) {
-      return (
-        <div
-          className={className}
-          style={{ aspectRatio, position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
-        >
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
-            <RefreshCw className="animate-spin text-green-500/80" size={24} />
-          </div>
-        </div>
-      );
-    }
-    return null;
-  }
+  }, [finalUrl]);
 
   const pulseOverlayHtml = useMemo(() => {
     if (!useDirect || !urlInfo?.finalBetbyEventId) return null;
@@ -4799,18 +4762,20 @@ function BetbyTrackerIframe({
     );
   }, [useDirect, urlInfo?.finalBetbyEventId, home, away]);
 
+  const showLoading = (!ready || isFetching);
+
   return (
     <div
       className={className}
       style={{ aspectRatio, position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
     >
-      {(!ready || isFetching) && (
+      {showLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
           <RefreshCw className="animate-spin text-green-500/80" size={24} />
         </div>
       )}
       {useDirect && pulseOverlayHtml}
-      {finalUrl ? (
+      {!failed && finalUrl ? (
         <iframe
           key={finalUrl}
           src={finalUrl}
@@ -4821,6 +4786,13 @@ function BetbyTrackerIframe({
           onError={() => setFailed(true)}
           referrerPolicy="strict-origin-when-cross-origin"
         />
+      ) : failed ? (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 p-4 text-center bg-zinc-900/95 text-zinc-200 pointer-events-none">
+          <div className="text-[13px] font-semibold text-zinc-100">Tracker indisponível neste momento.</div>
+          <div className="text-[11px] text-zinc-400 max-w-[80%] leading-tight">
+            {home} vs {away}
+          </div>
+        </div>
       ) : null}
     </div>
   );
