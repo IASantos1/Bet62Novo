@@ -4607,12 +4607,14 @@ class TrackerErrorBoundary extends Component<
 function BetbyTrackerIframe({
   home,
   away,
+  sport = "football",
   lang = "pt-br",
   aspectRatio = "16 / 9",
   className,
 }: {
   home: string;
   away: string;
+  sport?: string;
   lang?: string;
   aspectRatio?: string;
   className?: string;
@@ -4639,10 +4641,15 @@ function BetbyTrackerIframe({
   // (and its DIRECT-only pulse overlay wiring) was removed outright
   // instead of trusting a flag no one can see is set.
   const { data: urlInfo, isFetching, error: queryError } = useQuery({
-    queryKey: ["betby-tracker-url", home, away, lang, apiBase],
+    queryKey: ["betby-tracker-url", home, away, sport, lang, apiBase],
     queryFn: async () => {
       try {
-        const q = new URLSearchParams({ home, away, lang, sportId: "1" });
+        // sport (Bet62's own sport key — "football", "tennis",
+        // "basketball", ...) used to not be sent at all, so the backend
+        // always assumed football regardless of the match's real sport —
+        // see routes/betbyTracker.ts's /url handler for the fix on that
+        // side (converts this to BetBY's own numeric sportId convention).
+        const q = new URLSearchParams({ home, away, lang, sport });
         const endpoint = `${apiBase}/api/betby-live-tracker/url?${q.toString()}`;
         const res = await fetch(endpoint, { method: "GET", headers: { Accept: "application/json" } });
         if (!res.ok) return null;
@@ -4799,6 +4806,7 @@ function TrackerModal({
                 <BetbyTrackerIframe
                   home={event.home}
                   away={event.away}
+                  sport={event.sport}
                   lang="pt-br"
                   aspectRatio="16 / 9"
                 />
@@ -19238,6 +19246,7 @@ export default function Home({
                           <BetbyTrackerIframe
                             home={expandedMatch.home}
                             away={expandedMatch.away}
+                            sport={expandedMatch.sport ?? "football"}
                             lang="pt-br"
                             aspectRatio="16 / 9"
                           />

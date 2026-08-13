@@ -10,10 +10,28 @@ import { listMappings } from "../services/liveStream/mapping.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import {
   resolveBetbyMatchMeta,
+  listBetbyLiveEvents,
+  findBetbyLiveEventByTeams,
+  betbySportIdForPulseSport,
 } from "../services/betbyTracker/pulseBridge.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
+
+// Bet62's own outward Match.sport field says "football" (e.g. every match
+// object served by routes/matches.ts, and what the frontend actually
+// sends here) — but PulseScoreEvent.sport (and therefore
+// BETBY_SPORT_ID_TO_PULSE_SPORT's values, which findBetbyLiveEventByTeams
+// and betbySportIdForPulseSport are keyed against) uses "soccer" for the
+// exact same sport (see matches.ts's `ev.sport !== "soccer"` checks).
+// Without this translation every football/soccer match would silently
+// fail the sport-family filter in findBetbyLiveEventByTeams (comparing
+// "football" against a set that only ever contains "soccer") and
+// betbySportIdForPulseSport would fall through to its "1" default only by
+// accident, not by design.
+function normalizeToPulseSportKey(sport: string): string {
+  return sport === "football" ? "soccer" : sport;
+}
 
 const DEFAULT_THEME: BetbyThemeInjection = {
   fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
@@ -38,14 +56,32 @@ function getOriginFromRequest(req: Request): string | undefined {
   return undefined;
 }
 
-/** Encontra um betbyEventId na tabela live_stream_mappings por nomes times
- *  (fuzzy match teamNamesMatch). Retorna null se não encontrar nenhum candidato
- *  aceitável — neste caso pode chamar listBetbyLiveEventsByBrand no futuro. */
+/** Finds a betbyEventId for a Bet62 match, any sport. Two layers, tried in
+ *  order (user request 2026-08-13 — this used to ONLY check the manual
+ *  admin table below, so the Tracker only ever worked for the handful of
+ *  matches an admin had hand-mapped):
+ *   1. Auto-discovery against BetBY's OWN currently-live event catalogue
+ *      (listBetbyLiveEvents), matched by team name AND sport family
+ *      (findBetbyLiveEventByTeams) — works for any match, any sport, with
+ *      no manual setup, as long as BetBY's demo brand happens to be
+ *      carrying that fixture right now.
+ *   2. live_stream_mappings (admin-managed, originally built for the video
+ *      stream side — see services/liveStream/mapping.ts's own header) as a
+ *      fallback/manual-pin path, kept exactly as it worked before.
+ *  Returns null if neither finds an acceptable candidate. */
 async function resolveBetbyEventIdByName(
   home: string,
   away: string,
+  pulseSport: string,
 ): Promise<{ betbyEventId: string; confidence: number } | null> {
   if (!home || !away) return null;
+  try {
+    const liveEvents = await listBetbyLiveEvents();
+    const liveMatch = findBetbyLiveEventByTeams(home, away, pulseSport, liveEvents);
+    if (liveMatch) return { betbyEventId: liveMatch.betbyEventId, confidence: 3 };
+  } catch (err) {
+    logger.warn({ err, home, away, pulseSport }, "[betbyTracker] live-catalogue auto-match failed");
+  }
   try {
     const rows = await listMappings();
     let best: { betbyEventId: string; confidence: number } | null = null;
@@ -78,6 +114,15 @@ async function resolveFinalBetbyEventId(
 ): Promise<{ finalBetbyEventId: string | null; error?: { code: number; msg: string } }> {
   const home = typeof req.query.home === "string" ? req.query.home.trim() : "";
   const away = typeof req.query.away === "string" ? req.query.away.trim() : "";
+  // Bet62/PulseScore sport key ("football", "tennis", "basketball", ...) —
+  // NOT BetBY's own numeric sportId. Defaults to football only for
+  // backwards compatibility with any caller still not passing it; every
+  // current frontend call site does pass its match's real sport.
+  const sport = normalizeToPulseSportKey(
+    typeof req.query.sport === "string" && req.query.sport.trim()
+      ? req.query.sport.trim().toLowerCase()
+      : "football",
+  );
   const betbyEventId = typeof req.query.betbyEventId === "string"
     ? req.query.betbyEventId.trim()
     : "";
@@ -89,7 +134,7 @@ async function resolveFinalBetbyEventId(
         error: { code: 400, msg: "Missing required query params: betbyEventId OR (home AND away)" },
       };
     }
-    const byName = await resolveBetbyEventIdByName(home, away);
+    const byName = await resolveBetbyEventIdByName(home, away, sport);
     if (!byName) {
       return {
         finalBetbyEventId: null,
@@ -113,9 +158,21 @@ router.get("/url", async (req: Request, res: Response) => {
     const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
       ? req.query.lang
       : "pt-br";
-    const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
-      ? req.query.sportId
-      : "1";
+    // Bug report 2026-08-13: the Tracker only ever worked (when it worked
+    // at all) for football, because sportId was hardcoded to "1" on the
+    // frontend regardless of the match's real sport — a tennis or
+    // basketball match would ask BetBY's tracker widget to render as
+    // football. `sport` (Bet62/PulseScore's own sport key) is now the
+    // primary source of truth, converted to BetBY's numeric convention via
+    // betbySportIdForPulseSport; an explicit `sportId` query param is still
+    // honored when passed on its own (no `sport`), for any caller that
+    // already knows BetBY's raw numeric id directly.
+    const sportParam = typeof req.query.sport === "string" ? req.query.sport.trim().toLowerCase() : "";
+    const sportId = sportParam
+      ? betbySportIdForPulseSport(normalizeToPulseSportKey(sportParam))
+      : typeof req.query.sportId === "string" && req.query.sportId.length > 0
+        ? req.query.sportId
+        : "1";
     const parentOrigin = getOriginFromRequest(req) ?? "*";
     const resolved = await resolveFinalBetbyEventId(req);
     if (resolved.error) {

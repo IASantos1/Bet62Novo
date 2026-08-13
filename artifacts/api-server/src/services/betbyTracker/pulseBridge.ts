@@ -151,6 +151,131 @@ export async function resolveBetbyMatchMeta(
   }
 }
 
+// ─── Auto-discovery: PulseScore ↔ BetBY live-event matching, any sport ────
+// User request 2026-08-13: the Tracker should work for ANY match that goes
+// live, any sport, without needing an admin to hand-map every fixture in
+// live_stream_mappings first. resolveBetbyMatchMeta above already proved
+// this exact REST shape works for a SINGLE known event id — its response
+// carries `events` as a MAP (not a single object) alongside brand-wide
+// `sports`/`categories`/`tournaments` dictionaries, which is the shape of a
+// "live centre" snapshot, not a single-record lookup. listBetbyLiveEvents
+// calls the same path with the trailing eventId segment dropped — the
+// standard REST "collection vs. resource" convention — to read that same
+// map as a genuine live catalogue across every sport BetBY's demo brand
+// currently has live, instead of needing an id in hand first. This has not
+// been verified against BetBY's live production traffic (no outbound
+// network access to demoapi.betby.com from where this was written) — if
+// the collection path 404s or shape differs, this fails closed (empty
+// list, one clear warning log) and callers fall back to the existing
+// admin-managed live_stream_mappings table exactly as before, so it can't
+// make Tracker resolution worse than it already was.
+export type BetbyLiveEventSummary = {
+  betbyEventId: string;
+  sportId: string;
+  homeName: string;
+  awayName: string;
+  tournamentName?: string;
+};
+
+const BETBY_LIVE_EVENTS_CACHE_TTL_MS = 15_000;
+let betbyLiveEventsCache: BetbyLiveEventSummary[] = [];
+let betbyLiveEventsCachedAt = 0;
+
+export async function listBetbyLiveEvents(timeoutMs = 6000): Promise<BetbyLiveEventSummary[]> {
+  const now = Date.now();
+  if (now - betbyLiveEventsCachedAt < BETBY_LIVE_EVENTS_CACHE_TTL_MS) {
+    return betbyLiveEventsCache;
+  }
+  const BETBY_BRAND_ID_LIVE = process.env.BETBY_BRAND_ID || "1653815133341880320";
+  const controller = new AbortController();
+  const to = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `https://${process.env.BETBY_API_HOST ?? "demoapi.betby.com"}/api/v4/live/brand/${BETBY_BRAND_ID_LIVE}/event/${process.env.BETBY_LANG_DEFAULT ?? "en"}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
+      },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      logger.warn(
+        { status: res.status, url },
+        "[pulseBridge] listBetbyLiveEvents: collection endpoint returned non-OK — falling back to cached/empty list",
+      );
+      betbyLiveEventsCache = [];
+      betbyLiveEventsCachedAt = now;
+      return betbyLiveEventsCache;
+    }
+    const json: any = await res.json();
+    const events: any = json?.events ?? {};
+    const tournaments: any = json?.tournaments ?? {};
+    const out: BetbyLiveEventSummary[] = [];
+    for (const [id, ev] of Object.entries<any>(events)) {
+      const home = ev?.desc?.competitors?.[0]?.name;
+      const away = ev?.desc?.competitors?.[1]?.name;
+      if (!home || !away) continue;
+      out.push({
+        betbyEventId: id,
+        sportId: String(ev?.desc?.sport ?? ""),
+        homeName: String(home),
+        awayName: String(away),
+        tournamentName: tournaments?.[String(ev?.desc?.tournament ?? "")]?.name ?? undefined,
+      });
+    }
+    betbyLiveEventsCache = out;
+    betbyLiveEventsCachedAt = now;
+    return out;
+  } catch (err) {
+    logger.warn({ err }, "[pulseBridge] listBetbyLiveEvents failed");
+    return betbyLiveEventsCache;
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+/** Inverse of BETBY_SPORT_ID_TO_PULSE_SPORT: the primary BetBY numeric
+ *  sportId for a given Bet62/PulseScore sport key. Falls back to "1"
+ *  (football) only when the sport has no known BetBY id at all — every
+ *  real call site passes a sport this map does cover. */
+export function betbySportIdForPulseSport(pulseSport: string): string {
+  for (const [betbyId, sport] of Object.entries(BETBY_SPORT_ID_TO_PULSE_SPORT)) {
+    if (sport === pulseSport) return betbyId;
+  }
+  return "1";
+}
+
+/** Finds the best-matching currently-live BetBY event for a Bet62 match,
+ *  by team name (both home AND away must match, either order — a single
+ *  team name coincidentally matching an unrelated match is exactly the
+ *  false-positive class this session already had to harden the
+ *  API-Football fixture matcher against) constrained to the same sport
+ *  family. Returns null rather than a weak guess when nothing qualifies. */
+export function findBetbyLiveEventByTeams(
+  home: string,
+  away: string,
+  pulseSport: string,
+  events: BetbyLiveEventSummary[],
+): BetbyLiveEventSummary | null {
+  if (!home || !away) return null;
+  const wantedSportIds = new Set(
+    Object.entries(BETBY_SPORT_ID_TO_PULSE_SPORT)
+      .filter(([, s]) => s === pulseSport)
+      .map(([id]) => id),
+  );
+  for (const ev of events) {
+    if (wantedSportIds.size > 0 && !wantedSportIds.has(ev.sportId)) continue;
+    const direct = teamNamesMatch(ev.homeName, home) && teamNamesMatch(ev.awayName, away);
+    const swapped = teamNamesMatch(ev.awayName, home) && teamNamesMatch(ev.homeName, away);
+    if (direct || swapped) return ev;
+  }
+  return null;
+}
+
 function scoreFromPulseEvent(ev: PulseScoreEvent | null | undefined): { home: string; away: string } | null {
   if (!ev?.score) return null;
   return { home: String(ev.score.home ?? "0"), away: String(ev.score.away ?? "0") };
