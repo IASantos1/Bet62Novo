@@ -4720,6 +4720,55 @@ function BetbyTrackerIframe({
     setReady(false);
   }, [finalUrl]);
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    if (!finalUrl) return;
+    let cancelled = false;
+    const win = window as unknown as Window;
+    const handler = (ev: MessageEvent) => {
+      try {
+        if (cancelled) return;
+        if (!ev || !ev.data || typeof ev.data !== "object") return;
+        if (ev.data.source !== "bet62-betby-tracker") return;
+        const payload = ev.data.payload as
+          | { type: "ready" | "load" | "error" | "warn" | "data" | "resize" | "inner-event"; height?: number; available?: boolean; error?: unknown };
+        if (!payload || typeof payload.type !== "string") return;
+        switch (payload.type) {
+          case "ready":
+          case "load":
+          case "data":
+            setReady(true);
+            break;
+          case "resize": {
+            const h = Number(payload.height) || 0;
+            if (h > 100 && containerRef.current) {
+              containerRef.current.style.aspectRatio = "auto";
+              containerRef.current.style.height = `${h}px`;
+            }
+            break;
+          }
+          case "error":
+            setFailed(true);
+            break;
+          case "warn":
+          case "inner-event":
+          default:
+            break;
+        }
+      } catch (_) { /* ignore */ }
+    };
+    win.addEventListener("message", handler);
+    // Safety fallback for iframes that never post events (useDirect mode without bridge injection)
+    const fallbackT = setTimeout(() => { if (!cancelled) setReady(true); }, 8000);
+    return () => {
+      cancelled = true;
+      clearTimeout(fallbackT);
+      win.removeEventListener("message", handler);
+    };
+  }, [finalUrl]);
+
   const pulseOverlayHtml = useMemo(() => {
     if (!useDirect || !urlInfo?.finalBetbyEventId) return null;
     const betbyEventId = String(urlInfo.finalBetbyEventId);
@@ -4766,6 +4815,7 @@ function BetbyTrackerIframe({
 
   return (
     <div
+      ref={containerRef}
       className={className}
       style={{ aspectRatio, position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
     >
@@ -4777,6 +4827,7 @@ function BetbyTrackerIframe({
       {useDirect && pulseOverlayHtml}
       {!failed && finalUrl ? (
         <iframe
+          ref={iframeRef}
           key={finalUrl}
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}

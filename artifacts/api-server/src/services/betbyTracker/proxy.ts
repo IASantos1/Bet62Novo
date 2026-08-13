@@ -440,6 +440,26 @@ export function buildBetbyThemeInjectionStyle(
       function postParent(payload) {
         try { window.parent.postMessage({ source: "bet62-betby-tracker", payload: payload }, ${JSON.stringify(parentOrigin)}); } catch (_) {}
       }
+      function ensureVisible() {
+        try {
+          var container = document.getElementById("bt-tracker-container");
+          if (container) {
+            container.style.display = "block";
+            container.style.minHeight = "470px";
+            container.style.visibility = "visible";
+            container.style.opacity = "1";
+          }
+          var iframes = document.querySelectorAll("#bt-tracker-container iframe");
+          iframes.forEach(function(f) { try { f.style.display = "block"; f.style.minHeight = "470px"; } catch(_) {} });
+          var body = document.body;
+          if (body) {
+            body.style.display = "block";
+            body.style.visibility = "visible";
+            body.style.opacity = "1";
+            body.style.background = "transparent";
+          }
+        } catch (_) {}
+      }
       function setupResize() {
         const el = document.getElementById("bt-tracker-container") || document.body;
         let last = 0;
@@ -451,26 +471,70 @@ export function buildBetbyThemeInjectionStyle(
         if (typeof ResizeObserver !== "undefined") { try { var ro = new ResizeObserver(tick); ro.observe(el); } catch(_) { setInterval(tick, 400); } }
         else setInterval(tick, 400);
       }
+      var readyFired = false;
+      function fireReady() {
+        if (readyFired) return;
+        readyFired = true;
+        ensureVisible();
+        postParent({ type: "ready" });
+        setupResize();
+      }
       window.addEventListener("load", function () {
+        ensureVisible();
         postParent({ type: "load" });
         setTimeout(setupResize, 200);
       });
       window.addEventListener("message", function (e) {
         try {
-          if (!e.data || e.data.source !== "bt-frame") return;
-          var inner = e.data.message || {};
-          if (inner.type === "bt-frame-loaded" || inner.type === "bt-frame-widget-loaded") {
-            postParent({ type: "ready" });
-            setupResize();
-          } else if (inner.type === "bt-frame-height-changed") {
-            postParent({ type: "resize", height: inner.payload });
-          } else if (inner.type === "bt-frame-widget-failed") {
-            postParent({ type: "error", error: inner.payload ? String(inner.payload) : "widget failed" });
-          } else {
-            postParent({ type: "inner-event", inner: inner });
+          if (!e.data) return;
+          // Inner BetBY widget-level events (bt-frame-*)
+          if (e.data.source === "bt-frame") {
+            var inner = e.data.message || {};
+            if (inner.type === "bt-frame-loaded" || inner.type === "bt-frame-widget-loaded") {
+              fireReady();
+            } else if (inner.type === "bt-frame-height-changed") {
+              postParent({ type: "resize", height: inner.payload });
+            } else if (inner.type === "bt-frame-widget-failed") {
+              postParent({ type: "error", error: inner.payload ? String(inner.payload) : "widget failed" });
+            } else {
+              postParent({ type: "inner-event", inner: inner });
+            }
+            return;
+          }
+          // Direct BetBY tracker iframe postMessage events (DATA / RESIZE) — from user's pasted model
+          if (typeof e.data.type === "string") {
+            if (e.data.type === "DATA") {
+              ensureVisible();
+              if (e.data.available === true) {
+                fireReady();
+              } else if (e.data.available === false) {
+                postParent({ type: "warn", error: "widget unavailable" });
+              } else {
+                fireReady();
+              }
+              postParent({ type: "data", available: e.data.available });
+              return;
+            }
+            if (e.data.type === "RESIZE") {
+              var h = Number(e.data.height) || 0;
+              if (h > 0) {
+                var container = document.getElementById("bt-tracker-container");
+                if (container) {
+                  container.style.height = (h + "px");
+                  try { var innerIframe = container.querySelector("iframe"); if (innerIframe) innerIframe.style.height = (h + "px"); } catch(_) {}
+                }
+                postParent({ type: "resize", height: h });
+              }
+              return;
+            }
           }
         } catch (_) {}
       });
+      // Safety: after 6s with no event, force visible + fire ready anyway (avoid endless black screen)
+      setTimeout(function () {
+        ensureVisible();
+        fireReady();
+      }, 6000);
     })();
     <\/script>`;
 }
@@ -554,7 +618,6 @@ export const BETBY_TRACKER_RESPONSE_HEADERS: Record<string, string> = {
     "font-src 'self' 'unsafe-inline' https://fonts.gstatic.com data:",
     "script-src 'self' 'unsafe-inline' https://demoapi.betby.com https://wgt-s3-cdn.statscore.com",
     "connect-src 'self' https://demoapi.betby.com https://widgets.statscore.com https://events-d.pc.statscore.com https://region1.analytics.google.com",
-    "frame-ancestors 'self'",
     "base-uri 'self'",
     "form-action 'none'",
     "object-src 'none'",
