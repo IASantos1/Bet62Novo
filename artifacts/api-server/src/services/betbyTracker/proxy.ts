@@ -516,6 +516,31 @@ export async function fetchBetbyTrackerHtml(
         throw new Error(`Upstream tracker returned HTTP ${res.status}`);
       }
       let html = await res.text();
+      // Bug report 2026-08-13 ("tela preta"): this HTML is fetched
+      // server-side from demoapi.betby.com and re-served verbatim from OUR
+      // OWN origin/path (/api/betby-live-tracker/:id), not from
+      // demoapi.betby.com. Any relative resource URL the upstream page uses
+      // (script src, stylesheet href, XHR without a full origin, etc.) was
+      // resolving against our proxy's path instead of the real upstream
+      // host — those requests 404 against our server, the widget's own JS
+      // bundle never loads, and nothing ever paints inside the iframe: a
+      // silent black screen with no error surfaced anywhere, since the page
+      // itself finishes loading fine (onLoad fires) — only what it tried to
+      // fetch afterward failed. A <base> tag, inserted as the very first
+      // thing in <head> (so it wins over any base tag the upstream page
+      // might declare itself, per the HTML spec's "first base element
+      // wins" rule), makes every relative reference in the page resolve
+      // against the real upstream URL again.
+      const baseHref = (() => {
+        try {
+          const u = new URL(upstreamUrl);
+          u.search = "";
+          u.hash = "";
+          return u.toString();
+        } catch {
+          return BETBY_DEMO_TRACKER_BASE + BETBY_TRACKER_PATH;
+        }
+      })();
       const injectBlock = buildBetbyThemeInjectionStyle(
         input.theme ?? {},
         input.parentOrigin ?? "*",
@@ -526,7 +551,13 @@ export async function fetchBetbyTrackerHtml(
           sseUrl: undefined,
         },
       );
-      html = html.replace(/<head([^>]*)>/i, `<head$1>\n${injectBlock}\n`);
+      // <base> goes in first (single replace, not a second race against the
+      // same <head> match) so it's unambiguously the first <base> element in
+      // the document regardless of what the upstream page itself declares.
+      html = html.replace(
+        /<head([^>]*)>/i,
+        `<head$1>\n<base href="${baseHref}">\n${injectBlock}\n`,
+      );
       const titleMatch = /<title>[^<]*<\/title>/i.exec(html);
       if (titleMatch) {
         html = html.replace(titleMatch[0], "<title>Live Match Tracker</title>");
@@ -555,7 +586,13 @@ export const BETBY_TRACKER_RESPONSE_HEADERS: Record<string, string> = {
     "script-src 'self' 'unsafe-inline' https://demoapi.betby.com https://wgt-s3-cdn.statscore.com",
     "connect-src 'self' https://demoapi.betby.com https://widgets.statscore.com https://events-d.pc.statscore.com https://region1.analytics.google.com",
     "frame-ancestors 'self'",
-    "base-uri 'self'",
+    // 'self' here is OUR api-server origin, not demoapi.betby.com — with
+    // only 'self' allowed, the CSP silently vetoed the <base
+    // href="https://demoapi.betby.com/..."> tag fetchBetbyTrackerHtml
+    // injects to fix relative-asset resolution (see that function's own
+    // comment for the full "tela preta" story), which would have kept the
+    // black screen even after the <base> fix.
+    "base-uri 'self' https://demoapi.betby.com",
     "form-action 'none'",
     "object-src 'none'",
   ].join("; "),
