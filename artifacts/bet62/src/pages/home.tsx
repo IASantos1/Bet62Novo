@@ -4623,6 +4623,16 @@ function BetbyTrackerIframe({
   const [failed, setFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Flag que nos diz se o bridge de dentro do iframe JÁ ENVIOU pelo menos
+  // 1 sinal "resize" com altura REAL do widget (não o nosso fallback 470).
+  // Se após 10s READY essa flag continuar FALSE, significa que o widget
+  // Statscore NÃO RENDERIZOU NADA (recebeu ID inválido/fallback BetbyID)
+  // → container fica VAZIO, cor de fundo = PRETO → o usuário vê "tela preta
+  // sem conteúdo". Acionamos setFailed e mostramos a mensagem amigável.
+  const gotRealResize = useRef(false);
+  // Guarda DATA.available=false do bridge: o widget Statscore EXPLICITOU
+  // que não tem dados para esse evento → pula direto para indisponível.
+  const dataExplicitUnavailable = useRef(false);
   const apiBase = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
     : "";
@@ -4674,6 +4684,9 @@ function BetbyTrackerIframe({
 
   useEffect(() => {
     setFailed(!finalUrl || !!queryError);
+    // Reset flags do detector de widget vazio sempre que mudar o URL alvo
+    gotRealResize.current = false;
+    dataExplicitUnavailable.current = false;
   }, [finalUrl, queryError]);
 
   useEffect(() => {
@@ -4711,13 +4724,28 @@ function BetbyTrackerIframe({
         const type: unknown = payload.type;
         if (typeof type !== "string") return;
 
-        if (type === "ready" || type === "load" || type === "data") {
+        if (type === "ready" || type === "load" || type === "datachange" || type === "loaded") {
+          setReady(true);
+          return;
+        }
+        if (type === "data") {
+          const available: unknown = payload.available;
+          if (available === false) {
+            // Widget Statscore EXPLICITA que não tem dados para esse evento.
+            // Não precisa esperar 10s, já aciona detector de widget vazio.
+            dataExplicitUnavailable.current = true;
+          }
           setReady(true);
           return;
         }
         if (type === "resize") {
           const h = Number(payload.height);
           if (Number.isFinite(h) && h > 100 && containerRef.current) {
+            // Alturas < 700px quase sempre são o nosso fallback inicial
+            // 470px, NÃO UM RESIZE REAL do widget Statscore com dados.
+            // Widgets reais de futebol são > 900px, tênis/vôlei > 1200px.
+            // Essa heurística separa "pintou algo" de "ainda está preto vazio".
+            if (h > 700) gotRealResize.current = true;
             containerRef.current.style.aspectRatio = "auto";
             containerRef.current.style.height = `${Math.round(h)}px`;
           }
@@ -4744,13 +4772,65 @@ function BetbyTrackerIframe({
     return () => clearTimeout(t);
   }, [finalUrl, ready, failed]);
 
+  // ──────────────────────────────────────────────────────────────────
+  // DETECTOR DE WIDGET VAZIO (TELA PRETA SEM CONTEÚDO, sem dados Statscore)
+  // Sintoma do usuário: "ERRO SAIU, FICOU COM A IMAGEM DO TRACKER PRETO".
+  //
+  // Cenário que causa isso:
+  //   resolveStatscoreEventIdFromBetby() → null → fallback smart usa
+  //   BetbyID numérico como StatscoreID → Widget Statscore recebe ID
+  //   inválido → NÃO RENDERIZA NADA, nem manda DATA.available=false,
+  //   container fica VAZIO, cor do fundo = preto → parece "tela preta".
+  //
+  // Estratégia: 10s APÓS ficar ready, checar:
+  //   (A) NUNCA recebemos resize com altura REAL (> 700px) → gotRealResize=false
+  //   (B) OU widget Statscore mandou DATA.available=false explicitamente
+  //   (C) E a altura REAL do container é MENOR DO QUE o esperado para um
+  //       widget com dados (continua exatamente no aspectRatio 16/9 fixo)
+  // └─> QUALQUER CENÁRIO A/B acima: setFailed(true) + mostra mensagem amigável
+  useEffect(() => {
+    if (!finalUrl || !ready || failed) return;
+    const t = setTimeout(() => {
+      if (dataExplicitUnavailable.current) {
+        // Caso B: widget já disse available=false, não tem dado.
+        setFailed(true);
+        return;
+      }
+      if (!gotRealResize.current && containerRef.current) {
+        // Caso A/C: Nenhum resize > 700 chegou. Verificamos se o container
+        // realmente ainda está na proporção 16:9 inicial (realmente vazio).
+        const rect = containerRef.current.getBoundingClientRect();
+        const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
+        const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
+        if (stillFixedAspect && rect.height < 700) {
+          setFailed(true);
+        }
+      }
+    }, 10_000);
+    return () => clearTimeout(t);
+  }, [finalUrl, ready, failed]);
+
   const showLoading = (!ready || isFetching) && !failed;
 
   return (
     <div
       ref={containerRef}
       className={className}
-      style={{ aspectRatio, position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
+      style={{
+        aspectRatio,
+        position: "relative",
+        // Overflow hidden + 16:9 = cortava o conteúdo de widgets de vôlei
+        // (5 sets) ou tênis (tie-break longo) que ficam MAIS ALTOS do que
+        // a proporção inicial. Vamos deixar overflow clip e ainda assim
+        // respeitar borderRadius com isolation.
+        overflow: "clip",
+        borderRadius: 20,
+        isolation: "isolate",
+        // Fundo zinc-950 (mesmo do app, cor do bridge). Se o widget não
+        // pintar nada, o usuário vê cinza escuro coerente (não preto 100%
+        // puro que parece mais "quebrado").
+        backgroundColor: "#09090b",
+      }}
     >
       {showLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
@@ -4764,6 +4844,7 @@ function BetbyTrackerIframe({
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
           className="w-full h-full border-0 block"
+          style={{ backgroundColor: "#09090b", minHeight: 470 }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => setReady(true)}
           onError={() => setFailed(true)}

@@ -535,31 +535,80 @@ export function buildBetbyThemeInjectionStyle(
       function getContainer() {
         return document.getElementById("bt-tracker-container") || document.body;
       }
+      const BG_COLOR = "#09090b"; /* zinc-950: cor do app Bet62, não preto puro */
+      const MIN_HEIGHT = "470px";
       function ensureVisible() {
         try {
           const el = getContainer();
+          const force = " !important";
           if (el) {
-            el.style.display = "block";
-            el.style.minHeight = "470px";
-            el.style.height = el.style.height || "470px";
-            el.style.opacity = "1";
-            el.style.visibility = "visible";
+            el.style.setProperty("display", "block", "important");
+            el.style.setProperty("min-height", MIN_HEIGHT, "important");
+            if (!el.style.height || parseInt(el.style.height, 10) < 400) {
+              el.style.setProperty("height", MIN_HEIGHT, "important");
+            }
+            el.style.setProperty("opacity", "1", "important");
+            el.style.setProperty("visibility", "visible", "important");
+            el.style.setProperty("background", BG_COLOR, "important");
+            el.style.setProperty("color-scheme", "dark", "important");
+            el.style.setProperty("transform", "none", "important");
+            el.style.setProperty("clip", "auto", "important");
+            el.style.setProperty("clip-path", "none", "important");
+            el.style.setProperty("filter", "none", "important");
+            el.removeAttribute("hidden");
           }
-          document.body.style.display = "block";
-          document.body.style.minHeight = "470px";
-          document.body.style.opacity = "1";
-          document.body.style.visibility = "visible";
-          document.documentElement.style.display = "block";
-          document.documentElement.style.minHeight = "470px";
+          document.documentElement.style.setProperty("display", "block", "important");
+          document.documentElement.style.setProperty("min-height", MIN_HEIGHT, "important");
+          document.documentElement.style.setProperty("opacity", "1", "important");
+          document.documentElement.style.setProperty("visibility", "visible", "important");
+          document.documentElement.style.setProperty("background", BG_COLOR, "important");
+          document.documentElement.removeAttribute("hidden");
+          document.body.style.setProperty("display", "block", "important");
+          document.body.style.setProperty("min-height", MIN_HEIGHT, "important");
+          document.body.style.setProperty("opacity", "1", "important");
+          document.body.style.setProperty("visibility", "visible", "important");
+          document.body.style.setProperty("background", BG_COLOR, "important");
+          document.body.style.setProperty("margin", "0", "important");
+          document.body.style.setProperty("padding", "0", "important");
+          document.body.style.setProperty("overflow", "hidden auto", "important");
+          document.body.removeAttribute("hidden");
           const iframes = document.querySelectorAll("iframe");
           iframes.forEach(function (f) {
             try {
-              f.style.display = "block";
-              f.style.minHeight = "470px";
-              f.style.opacity = "1";
-              f.style.visibility = "visible";
+              f.style.setProperty("display", "block", "important");
+              f.style.setProperty("min-height", MIN_HEIGHT, "important");
+              f.style.setProperty("width", "100%", "important");
+              f.style.setProperty("opacity", "1", "important");
+              f.style.setProperty("visibility", "visible", "important");
+              f.style.setProperty("background", BG_COLOR, "important");
+              f.style.setProperty("border", "0", "important");
+              f.removeAttribute("hidden");
             } catch (_) {}
           });
+          // Statscore/Betby às vezes criam <div id="statscore-wrapper"> ou
+          // elementos com display:none dentro do body → força todos os divs
+          // descendentes diretos do body + container também:
+          const forceRootChildren = function (root) {
+            try {
+              const nodes = root.children;
+              for (let i = 0; i < nodes.length; i++) {
+                const n = nodes[i];
+                const cs = window.getComputedStyle ? window.getComputedStyle(n) : null;
+                const isNone = (n.style.display === "none") || (cs && cs.display === "none");
+                const isHidden = n.hasAttribute("hidden") || n.style.visibility === "hidden" || (cs && cs.visibility === "hidden");
+                const isZeroH = parseInt(n.style.height,10) === 0 || (cs && parseInt(cs.height,10) === 0) || (cs && parseInt(cs.maxHeight,10) === 0);
+                if (isNone) n.style.setProperty("display", "block", "important");
+                if (isHidden) {
+                  n.style.setProperty("opacity", "1", "important");
+                  n.style.setProperty("visibility", "visible", "important");
+                  n.removeAttribute("hidden");
+                }
+                if (isZeroH) n.style.setProperty("min-height", MIN_HEIGHT, "important");
+              }
+            } catch (_) {}
+          };
+          forceRootChildren(document.body);
+          if (el && el !== document.body) forceRootChildren(el);
         } catch (_) {}
       }
       function fireReady() {
@@ -576,13 +625,70 @@ export function buildBetbyThemeInjectionStyle(
           } catch (_) {}
         };
         tick();
-        if (typeof ResizeObserver !== "undefined") { try { var ro = new ResizeObserver(tick); ro.observe(el); } catch(_) { setInterval(tick, 400); } }
+        if (typeof ResizeObserver !== "undefined") { try { var ro = new ResizeObserver(tick); ro.observe(el); ro.observe(document.body); } catch(_) { setInterval(tick, 400); } }
         else setInterval(tick, 400);
       }
+
+      // ── CAMADA 1: Garante visibilidade a QUALQUER CUSTO por 30 segundos ──
+      //    Widget Statscore pode colocar display:none / hidden / height:0 EM
+      //    QUALQUER MOMENTO (ex: data fetch interno que falha depois de 7s
+      //    ou 9s, MESMO após nosso fallback 6s inicial). Para ganhar dessa
+      //    corrida de JS:
+      //      (a) MutationObserver = QUALQUER mudança DOM/style/class/attr
+      //          em body / container / iframes → roda ensureVisible IMEDIATO
+      //      (b) setInterval 500ms por 30s = rede de segurança
+      ensureVisible();
+      setupResize();
+      try {
+        const MO = typeof MutationObserver !== "undefined" ? MutationObserver : null;
+        if (MO) {
+          const moCb = function () { ensureVisible(); };
+          const moOpts = { attributes: true, attributeFilter: ["style","class","hidden"], childList: true, subtree: true, characterData: false };
+          const mo1 = new MO(moCb);
+          mo1.observe(document.documentElement, moOpts);
+          const mo2 = new MO(moCb);
+          mo2.observe(document.body, moOpts);
+          const el = getContainer();
+          if (el && el !== document.body) {
+            const mo3 = new MO(moCb);
+            mo3.observe(el, moOpts);
+          }
+          // Observa futuros iframes também
+          document.addEventListener("DOMNodeInserted", function (ev) {
+            try {
+              const n = ev && ev.target;
+              if (!n) return;
+              if (n.tagName === "IFRAME") {
+                n.addEventListener("load", function () { ensureVisible(); setupResize(); }, { once: true });
+              }
+              if (n.querySelectorAll) {
+                const ifs = n.querySelectorAll("iframe");
+                ifs.forEach(function (i) { i.addEventListener("load", function () { ensureVisible(); setupResize(); }, { once: true }); });
+              }
+            } catch (_) {}
+          }, false);
+        }
+      } catch (_) { /* MutationObserver não disponível, cai no interval */ }
+      var guardRounds = 0;
+      const guardInterval = setInterval(function () {
+        guardRounds += 1;
+        ensureVisible();
+        if (guardRounds > 60) { clearInterval(guardInterval); } /* 60 * 500ms = 30s */
+      }, 500);
+      // Força extra em momentos caros do ciclo de vida do navegador
+      window.addEventListener("DOMContentLoaded", ensureVisible);
       window.addEventListener("load", function () {
         postParent({ type: "load" });
+        ensureVisible();
         setTimeout(setupResize, 200);
+        setTimeout(ensureVisible, 100);
+        setTimeout(ensureVisible, 500);
+        setTimeout(ensureVisible, 1500);
+        setTimeout(ensureVisible, 3000);
+        setTimeout(ensureVisible, 6000);
       });
+      window.addEventListener("focus", ensureVisible);
+
       window.addEventListener("message", function (e) {
         try {
           const data = e.data;
@@ -590,45 +696,70 @@ export function buildBetbyThemeInjectionStyle(
           // ── Camada 1: Betby outer iframe bridge (source: "bt-frame") ──
           if (typeof data === "object" && data.source === "bt-frame") {
             var inner = data.message || {};
-            if (inner.type === "bt-frame-loaded" || inner.type === "bt-frame-widget-loaded") {
+            const t = typeof inner === "object" ? inner.type : null;
+            if (t === "bt-frame-loaded" || t === "bt-frame-widget-loaded") {
+              ensureVisible();
               fireReady();
-            } else if (inner.type === "bt-frame-height-changed") {
+            } else if (t === "bt-frame-height-changed") {
               postParent({ type: "resize", height: inner.payload });
-            } else if (inner.type === "bt-frame-widget-failed") {
+              ensureVisible();
+            } else if (t === "bt-frame-widget-failed") {
               postParent({ type: "error", error: inner.payload ? String(inner.payload) : "widget failed" });
+              ensureVisible();
             } else {
               postParent({ type: "inner-event", inner: inner });
             }
             return;
           }
-          // ── Camada 2: Statscore widget DIRETO (não tem source) ──
-          if (typeof data === "object" && typeof data.type === "string") {
-            if (data.type === "DATA") {
-              if (data.available === true) {
+          // ── Camada 2: Statscore widget DIRETO (qualquer formato) ──
+          if (typeof data === "object") {
+            // Tenta pegar `type` de dentro (se objeto tiver type/data/resize/datachange etc.)
+            const type = typeof data.type === "string" ? data.type : null;
+            const hasAvailable = typeof data.available === "boolean";
+            const hasHeightNum = typeof data.height === "number" && data.height > 100;
+            // 2a) { type: "DATA", available: boolean } (formato do modelo Statscore)
+            if (type === "DATA" || (hasAvailable && !type)) {
+              const available = data.available === true;
+              postParent({ type: "data", available: available });
+              if (available) {
                 ensureVisible();
                 fireReady();
+              } else {
+                // available=false: Garantimos visibilidade (não deixa
+                // preto!), e enviamos sinal para o pai decidir se quer
+                // substituir por mensagem (pai cuida de UX após 10s).
+                ensureVisible();
+                postParent({ type: "resize", height: 470 });
               }
-              postParent({ type: "data", available: data.available === true });
               return;
             }
-            if (data.type === "RESIZE") {
-              if (typeof data.height === "number" && data.height > 100) {
+            // 2b) { type: "RESIZE", height: number } (formato modelo Statscore)
+            //     OU qualquer objeto com height numérico grande
+            if (type === "RESIZE" || hasHeightNum) {
+              if (hasHeightNum) {
                 const el = getContainer();
                 if (el) {
                   const px = data.height + "px";
-                  el.style.height = px;
-                  document.body.style.height = px;
+                  el.style.setProperty("height", px, "important");
+                  document.body.style.setProperty("height", px, "important");
                 }
                 postParent({ type: "resize", height: data.height });
               } else {
-                    setupResize();
-                  }
+                setupResize();
+              }
+              ensureVisible();
+              return;
+            }
+            // 2c) Qualquer outro evento conhecido do Statscore
+            if (typeof type === "string" && /^(ready|loaded|error|datachange)$/i.test(type)) {
+              postParent({ type: type.toLowerCase() });
+              ensureVisible();
               return;
             }
           }
         } catch (_) {}
       });
-      // ── Fallback safety: nenhum evento chegou em 6s → força visível de qualquer jeito
+      // ── Fallback safety: nenhum evento chegou em 6s → força visível + ready
       setTimeout(function () {
         ensureVisible();
         fireReady();
