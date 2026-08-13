@@ -713,7 +713,7 @@ export function buildBetbyThemeInjectionStyle(
           }
           // ── Camada 2: Statscore widget DIRETO (qualquer formato) ──
           if (typeof data === "object") {
-            // Tenta pegar `type` de dentro (se objeto tiver type/data/resize/datachange etc.)
+            // Tenta pegar 'type' de dentro (se objeto tiver type/data/resize/datachange etc.)
             const type = typeof data.type === "string" ? data.type : null;
             const hasAvailable = typeof data.available === "boolean";
             const hasHeightNum = typeof data.height === "number" && data.height > 100;
@@ -792,18 +792,18 @@ export async function fetchBetbyTrackerHtml(
     // Quando resolveStatscoreEventIdFromBetby não achava ID real do Statscore,
     // nós caíamos num fallback "enviar BetBY ID como se fosse Statscore ID".
     // Como o widget do Statscore recebia um ID inexistente, ele não tinha dados
-    // → colocava `display:none` em si mesmo → TELA PRETA ETERNA (nem sinal de vida!).
+    // → colocava 'display:none' em si mesmo → TELA PRETA ETERNA (nem sinal de vida!).
     // Ninguém conseguia detectar isso. O throw draconiano era a única saída:
     // "melhor não ter tracker do que tela preta enganando o usuário".
     //
     // O MUNDO MUDOU HOJE (4 correções dessa sessão):
-    //  1) Bridge injetado (L438-L545) OUVINDO eventos `DATA` e `RESIZE` DIRETOS
-    //     do widget Statscore + `ensureVisible()` FORÇA display:block/min-height
+    //  1) Bridge injetado (L438-L545) OUVINDO eventos 'DATA' e 'RESIZE' DIRETOS
+    //     do widget Statscore + 'ensureVisible()' FORÇA display:block/min-height
     //     /opacity:1 em TUDO (container, body, iframes internos) → MESMO SE o widget
     //     tentar colocar display:none, NÓS TIRAMOS.
-    //  2) Fallback 6s safety timeout no bridge força `ensureVisible` + `ready` de
+    //  2) Fallback 6s safety timeout no bridge força 'ensureVisible' + 'ready' de
     //     qualquer jeito.
-    //  3) Frontend ouve `postMessage` do bridge. Se DATA.available=false chegar,
+    //  3) Frontend ouve 'postMessage' do bridge. Se DATA.available=false chegar,
     //     ou nenhum evento chegar, cai no fallback "Tracker indisponível" em <10s
     //     (com HTTP 200, Cloudflare não intercepta).
     //  4) CSP frame-ancestors apagado, iframe sempre renderiza.

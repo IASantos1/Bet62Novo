@@ -23,7 +23,7 @@ const router = Router();
 // sends here) — but PulseScoreEvent.sport (and therefore
 // BETBY_SPORT_ID_TO_PULSE_SPORT's values, which findBetbyLiveEventByTeams
 // and betbySportIdForPulseSport are keyed against) uses "soccer" for the
-// exact same sport (see matches.ts's `ev.sport !== "soccer"` checks).
+// exact same sport (see matches.ts's ev.sport !== "soccer" checks).
 // Without this translation every football/soccer match would silently
 // fail the sport-family filter in findBetbyLiveEventByTeams (comparing
 // "football" against a set that only ever contains "soccer") and
@@ -184,10 +184,10 @@ router.get("/url", async (req: Request, res: Response) => {
     // at all) for football, because sportId was hardcoded to "1" on the
     // frontend regardless of the match's real sport — a tennis or
     // basketball match would ask BetBY's tracker widget to render as
-    // football. `sport` (Bet62/PulseScore's own sport key) is now the
+    // football. 'sport' (Bet62/PulseScore's own sport key) is now the
     // primary source of truth, converted to BetBY's numeric convention via
-    // betbySportIdForPulseSport; an explicit `sportId` query param is still
-    // honored when passed on its own (no `sport`), for any caller that
+    // betbySportIdForPulseSport; an explicit 'sportId' query param is still
+    // honored when passed on its own (no 'sport'), for any caller that
     // already knows BetBY's raw numeric id directly.
     const sportParam = typeof req.query.sport === "string" ? req.query.sport.trim().toLowerCase() : "";
     const sportId = sportParam
