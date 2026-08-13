@@ -119,11 +119,13 @@ router.get("/url", async (req: Request, res: Response) => {
     const parentOrigin = getOriginFromRequest(req) ?? "*";
     const resolved = await resolveFinalBetbyEventId(req);
     if (resolved.error) {
-      return res.status(resolved.error.code).json({
+      return res.status(200).json({
         ok: false,
         error: resolved.error.msg,
+        errorCode: resolved.error.code,
         upstream: null,
         proxy: null,
+        pulseSse: null,
         finalBetbyEventId: null,
       });
     }
@@ -149,11 +151,13 @@ router.get("/url", async (req: Request, res: Response) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({
+    return res.status(200).json({
       ok: false,
       error: msg,
+      errorCode: 500,
       upstream: null,
       proxy: null,
+      pulseSse: null,
       finalBetbyEventId: null,
     });
   }
