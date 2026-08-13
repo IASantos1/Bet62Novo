@@ -592,6 +592,37 @@ export async function initDb(): Promise<void> {
 
       CREATE UNIQUE INDEX IF NOT EXISTS api_football_team_mappings_name_idx
         ON api_football_team_mappings (pulsescore_team_name);
+
+      -- Persistent, cross-session PulseScore-match -> API-Football-fixture
+      -- cache (2026-08-12) — see apiFootballFixtureMappings.ts's own header
+      -- for the full reasoning. Production incident 2026-08-13: this table
+      -- was added to the Drizzle schema (lib/db/src/schema/
+      -- apiFootballFixtureMappings.ts) but the matching CREATE TABLE here
+      -- was missed, so it never actually existed in the real database —
+      -- every live football tick's ensureFixtureMappingCacheFresh() call
+      -- (services/apiFootball.ts) failed with "relation ... does not
+      -- exist" and, since the failure never updates
+      -- fixtureMappingCacheLoadedAt, immediately retried on the very next
+      -- tick for every live match, hammering the Postgres connection pool
+      -- hard enough to bring the whole site down (Cloudflare 502 — the
+      -- origin stopped responding, not because the process crashed, but
+      -- because it could no longer get a DB connection for anything).
+      CREATE TABLE IF NOT EXISTS api_football_fixture_mappings (
+        id                      SERIAL PRIMARY KEY,
+        pulsescore_match_id     TEXT NOT NULL,
+        pulsescore_event_id     TEXT NOT NULL,
+        api_football_fixture_id INTEGER NOT NULL,
+        home_team               TEXT,
+        away_team               TEXT,
+        league                  TEXT,
+        kickoff_ms              INTEGER,
+        confirmation_count      INTEGER NOT NULL DEFAULT 1,
+        first_confirmed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_confirmed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS api_football_fixture_mappings_match_idx
+        ON api_football_fixture_mappings (pulsescore_match_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");
