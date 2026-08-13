@@ -500,10 +500,11 @@ export function buildBetbyThemeInjectionStyle(
   })();
 
   return `<style data-bet62-inject="theme-branding">
-      html, body { background: transparent !important; color-scheme: dark; }
+      html, body { background: #18181b !important; color-scheme: dark; }
       #bt-tracker-container,
       .STATSCOREWidgetContainer,
       .STATSCOREWidget {
+        background-color: #18181b !important;
         ${cssVars}
       }
       .STATSCOREWidget *[class*="logo" i],
