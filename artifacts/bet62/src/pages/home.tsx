@@ -4622,10 +4622,22 @@ function BetbyTrackerIframe({
   const apiBase = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
     : "";
-  const useDirect = String(import.meta.env.VITE_USE_BETBY_DIRECT_IFRAME ?? "").trim().toLowerCase() === "direct";
-  if (useDirect) {
-    try { console.warn("[BetbyTrackerIframe] DIRECT mode: Verifique se o BetBY liberou frame-ancestors para seu domínio. Caso o tracker esteja com tela preta, remova a variável VITE_USE_BETBY_DIRECT_IFRAME para usar PROXY (sem bloqueios)."); } catch {}
-  }
+  // Always PROXY mode (our own server fetches the BetBY/Statscore tracker
+  // HTML and re-serves it from our origin, with a <base href> + relaxed
+  // CSP base-uri fixing the relative-resource resolution that used to
+  // break it — see fetchBetbyTrackerHtml's own comment). DIRECT mode (an
+  // <iframe> pointing straight at demoapi.betby.com) used to be reachable
+  // via VITE_USE_BETBY_DIRECT_IFRAME and was already hit and reverted once
+  // in production: BetBY's own CSP/X-Frame-Options silently refuses to be
+  // framed cross-origin, the outer <iframe>'s onLoad still fires (the HTTP
+  // request itself succeeds), and nothing ever paints — a black screen
+  // with zero errors surfaced anywhere, and this component has no way to
+  // detect it (DIRECT mode carries none of the bridge postMessage
+  // signaling that only exists in the HTML our own proxy injects). A
+  // stray env var left set in a build's config could silently re-enable
+  // that dead end with no trace visible in the code, so the escape hatch
+  // (and its DIRECT-only pulse overlay wiring) was removed outright
+  // instead of trusting a flag no one can see is set.
   const { data: urlInfo, isFetching, error: queryError } = useQuery({
     queryKey: ["betby-tracker-url", home, away, lang, apiBase],
     queryFn: async () => {
@@ -4637,11 +4649,9 @@ function BetbyTrackerIframe({
         const json = (await res.json().catch(() => null)) as null | {
           ok?: boolean;
           finalBetbyEventId?: string | null;
-          upstream?: string | null;
           proxy?: string | null;
-          pulseSse?: string | null;
         };
-        if (!json || !json.ok || !json.finalBetbyEventId) return null;
+        if (!json || !json.ok || !json.finalBetbyEventId || !json.proxy) return null;
         return json as Required<Omit<NonNullable<typeof json>, never>>;
       } catch { return null; }
     },
@@ -4651,116 +4661,15 @@ function BetbyTrackerIframe({
     throwOnError: false,
   });
 
-  const finalUrl = useMemo(() => {
-    if (!urlInfo) return null;
-    return useDirect ? urlInfo.upstream : urlInfo.proxy;
-  }, [urlInfo, useDirect]);
-
-  const pulseOverlayRef = useRef<HTMLDivElement | null>(null);
-  const sseRef = useRef<EventSource | null>(null);
+  const finalUrl = urlInfo?.proxy ?? null;
 
   useEffect(() => {
-    if (!useDirect || !urlInfo || !urlInfo.pulseSse) return;
-    try {
-      if (sseRef.current) { try { sseRef.current.close(); } catch (_) {} sseRef.current = null; }
-      const es = new EventSource(urlInfo.pulseSse, { withCredentials: false });
-      sseRef.current = es;
-      es.addEventListener("match", (ev) => {
-        try {
-          const m = JSON.parse(ev.data) as { match: Record<string, unknown> };
-          if (!m || !m.match) return;
-          const payload: Record<string, unknown> = m.match as any;
-          if (payload.matchedBy === "none" || !payload.pulseEventId) {
-            const ov = document.getElementById("bet62-pulse-overlay");
-            if (ov) ov.classList.add("b62-hidden");
-            return;
-          }
-          const ov = document.getElementById("bet62-pulse-overlay");
-          if (!ov) return;
-          ov.classList.remove("b62-hidden");
-          const homeEl = ov.querySelector<HTMLElement>(".b62-team.b62-home");
-          const awayEl = ov.querySelector<HTMLElement>(".b62-team.b62-away");
-          const h = ov.querySelector<HTMLElement>(".b62-score.b62-home-score");
-          const a = ov.querySelector<HTMLElement>(".b62-score.b62-away-score");
-          const c = ov.querySelector<HTMLElement>(".b62-clock-el");
-          const meta = ov.querySelector<HTMLElement>(".b62-pill.b62-pill-meta");
-          if (homeEl && typeof payload.home === "string") homeEl.textContent = payload.home;
-          if (awayEl && typeof payload.away === "string") awayEl.textContent = payload.away;
-          if (h && typeof (payload.score as any)?.home !== "undefined") h.textContent = String((payload.score as any).home ?? "0");
-          if (a && typeof (payload.score as any)?.away !== "undefined") a.textContent = String((payload.score as any).away ?? "0");
-          if (c) {
-            const clock: string[] = [];
-            if (typeof payload.minute === "number") clock.push(`${String(payload.minute).padStart(2, "0")}'`);
-            if (typeof payload.period === "string") clock.push(String(payload.period).replace(/_/g, " "));
-            if (typeof payload.running === "boolean") clock.push(payload.running ? "▶" : "⏸");
-            c.textContent = clock.join("  ·  ");
-          }
-          if (meta) {
-            const conf = (typeof payload.confidence === "number" ? payload.confidence : 0) | 0;
-            const stars = "★★★".slice(3 - conf);
-            const matchedBy = payload.matchedBy === "sport+home+away" ? "Completo"
-              : payload.matchedBy === "sport+home" ? "Home"
-              : payload.matchedBy === "sport+away" ? "Away" : "-";
-            const id = typeof payload.pulseEventId === "string" ? payload.pulseEventId.slice(0, 10) : "-";
-            meta.textContent = `Confiança: ${stars} · Match: ${matchedBy} · ID: ${id}`;
-          }
-        } catch (_) { /* ignore */ }
-      });
-    } catch (_sseErr) { /* ignore */ }
-    return () => {
-      if (sseRef.current) { try { sseRef.current.close(); } catch (_) {} sseRef.current = null; }
-    };
-  }, [urlInfo, useDirect]);
-
-  useEffect(() => {
-    setFailed(!(urlInfo && finalUrl) || !!queryError);
-  }, [urlInfo, finalUrl, queryError]);
+    setFailed(!finalUrl || !!queryError);
+  }, [finalUrl, queryError]);
 
   useEffect(() => {
     setReady(false);
   }, [finalUrl]);
-
-  const pulseOverlayHtml = useMemo(() => {
-    if (!useDirect || !urlInfo?.finalBetbyEventId) return null;
-    const betbyEventId = String(urlInfo.finalBetbyEventId);
-    if (!betbyEventId) return null;
-    const highlight = "rgba(34, 197, 94, 1)";
-    const bg = "rgba(12, 22, 33, 0.88)";
-    const elBg = "rgba(30, 48, 66, 0.9)";
-    const contrast = "rgba(255,255,255,1)";
-    const lines = "rgba(255,255,255,0.08)";
-    const style = `#bet62-pulse-overlay{position:fixed!important;top:6px!important;left:6px!important;z-index:2147483646!important;display:flex!important;flex-direction:column!important;gap:3px!important;padding:8px 10px!important;border-radius:10px!important;pointer-events:none!important;background:color-mix(in srgb,${bg} 88%,transparent)!important;border:1px solid color-mix(in srgb,${highlight} 30%,transparent)!important;backdrop-filter:blur(6px);box-shadow:0 8px 22px rgba(0,0,0,0.45);max-width:calc(100% - 12px);color:${contrast};transition:opacity 160ms ease,transform 160ms ease;transform-origin:top left}#bet62-pulse-overlay.b62-hidden{opacity:0!important;transform:scale(.96) translateY(-4px)}#bet62-pulse-overlay .b62-row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}#bet62-pulse-overlay .b62-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,${highlight} 16%,transparent);color:${highlight};font-weight:600;font-size:11.5px;letter-spacing:.2px;border:1px solid color-mix(in srgb,${highlight} 30%,transparent)}#bet62-pulse-overlay .b62-scorebox{display:flex;align-items:center;gap:10px;padding:3px 8px;border-radius:8px;background:color-mix(in srgb,${elBg} 90%,transparent);border:1px solid ${lines};font-size:14px;font-weight:650;letter-spacing:.2px}#bet62-pulse-overlay .b62-team{max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${contrast}}#bet62-pulse-overlay .b62-score{color:${highlight};font-variant-numeric:tabular-nums;padding:0 2px}#bet62-pulse-overlay .b62-colon{opacity:.6}#bet62-pulse-overlay .b62-clock{font-size:11px;opacity:.85;color:${contrast};font-variant-numeric:tabular-nums}#bet62-pulse-overlay .b62-foot{display:flex;gap:6px;flex-wrap:wrap;font-size:10.5px;opacity:.8}#bet62-pulse-overlay .b62-pill{padding:1px 7px;border-radius:999px;background:color-mix(in srgb,${elBg} 70%,transparent);border:1px solid ${lines};color:${contrast}}#bet62-pulse-overlay .b62-pill.b62-pill-live{background:color-mix(in srgb,rgba(239,68,68,1) 16%,transparent);color:rgba(248,113,113,1);border-color:color-mix(in srgb,rgba(239,68,68,1) 30%,transparent)}#bet62-pulse-overlay .b62-pulse-dot{width:6px;height:6px;border-radius:999px;background:currentColor;display:inline-block;box-shadow:0 0 0 0 rgba(248,113,113,.5);animation:b62Pulse 1.5s infinite ease-out}@keyframes b62Pulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.5)}70%{box-shadow:0 0 0 10px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}`;
-    return (
-      <>
-        <style dangerouslySetInnerHTML={{ __html: style }} />
-        <div
-          id="bet62-pulse-overlay"
-          ref={pulseOverlayRef}
-          className="b62-hidden"
-        >
-          <div className="b62-row1">
-            <span className="b62-badge">
-              <span className="b62-pulse-dot" /> PulseScore LIVE
-            </span>
-            <span className="b62-scorebox">
-              <span className="b62-team b62-home">{home}</span>
-              <span className="b62-score b62-home-score">0</span>
-              <span className="b62-colon">:</span>
-              <span className="b62-score b62-away-score">0</span>
-              <span className="b62-team b62-away">{away}</span>
-            </span>
-            <span className="b62-clock b62-clock-el" />
-          </div>
-          <div className="b62-foot">
-            <span className="b62-pill b62-pill-live">Sincronizado Bet62</span>
-            <span className="b62-pill b62-pill-meta">Aguardando sincronia PulseScore...</span>
-          </div>
-          <hr style={{ height: 1, background: `linear-gradient(90deg, transparent, ${highlight}, transparent)`, opacity: 0.6, border: 0, margin: "2px 0 0 0" }} />
-          <div style={{ fontSize: 9.5, opacity: 0.5, letterSpacing: "0.4px", textTransform: "uppercase" }}>Sincronia PulseScore ativa</div>
-        </div>
-      </>
-    );
-  }, [useDirect, urlInfo?.finalBetbyEventId, home, away]);
 
   const showLoading = (!ready || isFetching);
 
@@ -4774,7 +4683,6 @@ function BetbyTrackerIframe({
           <RefreshCw className="animate-spin text-green-500/80" size={24} />
         </div>
       )}
-      {useDirect && pulseOverlayHtml}
       {!failed && finalUrl ? (
         <iframe
           key={finalUrl}
