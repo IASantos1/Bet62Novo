@@ -440,12 +440,48 @@ export function buildBetbyThemeInjectionStyle(
       function postParent(payload) {
         try { window.parent.postMessage({ source: "bet62-betby-tracker", payload: payload }, ${JSON.stringify(parentOrigin)}); } catch (_) {}
       }
+      function getContainer() {
+        return document.getElementById("bt-tracker-container") || document.body;
+      }
+      function ensureVisible() {
+        try {
+          const el = getContainer();
+          if (el) {
+            el.style.display = "block";
+            el.style.minHeight = "470px";
+            el.style.height = el.style.height || "470px";
+            el.style.opacity = "1";
+            el.style.visibility = "visible";
+          }
+          document.body.style.display = "block";
+          document.body.style.minHeight = "470px";
+          document.body.style.opacity = "1";
+          document.body.style.visibility = "visible";
+          document.documentElement.style.display = "block";
+          document.documentElement.style.minHeight = "470px";
+          const iframes = document.querySelectorAll("iframe");
+          iframes.forEach(function (f) {
+            try {
+              f.style.display = "block";
+              f.style.minHeight = "470px";
+              f.style.opacity = "1";
+              f.style.visibility = "visible";
+            } catch (_) {}
+          });
+        } catch (_) {}
+      }
+      function fireReady() {
+        postParent({ type: "ready" });
+        setupResize();
+      }
       function setupResize() {
-        const el = document.getElementById("bt-tracker-container") || document.body;
+        const el = getContainer();
         let last = 0;
         const tick = function () {
-          const h = el.getBoundingClientRect().height;
-          if (Math.abs(h - last) > 0.5) { last = h; postParent({ type: "resize", height: h }); }
+          try {
+            const h = el.getBoundingClientRect().height;
+            if (Math.abs(h - last) > 0.5) { last = h; postParent({ type: "resize", height: h }); }
+          } catch (_) {}
         };
         tick();
         if (typeof ResizeObserver !== "undefined") { try { var ro = new ResizeObserver(tick); ro.observe(el); } catch(_) { setInterval(tick, 400); } }
@@ -457,20 +493,54 @@ export function buildBetbyThemeInjectionStyle(
       });
       window.addEventListener("message", function (e) {
         try {
-          if (!e.data || e.data.source !== "bt-frame") return;
-          var inner = e.data.message || {};
-          if (inner.type === "bt-frame-loaded" || inner.type === "bt-frame-widget-loaded") {
-            postParent({ type: "ready" });
-            setupResize();
-          } else if (inner.type === "bt-frame-height-changed") {
-            postParent({ type: "resize", height: inner.payload });
-          } else if (inner.type === "bt-frame-widget-failed") {
-            postParent({ type: "error", error: inner.payload ? String(inner.payload) : "widget failed" });
-          } else {
-            postParent({ type: "inner-event", inner: inner });
+          const data = e.data;
+          if (!data) return;
+          // ── Camada 1: Betby outer iframe bridge (source: "bt-frame") ──
+          if (typeof data === "object" && data.source === "bt-frame") {
+            var inner = data.message || {};
+            if (inner.type === "bt-frame-loaded" || inner.type === "bt-frame-widget-loaded") {
+              fireReady();
+            } else if (inner.type === "bt-frame-height-changed") {
+              postParent({ type: "resize", height: inner.payload });
+            } else if (inner.type === "bt-frame-widget-failed") {
+              postParent({ type: "error", error: inner.payload ? String(inner.payload) : "widget failed" });
+            } else {
+              postParent({ type: "inner-event", inner: inner });
+            }
+            return;
+          }
+          // ── Camada 2: Statscore widget DIRETO (não tem source) ──
+          if (typeof data === "object" && typeof data.type === "string") {
+            if (data.type === "DATA") {
+              if (data.available === true) {
+                ensureVisible();
+                fireReady();
+              }
+              postParent({ type: "data", available: data.available === true });
+              return;
+            }
+            if (data.type === "RESIZE") {
+              if (typeof data.height === "number" && data.height > 100) {
+                const el = getContainer();
+                if (el) {
+                  const px = data.height + "px";
+                  el.style.height = px;
+                  document.body.style.height = px;
+                }
+                postParent({ type: "resize", height: data.height });
+              } else {
+                    setupResize();
+                  }
+              return;
+            }
           }
         } catch (_) {}
       });
+      // ── Fallback safety: nenhum evento chegou em 6s → força visível de qualquer jeito
+      setTimeout(function () {
+        ensureVisible();
+        fireReady();
+      }, 6000);
     })();
     <\/script>`;
 }
@@ -607,13 +677,6 @@ export const BETBY_TRACKER_RESPONSE_HEADERS: Record<string, string> = {
     "font-src 'self' 'unsafe-inline' https://fonts.gstatic.com data:",
     "script-src 'self' 'unsafe-inline' https://demoapi.betby.com https://wgt-s3-cdn.statscore.com",
     "connect-src 'self' https://demoapi.betby.com https://widgets.statscore.com https://events-d.pc.statscore.com https://region1.analytics.google.com",
-    "frame-ancestors 'self'",
-    // 'self' here is OUR api-server origin, not demoapi.betby.com — with
-    // only 'self' allowed, the CSP silently vetoed the <base
-    // href="https://demoapi.betby.com/..."> tag fetchBetbyTrackerHtml
-    // injects to fix relative-asset resolution (see that function's own
-    // comment for the full "tela preta" story), which would have kept the
-    // black screen even after the <base> fix.
     "base-uri 'self' https://demoapi.betby.com",
     "form-action 'none'",
     "object-src 'none'",

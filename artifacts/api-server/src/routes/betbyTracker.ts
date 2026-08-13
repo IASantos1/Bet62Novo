@@ -243,22 +243,29 @@ router.get("/url", async (req: Request, res: Response) => {
 });
 
 router.get("/", async (req: Request, res: Response) => {
-  const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
-    ? req.query.lang
-    : "pt-br";
-  const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
-    ? req.query.sportId
-    : "1";
-  const resolved = await resolveFinalBetbyEventId(req);
-  if (resolved.error) {
-    return res
-      .status(resolved.error.code)
-      .type("text/plain")
-      .send(resolved.error.msg);
-  }
-  const finalBetbyEventId = resolved.finalBetbyEventId!;
-
+  // EVERYTHING inside a single outer try/catch so a stray throw from
+  // resolveFinalBetbyEventId or any helper can never bubble past the
+  // handler and crash the node process. Also, all responses are HTTP 200
+  // — returning 502/400/etc makes Cloudflare intercept the response and
+  // show its own generic "Bad Gateway" error page, which users read as
+  // the whole site being down instead of "this specific tracker is
+  // unavailable right now".
   try {
+    const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
+      ? req.query.lang
+      : "pt-br";
+    const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
+      ? req.query.sportId
+      : "1";
+    const resolved = await resolveFinalBetbyEventId(req);
+    if (resolved.error) {
+      return res
+        .status(200)
+        .type("text/plain")
+        .send(resolved.error.msg);
+    }
+    const finalBetbyEventId = resolved.finalBetbyEventId!;
+
     const parentOrigin = getOriginFromRequest(req) ?? "*";
     await resolveBetbyMatchMeta(finalBetbyEventId, 3500)
       .catch(() => null);
@@ -282,8 +289,9 @@ router.get("/", async (req: Request, res: Response) => {
     return res.status(200).send(html);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn({ err: msg, finalBetbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
-    return res.status(502).type("text/html").send(trackerUnavailableHtml());
+    logger.warn({ err: msg }, "[betbyTracker] / handler failed");
+    // Always HTTP 200 — Cloudflare replaces 5xx with its own landing page
+    return res.status(200).type("text/html").send(trackerUnavailableHtml());
   }
 });
 
@@ -291,7 +299,7 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   try {
     const betbyEventId = String(req.params.betbyEventId);
     if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {
-      return res.status(400).type("text/plain").send("Invalid betbyEventId (expected numeric id)");
+      return res.status(200).type("text/plain").send("Invalid betbyEventId (expected numeric id)");
     }
     const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
       ? req.query.lang
@@ -324,7 +332,10 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg, betbyEventId: req.params.betbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
-    return res.status(502).type("text/html").send(trackerUnavailableHtml());
+    // Always HTTP 200 — returning 502 here made Cloudflare show its own
+    // generic "Bad Gateway" page to users, which looked like the whole
+    // site was down. Now users see our own "Tracker indisponível" card.
+    return res.status(200).type("text/html").send(trackerUnavailableHtml());
   }
 });
 

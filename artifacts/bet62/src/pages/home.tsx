@@ -4621,6 +4621,8 @@ function BetbyTrackerIframe({
 }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const apiBase = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
     : "";
@@ -4694,10 +4696,59 @@ function BetbyTrackerIframe({
     return () => clearTimeout(t);
   }, [finalUrl, ready]);
 
+  // Listen to postMessage bridge signals from the proxied tracker HTML.
+  // Our own bridge script (proxy.ts) sends: { source: "bet62-betby-tracker", payload: { type, ... } }
+  // - ready / load / data  → widget actually rendered → stop showing spinner
+  // - resize                → widget statscore reported real height → no fixed aspect ratio cut
+  // - error                 → widget failed to load → fallback message
+  useEffect(() => {
+    if (!finalUrl) return;
+    const handler = (ev: MessageEvent) => {
+      try {
+        const data = ev.data;
+        if (!data || data.source !== "bet62-betby-tracker") return;
+        const payload = data.payload || {};
+        const type: unknown = payload.type;
+        if (typeof type !== "string") return;
+
+        if (type === "ready" || type === "load" || type === "data") {
+          setReady(true);
+          return;
+        }
+        if (type === "resize") {
+          const h = Number(payload.height);
+          if (Number.isFinite(h) && h > 100 && containerRef.current) {
+            containerRef.current.style.aspectRatio = "auto";
+            containerRef.current.style.height = `${Math.round(h)}px`;
+          }
+          setReady(true);
+          return;
+        }
+        if (type === "error") {
+          setFailed(true);
+          return;
+        }
+      } catch (_) { /* no-op, ignore stray messages */ }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [finalUrl]);
+
+  // Fallback safety: even if NO postMessage signals arrive at all (e.g.
+  // upstream BetBY/Statscore silently broke their own message format),
+  // remove the spinner overlay after 8s so the user doesn't see a loading
+  // state forever on top of a potentially valid widget.
+  useEffect(() => {
+    if (!finalUrl || ready || failed) return;
+    const t = setTimeout(() => setReady(true), 8_000);
+    return () => clearTimeout(t);
+  }, [finalUrl, ready, failed]);
+
   const showLoading = (!ready || isFetching) && !failed;
 
   return (
     <div
+      ref={containerRef}
       className={className}
       style={{ aspectRatio, position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
     >
@@ -4708,6 +4759,7 @@ function BetbyTrackerIframe({
       )}
       {!failed && finalUrl ? (
         <iframe
+          ref={iframeRef}
           key={finalUrl}
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
