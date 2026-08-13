@@ -41,8 +41,14 @@ declare module "@workspace/api-zod" {
 }
 
 declare module "express" {
-  export default function(...args: any[]): any;
-  export const json: any; export const urlencoded: any; export const static: any;
+  const expressCallable: {
+    (...args: any[]): any;
+    [k: string]: any;
+    json: any; urlencoded: any; static: any; raw: any; text: any;
+    Router: any; Route: any; application: any;
+  };
+  export default expressCallable;
+  export const json: any; export const urlencoded: any; export const static: any; export const raw: any; export const text: any;
   export const Router: any; export const Route: any; export const application: any;
   export type Express = any; export type Request<P = any, ResBody = any, ReqBody = any, ReqQuery = any, Locals = Record<string, any>> = any; export type Response<T = any, ResBody = any, Locals = Record<string, any>> = any;
   export type NextFunction = any; export type Application = any;
@@ -66,9 +72,27 @@ declare module "pino" {
   export type Level = any; export type LogDescriptor = any;
 }
 declare module "stripe" {
-  export default class { constructor(...args: any[]); [k: string]: any }
-  export type Stripe = any; export type Event = any; export type Webhook = any;
-  export namespace webhooks { export const constructEvent: any; export const generateTestHeaderString: any; }
+  export default class Stripe { constructor(...args: any[]); [k: string]: any }
+  export namespace Stripe {
+    export type Stripe = any; export type Event = any; export type Webhook = any;
+    export namespace webhooks { export const constructEvent: any; export const generateTestHeaderString: any; }
+    export namespace errors {
+      export const StripeError: any; export const StripeCardError: any; export const StripeInvalidRequestError: any;
+      export const StripeAPIError: any; export const StripeAuthenticationError: any;
+      export const StripePermissionError: any; export const StripeRateLimitError: any;
+      export const StripeConnectionError: any; export const StripeSignatureVerificationError: any;
+      export const StripeIdempotencyError: any; export const StripeInvalidGrantError: any;
+    }
+    export namespace resources { export const Customers: any; export const Charges: any; export const PaymentIntents: any; }
+    export type Checkout = any; export namespace Checkout { export type Session = any; }
+    export type PaymentIntent = any; export type PaymentMethod = any;
+    export type Customer = any; export type Charge = any; export type Refund = any;
+    export type Invoice = any; export type Subscription = any; export type Product = any;
+    export type Price = any; export type SetupIntent = any; export type Balance = any;
+    export type Transfer = any; export type Payout = any; export type Account = any;
+  }
+  export const webhooks: any;
+  export const resources: any;
   export namespace errors {
     export const StripeError: any; export const StripeCardError: any; export const StripeInvalidRequestError: any;
     export const StripeAPIError: any; export const StripeAuthenticationError: any;
@@ -76,15 +100,14 @@ declare module "stripe" {
     export const StripeConnectionError: any; export const StripeSignatureVerificationError: any;
     export const StripeIdempotencyError: any; export const StripeInvalidGrantError: any;
   }
-  export namespace resources { export const Customers: any; export const Charges: any; export const PaymentIntents: any; }
+  export namespace webhooks { export const constructEvent: any; export const generateTestHeaderString: any; }
+  export type Event = any; export type Webhook = any;
   export type Checkout = any; export namespace Checkout { export type Session = any; }
   export type PaymentIntent = any; export type PaymentMethod = any;
   export type Customer = any; export type Charge = any; export type Refund = any;
   export type Invoice = any; export type Subscription = any; export type Product = any;
   export type Price = any; export type SetupIntent = any; export type Balance = any;
   export type Transfer = any; export type Payout = any; export type Account = any;
-  export namespace Stripe { export type Event = any; export type Webhook = any; export namespace errors { export const StripeError: any; export const StripeCardError: any; export const StripeInvalidRequestError: any; export const StripeAPIError: any; export const StripeAuthenticationError: any; export const StripePermissionError: any; export const StripeRateLimitError: any; export const StripeConnectionError: any; export const StripeSignatureVerificationError: any; export const StripeIdempotencyError: any; export const StripeInvalidGrantError: any; } export type Checkout = any; export namespace Checkout { export type Session = any; } export type PaymentIntent = any; export type PaymentMethod = any; export type Customer = any; export type Charge = any; export type Refund = any; export type Invoice = any; export type Subscription = any; export type Product = any; export type Price = any; export type SetupIntent = any; export type Balance = any; export type Transfer = any; export type Payout = any; export type Account = any; }
-  export const webhooks: any;
 }
 declare module "drizzle-orm" {
   export default function(...args: any[]): any;
