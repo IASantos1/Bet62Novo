@@ -493,11 +493,33 @@ export async function fetchBetbyTrackerHtml(
       resolvedStatscoreEventId = null;
     }
 
-    const upstreamUrl = buildBetbyTrackerUpstreamUrl(
-      resolvedStatscoreEventId
-        ? { ...input, statscoreEventId: resolvedStatscoreEventId }
-        : input,
-    );
+    // Bug report 2026-08-13, confirmed with a real captured URL: opening
+    // the upstream tracker.html link DIRECTLY (outside our proxy, outside
+    // any iframe) still rendered black — which rules out everything on
+    // Bet62's own side (base href, CSP, iframe framing, sportId — all
+    // already fixed/ruled out earlier) and points squarely at the eventId
+    // sent to BetBY's widget being wrong. resolveStatscoreEventIdFromBetby
+    // scrapes BetBY's own site for the REAL underlying Statscore event id,
+    // since BetBY's internal event id and Statscore's are two different
+    // companies' numbering — nothing says they're ever the same value.
+    // Previously, when that scrape failed, this silently fell back to
+    // using the raw BetBY id AS a Statscore id anyway (buildBetbyTracker
+    // UpstreamUrl's own fallback) — sending a fabricated/wrong id to a
+    // real widget that has no live data for it renders exactly this
+    // symptom: the widget shell loads fine, nothing ever paints, no error
+    // anywhere. Failing loudly here instead — the caller already turns a
+    // thrown error into a proper failed response, which the frontend
+    // already shows as a clear "Tracker indisponível" instead of a
+    // silently broken black iframe.
+    if (!resolvedStatscoreEventId) {
+      throw new Error(
+        `Could not resolve a real Statscore event id for BetBY event ${input.betbyEventId} — refusing to guess with the raw BetBY id`,
+      );
+    }
+    const upstreamUrl = buildBetbyTrackerUpstreamUrl({
+      ...input,
+      statscoreEventId: resolvedStatscoreEventId,
+    });
     const controller = new AbortController();
     const to = setTimeout(() => controller.abort(), timeoutMs);
     try {

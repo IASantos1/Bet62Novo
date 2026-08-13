@@ -43,6 +43,28 @@ const DEFAULT_THEME: BetbyThemeInjection = {
   contrast: "rgba(255, 255, 255, 1)",
 };
 
+// A failed fetchBetbyTrackerHtml (e.g. no resolvable Statscore event id —
+// see that function's own comment) used to fall through to a bare
+// text/plain 502 body. That's fine when this route is hit directly, but
+// it's ALSO what ends up painted inside BetbyTrackerIframe's <iframe> when
+// the failure happens there: the browser still fires onLoad for an error
+// status document load (only a network-level failure fires onError), so
+// the frontend's own "Tracker indisponível" fallback UI never gets a
+// chance to show — the raw error text renders instead, looking broken
+// rather than intentional. This gives the iframe something that matches
+// the same look on failure regardless of which layer caught it.
+function trackerUnavailableHtml(): string {
+  return `<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{height:100%;margin:0;background:rgba(12,22,33,1);color:rgba(228,228,231,1);
+    font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  .wrap{height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;}
+  .msg{font-size:13px;font-weight:600;color:rgba(244,244,245,1);}
+</style></head>
+<body><div class="wrap"><div class="msg">Tracker indisponível neste momento.</div></div></body></html>`;
+}
+
 function getOriginFromRequest(req: Request): string | undefined {
   const origin = req.headers["origin"] || req.headers["referer"];
   if (typeof origin === "string" && origin.length > 0) {
@@ -260,10 +282,8 @@ router.get("/", async (req: Request, res: Response) => {
     return res.status(200).send(html);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return res
-      .status(502)
-      .type("text/plain")
-      .send(`Failed to proxy BetBY tracker (Bet62 bridge): ${msg}`);
+    logger.warn({ err: msg, finalBetbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
+    return res.status(502).type("text/html").send(trackerUnavailableHtml());
   }
 });
 
@@ -303,10 +323,8 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
     return res.status(200).send(html);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return res
-      .status(502)
-      .type("text/plain")
-      .send(`Failed to proxy BetBY tracker (Bet62 bridge): ${msg}`);
+    logger.warn({ err: msg, betbyEventId: req.params.betbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
+    return res.status(502).type("text/html").send(trackerUnavailableHtml());
   }
 });
 
