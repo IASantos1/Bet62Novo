@@ -4671,7 +4671,23 @@ function BetbyTrackerIframe({
     setReady(false);
   }, [finalUrl]);
 
-  const showLoading = (!ready || isFetching);
+  // Bug report 2026-08-13 ("fica assim é querendo carregar" — stuck on the
+  // loading spinner forever): the proxy route this iframe's src points at
+  // (fetchBetbyTrackerHtml) does its own upstream fetches with real
+  // timeouts, but an <iframe> only fires onLoad/onError once the browser
+  // gets a response at all — if the underlying request stalls (a slow or
+  // half-open upstream connection, a proxy hop that never completes) with
+  // neither event firing, ready never flips to true and the spinner has no
+  // way to ever clear on its own. A hard wall-clock cap here means a stuck
+  // load degrades to the same clear "Tracker indisponível" message a
+  // resolved failure already shows, instead of spinning indefinitely.
+  useEffect(() => {
+    if (!finalUrl || ready) return;
+    const t = setTimeout(() => setFailed(true), 12_000);
+    return () => clearTimeout(t);
+  }, [finalUrl, ready]);
+
+  const showLoading = (!ready || isFetching) && !failed;
 
   return (
     <div
