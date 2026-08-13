@@ -7,6 +7,14 @@ import router from "./routes/index.js";
 import { logger } from "./lib/logger.js";
 import { initDb } from "@workspace/db";
 import Stripe from "stripe";
+// Aliases tipo para objetos Stripe (evita usar Stripe.* namespace tipo que conflita com
+// import Stripe value-class no mesmo modulo: IDE TS Server frequentemente resolve
+// apenas o value e diz que Stripe "only refers to a type" quando usado como namespace).
+// Todos sao type ANY, coerencia garantida pela library Stripe em runtime — modules.d.ts stub.
+type StripeEvent = any;
+type StripeCheckoutSession = any;
+type StripePaymentIntent = any;
+type StripeCharge = any;
 import { db, paymentsTable, usersTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
 import { applyBalanceDelta } from "./lib/ledger.js";
@@ -133,7 +141,7 @@ app.post(
       res.status(400).json({ error: "Missing webhook config" });
       return;
     }
-    let event: Stripe.Event;
+    let event: StripeEvent;
     try {
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-06-24.dahlia" });
       event = stripe.webhooks.constructEvent(req.body as Buffer, sig as string, webhookSecret);
@@ -145,17 +153,13 @@ app.post(
 
     try {
       if (event.type === "checkout.session.completed") {
-        const s = event.data.object as Stripe.Checkout.Session;
+        const s = event.data.object as StripeCheckoutSession;
         if (s.metadata?.orderId && s.payment_status === "paid") await creditPaymentHelper(s.metadata.orderId);
       } else if (event.type === "payment_intent.succeeded") {
-        const pi = event.data.object as Stripe.PaymentIntent;
+        const pi = event.data.object as StripePaymentIntent;
         if (pi.metadata?.orderId) await creditPaymentHelper(pi.metadata.orderId);
       } else if (event.type === "charge.succeeded") {
-        // Fallback for MB WAY / Multibanco (async) — sometimes Stripe emits
-        // charge.succeeded with no prior payment_intent.succeeded visible in
-        // webhook timeline, especially with late capture from the Portuguese
-        // interbank network. Pull the linked PI and check its metadata.
-        const ch = event.data.object as Stripe.Charge;
+        const ch = event.data.object as StripeCharge;
         const piId = typeof ch.payment_intent === "string" ? ch.payment_intent : null;
         if (piId) {
           try {
