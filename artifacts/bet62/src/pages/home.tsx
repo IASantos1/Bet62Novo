@@ -4942,6 +4942,17 @@ export default function Home({
   const [casinoLaunchUrl, setCasinoLaunchUrl] = useState<string | null>(null);
   const [casinoLoadingGame, setCasinoLoadingGame] = useState<string | null>(null);
   const [casinoGames, setCasinoGames] = useState<CasinoGame[]>([]);
+  // Bug report 2026-08-13: casino tiles going blank instead of showing a
+  // game. Root cause: game.img comes straight from the Palace Casino
+  // aggregator's own CDN with no fallback — when a given URL 404s or the
+  // CDN hiccups, the <img>'s onError just set display:none on itself, and
+  // nothing else was in the DOM to take its place, leaving a truly blank
+  // card (border/background only, no icon, no name) that reads as "the
+  // app is broken" rather than "this one game's artwork is unavailable
+  // right now". Tracked by game id here (shared between the "Destaques"
+  // preview and the casino tab's own grid) so a failed load falls back to
+  // the same placeholder already used for game.img === null.
+  const [failedGameImgIds, setFailedGameImgIds] = useState<Set<string>>(new Set());
   // Small independent preview for the "Destaques" tab — deliberately its own
   // state/effect, never touches casinoGames (the casino tab's own data), so
   // this can't affect anything already working there.
@@ -22317,14 +22328,14 @@ export default function Home({
                               <div className="absolute inset-0 flex items-center justify-center">
                                 <RefreshCw className="animate-spin text-zinc-400" size={22} />
                               </div>
-                            ) : game.img ? (
+                            ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
                               <img
                                 src={game.img}
                                 alt={game.name}
                                 className="absolute inset-0 w-full h-full object-fill"
                                 loading="lazy"
-                                onError={(e) => {
-                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                onError={() => {
+                                  setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
                                 }}
                               />
                             ) : (
@@ -25947,7 +25958,7 @@ export default function Home({
                 >
                   {casinoLoadingGame === game.id ? (
                     <RefreshCw className="animate-spin text-zinc-400" size={28} />
-                  ) : game.img ? (
+                  ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
                     // Game artwork already has its title baked in — no
                     // overlay caption here, it only fought with that text
                     // and got cut off. Neither object-cover (crops to fill)
@@ -25964,8 +25975,8 @@ export default function Home({
                       className="absolute inset-0 w-full h-full object-fill"
                       style={{ filter: "url(#casino-art-sharpen)" }}
                       loading="lazy"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                      onError={() => {
+                        setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
                       }}
                     />
                   ) : (
