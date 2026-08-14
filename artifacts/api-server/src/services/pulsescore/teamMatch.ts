@@ -62,7 +62,7 @@ function slugifyTeamName(name: string): string {
 // tokens, since bwin sometimes uses the expanded form instead of the
 // abbreviation for lower-division clubs.
 const CLUB_TOKEN_RE =
-  /\b(fc|cf|ud|sc|ac|cd|afc|sad|se|cr|aa|ad|ce|ec|club|clube|futebol clube|esporte clube|clube atlético|clube atletico|sociedade esportiva|associação atlética|associacao atletica|clube de regatas|associação desportiva|associacao desportiva|f\.c\.|ca|fk|sk|cs|uc|ss|gks|kv)\b/gi;
+  /\b(fc|cf|ud|sc|ac|cd|afc|sad|se|cr|aa|ad|ce|ec|club|clube|futebol clube|esporte clube|clube atlético|clube atletico|sociedade esportiva|associação atlética|associacao atletica|clube de regatas|associação desportiva|associacao desportiva|f\.c\.|ca|fk|sk|cs|uc|ss|gks|kv|dr|dr\.|club\s+dr|club\s+doctor)\b/gi;
 function slugifyTeamNameStripped(name: string): string {
   const stripped = name.replace(CLUB_TOKEN_RE, " ").replace(/\s+/g, " ").trim();
   return slugifyTeamName(stripped || name);

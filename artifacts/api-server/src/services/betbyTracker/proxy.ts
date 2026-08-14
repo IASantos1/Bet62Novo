@@ -105,6 +105,18 @@ const MANUAL_TEAM_TO_STATSCORE_ID: Array<{ homeLike: RegExp; awayLike: RegExp; s
     statscoreId: "6670732",
     note: "Idem inverted home/away",
   },
+  {
+    homeLike: /fernando\s*de\s*la\s*mora|fernando\s+la\s+mora/i,
+    awayLike: /benjam[íi]n\s*aceval|dr\.?\s*benj|aceval/i,
+    statscoreId: "6693630",
+    note: "Paraguay División Intermedia 2026-08-14 Fernando de La Mora vs Club Dr. Benjamín Aceval (fixture api-football 1612422).",
+  },
+  {
+    homeLike: /benjam[íi]n\s*aceval|dr\.?\s*benj|aceval/i,
+    awayLike: /fernando\s*de\s*la\s*mora|fernando\s+la\s+mora/i,
+    statscoreId: "6693630",
+    note: "Idem inverted home/away",
+  },
 ];
 
 export function tryManualTeamStatscoreId(home?: string, away?: string): string | null {
