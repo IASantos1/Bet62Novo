@@ -4738,7 +4738,22 @@ function BetbyTrackerIframe({
         const useUpstream = hasRealStat && !!json.upstream;
         const finalIframeSrc: string | null = useUpstream ? json.upstream! : (json.proxy ?? null);
         if (!finalIframeSrc) return null;
-        return { ...json, finalIframeSrc } as typeof json & { ok: true; finalIframeSrc: string };
+        // isDirectUpstream = we're pointing the <iframe> straight at BetBY's
+        // own demoapi.betby.com HTML (NOT our proxied wrapper that injects
+        // the custom `bet62-betby-tracker` postMessage bridge). In this mode
+        // we cannot hear any resize/data/ready signals from inside the
+        // cross-origin iframe of a third party, so the "widget empty"
+        // detectors below would always fire a false positive after 7s/18s
+        // (gotRealResize would stay false forever) and kill the visible
+        // widget right when it finishes painting — the exact symptom the
+        // user reported: "the field's color showed, then it went black".
+        // The trade-off we accept here: we lose automatic "tracker
+        // indisponível" detection for this iframe, but in return we get the
+        // Statscore widget's real origin (demoapi.betby.com) where it is
+        // known to paint perfectly without the 0-byte origin block, so the
+        // user actually sees the green field instead of a dead fallback.
+        return { ...json, finalIframeSrc, isDirectUpstream: useUpstream } as
+          typeof json & { ok: true; finalIframeSrc: string; isDirectUpstream: boolean };
       } catch { return null; }
     },
     staleTime: 120_000,
@@ -4858,6 +4873,8 @@ function BetbyTrackerIframe({
   // real vindo do próprio widget (gotRealResize) — e as janelas de tempo
   // foram alargadas (4s→7s, 12s→18s) para dar folga a conexões mais
   // lentas antes de desistir.
+  const isDirectUpstream = !!urlInfo?.isDirectUpstream;
+
   useEffect(() => {
     if (!finalUrl || !ready || failed) return;
     const t = setTimeout(() => {
@@ -4865,19 +4882,22 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      // Bug report 2026-08-13 (sizing rounds): this used to also check the
-      // container's own rendered aspect ratio/height as a secondary signal
-      // — but now that the container is deliberately capped short
-      // (MINI_TRACKER_MAX_HEIGHT, see its own comment), its rendered shape
-      // no longer reflects whether the widget INSIDE actually rendered
-      // real content; that check would misfire constantly. gotRealResize
-      // is measured from the bridge's own resize report of the widget's
-      // natural (uncapped) height, still accurate regardless of how small
-      // we clip the outer box — it alone is the reliable signal now.
+      // Direct-upstream iframe src = demoapi.betby.com (third-party HTML, no
+      // custom `bet62-betby-tracker` postMessage bridge injected inside it).
+      // We cannot hear the widget's real resize signals from outside a
+      // cross-origin iframe we don't control, so `gotRealResize` would stay
+      // `false` forever here — triggering a guaranteed false positive that
+      // swaps the painted green field for a black "indisponível" fallback
+      // right at the 7s mark. Skip this check entirely in that mode; the
+      // widget is known to render correctly when served from its own real
+      // origin (the 0-byte origin block is the main reason we preferred it
+      // over the proxy path to begin with), and the user can see whether
+      // content loaded visually.
+      if (isDirectUpstream) return;
       if (!gotRealResize.current) setFailed(true);
     }, 7_000);
     return () => clearTimeout(t);
-  }, [finalUrl, ready, failed]);
+  }, [finalUrl, ready, failed, isDirectUpstream]);
 
   useEffect(() => {
     if (!finalUrl || failed) return;
@@ -4886,13 +4906,11 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      // See the 7s check above for why the old rect/aspect-ratio check was
-      // dropped — the container is now deliberately capped short, so its
-      // shape no longer says anything about whether the widget rendered.
+      if (isDirectUpstream) return;
       if (!gotRealResize.current) setFailed(true);
     }, 18_000);
     return () => clearTimeout(t);
-  }, [finalUrl, failed]);
+  }, [finalUrl, failed, isDirectUpstream]);
 
   const showLoading = (!ready || isFetching) && !failed;
   // Scale the whole widget down proportionally once we know its real
