@@ -4612,6 +4612,14 @@ class TrackerErrorBoundary extends Component<
 // Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
 // self-contained so its lifecycle (start/stop polling) doesn't entangle
 // with the rest of the page's state.
+// Bug report 2026-08-13 (2 rounds): "Mini Tracker" muito grande no
+// PWA/mobile — this is the shared ceiling for both the CSS clamp() (loading
+// state) and the JS resize handler's cap (once the widget reports its real,
+// much taller, native size). A single source of truth so the two can never
+// drift apart and visibly "jump" between a loading-state size and a
+// different loaded-state size.
+const MINI_TRACKER_MAX_HEIGHT = 260;
+
 function BetbyTrackerIframe({
   home,
   away,
@@ -4762,16 +4770,16 @@ function BetbyTrackerIframe({
             // heurística separa "pintou algo" de "ainda está preto vazio".
             if (h > 700) gotRealResize.current = true;
             containerRef.current.style.aspectRatio = "auto";
-            // Bug report 2026-08-13: "Mini Tracker" grande demais no PWA —
-            // aplicar a altura real do widget sem limite (900-1200px+ para
-            // alguns esportes) mantinha o box gigante mesmo depois de
-            // carregar com sucesso, não só durante o carregamento. Um
-            // "mini" tracker fica com teto fixo aqui; o widget interno
-            // continua no tamanho real dele (sem reflow, sem cortar
-            // conteúdo pela metade) — overflow:hidden no container só
-            // esconde a parte de baixo além do teto, em vez de forçar tudo
-            // a se espremer numa altura menor.
-            const MINI_TRACKER_MAX_HEIGHT = 420;
+            // Bug report 2026-08-13 (2 rounds): "Mini Tracker" grande demais
+            // no PWA/mobile — a primeira redução (teto 420px) ainda não foi
+            // suficiente pelo relato do usuário. Aplicar a altura real do
+            // widget sem limite (900-1200px+ para alguns esportes) mantinha
+            // o box gigante mesmo depois de carregar com sucesso, não só
+            // durante o carregamento. Teto reduzido para MINI_TRACKER_MAX_
+            // HEIGHT (compartilhado com o clamp() do container, mais
+            // abaixo) — o widget interno continua no tamanho real dele
+            // (sem reflow, sem cortar conteúdo pela metade), overflow:hidden
+            // no container só esconde a parte de baixo além do teto.
             containerRef.current.style.height = `${Math.min(Math.round(h), MINI_TRACKER_MAX_HEIGHT)}px`;
           }
           setReady(true);
@@ -4877,7 +4885,7 @@ function BetbyTrackerIframe({
         // telas curtas (PWA/mobile) sem nunca passar de 420px em telas
         // altas, mantendo folga suficiente pra não reintroduzir o corte
         // que motivou o piso em primeiro lugar.
-        minHeight: "clamp(280px, 42vh, 420px)",
+        minHeight: `clamp(190px, 26vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
         overflow: "hidden",
         borderRadius: 20,
         isolation: "isolate",
@@ -4911,7 +4919,7 @@ function BetbyTrackerIframe({
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
           className="w-full h-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", minHeight: "clamp(280px, 42vh, 420px)", zIndex: 1 }}
+          style={{ backgroundColor: "#18181b", minHeight: `clamp(190px, 26vh, ${MINI_TRACKER_MAX_HEIGHT}px)`, zIndex: 1 }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => {
             setReady(true);
