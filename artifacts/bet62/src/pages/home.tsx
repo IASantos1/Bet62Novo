@@ -523,6 +523,7 @@ type LiveTrackerEvent = {
   minute?: string;
   score: { home: number; away: number };
   tracker?: MatchTracker;
+  statscoreEventId?: string;
 };
 type CasinoBanner = {
   id: number;
@@ -4611,6 +4612,15 @@ class TrackerErrorBoundary extends Component<
 // Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
 // self-contained so its lifecycle (start/stop polling) doesn't entangle
 // with the rest of the page's state.
+// Bug report 2026-08-13 (3 rounds — 470 to 420 to 260 still "grande",
+// user asked to cut it further): "Mini Tracker" muito grande no PWA/mobile
+// — this is the shared ceiling for both the CSS clamp() (loading state) and
+// the JS resize handler's cap (once the widget reports its real, much
+// taller, native size). A single source of truth so the two can never drift
+// apart and visibly "jump" between a loading-state size and a different
+// loaded-state size.
+const MINI_TRACKER_MAX_HEIGHT = 180;
+
 function BetbyTrackerIframe({
   home,
   away,
@@ -4639,6 +4649,16 @@ function BetbyTrackerIframe({
   // → container fica VAZIO, cor de fundo = PRETO → o usuário vê "tela preta
   // sem conteúdo". Acionamos setFailed e mostramos a mensagem amigável.
   const gotRealResize = useRef(false);
+  // Bug report 2026-08-14: shrinking the box by capping its height with
+  // overflow:hidden alone doesn't actually shrink the WIDGET — it just
+  // clips the visible window down to whatever happens to be in the
+  // top-left corner of a much taller natural layout, which reads as
+  // "content stuck over to the left" (it's really just a crop, not a
+  // scaled-down view). naturalHeight (from the widget's own real resize
+  // report) drives a CSS transform: scale() on the iframe instead, so the
+  // whole widget shrinks proportionally and stays centered, rather than
+  // being cropped to one corner.
+  const [naturalHeight, setNaturalHeight] = useState<number | null>(null);
   // Guarda DATA.available=false do bridge: o widget Statscore EXPLICITOU
   // que não tem dados para esse evento → pula direto para indisponível.
   const dataExplicitUnavailable = useRef(false);
@@ -4701,6 +4721,7 @@ function BetbyTrackerIframe({
     // Reset flags do detector de widget vazio sempre que mudar o URL alvo
     gotRealResize.current = false;
     dataExplicitUnavailable.current = false;
+    setNaturalHeight(null);
   }, [finalUrl, queryError]);
 
   useEffect(() => {
@@ -4754,14 +4775,13 @@ function BetbyTrackerIframe({
         }
         if (type === "resize") {
           const h = Number(payload.height);
-          if (Number.isFinite(h) && h > 100 && containerRef.current) {
-            // Alturas < 700px quase sempre são o nosso fallback inicial
-            // 470px, NÃO UM RESIZE REAL do widget Statscore com dados.
-            // Widgets reais de futebol são > 900px, tênis/vôlei > 1200px.
-            // Essa heurística separa "pintou algo" de "ainda está preto vazio".
+          if (Number.isFinite(h) && h > 100) {
+            // Alturas < 700px quase sempre são o nosso fallback inicial,
+            // NÃO UM RESIZE REAL do widget Statscore com dados. Widgets
+            // reais de futebol são > 900px, tênis/vôlei > 1200px — essa
+            // heurística separa "pintou algo" de "ainda está preto vazio".
             if (h > 700) gotRealResize.current = true;
-            containerRef.current.style.aspectRatio = "auto";
-            containerRef.current.style.height = `${Math.round(h)}px`;
+            setNaturalHeight(Math.round(h));
           }
           setReady(true);
           return;
@@ -4788,23 +4808,23 @@ function BetbyTrackerIframe({
 
   // ──────────────────────────────────────────────────────────────────
   // DETECTOR DE WIDGET VAZIO (TELA PRETA SEM CONTEÚDO, sem dados Statscore)
-  // Sintoma do usuário: "ERRO SAIU, FICOU COM A IMAGEM DO TRACKER PRETO".
   //
-  // Cenário que causa isso:
-  //   resolveStatscoreEventIdFromBetby() → null → fallback smart usa
-  //   BetbyID numérico como StatscoreID → Widget Statscore recebe ID
-  //   inválido → NÃO RENDERIZA NADA, nem manda DATA.available=false,
-  //   container fica VAZIO, cor do fundo = preto → parece "tela preta".
-  //
-  // Estratégia (MÚLTIPLOS FALLBACKS, nenhum depende só de ready):
-  //   (A) 4s APÓS ficar ready, checa flags → widget que carregou rápido
-  //   (B) WALL-CLOCK ABSOLUTO 12s APÓS montar finalUrl → NÃO DEPENDE de
-  //       ready ser true. Se até 12s não pintou nada (nenhum resize real
-  //       > 700), setFailed — resolve cenários onde bridge nunca enviou
-  //       ready (por ex: network stall)
-  //   Em ambas as checagens:
-  //     * dataExplicitUnavailable=true (DATA.available=false) → falha
-  //     * Nenhum resize > 700 E container ainda aspect 16/9 E h<700 → falha
+  // Bug report 2026-08-13: o widget carregava, mostrava um pedaço real do
+  // mini-campo, e voltava pra tela preta sozinho. Causa: esta checagem
+  // usava innerText.length < 50 como sinal de "widget vazio" — mas o
+  // mini-campo é majoritariamente gráfico (campo, bolinha, escudos via
+  // SVG/canvas), então tem pouco texto mesmo quando está renderizando
+  // PERFEITAMENTE. Um checador de 1.5s (removido) e este de 4s ainda
+  // rodavam ANTES do widget terminar de montar em conexões normais,
+  // confundindo "ainda carregando" com "vazio de vez" — e, como não há
+  // como reverter failed=true depois, a primeira falsa-alarme matava o
+  // iframe pra sempre mesmo que o widget fosse terminar de carregar 1s
+  // depois. Removido o check de innerText; agora só os dois sinais
+  // realmente confiáveis contam: o bridge dizendo explicitamente que não
+  // há dados (dataExplicitUnavailable) e a ausência de qualquer resize
+  // real vindo do próprio widget (gotRealResize) — e as janelas de tempo
+  // foram alargadas (4s→7s, 12s→18s) para dar folga a conexões mais
+  // lentas antes de desistir.
   useEffect(() => {
     if (!finalUrl || !ready || failed) return;
     const t = setTimeout(() => {
@@ -4812,26 +4832,17 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      // (MESMA ORIGEM) Detector infalível 1: acessa DOM do iframe diretamente
-      // (proxy é mesma origem bet62.plus/api/betby-live-tracker → cross-origin
-      // NAO BLOQUEIA accesso a contentDocument). Se innerText do body é
-      // curto demais (< 50 chars) → widget Statscore VAZIO sem conteúdo.
-      try {
-        const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
-        if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
-          setFailed(true);
-          return;
-        }
-      } catch (_) { /* cross-origin raro, ignora */ }
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
-        const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if ((stillFixedAspect && rect.height < 700) || rect.height < 300) {
-          setFailed(true);
-        }
-      }
-    }, 4_000);
+      // Bug report 2026-08-13 (sizing rounds): this used to also check the
+      // container's own rendered aspect ratio/height as a secondary signal
+      // — but now that the container is deliberately capped short
+      // (MINI_TRACKER_MAX_HEIGHT, see its own comment), its rendered shape
+      // no longer reflects whether the widget INSIDE actually rendered
+      // real content; that check would misfire constantly. gotRealResize
+      // is measured from the bridge's own resize report of the widget's
+      // natural (uncapped) height, still accurate regardless of how small
+      // we clip the outer box — it alone is the reliable signal now.
+      if (!gotRealResize.current) setFailed(true);
+    }, 7_000);
     return () => clearTimeout(t);
   }, [finalUrl, ready, failed]);
 
@@ -4842,26 +4853,21 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      try {
-        const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
-        if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
-          setFailed(true);
-          return;
-        }
-      } catch (_) { /* ignora cross-origin raro */ }
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
-        const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if (stillFixedAspect || rect.height < 700) {
-          setFailed(true);
-        }
-      }
-    }, 12_000);
+      // See the 7s check above for why the old rect/aspect-ratio check was
+      // dropped — the container is now deliberately capped short, so its
+      // shape no longer says anything about whether the widget rendered.
+      if (!gotRealResize.current) setFailed(true);
+    }, 18_000);
     return () => clearTimeout(t);
   }, [finalUrl, failed]);
 
   const showLoading = (!ready || isFetching) && !failed;
+  // Scale the whole widget down proportionally once we know its real
+  // height, instead of the container's overflow:hidden clipping whatever
+  // happens to be in its top-left corner (see naturalHeight's own comment).
+  const iframeScale = naturalHeight && naturalHeight > MINI_TRACKER_MAX_HEIGHT
+    ? MINI_TRACKER_MAX_HEIGHT / naturalHeight
+    : 1;
 
   return (
     <div
@@ -4870,17 +4876,33 @@ function BetbyTrackerIframe({
       style={{
         aspectRatio,
         position: "relative",
+        // Bug report 2026-08-14: box reads as shifted toward the left edge
+        // instead of centered/filling its card. Neither call site passes a
+        // className, so this div had no explicit width at all — a block
+        // element with no width set should default to filling its parent,
+        // but the maxHeight cap above makes the box shorter and wider than
+        // its aspectRatio (see that comment), which is exactly the kind of
+        // layout this element was never explicitly tested to hold. Setting
+        // width/display explicitly removes any ambiguity instead of
+        // relying on block-level defaults still holding under that shape.
+        display: "block",
+        width: "100%",
         // ── BUG FIX 2026-08-13 (TELA PRETA) ──────────────────────────
-        // Antes: minHeight só no iframe FILHO, não no container PAI.
-        // Container pai usava só aspectRatio "16 / 9" → altura ~220px
-        // no mobile. Overflow clip CORTAVA os 250px INFERIORES do iframe
-        // (que tinha minHeight 470px) → só aparecia topo PRETO VAZIO
-        // (o conteúdo do Statscore começa no meio). Resultado: usuário
-        // via "tracker preto sem conteúdo", achava quebrado.
-        // Agora: minHeight no CONTAINER PAI também, GARANTINDO que o
-        // widget não seja cortado, MESMO que nenhum postMessage de
-        // resize chegue a tempo.
-        minHeight: 470,
+        // Container pai precisa de um piso de altura (não só aspectRatio
+        // 16/9, que dá ~220px no mobile) para não cortar o meio do widget
+        // antes de qualquer resize real chegar — ver histórico desta
+        // constante para o porquê original de 470px fixo.
+        minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+        // ── BUG FIX 2026-08-13, rounds 2-4 ("Mini Tracker ainda grande")
+        // Reducing minHeight alone never actually shrank anything: it's a
+        // FLOOR, and aspectRatio ("16 / 9") was still computing a taller
+        // height at typical mobile container widths (~380px wide → ~214px
+        // tall from aspect-ratio ALONE, before minHeight even entered the
+        // picture) — so every earlier minHeight reduction this round was
+        // fighting a constraint that wasn't the actual bottleneck. maxHeight
+        // is a real ceiling regardless of what aspectRatio computes; this is
+        // what actually makes the box small on mobile/PWA.
+        maxHeight: MINI_TRACKER_MAX_HEIGHT,
         overflow: "hidden",
         borderRadius: 20,
         isolation: "isolate",
@@ -4913,23 +4935,36 @@ function BetbyTrackerIframe({
           key={finalUrl}
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
-          className="w-full h-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", minHeight: 470, zIndex: 1 }}
+          className="w-full border-0 block relative"
+          style={{
+            backgroundColor: "#18181b",
+            zIndex: 1,
+            // Before the widget's real height is known: fill the container
+            // normally (same as before), clipped by its overflow:hidden —
+            // there's nothing to scale yet. Once naturalHeight arrives, the
+            // iframe is laid out at its OWN true height (not clipped) and
+            // visually shrunk with transform: scale() instead, so the whole
+            // widget shrinks proportionally and stays centered rather than
+            // being cropped to whatever's in the top-left corner of a much
+            // taller layout. transform doesn't affect how the *parent*
+            // computes overflow — a descendant's PAINTED (post-transform)
+            // bounds are what gets clipped, so a widget scaled down to
+            // exactly fill the container's fixed height needs no clipping
+            // at all once naturalHeight is set.
+            ...(naturalHeight
+              ? {
+                  height: `${naturalHeight}px`,
+                  transform: `scale(${iframeScale})`,
+                  transformOrigin: "top center",
+                }
+              : {
+                  height: "100%",
+                  minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+                }),
+          }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => {
             setReady(true);
-            // (MESMA ORIGEM) Detector rápido pós-onLoad: se iframe carregou mas
-            // body.innerText < 50 chars = widget Statscore VAZIO (ID invalido)
-            // Marca falha em 1.5s sem esperar os 4/12s dos detectors gerais.
-            const fastTimer = window.setTimeout(() => {
-              try {
-                const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
-                if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
-                  setFailed(true);
-                }
-              } catch (_) { /* noop cross-origin raro */ }
-            }, 1500);
-            (iframeRef.current as HTMLIFrameElement | null)?.addEventListener?.("load", () => window.clearTimeout(fastTimer), { once: true });
           }}
           onError={() => setFailed(true)}
           referrerPolicy="strict-origin-when-cross-origin"

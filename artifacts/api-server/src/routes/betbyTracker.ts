@@ -190,24 +190,51 @@ router.get("/url", async (req: Request, res: Response) => {
         ? req.query.sportId
         : "1";
     const parentOrigin = getOriginFromRequest(req) ?? "*";
+
+    // P0 + P1: Resolve Statscore PRIMEIRO, completamente independente de BetBY
     const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
       ? req.query.statscoreEventId.trim()
       : null;
-    const rawHome = typeof req.query.home === "string" ? req.query.home : "";
-    const rawAway = typeof req.query.away === "string" ? req.query.away : "";
+    const homeForResolve = typeof req.query.home === "string" ? req.query.home.trim() : "";
+    const awayForResolve = typeof req.query.away === "string" ? req.query.away.trim() : "";
     let finalStatscoreEventId: string | null = explicitStatscoreId;
-    if (!finalStatscoreEventId && rawHome && rawAway) {
-      const manual = tryManualTeamStatscoreId(rawHome, rawAway);
-      if (manual) finalStatscoreEventId = manual;
-    }
-    const hasRealStatscore = finalStatscoreEventId != null && finalStatscoreEventId.length >= 4;
 
+    // Bug found 2026-08-14 auditing every BetBY URL config end-to-end: this
+    // route bakes finalStatscoreEventId into the proxy URL it returns, and
+    // once that URL is built with SOME value (real or the wrong-ID fallback
+    // below), fetchBetbyTrackerHtml's "SHORTCUT PRIORIDADE 0" treats whatever
+    // arrives on the query string as already-resolved and never re-checks
+    // anything — including tryManualTeamStatscoreId (the Mirassol/LDU
+    // hand-mapped override). Since THIS route never consulted that table
+    // itself, a match covered by the manual map but not by automatic
+    // resolution had its correct ID silently overridden by the wrong-ID
+    // fallback below before the manual map ever got a chance to run — making
+    // that override effectively dead code for any request that goes through
+    // the normal /url → <iframe src> flow (which is all of them). Checking
+    // it here, in the same priority slot fetchBetbyTrackerHtml itself uses,
+    // is what actually makes it apply.
+    if (!finalStatscoreEventId && (homeForResolve || awayForResolve)) {
+      finalStatscoreEventId = tryManualTeamStatscoreId(homeForResolve, awayForResolve);
+    }
+
+    const hasRealStatscore = finalStatscoreEventId != null && finalStatscoreEventId.length >= 4;
+    // Guard CRITICO: se jah temos statscore REAL (explicito ou mapa manual)
+    // ANTES de tentar BetBY, NUNCA sobrescrevemos com fallback smart BetBY
+    // ID (pois ele sempre sera ~19 digitos, = HTTP 404 no widgets.statscore).
+    const hadRealStatscoreBeforeResolve = hasRealStatscore;
+
+    // BetBY é OPCIONAL: só resolve se tivermos inputs mínimos PARA BetBY,
+    // ou se realmente precisamos (nenhum statscore ainda). Se temos
+    // hasRealStatscore=true E NÃO tem nada p/ BetBY, PULA completamente,
+    // NÃO retorna erro 400/404 BetBY. Isso permite URLs como
+    // /url?statscoreEventId=6479574 sem home/away/betbyEventId.
     let finalBetbyEventId: string | null = null;
     let betbyError: { code: number; msg: string } | null = null;
     const hasMinimumForBetbyResolve = !!(
       (typeof req.query.betbyEventId === "string" && req.query.betbyEventId.trim().length >= 4) ||
-      (rawHome && rawAway)
+      (homeForResolve && awayForResolve)
     );
+
     if (hasMinimumForBetbyResolve || !hasRealStatscore) {
       try {
         const resolved = await resolveFinalBetbyEventId(req);
@@ -217,6 +244,10 @@ router.get("/url", async (req: Request, res: Response) => {
         betbyError = { code: 500, msg: "resolveFinalBetbyEventId threw" };
       }
     }
+
+    // Erro BetBY SÓ interrompe pipeline se NÃO temos statscore real ainda
+    // (pois aí realmente precisamos). Se já temos statscore, ignoramos o erro
+    // BetBY (é opcional).
     if (!hasRealStatscore && betbyError) {
       return res.status(200).json({
         ok: false,
@@ -231,7 +262,8 @@ router.get("/url", async (req: Request, res: Response) => {
       });
     }
 
-    const hadRealStatscoreBeforeResolve = hasRealStatscore;
+    // P3: Resolução automática BetBY → Statscore (só se temos BetBY ID e
+    // ainda não temos statscore real)
     if (!finalStatscoreEventId && finalBetbyEventId) {
       try {
         finalStatscoreEventId = await Promise.race([
@@ -240,15 +272,22 @@ router.get("/url", async (req: Request, res: Response) => {
         ]) as string | null;
       } catch (_) { finalStatscoreEventId = null; }
     }
+
+    // Fallback SMART BetBY ID: SÓ usa se NENHUM caminho P0-P3 deu resultado
+    // (nem explícito, nem mapa manual, nem Betby→Statscore). E NUNCA se
+    // hadRealStatscoreBeforeResolve=true (esse é o guard do bug anterior
+    // onde Mirassol/LDU=6670732 perdia para BetBY ID 19 dígitos).
     let usedFallbackSmartBetbyId = false;
     if (!finalStatscoreEventId && finalBetbyEventId && !hadRealStatscoreBeforeResolve) {
       finalStatscoreEventId = finalBetbyEventId;
       usedFallbackSmartBetbyId = true;
     }
+
+    // Nada deu? → 404, mensagem clara (não fala só de BetBY, já que BetBY é opcional)
     if (!finalStatscoreEventId) {
       return res.status(200).json({
         ok: false,
-        error: "Could not resolve either a BetBY event mapping or a valid Statscore event ID for this match.",
+        error: "Could not resolve either a BetBY event mapping or a valid Statscore event ID for this match. Try passing ?statscoreEventId=XXXXXXX explicitly.",
         errorCode: 404,
         upstream: null,
         proxy: null,
@@ -259,6 +298,9 @@ router.get("/url", async (req: Request, res: Response) => {
       });
     }
 
+    // Construção URLs: finalBetbyEventId PODE ser null quando temos só
+    // statscore; usa placeholder onde necessário (buildBetbyTrackerPublicUrl
+    // aceita undefined betbyEventId, proxy usa rota sem path param /:id)
     const publicDirectUrl = buildBetbyTrackerPublicUrl({
       betbyEventId: finalBetbyEventId ?? undefined,
       statscoreEventId: finalStatscoreEventId ?? undefined,
@@ -270,12 +312,33 @@ router.get("/url", async (req: Request, res: Response) => {
       ? `${apiBase}/api/betby-live-tracker/${encodeURIComponent(finalBetbyEventId)}?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`
       : `${apiBase}/api/betby-live-tracker?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`;
     if (finalStatscoreEventId) proxyUrl += `&statscoreEventId=${encodeURIComponent(finalStatscoreEventId)}`;
+    const rawHome = typeof req.query.home === "string" ? req.query.home : "";
+    const rawAway = typeof req.query.away === "string" ? req.query.away : "";
     if (rawHome) proxyUrl += `&home=${encodeURIComponent(rawHome)}`;
     if (rawAway) proxyUrl += `&away=${encodeURIComponent(rawAway)}`;
-    if (finalBetbyEventId) void resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null);
+
+    if (finalBetbyEventId) {
+      void resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null);
+      return res.status(200).json({
+        ok: true,
+        finalBetbyEventId,
+        finalStatscoreEventId,
+        usedFallbackSmartBetbyId,
+        upstream: publicDirectUrl,
+        direct: true,
+        lang,
+        sportId,
+        parentOrigin,
+        proxy: proxyUrl,
+        pulseSse: `${apiBase}/api/pulsebridge/betby/${encodeURIComponent(finalBetbyEventId)}`,
+      });
+    }
+
+    // Sem BetBY ID (só temos statscore): pulseSse fica null (BetBY pulse
+    // precisa de BetbyEventId; Statscore widget usa seu próprio SSE interno).
     return res.status(200).json({
       ok: true,
-      finalBetbyEventId,
+      finalBetbyEventId: null,
       finalStatscoreEventId,
       usedFallbackSmartBetbyId,
       upstream: publicDirectUrl,
@@ -284,9 +347,7 @@ router.get("/url", async (req: Request, res: Response) => {
       sportId,
       parentOrigin,
       proxy: proxyUrl,
-      pulseSse: finalBetbyEventId
-        ? `${apiBase}/api/pulsebridge/betby/${encodeURIComponent(finalBetbyEventId)}`
-        : null,
+      pulseSse: null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -311,86 +372,94 @@ router.get("/", async (req: Request, res: Response) => {
   const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
     ? req.query.sportId
     : "1";
+  // P0 + P1 (igual /url endpoint): resolve Statscore PRIMEIRO, totalmente independente de BetBY
   const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
     ? req.query.statscoreEventId.trim()
     : null;
   const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
   const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
   let finalStatscoreEventId: string | null = explicitStatscoreId;
-  if (!finalStatscoreEventId && queryHome && queryAway) {
-    const manual = tryManualTeamStatscoreId(queryHome, queryAway);
-    if (manual) finalStatscoreEventId = manual;
+  // mesmo fix do /url endpoint: tryManualTeamStatscoreId AQUI antes de qualquer outra coisa,
+  // senão fetchBetbyTrackerHtml shortcut P0 iria aceitar só o statscoreEventId do query param
+  // e ignorar mapa manual (dead code).
+  if (!finalStatscoreEventId && (queryHome || queryAway)) {
+    finalStatscoreEventId = tryManualTeamStatscoreId(queryHome, queryAway);
   }
   const hasRealStatscore = finalStatscoreEventId != null && finalStatscoreEventId.length >= 4;
+
   let finalBetbyEventId: string | null = null;
-  let betbyResolveFailed = false;
+  let betbyError: { code: number; msg: string } | null = null;
+  const hasMinimumForBetbyResolve = !!(
+    (typeof req.query.betbyEventId === "string" && req.query.betbyEventId.trim().length >= 4) ||
+    (queryHome && queryAway)
+  );
+
   try {
-    const resolved = await resolveFinalBetbyEventId(req);
-    if (!resolved.error) finalBetbyEventId = resolved.finalBetbyEventId ?? null;
-    else betbyResolveFailed = true;
-    if (resolved.error && !hasRealStatscore) {
-      return res
-        .status(200)
-        .type("text/plain")
-        .send(resolved.error.msg);
+    // BetBY é OPCIONAL aqui também: só resolve se tem mínimo necessário OU se
+    // realmente precisamos (sem statscore real ainda).
+    if (hasMinimumForBetbyResolve || !hasRealStatscore) {
+      try {
+        const resolved = await resolveFinalBetbyEventId(req);
+        if (!resolved.error) finalBetbyEventId = resolved.finalBetbyEventId ?? null;
+        else betbyError = resolved.error;
+      } catch (_) {
+        betbyError = { code: 500, msg: "resolveFinalBetbyEventId threw" };
+      }
     }
+
+    // Só aborta com erro BetBY se NÃO temos statscore real válido.
+    // Se temos statscore real mesmo sem BetBY, continuamos o pipeline.
+    if (!hasRealStatscore && betbyError) {
+      // Se temos statscore de qualquer forma mas BetBY falhou, redirect client-side
+      // em vez de text/plain erro (igual /url). Se NÃO tem nada, text/plain erro.
+      if (!hasRealStatscore) {
+        return res
+          .status(200)
+          .type("text/plain")
+          .send(betbyError.msg);
+      }
+    }
+
     const parentOrigin = getOriginFromRequest(req) ?? "*";
+    // meta só existe se tivermos BetBY ID válido
     const meta = finalBetbyEventId
       ? await resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null)
       : null;
+    // BetbyEventId placeholder "0" é aceito por buildBetbyTrackerUpstreamUrl
+    // quando temos statscoreEventId real (widget Statscore só olha providers.eventId)
+    const safeBetbyId = finalBetbyEventId ?? "0";
     const upstreamPreview = buildBetbyTrackerUpstreamUrl({
-      betbyEventId: finalBetbyEventId ?? "0",
+      betbyEventId: safeBetbyId,
       statscoreEventId: finalStatscoreEventId ?? undefined,
       lang,
       sportId,
     });
-    const htmlAndUpstream = finalBetbyEventId || finalStatscoreEventId
-      ? await fetchBetbyTrackerHtml({
-          betbyEventId: finalBetbyEventId ?? "0",
-          statscoreEventId: finalStatscoreEventId ?? undefined,
-          homeTeamName: meta?.homeName || queryHome || undefined,
-          awayTeamName: meta?.awayName || queryAway || undefined,
-          lang,
-          sportId,
-          theme: DEFAULT_THEME,
-          parentOrigin,
-        })
-      : null;
-    if (htmlAndUpstream) {
-      res.set({
-        ...BETBY_TRACKER_RESPONSE_HEADERS,
-        "X-Bet62-Upstream": upstreamPreview,
-        "X-Bet62-Upstream-Real": htmlAndUpstream.upstreamUrl,
-      });
-      return res.status(200).send(htmlAndUpstream.html);
-    }
-    if (hasRealStatscore) {
-      const u = buildBetbyTrackerUpstreamUrl({ betbyEventId: "0", statscoreEventId: finalStatscoreEventId!, lang, sportId });
-      res.set(BETBY_TRACKER_RESPONSE_HEADERS);
-      return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
-    }
-    return res.status(200).type("text/html").send(trackerUnavailableHtml());
+    const { html, upstreamUrl } = await fetchBetbyTrackerHtml({
+      betbyEventId: safeBetbyId,
+      statscoreEventId: finalStatscoreEventId ?? undefined,
+      homeTeamName: meta?.homeName || queryHome || undefined,
+      awayTeamName: meta?.awayName || queryAway || undefined,
+      lang,
+      sportId,
+      theme: DEFAULT_THEME,
+      parentOrigin,
+    });
+    res.set({
+      ...BETBY_TRACKER_RESPONSE_HEADERS,
+      "X-Bet62-Upstream": upstreamPreview,
+      "X-Bet62-Upstream-Real": upstreamUrl,
+    });
+    return res.status(200).send(html);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg }, "[betbyTracker] / handler failed");
-    if ((explicitStatscoreId || finalStatscoreEventId) && (finalBetbyEventId || hasRealStatscore)) {
+    // Mesmo em catch, se temos finalStatscoreEventId REAL → redirect client-side
+    // para upstream BetBY (demoapi.betby.com) com placeholder betbyEventId="0".
+    if (finalStatscoreEventId) {
       try {
-        const statForRedirect = finalStatscoreEventId || explicitStatscoreId!;
         const u = buildBetbyTrackerUpstreamUrl({
           betbyEventId: finalBetbyEventId ?? "0",
-          statscoreEventId: statForRedirect,
-          lang,
-          sportId,
-        });
-        res.set(BETBY_TRACKER_RESPONSE_HEADERS);
-        return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
-      } catch (_) {}
-    }
-    if (hasRealStatscore) {
-      try {
-        const u = buildBetbyTrackerUpstreamUrl({
-          betbyEventId: "0",
-          statscoreEventId: finalStatscoreEventId!,
+          statscoreEventId: finalStatscoreEventId,
           lang,
           sportId,
         });
@@ -410,29 +479,38 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
     ? req.query.sportId
     : "1";
+  const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
+  const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
+
+  // P0 + P1 (igual rotas /url e /): Statscore PRIMEIRO, explícito ou mapa manual.
+  // Mesma correção de dead code do mapa manual (tryManualTeamStatscoreId AQUI,
+  // antes de shortcut P0 de fetchBetbyTrackerHtml).
   const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
     ? req.query.statscoreEventId.trim()
     : null;
+  let finalStatscoreEventId: string | null = explicitStatscoreId;
+  if (!finalStatscoreEventId && (queryHome || queryAway)) {
+    finalStatscoreEventId = tryManualTeamStatscoreId(queryHome, queryAway);
+  }
+
   try {
     if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {
       return res.status(200).type("text/plain").send("Invalid betbyEventId (expected numeric id)");
     }
-    const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
-    const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
     const parentOrigin = getOriginFromRequest(req) ?? "*";
 
     const meta = await resolveBetbyMatchMeta(betbyEventId, 3500).catch(() => null);
 
     const upstreamPreview = buildBetbyTrackerUpstreamUrl({
       betbyEventId,
-      statscoreEventId: explicitStatscoreId ?? undefined,
+      statscoreEventId: finalStatscoreEventId ?? undefined,
       lang,
       sportId,
     });
 
     const { html, upstreamUrl } = await fetchBetbyTrackerHtml({
       betbyEventId,
-      statscoreEventId: explicitStatscoreId ?? undefined,
+      statscoreEventId: finalStatscoreEventId ?? undefined,
       homeTeamName: meta?.homeName || queryHome || undefined,
       awayTeamName: meta?.awayName || queryAway || undefined,
       lang,
@@ -450,9 +528,11 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg, betbyEventId: req.params.betbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
-    if (explicitStatscoreId && betbyEventId && /^\d+$/.test(betbyEventId) && betbyEventId.length >= 6) {
+    // Nessa rota SEMPRE temos betbyEventId no path param; se temos statscoreEventId
+    // (explícito ou mapa manual) → redirect client-side bypass WAF.
+    if (finalStatscoreEventId && /^\d+$/.test(betbyEventId) && betbyEventId.length >= 6) {
       try {
-        const u = buildBetbyTrackerUpstreamUrl({ betbyEventId, statscoreEventId: explicitStatscoreId, lang, sportId });
+        const u = buildBetbyTrackerUpstreamUrl({ betbyEventId, statscoreEventId: finalStatscoreEventId, lang, sportId });
         res.set(BETBY_TRACKER_RESPONSE_HEADERS);
         return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
       } catch (_) {}
