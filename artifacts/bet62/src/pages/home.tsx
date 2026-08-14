@@ -4756,13 +4756,23 @@ function BetbyTrackerIframe({
         if (type === "resize") {
           const h = Number(payload.height);
           if (Number.isFinite(h) && h > 100 && containerRef.current) {
-            // Alturas < 700px quase sempre são o nosso fallback inicial
-            // 470px, NÃO UM RESIZE REAL do widget Statscore com dados.
-            // Widgets reais de futebol são > 900px, tênis/vôlei > 1200px.
-            // Essa heurística separa "pintou algo" de "ainda está preto vazio".
+            // Alturas < 700px quase sempre são o nosso fallback inicial,
+            // NÃO UM RESIZE REAL do widget Statscore com dados. Widgets
+            // reais de futebol são > 900px, tênis/vôlei > 1200px — essa
+            // heurística separa "pintou algo" de "ainda está preto vazio".
             if (h > 700) gotRealResize.current = true;
             containerRef.current.style.aspectRatio = "auto";
-            containerRef.current.style.height = `${Math.round(h)}px`;
+            // Bug report 2026-08-13: "Mini Tracker" grande demais no PWA —
+            // aplicar a altura real do widget sem limite (900-1200px+ para
+            // alguns esportes) mantinha o box gigante mesmo depois de
+            // carregar com sucesso, não só durante o carregamento. Um
+            // "mini" tracker fica com teto fixo aqui; o widget interno
+            // continua no tamanho real dele (sem reflow, sem cortar
+            // conteúdo pela metade) — overflow:hidden no container só
+            // esconde a parte de baixo além do teto, em vez de forçar tudo
+            // a se espremer numa altura menor.
+            const MINI_TRACKER_MAX_HEIGHT = 420;
+            containerRef.current.style.height = `${Math.min(Math.round(h), MINI_TRACKER_MAX_HEIGHT)}px`;
           }
           setReady(true);
           return;
@@ -4789,23 +4799,23 @@ function BetbyTrackerIframe({
 
   // ──────────────────────────────────────────────────────────────────
   // DETECTOR DE WIDGET VAZIO (TELA PRETA SEM CONTEÚDO, sem dados Statscore)
-  // Sintoma do usuário: "ERRO SAIU, FICOU COM A IMAGEM DO TRACKER PRETO".
   //
-  // Cenário que causa isso:
-  //   resolveStatscoreEventIdFromBetby() → null → fallback smart usa
-  //   BetbyID numérico como StatscoreID → Widget Statscore recebe ID
-  //   inválido → NÃO RENDERIZA NADA, nem manda DATA.available=false,
-  //   container fica VAZIO, cor do fundo = preto → parece "tela preta".
-  //
-  // Estratégia (MÚLTIPLOS FALLBACKS, nenhum depende só de ready):
-  //   (A) 4s APÓS ficar ready, checa flags → widget que carregou rápido
-  //   (B) WALL-CLOCK ABSOLUTO 12s APÓS montar finalUrl → NÃO DEPENDE de
-  //       ready ser true. Se até 12s não pintou nada (nenhum resize real
-  //       > 700), setFailed — resolve cenários onde bridge nunca enviou
-  //       ready (por ex: network stall)
-  //   Em ambas as checagens:
-  //     * dataExplicitUnavailable=true (DATA.available=false) → falha
-  //     * Nenhum resize > 700 E container ainda aspect 16/9 E h<700 → falha
+  // Bug report 2026-08-13: o widget carregava, mostrava um pedaço real do
+  // mini-campo, e voltava pra tela preta sozinho. Causa: esta checagem
+  // usava innerText.length < 50 como sinal de "widget vazio" — mas o
+  // mini-campo é majoritariamente gráfico (campo, bolinha, escudos via
+  // SVG/canvas), então tem pouco texto mesmo quando está renderizando
+  // PERFEITAMENTE. Um checador de 1.5s (removido) e este de 4s ainda
+  // rodavam ANTES do widget terminar de montar em conexões normais,
+  // confundindo "ainda carregando" com "vazio de vez" — e, como não há
+  // como reverter failed=true depois, a primeira falsa-alarme matava o
+  // iframe pra sempre mesmo que o widget fosse terminar de carregar 1s
+  // depois. Removido o check de innerText; agora só os dois sinais
+  // realmente confiáveis contam: o bridge dizendo explicitamente que não
+  // há dados (dataExplicitUnavailable) e a ausência de qualquer resize
+  // real vindo do próprio widget (gotRealResize) — e as janelas de tempo
+  // foram alargadas (4s→7s, 12s→18s) para dar folga a conexões mais
+  // lentas antes de desistir.
   useEffect(() => {
     if (!finalUrl || !ready || failed) return;
     const t = setTimeout(() => {
@@ -4813,26 +4823,16 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      // (MESMA ORIGEM) Detector infalível 1: acessa DOM do iframe diretamente
-      // (proxy é mesma origem bet62.plus/api/betby-live-tracker → cross-origin
-      // NAO BLOQUEIA accesso a contentDocument). Se innerText do body é
-      // curto demais (< 50 chars) → widget Statscore VAZIO sem conteúdo.
-      try {
-        const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
-        if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
-          setFailed(true);
-          return;
-        }
-      } catch (_) { /* cross-origin raro, ignora */ }
+      if (gotRealResize.current) return;
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
         const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if ((stillFixedAspect && rect.height < 700) || rect.height < 300) {
+        if (stillFixedAspect && rect.height < 300) {
           setFailed(true);
         }
       }
-    }, 4_000);
+    }, 7_000);
     return () => clearTimeout(t);
   }, [finalUrl, ready, failed]);
 
@@ -4843,22 +4843,16 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      try {
-        const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
-        if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
-          setFailed(true);
-          return;
-        }
-      } catch (_) { /* ignora cross-origin raro */ }
+      if (gotRealResize.current) return;
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
         const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if (stillFixedAspect || rect.height < 700) {
+        if (stillFixedAspect && rect.height < 300) {
           setFailed(true);
         }
       }
-    }, 12_000);
+    }, 18_000);
     return () => clearTimeout(t);
   }, [finalUrl, failed]);
 
@@ -4872,16 +4866,18 @@ function BetbyTrackerIframe({
         aspectRatio,
         position: "relative",
         // ── BUG FIX 2026-08-13 (TELA PRETA) ──────────────────────────
-        // Antes: minHeight só no iframe FILHO, não no container PAI.
-        // Container pai usava só aspectRatio "16 / 9" → altura ~220px
-        // no mobile. Overflow clip CORTAVA os 250px INFERIORES do iframe
-        // (que tinha minHeight 470px) → só aparecia topo PRETO VAZIO
-        // (o conteúdo do Statscore começa no meio). Resultado: usuário
-        // via "tracker preto sem conteúdo", achava quebrado.
-        // Agora: minHeight no CONTAINER PAI também, GARANTINDO que o
-        // widget não seja cortado, MESMO que nenhum postMessage de
-        // resize chegue a tempo.
-        minHeight: 470,
+        // Container pai precisa de um piso de altura (não só aspectRatio
+        // 16/9, que dá ~220px no mobile) para não cortar o meio do widget
+        // antes de qualquer resize real chegar — ver histórico desta
+        // constante para o porquê original de 470px fixo.
+        //
+        // Bug report seguinte (2026-08-13): "Mini Tracker" ficando grande
+        // demais no PWA/mobile com esse valor fixo. clamp() troca o número
+        // fixo por um piso que acompanha a altura real da tela: encolhe em
+        // telas curtas (PWA/mobile) sem nunca passar de 420px em telas
+        // altas, mantendo folga suficiente pra não reintroduzir o corte
+        // que motivou o piso em primeiro lugar.
+        minHeight: "clamp(280px, 42vh, 420px)",
         overflow: "hidden",
         borderRadius: 20,
         isolation: "isolate",
@@ -4915,22 +4911,10 @@ function BetbyTrackerIframe({
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
           className="w-full h-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", minHeight: 470, zIndex: 1 }}
+          style={{ backgroundColor: "#18181b", minHeight: "clamp(280px, 42vh, 420px)", zIndex: 1 }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => {
             setReady(true);
-            // (MESMA ORIGEM) Detector rápido pós-onLoad: se iframe carregou mas
-            // body.innerText < 50 chars = widget Statscore VAZIO (ID invalido)
-            // Marca falha em 1.5s sem esperar os 4/12s dos detectors gerais.
-            const fastTimer = window.setTimeout(() => {
-              try {
-                const iframeDoc = (iframeRef.current as HTMLIFrameElement | null)?.contentDocument;
-                if (iframeDoc && (iframeDoc.body?.innerText?.trim().length ?? 0) < 50) {
-                  setFailed(true);
-                }
-              } catch (_) { /* noop cross-origin raro */ }
-            }, 1500);
-            (iframeRef.current as HTMLIFrameElement | null)?.addEventListener?.("load", () => window.clearTimeout(fastTimer), { once: true });
           }}
           onError={() => setFailed(true)}
           referrerPolicy="strict-origin-when-cross-origin"
