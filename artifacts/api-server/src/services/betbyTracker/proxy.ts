@@ -713,6 +713,7 @@ export function buildBetbyThemeInjectionStyle(
       // Força extra em momentos caros do ciclo de vida do navegador
       window.addEventListener("DOMContentLoaded", ensureVisible);
       window.addEventListener("load", function () {
+        ensureVisible();
         postParent({ type: "load" });
         ensureVisible();
         setTimeout(setupResize, 200);
