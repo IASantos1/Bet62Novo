@@ -6,6 +6,7 @@ import {
   buildBetbyTrackerPublicUrl,
   resolveStatscoreEventIdFromBetby,
   buildClientRedirectBypassWafHtml,
+  tryManualTeamStatscoreId,
   type BetbyThemeInjection,
 } from "../services/betbyTracker/proxy.js";
 import { listMappings } from "../services/liveStream/mapping.js";
@@ -189,12 +190,38 @@ router.get("/url", async (req: Request, res: Response) => {
         ? req.query.sportId
         : "1";
     const parentOrigin = getOriginFromRequest(req) ?? "*";
-    const resolved = await resolveFinalBetbyEventId(req);
-    if (resolved.error) {
+    const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
+      ? req.query.statscoreEventId.trim()
+      : null;
+    const rawHome = typeof req.query.home === "string" ? req.query.home : "";
+    const rawAway = typeof req.query.away === "string" ? req.query.away : "";
+    let finalStatscoreEventId: string | null = explicitStatscoreId;
+    if (!finalStatscoreEventId && rawHome && rawAway) {
+      const manual = tryManualTeamStatscoreId(rawHome, rawAway);
+      if (manual) finalStatscoreEventId = manual;
+    }
+    const hasRealStatscore = finalStatscoreEventId != null && finalStatscoreEventId.length >= 4;
+
+    let finalBetbyEventId: string | null = null;
+    let betbyError: { code: number; msg: string } | null = null;
+    const hasMinimumForBetbyResolve = !!(
+      (typeof req.query.betbyEventId === "string" && req.query.betbyEventId.trim().length >= 4) ||
+      (rawHome && rawAway)
+    );
+    if (hasMinimumForBetbyResolve || !hasRealStatscore) {
+      try {
+        const resolved = await resolveFinalBetbyEventId(req);
+        if (!resolved.error) finalBetbyEventId = resolved.finalBetbyEventId ?? null;
+        else betbyError = resolved.error;
+      } catch (_) {
+        betbyError = { code: 500, msg: "resolveFinalBetbyEventId threw" };
+      }
+    }
+    if (!hasRealStatscore && betbyError) {
       return res.status(200).json({
         ok: false,
-        error: resolved.error.msg,
-        errorCode: resolved.error.code,
+        error: betbyError.msg,
+        errorCode: betbyError.code,
         upstream: null,
         proxy: null,
         pulseSse: null,
@@ -203,13 +230,9 @@ router.get("/url", async (req: Request, res: Response) => {
         usedFallbackSmartBetbyId: false,
       });
     }
-    const finalBetbyEventId = resolved.finalBetbyEventId!;
-    const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
-      ? req.query.statscoreEventId.trim()
-      : null;
-    let finalStatscoreEventId: string | null = explicitStatscoreId;
-    let usedFallbackSmartBetbyId = false;
-    if (!finalStatscoreEventId) {
+
+    const hadRealStatscoreBeforeResolve = hasRealStatscore;
+    if (!finalStatscoreEventId && finalBetbyEventId) {
       try {
         finalStatscoreEventId = await Promise.race([
           resolveStatscoreEventIdFromBetby(finalBetbyEventId, 5000),
@@ -217,24 +240,39 @@ router.get("/url", async (req: Request, res: Response) => {
         ]) as string | null;
       } catch (_) { finalStatscoreEventId = null; }
     }
-    if (!finalStatscoreEventId) {
+    let usedFallbackSmartBetbyId = false;
+    if (!finalStatscoreEventId && finalBetbyEventId && !hadRealStatscoreBeforeResolve) {
       finalStatscoreEventId = finalBetbyEventId;
       usedFallbackSmartBetbyId = true;
     }
+    if (!finalStatscoreEventId) {
+      return res.status(200).json({
+        ok: false,
+        error: "Could not resolve either a BetBY event mapping or a valid Statscore event ID for this match.",
+        errorCode: 404,
+        upstream: null,
+        proxy: null,
+        pulseSse: null,
+        finalBetbyEventId: null,
+        finalStatscoreEventId: null,
+        usedFallbackSmartBetbyId: false,
+      });
+    }
+
     const publicDirectUrl = buildBetbyTrackerPublicUrl({
-      betbyEventId: finalBetbyEventId,
+      betbyEventId: finalBetbyEventId ?? undefined,
       statscoreEventId: finalStatscoreEventId ?? undefined,
       lang,
       sportId,
     });
     const apiBase = `${req.protocol}://${req.get("host") ?? ""}`;
-    let proxyUrl = `${apiBase}/api/betby-live-tracker/${encodeURIComponent(finalBetbyEventId)}?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`;
+    let proxyUrl = finalBetbyEventId
+      ? `${apiBase}/api/betby-live-tracker/${encodeURIComponent(finalBetbyEventId)}?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`
+      : `${apiBase}/api/betby-live-tracker?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`;
     if (finalStatscoreEventId) proxyUrl += `&statscoreEventId=${encodeURIComponent(finalStatscoreEventId)}`;
-    const rawHome = typeof req.query.home === "string" ? req.query.home : "";
-    const rawAway = typeof req.query.away === "string" ? req.query.away : "";
     if (rawHome) proxyUrl += `&home=${encodeURIComponent(rawHome)}`;
     if (rawAway) proxyUrl += `&away=${encodeURIComponent(rawAway)}`;
-    void resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null);
+    if (finalBetbyEventId) void resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null);
     return res.status(200).json({
       ok: true,
       finalBetbyEventId,
@@ -246,7 +284,9 @@ router.get("/url", async (req: Request, res: Response) => {
       sportId,
       parentOrigin,
       proxy: proxyUrl,
-      pulseSse: `${apiBase}/api/pulsebridge/betby/${encodeURIComponent(finalBetbyEventId)}`,
+      pulseSse: finalBetbyEventId
+        ? `${apiBase}/api/pulsebridge/betby/${encodeURIComponent(finalBetbyEventId)}`
+        : null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -274,50 +314,86 @@ router.get("/", async (req: Request, res: Response) => {
   const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
     ? req.query.statscoreEventId.trim()
     : null;
+  const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
+  const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
+  let finalStatscoreEventId: string | null = explicitStatscoreId;
+  if (!finalStatscoreEventId && queryHome && queryAway) {
+    const manual = tryManualTeamStatscoreId(queryHome, queryAway);
+    if (manual) finalStatscoreEventId = manual;
+  }
+  const hasRealStatscore = finalStatscoreEventId != null && finalStatscoreEventId.length >= 4;
   let finalBetbyEventId: string | null = null;
+  let betbyResolveFailed = false;
   try {
-    const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
-    const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
     const resolved = await resolveFinalBetbyEventId(req);
-    if (resolved.error) {
+    if (!resolved.error) finalBetbyEventId = resolved.finalBetbyEventId ?? null;
+    else betbyResolveFailed = true;
+    if (resolved.error && !hasRealStatscore) {
       return res
         .status(200)
         .type("text/plain")
         .send(resolved.error.msg);
     }
-    finalBetbyEventId = resolved.finalBetbyEventId!;
-
     const parentOrigin = getOriginFromRequest(req) ?? "*";
-    const meta = await resolveBetbyMatchMeta(finalBetbyEventId, 3500)
-      .catch(() => null);
+    const meta = finalBetbyEventId
+      ? await resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null)
+      : null;
     const upstreamPreview = buildBetbyTrackerUpstreamUrl({
-      betbyEventId: finalBetbyEventId,
-      statscoreEventId: explicitStatscoreId ?? undefined,
+      betbyEventId: finalBetbyEventId ?? "0",
+      statscoreEventId: finalStatscoreEventId ?? undefined,
       lang,
       sportId,
     });
-    const { html, upstreamUrl } = await fetchBetbyTrackerHtml({
-      betbyEventId: finalBetbyEventId,
-      statscoreEventId: explicitStatscoreId ?? undefined,
-      homeTeamName: meta?.homeName || queryHome || undefined,
-      awayTeamName: meta?.awayName || queryAway || undefined,
-      lang,
-      sportId,
-      theme: DEFAULT_THEME,
-      parentOrigin,
-    });
-    res.set({
-      ...BETBY_TRACKER_RESPONSE_HEADERS,
-      "X-Bet62-Upstream": upstreamPreview,
-      "X-Bet62-Upstream-Real": upstreamUrl,
-    });
-    return res.status(200).send(html);
+    const htmlAndUpstream = finalBetbyEventId || finalStatscoreEventId
+      ? await fetchBetbyTrackerHtml({
+          betbyEventId: finalBetbyEventId ?? "0",
+          statscoreEventId: finalStatscoreEventId ?? undefined,
+          homeTeamName: meta?.homeName || queryHome || undefined,
+          awayTeamName: meta?.awayName || queryAway || undefined,
+          lang,
+          sportId,
+          theme: DEFAULT_THEME,
+          parentOrigin,
+        })
+      : null;
+    if (htmlAndUpstream) {
+      res.set({
+        ...BETBY_TRACKER_RESPONSE_HEADERS,
+        "X-Bet62-Upstream": upstreamPreview,
+        "X-Bet62-Upstream-Real": htmlAndUpstream.upstreamUrl,
+      });
+      return res.status(200).send(htmlAndUpstream.html);
+    }
+    if (hasRealStatscore) {
+      const u = buildBetbyTrackerUpstreamUrl({ betbyEventId: "0", statscoreEventId: finalStatscoreEventId!, lang, sportId });
+      res.set(BETBY_TRACKER_RESPONSE_HEADERS);
+      return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
+    }
+    return res.status(200).type("text/html").send(trackerUnavailableHtml());
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg }, "[betbyTracker] / handler failed");
-    if (explicitStatscoreId && finalBetbyEventId) {
+    if ((explicitStatscoreId || finalStatscoreEventId) && (finalBetbyEventId || hasRealStatscore)) {
       try {
-        const u = buildBetbyTrackerUpstreamUrl({ betbyEventId: finalBetbyEventId, statscoreEventId: explicitStatscoreId, lang, sportId });
+        const statForRedirect = finalStatscoreEventId || explicitStatscoreId!;
+        const u = buildBetbyTrackerUpstreamUrl({
+          betbyEventId: finalBetbyEventId ?? "0",
+          statscoreEventId: statForRedirect,
+          lang,
+          sportId,
+        });
+        res.set(BETBY_TRACKER_RESPONSE_HEADERS);
+        return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
+      } catch (_) {}
+    }
+    if (hasRealStatscore) {
+      try {
+        const u = buildBetbyTrackerUpstreamUrl({
+          betbyEventId: "0",
+          statscoreEventId: finalStatscoreEventId!,
+          lang,
+          sportId,
+        });
         res.set(BETBY_TRACKER_RESPONSE_HEADERS);
         return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
       } catch (_) {}
