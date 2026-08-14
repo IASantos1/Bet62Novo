@@ -523,6 +523,7 @@ type LiveTrackerEvent = {
   minute?: string;
   score: { home: number; away: number };
   tracker?: MatchTracker;
+  statscoreEventId?: string;
 };
 type CasinoBanner = {
   id: number;
