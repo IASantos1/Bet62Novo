@@ -4870,6 +4870,17 @@ function BetbyTrackerIframe({
       style={{
         aspectRatio,
         position: "relative",
+        // Bug report 2026-08-14: box reads as shifted toward the left edge
+        // instead of centered/filling its card. Neither call site passes a
+        // className, so this div had no explicit width at all — a block
+        // element with no width set should default to filling its parent,
+        // but the maxHeight cap above makes the box shorter and wider than
+        // its aspectRatio (see that comment), which is exactly the kind of
+        // layout this element was never explicitly tested to hold. Setting
+        // width/display explicitly removes any ambiguity instead of
+        // relying on block-level defaults still holding under that shape.
+        display: "block",
+        width: "100%",
         // ── BUG FIX 2026-08-13 (TELA PRETA) ──────────────────────────
         // Container pai precisa de um piso de altura (não só aspectRatio
         // 16/9, que dá ~220px no mobile) para não cortar o meio do widget
