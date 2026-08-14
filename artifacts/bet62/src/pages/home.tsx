@@ -4703,9 +4703,42 @@ function BetbyTrackerIframe({
           finalStatscoreEventId?: string | null;
           usedFallbackSmartBetbyId?: boolean;
           proxy?: string | null;
+          // direct upstream URL returned by /url: https://demoapi.betby.com/a82d758c/tracker.html?providers=...
+          // When hasRealStatscore (usedFallbackSmartBetbyId=false) WE WANT this as iframe src DIRECTLY,
+          // BYPASSING our proxy fetch (which can hit BetBY WAF 503 Node.js block AND
+          // is guaranteed to render from demoapi.betby.com origin — avoiding widget
+          // tracker.57e48a41.js 0-byte origin block).
+          upstream?: string | null;
         };
-        if (!json || !json.ok || !json.finalBetbyEventId || !json.proxy) return null;
-        return json as Required<Omit<NonNullable<typeof json>, never>>;
+        // Update 2026-08-14: BetBY Event ID is now 100% OPTIONAL. The
+        // Statscore widget does NOT need BetBY id for anything at all — it
+        // only reads the providers.eventId inside the HTML, which is driven
+        // by statscoreEventId. BetBY id is only needed for BetBY-side pulse
+        // SSE and betby match metadata. As long as /url returned a valid
+        // proxy URL (which can be the no-path-param route /api/betby-live-tracker
+        // when there is no BetBY id at all but statscoreEventId is real), we
+        // must render. The previous check (`!json.finalBetbyEventId`) was
+        // silently returning null (black screen with no iframe src) for any
+        // match where BetBY had no mapping — even when the user had
+        // explicitly provided a working statscoreEventId.
+        if (!json || !json.ok) return null;
+        // If we have a REAL statscore id (not a BetBY fallback), prefer the
+        // upstream URL directly from demoapi.betby.com as the iframe src —
+        // the browser fetches it directly as a human user request, so it
+        // bypasses the BetBY WAF 503 that kills server-side Node fetches AND
+        // guarantees the widget runs under the correct origin (demoapi.betby.com)
+        // so tracker.57e48a41.js / EmbederESM.js paint correctly instead of
+        // returning zero bytes. We only fall back to our own proxy URL when
+        // fallback-smart BetBY id is being used (the widget likely 404s
+        // anyway, but the proxy route at least returns our friendly "not
+        // available" shell with postMessage bridge signals so this component
+        // can detect and show the same state instead of a silent black iframe).
+        const finalStat = json.finalStatscoreEventId ?? "";
+        const hasRealStat = finalStat.length >= 4 && !json.usedFallbackSmartBetbyId;
+        const useUpstream = hasRealStat && !!json.upstream;
+        const finalIframeSrc: string | null = useUpstream ? json.upstream! : (json.proxy ?? null);
+        if (!finalIframeSrc) return null;
+        return { ...json, finalIframeSrc } as typeof json & { ok: true; finalIframeSrc: string };
       } catch { return null; }
     },
     staleTime: 120_000,
@@ -4714,7 +4747,7 @@ function BetbyTrackerIframe({
     throwOnError: false,
   });
 
-  const finalUrl = urlInfo?.proxy ?? null;
+  const finalUrl = urlInfo?.finalIframeSrc ?? null;
 
   useEffect(() => {
     setFailed(!finalUrl || !!queryError);
