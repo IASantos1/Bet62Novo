@@ -4612,13 +4612,14 @@ class TrackerErrorBoundary extends Component<
 // Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
 // self-contained so its lifecycle (start/stop polling) doesn't entangle
 // with the rest of the page's state.
-// Bug report 2026-08-13 (2 rounds): "Mini Tracker" muito grande no
-// PWA/mobile — this is the shared ceiling for both the CSS clamp() (loading
-// state) and the JS resize handler's cap (once the widget reports its real,
-// much taller, native size). A single source of truth so the two can never
-// drift apart and visibly "jump" between a loading-state size and a
-// different loaded-state size.
-const MINI_TRACKER_MAX_HEIGHT = 260;
+// Bug report 2026-08-13 (3 rounds — 470 to 420 to 260 still "grande",
+// user asked to cut it further): "Mini Tracker" muito grande no PWA/mobile
+// — this is the shared ceiling for both the CSS clamp() (loading state) and
+// the JS resize handler's cap (once the widget reports its real, much
+// taller, native size). A single source of truth so the two can never drift
+// apart and visibly "jump" between a loading-state size and a different
+// loaded-state size.
+const MINI_TRACKER_MAX_HEIGHT = 180;
 
 function BetbyTrackerIframe({
   home,
@@ -4831,15 +4832,16 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      if (gotRealResize.current) return;
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
-        const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if (stillFixedAspect && rect.height < 300) {
-          setFailed(true);
-        }
-      }
+      // Bug report 2026-08-13 (sizing rounds): this used to also check the
+      // container's own rendered aspect ratio/height as a secondary signal
+      // — but now that the container is deliberately capped short
+      // (MINI_TRACKER_MAX_HEIGHT, see its own comment), its rendered shape
+      // no longer reflects whether the widget INSIDE actually rendered
+      // real content; that check would misfire constantly. gotRealResize
+      // is measured from the bridge's own resize report of the widget's
+      // natural (uncapped) height, still accurate regardless of how small
+      // we clip the outer box — it alone is the reliable signal now.
+      if (!gotRealResize.current) setFailed(true);
     }, 7_000);
     return () => clearTimeout(t);
   }, [finalUrl, ready, failed]);
@@ -4851,15 +4853,10 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      if (gotRealResize.current) return;
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const aspect = rect.width > 1 ? rect.height / rect.width : 9 / 16;
-        const stillFixedAspect = Math.abs(aspect - (9 / 16)) < 0.05;
-        if (stillFixedAspect && rect.height < 300) {
-          setFailed(true);
-        }
-      }
+      // See the 7s check above for why the old rect/aspect-ratio check was
+      // dropped — the container is now deliberately capped short, so its
+      // shape no longer says anything about whether the widget rendered.
+      if (!gotRealResize.current) setFailed(true);
     }, 18_000);
     return () => clearTimeout(t);
   }, [finalUrl, failed]);
@@ -4878,14 +4875,17 @@ function BetbyTrackerIframe({
         // 16/9, que dá ~220px no mobile) para não cortar o meio do widget
         // antes de qualquer resize real chegar — ver histórico desta
         // constante para o porquê original de 470px fixo.
-        //
-        // Bug report seguinte (2026-08-13): "Mini Tracker" ficando grande
-        // demais no PWA/mobile com esse valor fixo. clamp() troca o número
-        // fixo por um piso que acompanha a altura real da tela: encolhe em
-        // telas curtas (PWA/mobile) sem nunca passar de 420px em telas
-        // altas, mantendo folga suficiente pra não reintroduzir o corte
-        // que motivou o piso em primeiro lugar.
-        minHeight: `clamp(190px, 26vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+        minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+        // ── BUG FIX 2026-08-13, rounds 2-4 ("Mini Tracker ainda grande")
+        // Reducing minHeight alone never actually shrank anything: it's a
+        // FLOOR, and aspectRatio ("16 / 9") was still computing a taller
+        // height at typical mobile container widths (~380px wide → ~214px
+        // tall from aspect-ratio ALONE, before minHeight even entered the
+        // picture) — so every earlier minHeight reduction this round was
+        // fighting a constraint that wasn't the actual bottleneck. maxHeight
+        // is a real ceiling regardless of what aspectRatio computes; this is
+        // what actually makes the box small on mobile/PWA.
+        maxHeight: MINI_TRACKER_MAX_HEIGHT,
         overflow: "hidden",
         borderRadius: 20,
         isolation: "isolate",
@@ -4919,7 +4919,7 @@ function BetbyTrackerIframe({
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
           className="w-full h-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", minHeight: `clamp(190px, 26vh, ${MINI_TRACKER_MAX_HEIGHT}px)`, zIndex: 1 }}
+          style={{ backgroundColor: "#18181b", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`, maxHeight: MINI_TRACKER_MAX_HEIGHT, zIndex: 1 }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => {
             setReady(true);
