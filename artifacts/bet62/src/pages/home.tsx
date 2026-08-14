@@ -7046,33 +7046,60 @@ export default function Home({
           e?.minute ??
           e?.matchTime ??
           e?.timeMinute ??
+          e?.elapsed ??
           e?.addedTime ??
           "";
         const minuteRaw = toText(minute);
         const time = minuteRaw !== "" ? `${minuteRaw}'` : "";
         const isHome = Boolean(
-          e?.isHome || e?.home || e?.team === "home" || e?.side === "home",
+          e?.isHome ||
+            e?.home ||
+            e?.team === "home" ||
+            e?.side === "home" ||
+            (typeof e?.team_id === "number" && e?.home_team_id && e.team_id === e.home_team_id),
         );
         const isAway = Boolean(
-          e?.isAway || e?.away || e?.team === "away" || e?.side === "away",
+          e?.isAway ||
+            e?.away ||
+            e?.team === "away" ||
+            e?.side === "away" ||
+            (typeof e?.team_id === "number" && e?.away_team_id && e.team_id === e.away_team_id),
         );
         const team: "home" | "away" | "neutral" = isHome
           ? "home"
           : isAway
             ? "away"
             : "neutral";
-        const title = String(
-          e?.type ?? e?.incidentType ?? e?.name ?? e?.title ?? "Evento",
+
+        const rawType = String(
+          e?.type ?? e?.incidentType ?? e?.eventType ?? "",
         ).trim();
-        const detail = String(
-          e?.text ??
-            e?.description ??
-            e?.player?.name ??
+        const rawName = String(e?.name ?? e?.title ?? "").trim();
+
+        const playerName = String(
+          e?.player?.name ??
             e?.playerName ??
-            e?.reason ??
+            e?.player_name ??
+            e?.scorer?.name ??
+            e?.goalScorer?.name ??
+            e?.related_player_name ??
+            e?.relatedPlayer?.name ??
             "",
         ).trim();
-        const sig = normalize(`${title} ${detail}`);
+
+        const textBody = String(
+          e?.text ??
+            e?.description ??
+            e?.detail ??
+            e?.reason ??
+            e?.comments ??
+            e?.comment ??
+            "",
+        ).trim();
+
+        const sigSrc =
+          `${rawType} ${rawName} ${playerName} ${textBody}`.toLowerCase();
+        const sig = normalize(sigSrc);
         let kind: V2IncidentKind = "other";
         if (sig.includes("goal") || sig.includes("golo") || sig.includes("gol"))
           kind = "goal";
@@ -7085,14 +7112,13 @@ export default function Home({
         else if (
           sig.includes("card") ||
           sig.includes("cartao") ||
-          sig.includes("cartao") ||
           sig.includes("yellow") ||
           sig.includes("red") ||
           sig.includes("amarel") ||
           sig.includes("vermelh")
         )
           kind = "card";
-        else if (sig.includes("substitution") || sig.includes("substituic"))
+        else if (sig.includes("substitution") || sig.includes("substituic") || sig.includes(" sub "))
           kind = "sub";
 
         const card: "yellow" | "red" | null =
@@ -7102,29 +7128,57 @@ export default function Home({
               : "yellow"
             : null;
 
-        const hs =
+        let title: string;
+        switch (kind) {
+          case "goal":
+            title = "Golo";
+            break;
+          case "corner":
+            title = "Canto";
+            break;
+          case "card":
+            title = card === "red" ? "Cartão Vermelho" : "Cartão Amarelo";
+            break;
+          case "sub":
+            title = "Substituição";
+            break;
+          default:
+            title = rawType || rawName || "Evento";
+            break;
+        }
+
+        let detail: string;
+        if (kind === "goal" || kind === "card" || kind === "sub") {
+          detail = playerName || textBody;
+        } else if (kind === "corner") {
+          detail = textBody || playerName;
+        } else {
+          detail = textBody || playerName || rawName;
+        }
+
+        const hsRaw =
           e?.homeScore?.current ??
           e?.homeScore ??
           e?.score?.home ??
-          e?.home ??
-          e?.homeTeamScore ??
           e?.homeGoals ??
+          e?.homeTeamScore ??
+          e?.home_score ??
           null;
-        const as =
+        const asRaw =
           e?.awayScore?.current ??
           e?.awayScore ??
           e?.score?.away ??
-          e?.away ??
-          e?.awayTeamScore ??
           e?.awayGoals ??
+          e?.awayTeamScore ??
+          e?.away_score ??
           null;
+        const hs = typeof hsRaw === "number" ? hsRaw : null;
+        const as = typeof asRaw === "number" ? asRaw : null;
         const score =
-          typeof hs === "number" && typeof as === "number"
-            ? `${hs}-${as}`
-            : undefined;
+          hs !== null && as !== null ? `${hs}-${as}` : undefined;
 
         return {
-          key: `${idx}-${title}-${detail}-${time}`,
+          key: `${idx}-${kind}-${title}-${detail}-${time}`,
           time,
           minute: parseMinute(minuteRaw),
           team,
@@ -21453,20 +21507,14 @@ export default function Home({
                                               {ev.displayTitle}
                                             </div>
                                             <div className="text-[11px] text-zinc-400 truncate">
-                                              {ev.detail || expandedMatch.home}
+                                              {ev.detail || "\u00A0"}
                                             </div>
                                           </div>
-                                          {ev.kind === "goal" &&
-                                            (ev.score ||
-                                              (expandedMatch.homeScore !=
-                                                null &&
-                                                expandedMatch.awayScore !=
-                                                  null)) && (
-                                              <div className="shrink-0 px-2 py-0.5 rounded-full border border-emerald-500/60 text-emerald-300 text-[11px] font-black tabular-nums">
-                                                {ev.score ??
-                                                  `${expandedMatch.homeScore}-${expandedMatch.awayScore}`}
-                                              </div>
-                                            )}
+                                          {ev.kind === "goal" && !!ev.score && (
+                                            <div className="shrink-0 px-2 py-0.5 rounded-full border border-emerald-500/60 text-emerald-300 text-[11px] font-black tabular-nums">
+                                              {ev.score}
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
 
@@ -21483,23 +21531,17 @@ export default function Home({
                                         className={`min-w-0 ${ev.team === "away" ? "text-left" : "opacity-0 pointer-events-none"}`}
                                       >
                                         <div className="inline-flex max-w-full items-start gap-2 border border-zinc-700/70 bg-zinc-900/40 rounded-xl px-3 py-2">
-                                          {ev.kind === "goal" &&
-                                            (ev.score ||
-                                              (expandedMatch.homeScore !=
-                                                null &&
-                                                expandedMatch.awayScore !=
-                                                  null)) && (
-                                              <div className="shrink-0 px-2 py-0.5 rounded-full border border-emerald-500/60 text-emerald-300 text-[11px] font-black tabular-nums">
-                                                {ev.score ??
-                                                  `${expandedMatch.homeScore}-${expandedMatch.awayScore}`}
-                                              </div>
-                                            )}
+                                          {ev.kind === "goal" && !!ev.score && (
+                                            <div className="shrink-0 px-2 py-0.5 rounded-full border border-emerald-500/60 text-emerald-300 text-[11px] font-black tabular-nums">
+                                              {ev.score}
+                                            </div>
+                                          )}
                                           <div className="min-w-0">
                                             <div className="text-sm font-bold text-white truncate">
                                               {ev.displayTitle}
                                             </div>
                                             <div className="text-[11px] text-zinc-400 truncate">
-                                              {ev.detail || expandedMatch.away}
+                                              {ev.detail || "\u00A0"}
                                             </div>
                                           </div>
                                         </div>
