@@ -4649,6 +4649,16 @@ function BetbyTrackerIframe({
   // → container fica VAZIO, cor de fundo = PRETO → o usuário vê "tela preta
   // sem conteúdo". Acionamos setFailed e mostramos a mensagem amigável.
   const gotRealResize = useRef(false);
+  // Bug report 2026-08-14: shrinking the box by capping its height with
+  // overflow:hidden alone doesn't actually shrink the WIDGET — it just
+  // clips the visible window down to whatever happens to be in the
+  // top-left corner of a much taller natural layout, which reads as
+  // "content stuck over to the left" (it's really just a crop, not a
+  // scaled-down view). naturalHeight (from the widget's own real resize
+  // report) drives a CSS transform: scale() on the iframe instead, so the
+  // whole widget shrinks proportionally and stays centered, rather than
+  // being cropped to one corner.
+  const [naturalHeight, setNaturalHeight] = useState<number | null>(null);
   // Guarda DATA.available=false do bridge: o widget Statscore EXPLICITOU
   // que não tem dados para esse evento → pula direto para indisponível.
   const dataExplicitUnavailable = useRef(false);
@@ -4711,6 +4721,7 @@ function BetbyTrackerIframe({
     // Reset flags do detector de widget vazio sempre que mudar o URL alvo
     gotRealResize.current = false;
     dataExplicitUnavailable.current = false;
+    setNaturalHeight(null);
   }, [finalUrl, queryError]);
 
   useEffect(() => {
@@ -4764,24 +4775,13 @@ function BetbyTrackerIframe({
         }
         if (type === "resize") {
           const h = Number(payload.height);
-          if (Number.isFinite(h) && h > 100 && containerRef.current) {
+          if (Number.isFinite(h) && h > 100) {
             // Alturas < 700px quase sempre são o nosso fallback inicial,
             // NÃO UM RESIZE REAL do widget Statscore com dados. Widgets
             // reais de futebol são > 900px, tênis/vôlei > 1200px — essa
             // heurística separa "pintou algo" de "ainda está preto vazio".
             if (h > 700) gotRealResize.current = true;
-            containerRef.current.style.aspectRatio = "auto";
-            // Bug report 2026-08-13 (2 rounds): "Mini Tracker" grande demais
-            // no PWA/mobile — a primeira redução (teto 420px) ainda não foi
-            // suficiente pelo relato do usuário. Aplicar a altura real do
-            // widget sem limite (900-1200px+ para alguns esportes) mantinha
-            // o box gigante mesmo depois de carregar com sucesso, não só
-            // durante o carregamento. Teto reduzido para MINI_TRACKER_MAX_
-            // HEIGHT (compartilhado com o clamp() do container, mais
-            // abaixo) — o widget interno continua no tamanho real dele
-            // (sem reflow, sem cortar conteúdo pela metade), overflow:hidden
-            // no container só esconde a parte de baixo além do teto.
-            containerRef.current.style.height = `${Math.min(Math.round(h), MINI_TRACKER_MAX_HEIGHT)}px`;
+            setNaturalHeight(Math.round(h));
           }
           setReady(true);
           return;
@@ -4862,6 +4862,12 @@ function BetbyTrackerIframe({
   }, [finalUrl, failed]);
 
   const showLoading = (!ready || isFetching) && !failed;
+  // Scale the whole widget down proportionally once we know its real
+  // height, instead of the container's overflow:hidden clipping whatever
+  // happens to be in its top-left corner (see naturalHeight's own comment).
+  const iframeScale = naturalHeight && naturalHeight > MINI_TRACKER_MAX_HEIGHT
+    ? MINI_TRACKER_MAX_HEIGHT / naturalHeight
+    : 1;
 
   return (
     <div
@@ -4929,8 +4935,33 @@ function BetbyTrackerIframe({
           key={finalUrl}
           src={finalUrl}
           title={`BetBY Live Tracker · ${home} vs ${away}`}
-          className="w-full h-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`, maxHeight: MINI_TRACKER_MAX_HEIGHT, zIndex: 1 }}
+          className="w-full border-0 block relative"
+          style={{
+            backgroundColor: "#18181b",
+            zIndex: 1,
+            // Before the widget's real height is known: fill the container
+            // normally (same as before), clipped by its overflow:hidden —
+            // there's nothing to scale yet. Once naturalHeight arrives, the
+            // iframe is laid out at its OWN true height (not clipped) and
+            // visually shrunk with transform: scale() instead, so the whole
+            // widget shrinks proportionally and stays centered rather than
+            // being cropped to whatever's in the top-left corner of a much
+            // taller layout. transform doesn't affect how the *parent*
+            // computes overflow — a descendant's PAINTED (post-transform)
+            // bounds are what gets clipped, so a widget scaled down to
+            // exactly fill the container's fixed height needs no clipping
+            // at all once naturalHeight is set.
+            ...(naturalHeight
+              ? {
+                  height: `${naturalHeight}px`,
+                  transform: `scale(${iframeScale})`,
+                  transformOrigin: "top center",
+                }
+              : {
+                  height: "100%",
+                  minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+                }),
+          }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => {
             setReady(true);
