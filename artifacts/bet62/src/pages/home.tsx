@@ -11991,6 +11991,7 @@ export default function Home({
     minute: match.tracker?.minute,
     score: { home: match.homeScore ?? 0, away: match.awayScore ?? 0 },
     tracker: match.tracker,
+    statscoreEventId: match.statscoreEventId,
   });
 
   // Goal/card markers for the Momentum chart, from the Match Tracker's

@@ -931,14 +931,43 @@ export async function fetchBetbyTrackerHtml(
       // (loggin via console; logger import é feito no routes/betbyTracker.ts)
       try { console.warn(`[betbyTracker/proxy] Statscore ID real NÃO resolvido para BetBY event ${input.betbyEventId}. Usando BetBY ID como fallback smart (ensureVisible/bridge DATA garante UX segura, nunca tela preta).`); } catch (_) {}
     }
-    void usedFallback; // usado apenas para log/debug
+    void 0; // usedFallback logged above; keep as local flag
     const upstreamUrl = buildBetbyTrackerUpstreamUrl({
       ...input,
       statscoreEventId: resolvedStatscoreEventId,
     });
-    const hasRealStatscoreId = !usedFallback && input.statscoreEventId != null && String(input.statscoreEventId).trim().length >= 4;
+    // Bug found 2026-08-14 auditing network requests (user sent 4 URLs):
+    //  - demoapi.betby.com/a82d758c/static/js/tracker.57e48a41.js (widget BetBY Statscore)
+    //  - settings-service.watchers.io (Statscore/Watchers tema API)
+    //
+    // tracker.57e48a41.js TEM BLOQUEIO DE ORIGEM CONHECIDO: retorna ZERO bytes
+    // (ou pinta DOM vazio) quando window.location.origin !== betby.com — ou seja,
+    // quando nós buscamos o HTML server-side (fetch Node) e re-servimos de NOSSA
+    // origem (bet62 Railway), o widget falha.
+    //
+    // A SOLUCAO CORRETA é: SEMPRE que temos UM Statscore ID REAL (qualquer
+    // caminho P0/P1/P3) fazemos redirect client-side (meta refresh 0s +
+    // window.location.replace) DIRETO para demoapi.betby.com, assim
+    // window.location.origin passa a ser betby.com e o tracker.57e48a41.js
+    // RENDERIZA NORMALMENTE.
+    //
+    // A CONDICAO ANTERIOR BUGADA:
+    //   hasRealStatscoreId = !usedFallback && input.statscoreEventId != null
+    //
+    // Erro GRAVE: usava input.statscoreEventId (SOMENTE P0 - statscore explicito
+    // passado pelo chamador), IGNORANDO COMPLETAMENTE:
+    //   P1 - tryManualTeamStatscoreId (mapa manual Mirassol/LDU=6670732)
+    //   P3 - resolveStatscoreEventIdFromBetby (resolucao automatica BetBY->Statscore)
+    // Resultado: hasRealStatscoreId quase sempre FALSE, NUNCA fazia redirect
+    // para betby.com, sempre caia no fetch Node → widget tracker.57e48a41.js
+    // ficava ZERO bytes, widget não aparecia (ou "Tracker indisponível").
+    //
+    // FIX: usa resolvedStatscoreEventId (P0/P1/P3) E NÃO input.statscoreEventId!
+    const hasRealStatscoreId = !usedFallback
+      && resolvedStatscoreEventId != null
+      && String(resolvedStatscoreEventId).trim().length >= 4;
     if (hasRealStatscoreId) {
-      try { console.warn(`[betbyTracker/proxy] statscoreEventId REAL (${String(input.statscoreEventId).trim()}) → usando redirect client-side DIRETO para demoapi.betby.com (evita bloqueio de origem no widget Statscore e WAF). Pulando fetch Node.`); } catch(_) {}
+      try { console.warn(`[betbyTracker/proxy] Statscore ID REAL via canal P0/P1/P3 (${String(resolvedStatscoreEventId).trim()}) → redirect client-side DIRETO para demoapi.betby.com (evita bloqueio de origem widget tracker.57e48a41.js + WAF 503). Pulando fetch Node.`); } catch(_) {}
       const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {});
       outerTimeout && clearTimeout(outerTimeout);
       return { html: redirectHtml, upstreamUrl };
@@ -1031,20 +1060,35 @@ export const BETBY_TRACKER_RESPONSE_HEADERS: Record<string, string> = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "private, no-store, no-cache, must-revalidate, proxy-revalidate",
   "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
+  // Antes: no-referrer (bloqueava envio de Referer para serviços terceiros como GA4/Watchers).
+  // strict-origin-when-cross-origin: envia apenas origem (scheme+host+porta) para cross-origin HTTPS,
+  // path/query só para mesma origem. Mantém privacidade razoável e não quebra integrações.
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), interest-cohort=()",
   "Content-Security-Policy": [
     "default-src 'self' https: data: blob:",
-    "img-src * data: blob:",
+    "img-src * data: blob: https://*.statscore.com https://*.watchers.io",
     "media-src * data: blob:",
-    "style-src * 'unsafe-inline' data:",
+    "style-src * 'unsafe-inline' data: https://wgt-s3-cdn.statscore.com https://*.statscore.com https://cdn.jsdelivr.net",
     "font-src * 'unsafe-inline' data:",
-    "script-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
+    // Novo widget ESM STATscore carrega de wgt-s3-cdn.statscore.com (além do velho tracker.57e48a41.js demoapi.betby.com).
+    // Também cobre *.statscore.com wildcard para qualquer subdominio futuro (ex: standings.pc.statscore.com descoberto 2026-08-14).
+    "script-src * 'unsafe-inline' 'unsafe-eval' data: blob: https://wgt-s3-cdn.statscore.com https://*.statscore.com https://demoapi.betby.com https://demo.betby.com https://www.gstatic.com",
     "worker-src * blob: data:",
-    "connect-src * wss: ws: data: blob:",
-    "frame-src * data: blob:",
+    // Connect-src atualizado 2026-08-14 com hosts conhecidos explicitos + wildcard *.statscore.com para cobrir:
+    //   - widgets.statscore.com (traducoes/PartialEventStartCountdown/match data)
+    //   - standings.pc.statscore.com (classificacoes/tabelas ligas, descoberto 2026-08-14)
+    //   - wgt-s3-cdn.statscore.com (CDN widget ESM moderno EmbederESM.js)
+    //   - settings-service.watchers.io (tema dark/light + regras widget EN/BR)
+    //   - demoapi.betby.com (BetBY live/brand, meta, pulse, API)
+    //   - region1.analytics.google.com (GA4 analytics enviado de demo.betby.com)
+    "connect-src * wss: ws: data: blob: https://widgets.statscore.com https://standings.pc.statscore.com https://*.statscore.com https://settings-service.watchers.io https://wgt-s3-cdn.statscore.com https://demoapi.betby.com https://region1.analytics.google.com",
+    "frame-src * data: blob: https://demoapi.betby.com https://demo.betby.com",
     "frame-ancestors *",
-    "base-uri 'self' https://demoapi.betby.com",
-    "form-action 'self' https://demoapi.betby.com https:",
+    "base-uri 'self' https://demoapi.betby.com https://demo.betby.com",
+    "form-action 'self' https://demoapi.betby.com https://demo.betby.com https:",
+    // Força todo request sub-recursos do widget a usarem HTTPS (evita downgrade http):
+    "upgrade-insecure-requests",
     "object-src 'none'",
   ].join("; "),
 };
