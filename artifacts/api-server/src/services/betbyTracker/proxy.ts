@@ -123,6 +123,14 @@ export function tryManualTeamStatscoreId(home?: string, away?: string): string |
   return null;
 }
 
+export function isRealStatscoreId(v: string): boolean {
+  const s = String(v ?? "").trim();
+  // Statscore IDs nativos = 5 a 10 dígitos (ex: 6670732, 6479574).
+  // BetBY IDs = ~19 dígitos que 404 no widgets.statscore.com.
+  // Mesma heurística do matches.ts P2 (enrichMatchWithStatscoreId).
+  return /^\d{5,10}$/.test(s);
+}
+
 export type BetbyTrackerProxyResult = {
   html: string;
   upstreamUrl: string;
@@ -807,52 +815,100 @@ export function buildBetbyThemeInjectionStyle(
 export function buildClientRedirectBypassWafHtml(
   upstreamUrl: string,
   theme: BetbyThemeInjection = {},
+  opts?: { isFallbackSmart?: boolean; parentOrigin?: string },
 ): string {
   const bg = theme.backgroundMain ?? DEFAULT_INJECT.backgroundMain;
   const contrast = theme.contrast ?? DEFAULT_INJECT.contrast;
+  const highlight = theme.highlight ?? DEFAULT_INJECT.highlight;
+  const parentOrigin = opts?.parentOrigin && opts.parentOrigin !== "*" ? opts.parentOrigin : "*";
+  const isFallbackSmart = !!opts?.isFallbackSmart;
+  // When this redirect shell is returned for a "fallback smart" BetBY id (we
+  // never found a real Statscore numeric id for the event — the widget at
+  // the upstream URL is almost guaranteed to 404, returning a blank widget),
+  // the parent frame's `BetbyTrackerIframe` needs to be told that (a) the
+  // widget itself loaded fine (ready → hides loading spinner), (b) the
+  // tracker reports a real size (resize → prevents the "empty widget" guard
+  // from killing it 7s/18s later), and most importantly (c) data.available
+  // is explicitly false so the parent degrades to the friendly "Tracker
+  // indisponível neste momento" shell instead of a silent black rectangle.
+  // When the redirect is for a REAL statscore id (Statscore native widget
+  // paints normally at the final origin), we still send the signals from
+  // THIS wrapper so the parent iframe sees *something* before the browser
+  // navigates away; the final demoapi.betby.com page then paints the real
+  // content and the user never notices the wrapper page at all.
+  const fallbackResizeHeight = isFallbackSmart ? 470 : 1400;
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Live Match Tracker</title>
-<meta http-equiv="refresh" content="0; url=${upstreamUrl}">
+${isFallbackSmart ? "" : `<meta http-equiv="refresh" content="0; url=${upstreamUrl}">`}
 <style>
   html,body{margin:0;padding:0;height:100%;min-height:470px;background:${bg};color:${contrast};
     font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color-scheme:dark;}
   .wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
     padding:16px;text-align:center;}
   .spinner{display:inline-block;width:36px;height:36px;border:3px solid color-mix(in srgb, ${contrast} 25%, transparent);
-    border-top-color:${theme.highlight ?? DEFAULT_INJECT.highlight};border-radius:50%;animation:spin 0.9s linear infinite;}
+    border-top-color:${highlight};border-radius:50%;animation:spin 0.9s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
   .box{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:320px;}
   .msg{font-size:13px;font-weight:600;color:${contrast};opacity:.92;}
   .sub{font-size:11.5px;opacity:.65;}
   a.btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:10px;
-    background:${theme.highlight ?? DEFAULT_INJECT.highlight};color:#fff;text-decoration:none;
+    background:${highlight};color:#fff;text-decoration:none;
     font-weight:650;font-size:12.5px;margin-top:6px;}
 </style>
 </head>
 <body>
 <div class="wrap"><div class="box">
   <div class="spinner" role="status" aria-label="Loading"></div>
-  <div class="msg">Carregando tracker...</div>
-  <div class="sub">Redirecionando para o widget oficial (WAF bypass)</div>
-  <a class="btn" href="${upstreamUrl}" target="_self" rel="noopener">Abrir agora</a>
+  <div class="msg">${isFallbackSmart ? "A preparar o tracker..." : "Carregando tracker..."}</div>
+  <div class="sub">${isFallbackSmart
+      ? "A verificar se existem dados disponiveis para este evento"
+      : "Redirecionando para o widget oficial (WAF bypass)"}</div>
+  ${isFallbackSmart ? "" : `<a class="btn" href="${upstreamUrl}" target="_self" rel="noopener">Abrir agora</a>`}
 </div></div>
 <script>
 (function(){
   try {
-    // Tenta redirect imediato. Em caso de CSP ou bloqueio, usuário clica no botão.
-    var t = Date.now();
-    var fire = function(){
-      try { window.location.replace(${JSON.stringify(upstreamUrl)}); }
-      catch (e) { /* fallback botão manual */ }
+    var parentOrigin = ${JSON.stringify(parentOrigin)};
+    var send = function(payload){
+      try {
+        var msg = { source: "bet62-betby-tracker", payload: payload };
+        if (window.parent && window.parent !== window) window.parent.postMessage(msg, parentOrigin);
+        if (window.top && window.top !== window && window.top !== window.parent) {
+          try { window.top.postMessage(msg, parentOrigin); } catch(_) {}
+        }
+      } catch (_) {}
     };
-    if (document.readyState === "complete") setTimeout(fire, 50);
-    else window.addEventListener("load", function(){ setTimeout(fire, 50); });
-    // Fallback de segurança: após 3s força
-    setTimeout(fire, 3000);
+    send({ type: "ready" });
+    // Size signals — match heights reported by real widgets so the outer
+    // BetbyTrackerIframe never confuses the wrapper with an empty one.
+    send({ type: "resize", height: ${JSON.stringify(fallbackResizeHeight)} });
+    setTimeout(function(){
+      send({ type: "resize", height: ${JSON.stringify(fallbackResizeHeight)} });
+    }, 1000);
+    if (${isFallbackSmart ? "true" : "false"}) {
+      // Fallback smart: explicitly tell the parent that Statscore has NO
+      // data for this BetBY-derived placeholder id — the parent will then
+      // swap to "Tracker indisponível" instantly instead of spinning for
+      // 7-18 seconds and then showing a black screen.
+      send({ type: "data", available: false });
+      setTimeout(function(){ send({ type: "data", available: false }); }, 1500);
+      setTimeout(function(){ send({ type: "data", available: false }); }, 3500);
+    } else {
+      send({ type: "data", available: true });
+      // Real Statscore id: proceed with client-side redirect to the
+      // official origin so tracker.57e48a41.js paints correctly.
+      var fire = function(){
+        try { window.location.replace(${JSON.stringify(upstreamUrl)}); }
+        catch (e) { /* fallback botao manual */ }
+      };
+      if (document.readyState === "complete") setTimeout(fire, 50);
+      else window.addEventListener("load", function(){ setTimeout(fire, 50); });
+      setTimeout(fire, 3000);
+    }
   } catch (_) {}
 })();
 <\/script>
@@ -870,11 +926,20 @@ export async function fetchBetbyTrackerHtml(
     let resolvedStatscoreEventId: string | null = null;
     // ── SHORTCUT PRIORIDADE 0: Chamador já sabe o Statscore ID (ex: query param
     //    ?statscoreEventId=6670732). Usa DIRETO, NÃO tenta resolver (evita erros).
+    //
+    // Bug 2026-08-14 #P0NoFormatValidate: NÃO aceita IDs numéricos longos (~19
+    // dígitos = BetBY IDs) aqui — eles 404 no widgets.statscore.com. Só aceita
+    // se o formato bate com Statscore NATIVO (5-10 dígitos). Qualquer coisa fora
+    // disso cai nos outros caminhos (P1 mapa manual / P3 BetBY→Statscore) e por
+    // fim no fallback smart L982 que marca usedFallback=true, impede redirect
+    // meta refresh para widget 404, e retorna bridge com data.available=false.
     if (input.statscoreEventId != null) {
       const v = String(input.statscoreEventId).trim();
-      if (v.length >= 4) {
+      if (isRealStatscoreId(v)) {
         resolvedStatscoreEventId = v;
-        try { console.warn(`[betbyTracker/proxy] Statscore ID passado EXPLICITAMENTE (${resolvedStatscoreEventId}). Usando direto, sem resolver.`); } catch(_) {}
+        try { console.warn(`[betbyTracker/proxy] Statscore ID REAL passado EXPLICITAMENTE P0 (${resolvedStatscoreEventId}). Usando direto, sem resolver.`); } catch(_) {}
+      } else if (v.length >= 4) {
+        try { console.warn(`[betbyTracker/proxy] ?statscoreEventId=${v} IGNORADO no P0 (formato inválido Statscore, provavel BetBY ID 19+ dígitos). Prosseguindo P1/P3/FallbackSmart.`); } catch(_) {}
       }
     }
     if (!resolvedStatscoreEventId) {
@@ -962,13 +1027,16 @@ export async function fetchBetbyTrackerHtml(
     // para betby.com, sempre caia no fetch Node → widget tracker.57e48a41.js
     // ficava ZERO bytes, widget não aparecia (ou "Tracker indisponível").
     //
-    // FIX: usa resolvedStatscoreEventId (P0/P1/P3) E NÃO input.statscoreEventId!
+    // FIX FINAL: usa resolvedStatscoreEventId (P0/P1/P3) E NÃO input.statscoreEventId,
+    // e ALÉM DISSO valida o FORMATO com isRealStatscoreId (5-10 dígitos), para que
+    // IDs BetBY longos nunca sejam tratados como "Statscore REAL" e nunca acionem
+    // redirect client-side para um widget que vai 404 → tela preta.
     const hasRealStatscoreId = !usedFallback
       && resolvedStatscoreEventId != null
-      && String(resolvedStatscoreEventId).trim().length >= 4;
+      && isRealStatscoreId(resolvedStatscoreEventId);
     if (hasRealStatscoreId) {
       try { console.warn(`[betbyTracker/proxy] Statscore ID REAL via canal P0/P1/P3 (${String(resolvedStatscoreEventId).trim()}) → redirect client-side DIRETO para demoapi.betby.com (evita bloqueio de origem widget tracker.57e48a41.js + WAF 503). Pulando fetch Node.`); } catch(_) {}
-      const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {});
+      const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {}, { parentOrigin: input.parentOrigin });
       outerTimeout && clearTimeout(outerTimeout);
       return { html: redirectHtml, upstreamUrl };
     }
@@ -990,6 +1058,27 @@ export async function fetchBetbyTrackerHtml(
         throw new Error(`Upstream tracker returned HTTP ${res.status}`);
       }
       let html = await res.text();
+      // Bug 2026-08-14 #FallbackSmartNoInject (GUARD DEFINITIVO): Não adianta
+      // só checar usedFallback — o P3 resolveStatscoreEventIdFromBetby pode
+      // retornar um BetBY ID de 19 dígitos como fallback sem marcar
+      // usedFallback=true, resultando no mesmo problema: widget Statscore 404
+      // silencioso sem bridge postMessage.
+      //
+      // GUARD DEFINITIVO: Se !isRealStatscoreId(resolvedStatscoreEventId)
+      // (não tem 5 a 10 dígitos = não é Statscore nativo), NÃO vamos
+      // injetar NADA do HTML upstream. Devolvemos o bridge shell
+      // buildClientRedirectBypassWafHtml com isFallbackSmart:true que envia
+      // data.available=false imediatamente. Front mostra
+      // "Tracker indisponível neste momento" em <500ms sem tela preta.
+      const resolvedRealStatscore = isRealStatscoreId(resolvedStatscoreEventId ?? "");
+      if (!resolvedRealStatscore) {
+        try { console.warn(`[betbyTracker/proxy] resolvedStatscoreEventId="${String(resolvedStatscoreEventId ?? "null")}" NÃO É Statscore REAL (isRealStatscoreId=false). Pulando upstream HTML inject. Retornando bridge shell data.available=false para front degrade amigavel.`); } catch(_) {}
+        outerTimeout && clearTimeout(outerTimeout);
+        return {
+          html: buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {}, { isFallbackSmart: true, parentOrigin: input.parentOrigin }),
+          upstreamUrl,
+        };
+      }
       // Bug report 2026-08-13 ("tela preta"): this HTML is fetched
       // server-side from demoapi.betby.com and re-served verbatim from OUR
       // OWN origin/path (/api/betby-live-tracker/:id), not from
@@ -1043,8 +1132,8 @@ export async function fetchBetbyTrackerHtml(
       clearTimeout(to);
       if (hasRealStatscoreId) {
         const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-        try { console.warn(`[betbyTracker/proxy] Upstream BetBY fetch falhou (${msg}). Temos statscoreEventId REAL (${String(input.statscoreEventId).trim()}) → usando fallback de redirect client-side (WAF bypass) para ${upstreamUrl}.`); } catch(_) {}
-        const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {});
+        try { console.warn(`[betbyTracker/proxy] Upstream BetBY fetch falhou (${msg}). Temos statscoreEventId REAL (${String(resolvedStatscoreEventId).trim()}) → usando fallback de redirect client-side (WAF bypass) para ${upstreamUrl}.`); } catch(_) {}
+        const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {}, { parentOrigin: input.parentOrigin });
         return { html: redirectHtml, upstreamUrl };
       }
       throw fetchErr;
