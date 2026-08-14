@@ -4691,7 +4691,10 @@ function BetbyTrackerIframe({
         // see routes/betbyTracker.ts's /url handler for the fix on that
         // side (converts this to BetBY's own numeric sportId convention).
         const q = new URLSearchParams({ home, away, lang, sport });
-        if (statscoreEventId && statscoreEventId.trim().length >= 4) {
+        // Defense-in-depth: só envia statscoreEventId explicitamente se
+        // formato for Statscore NATIVO REAL (5-10 dígitos). BetBY IDs ~19
+        // dígitos não chegam aqui — backend já teria que resolver por nome.
+        if (statscoreEventId && /^\d{5,10}$/.test(statscoreEventId.trim())) {
           q.set("statscoreEventId", statscoreEventId.trim());
         }
         const endpoint = `${apiBase}/api/betby-live-tracker/url?${q.toString()}`;
@@ -4734,7 +4737,14 @@ function BetbyTrackerIframe({
         // available" shell with postMessage bridge signals so this component
         // can detect and show the same state instead of a silent black iframe).
         const finalStat = json.finalStatscoreEventId ?? "";
-        const hasRealStat = finalStat.length >= 4 && !json.usedFallbackSmartBetbyId;
+        // Defense-in-depth: mesmos critérios do backend isRealStatscoreId(...)
+        // (5-10 dígitos = Statscore NATIVO real). BetBY IDs ~19 dígitos NUNCA
+        // passam, então useUpstream=false → iframe aponta para NOSSO proxy
+        // (que retorna bridge shell amigável) em vez de demoapi.betby.com
+        // direto (que dava net::ERR_ABORTED + widget Statscore 404 silencioso
+        // com origin betby e SEM bridge postMessage).
+        const isRealStatscoreIdFront = /^\d{5,10}$/.test(finalStat.trim());
+        const hasRealStat = isRealStatscoreIdFront && !json.usedFallbackSmartBetbyId;
         const useUpstream = hasRealStat && !!json.upstream;
         const finalIframeSrc: string | null = useUpstream ? json.upstream! : (json.proxy ?? null);
         if (!finalIframeSrc) return null;
