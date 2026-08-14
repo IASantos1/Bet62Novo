@@ -861,10 +861,10 @@ ${isFallbackSmart ? "" : `<meta http-equiv="refresh" content="0; url=${upstreamU
 </style>
 </head>
 <body>
-<div class="wrap"><div class="box">
-  <div class="spinner" role="status" aria-label="Loading"></div>
-  <div class="msg">${isFallbackSmart ? "A preparar o tracker..." : "Carregando tracker..."}</div>
-  <div class="sub">${isFallbackSmart
+<div class="wrap"><div class="box" id="fallback-box">
+  <div class="spinner" id="fallback-spinner" role="status" aria-label="Loading"></div>
+  <div class="msg" id="fallback-msg">${isFallbackSmart ? "A preparar o tracker..." : "Carregando tracker..."}</div>
+  <div class="sub" id="fallback-sub">${isFallbackSmart
       ? "A verificar se existem dados disponiveis para este evento"
       : "Redirecionando para o widget oficial (WAF bypass)"}</div>
   ${isFallbackSmart ? "" : `<a class="btn" href="${upstreamUrl}" target="_self" rel="noopener">Abrir agora</a>`}
@@ -897,6 +897,26 @@ ${isFallbackSmart ? "" : `<meta http-equiv="refresh" content="0; url=${upstreamU
       send({ type: "data", available: false });
       setTimeout(function(){ send({ type: "data", available: false }); }, 1500);
       setTimeout(function(){ send({ type: "data", available: false }); }, 3500);
+      // ── FAIL CLOSED VISUAL (não depende de postMessage cross-window) ──
+      // Mostra "Tracker indisponível neste momento" DENTRO do próprio iframe
+      // após 1.5s, caso o front pai não receba/process o postMessage.
+      (function(){
+        var swap = function(){
+          try {
+            var box = document.getElementById("fallback-box");
+            if (!box) return;
+            var spin = document.getElementById("fallback-spinner");
+            if (spin) spin.style.display = "none";
+            var msg = document.getElementById("fallback-msg");
+            if (msg) { msg.textContent = "Tracker indisponível neste momento."; msg.style.opacity = "1"; }
+            var sub = document.getElementById("fallback-sub");
+            if (sub) sub.style.display = "none";
+          } catch(_) {}
+        };
+        setTimeout(swap, 1500);
+        setTimeout(swap, 2500);
+        setTimeout(swap, 4000);
+      })();
     } else {
       send({ type: "data", available: true });
       // Real Statscore id: proceed with client-side redirect to the

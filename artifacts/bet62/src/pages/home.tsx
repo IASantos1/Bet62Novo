@@ -4825,8 +4825,12 @@ function BetbyTrackerIframe({
           const available: unknown = payload.available;
           if (available === false) {
             // Widget Statscore EXPLICITA que não tem dados para esse evento.
-            // Não precisa esperar 10s, já aciona detector de widget vazio.
+            // NÃO espera 7s do detector — aciona IMEDIATAMENTE o overlay
+            // "Tracker indisponível" (fail fast, UX melhor). O iframe também
+            // já troca DENTRO DELE a mensagem sozinho após 1.5s (fail closed
+            // visual, proxy.ts swap()).
             dataExplicitUnavailable.current = true;
+            setFailed(true);
           }
           setReady(true);
           return;
