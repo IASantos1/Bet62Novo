@@ -3747,6 +3747,13 @@ type Match = {
   sport?: string;
   // Football only — market-depth/staking tier (1 = full, 4 = minimal).
   matchTier?: 1 | 2 | 3 | 4;
+  // Explicit Statscore event ID (native Statscore numeric ID, e.g. 6479574
+  // for New York City FC vs Club Necaxa). When set, bypasses BetBY-side
+  // statscoreEventId resolution (which requires cookies) and is injected
+  // directly into the tracker widget — the ONLY way to guarantee the
+  // actual green field tracker renders instead of a "Tracker indisponível"
+  // fallback.  See proxy.ts resolveStatscoreEventIdFromBetby for details.
+  statscoreEventId?: string;
   hasRealOdds?: boolean;
   isWomens?: boolean;
   odds: Odds;
@@ -4611,6 +4618,7 @@ function BetbyTrackerIframe({
   lang = "pt-br",
   aspectRatio = "16 / 9",
   className,
+  statscoreEventId,
 }: {
   home: string;
   away: string;
@@ -4618,6 +4626,7 @@ function BetbyTrackerIframe({
   lang?: string;
   aspectRatio?: string;
   className?: string;
+  statscoreEventId?: string;
 }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -4653,7 +4662,7 @@ function BetbyTrackerIframe({
   // (and its DIRECT-only pulse overlay wiring) was removed outright
   // instead of trusting a flag no one can see is set.
   const { data: urlInfo, isFetching, error: queryError } = useQuery({
-    queryKey: ["betby-tracker-url", home, away, sport, lang, apiBase],
+    queryKey: ["betby-tracker-url", home, away, sport, lang, apiBase, statscoreEventId],
     queryFn: async () => {
       try {
         // sport (Bet62's own sport key — "football", "tennis",
@@ -4662,12 +4671,17 @@ function BetbyTrackerIframe({
         // see routes/betbyTracker.ts's /url handler for the fix on that
         // side (converts this to BetBY's own numeric sportId convention).
         const q = new URLSearchParams({ home, away, lang, sport });
+        if (statscoreEventId && statscoreEventId.trim().length >= 4) {
+          q.set("statscoreEventId", statscoreEventId.trim());
+        }
         const endpoint = `${apiBase}/api/betby-live-tracker/url?${q.toString()}`;
         const res = await fetch(endpoint, { method: "GET", headers: { Accept: "application/json" } });
         if (!res.ok) return null;
         const json = (await res.json().catch(() => null)) as null | {
           ok?: boolean;
           finalBetbyEventId?: string | null;
+          finalStatscoreEventId?: string | null;
+          usedFallbackSmartBetbyId?: boolean;
           proxy?: string | null;
         };
         if (!json || !json.ok || !json.finalBetbyEventId || !json.proxy) return null;
@@ -5012,6 +5026,7 @@ function TrackerModal({
                   sport={event.sport}
                   lang="pt-br"
                   aspectRatio="16 / 9"
+                  statscoreEventId={event.statscoreEventId}
                 />
               </TrackerErrorBoundary>
             </div>
@@ -19452,6 +19467,7 @@ export default function Home({
                             sport={expandedMatch.sport ?? "football"}
                             lang="pt-br"
                             aspectRatio="16 / 9"
+                            statscoreEventId={expandedMatch.statscoreEventId}
                           />
                         </TrackerErrorBoundary>
                       </div>

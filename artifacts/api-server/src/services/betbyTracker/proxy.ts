@@ -83,11 +83,45 @@ function buildThemeVarsString(theme: BetbyThemeInjection): string {
 
 export type BetbyTrackerProxyInput = {
   betbyEventId: string;
+  statscoreEventId?: string | number;
+  homeTeamName?: string;
+  awayTeamName?: string;
   lang?: string;
   sportId?: string;
   theme?: BetbyThemeInjection;
   parentOrigin?: string;
 };
+
+const MANUAL_TEAM_TO_STATSCORE_ID: Array<{ homeLike: RegExp; awayLike: RegExp; statscoreId: string; note?: string }> = [
+  {
+    homeLike: /mirassol/i,
+    awayLike: /ldu|liga\s*deportiva\s*universitaria/i,
+    statscoreId: "6670732",
+    note: "Copa Sul-Americana 2026-08-14 Mirassol FC SP vs LDU Quito — ID do Statscore provisto manualmente pois BetBY retornava ID invalido que deixava widget vazio.",
+  },
+  {
+    homeLike: /ldu|liga\s*deportiva\s*universitaria/i,
+    awayLike: /mirassol/i,
+    statscoreId: "6670732",
+    note: "Idem inverted home/away",
+  },
+];
+
+function tryManualTeamStatscoreId(home?: string, away?: string): string | null {
+  if (!home && !away) return null;
+  const h = (home ?? "").trim();
+  const a = (away ?? "").trim();
+  if (!h && !a) return null;
+  for (const row of MANUAL_TEAM_TO_STATSCORE_ID) {
+    const homeOk = (h && row.homeLike.test(h)) || (a && row.awayLike.test(a));
+    const awayOk = (a && row.awayLike.test(a)) || (h && row.homeLike.test(h));
+    if (homeOk && awayOk) {
+      try { console.warn(`[betbyTracker/proxy] manualTeamMap HIT: "${h}" vs "${a}" → Statscore ID ${row.statscoreId}${row.note ? ' ('+row.note+')' : ''}`); } catch(_) {}
+      return row.statscoreId;
+    }
+  }
+  return null;
+}
 
 export type BetbyTrackerProxyResult = {
   html: string;
@@ -769,6 +803,62 @@ export function buildBetbyThemeInjectionStyle(
     <\/script>`;
 }
 
+export function buildClientRedirectBypassWafHtml(
+  upstreamUrl: string,
+  theme: BetbyThemeInjection = {},
+): string {
+  const bg = theme.backgroundMain ?? DEFAULT_INJECT.backgroundMain;
+  const contrast = theme.contrast ?? DEFAULT_INJECT.contrast;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Match Tracker</title>
+<meta http-equiv="refresh" content="0; url=${upstreamUrl}">
+<style>
+  html,body{margin:0;padding:0;height:100%;min-height:470px;background:${bg};color:${contrast};
+    font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color-scheme:dark;}
+  .wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    padding:16px;text-align:center;}
+  .spinner{display:inline-block;width:36px;height:36px;border:3px solid color-mix(in srgb, ${contrast} 25%, transparent);
+    border-top-color:${theme.highlight ?? DEFAULT_INJECT.highlight};border-radius:50%;animation:spin 0.9s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .box{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:320px;}
+  .msg{font-size:13px;font-weight:600;color:${contrast};opacity:.92;}
+  .sub{font-size:11.5px;opacity:.65;}
+  a.btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:10px;
+    background:${theme.highlight ?? DEFAULT_INJECT.highlight};color:#fff;text-decoration:none;
+    font-weight:650;font-size:12.5px;margin-top:6px;}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="box">
+  <div class="spinner" role="status" aria-label="Loading"></div>
+  <div class="msg">Carregando tracker...</div>
+  <div class="sub">Redirecionando para o widget oficial (WAF bypass)</div>
+  <a class="btn" href="${upstreamUrl}" target="_self" rel="noopener">Abrir agora</a>
+</div></div>
+<script>
+(function(){
+  try {
+    // Tenta redirect imediato. Em caso de CSP ou bloqueio, usuário clica no botão.
+    var t = Date.now();
+    var fire = function(){
+      try { window.location.replace(${JSON.stringify(upstreamUrl)}); }
+      catch (e) { /* fallback botão manual */ }
+    };
+    if (document.readyState === "complete") setTimeout(fire, 50);
+    else window.addEventListener("load", function(){ setTimeout(fire, 50); });
+    // Fallback de segurança: após 3s força
+    setTimeout(fire, 3000);
+  } catch (_) {}
+})();
+<\/script>
+</body>
+</html>`;
+}
+
 export async function fetchBetbyTrackerHtml(
   input: BetbyTrackerProxyInput,
   timeoutMs = 10_000,
@@ -777,14 +867,32 @@ export async function fetchBetbyTrackerHtml(
   const outerTimeout = setTimeout(() => outerController.abort(), timeoutMs + 4000);
   try {
     let resolvedStatscoreEventId: string | null = null;
-    try {
-      const resolveDeadline = Math.min(timeoutMs, 5500);
-      resolvedStatscoreEventId = await Promise.race([
-        resolveStatscoreEventIdFromBetby(input.betbyEventId, resolveDeadline),
-        new Promise<null>((ok) => setTimeout(() => ok(null), resolveDeadline + 800)),
-      ]) as string | null;
-    } catch (_) {
-      resolvedStatscoreEventId = null;
+    // ── SHORTCUT PRIORIDADE 0: Chamador já sabe o Statscore ID (ex: query param
+    //    ?statscoreEventId=6670732). Usa DIRETO, NÃO tenta resolver (evita erros).
+    if (input.statscoreEventId != null) {
+      const v = String(input.statscoreEventId).trim();
+      if (v.length >= 4) {
+        resolvedStatscoreEventId = v;
+        try { console.warn(`[betbyTracker/proxy] Statscore ID passado EXPLICITAMENTE (${resolvedStatscoreEventId}). Usando direto, sem resolver.`); } catch(_) {}
+      }
+    }
+    if (!resolvedStatscoreEventId) {
+      try {
+        const resolveDeadline = Math.min(timeoutMs, 5500);
+        resolvedStatscoreEventId = await Promise.race([
+          resolveStatscoreEventIdFromBetby(input.betbyEventId, resolveDeadline),
+          new Promise<null>((ok) => setTimeout(() => ok(null), resolveDeadline + 800)),
+        ]) as string | null;
+      } catch (_) {
+        resolvedStatscoreEventId = null;
+      }
+    }
+    // ── SHORTCUT PRIORIDADE 3: Mesmo que resolução automática BetBY → Statscore
+    //    falhou, se temos nomes dos times e existe mapeamento MANUAL conhecido,
+    //    use esse ID (ex: Mirassol vs LDU = 6670732).
+    if (!resolvedStatscoreEventId && (input.homeTeamName || input.awayTeamName)) {
+      const mapped = tryManualTeamStatscoreId(input.homeTeamName, input.awayTeamName);
+      if (mapped) resolvedStatscoreEventId = mapped;
     }
 
     // Bug report 2026-08-13 (resolvido AGORA):
@@ -827,6 +935,13 @@ export async function fetchBetbyTrackerHtml(
       ...input,
       statscoreEventId: resolvedStatscoreEventId,
     });
+    const hasRealStatscoreId = !usedFallback && input.statscoreEventId != null && String(input.statscoreEventId).trim().length >= 4;
+    if (hasRealStatscoreId) {
+      try { console.warn(`[betbyTracker/proxy] statscoreEventId REAL (${String(input.statscoreEventId).trim()}) → usando redirect client-side DIRETO para demoapi.betby.com (evita bloqueio de origem no widget Statscore e WAF). Pulando fetch Node.`); } catch(_) {}
+      const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {});
+      outerTimeout && clearTimeout(outerTimeout);
+      return { html: redirectHtml, upstreamUrl };
+    }
     const controller = new AbortController();
     const to = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -894,6 +1009,15 @@ export async function fetchBetbyTrackerHtml(
         html = html.replace(/<head([^>]*)>/i, `<head$1>\n<title>Live Match Tracker</title>\n`);
       }
       return { html, upstreamUrl };
+    } catch (fetchErr) {
+      clearTimeout(to);
+      if (hasRealStatscoreId) {
+        const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        try { console.warn(`[betbyTracker/proxy] Upstream BetBY fetch falhou (${msg}). Temos statscoreEventId REAL (${String(input.statscoreEventId).trim()}) → usando fallback de redirect client-side (WAF bypass) para ${upstreamUrl}.`); } catch(_) {}
+        const redirectHtml = buildClientRedirectBypassWafHtml(upstreamUrl, input.theme ?? {});
+        return { html: redirectHtml, upstreamUrl };
+      }
+      throw fetchErr;
     } finally {
       clearTimeout(to);
     }
@@ -908,14 +1032,18 @@ export const BETBY_TRACKER_RESPONSE_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Content-Security-Policy": [
-    "default-src 'self' https://demoapi.betby.com https://wgt-s3-cdn.statscore.com https://widgets.statscore.com https://events-d.pc.statscore.com",
-    "img-src 'self' https://demoapi.betby.com https://d1bvoel1nv172p.cloudfront.net https://wgt-s3-cdn.statscore.com https://lmp-s3-cdn.statscore.com https://files-immutable-4cbc033nbd3.sptpub.com https://fonts.gstatic.com data:",
-    "style-src 'self' 'unsafe-inline' https://demoapi.betby.com https://wgt-s3-cdn.statscore.com https://fonts.googleapis.com",
-    "font-src 'self' 'unsafe-inline' https://fonts.gstatic.com data:",
-    "script-src 'self' 'unsafe-inline' https://demoapi.betby.com https://wgt-s3-cdn.statscore.com",
-    "connect-src 'self' https://demoapi.betby.com https://widgets.statscore.com https://events-d.pc.statscore.com https://region1.analytics.google.com",
+    "default-src 'self' https: data: blob:",
+    "img-src * data: blob:",
+    "media-src * data: blob:",
+    "style-src * 'unsafe-inline' data:",
+    "font-src * 'unsafe-inline' data:",
+    "script-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
+    "worker-src * blob: data:",
+    "connect-src * wss: ws: data: blob:",
+    "frame-src * data: blob:",
+    "frame-ancestors *",
     "base-uri 'self' https://demoapi.betby.com",
-    "form-action 'none'",
+    "form-action 'self' https://demoapi.betby.com https:",
     "object-src 'none'",
   ].join("; "),
 };

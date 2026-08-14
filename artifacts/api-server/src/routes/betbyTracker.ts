@@ -4,6 +4,8 @@ import {
   fetchBetbyTrackerHtml,
   buildBetbyTrackerUpstreamUrl,
   buildBetbyTrackerPublicUrl,
+  resolveStatscoreEventIdFromBetby,
+  buildClientRedirectBypassWafHtml,
   type BetbyThemeInjection,
 } from "../services/betbyTracker/proxy.js";
 import { listMappings } from "../services/liveStream/mapping.js";
@@ -180,15 +182,6 @@ router.get("/url", async (req: Request, res: Response) => {
     const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
       ? req.query.lang
       : "pt-br";
-    // Bug report 2026-08-13: the Tracker only ever worked (when it worked
-    // at all) for football, because sportId was hardcoded to "1" on the
-    // frontend regardless of the match's real sport — a tennis or
-    // basketball match would ask BetBY's tracker widget to render as
-    // football. 'sport' (Bet62/PulseScore's own sport key) is now the
-    // primary source of truth, converted to BetBY's numeric convention via
-    // betbySportIdForPulseSport; an explicit 'sportId' query param is still
-    // honored when passed on its own (no 'sport'), for any caller that
-    // already knows BetBY's raw numeric id directly.
     const sportParam = typeof req.query.sport === "string" ? req.query.sport.trim().toLowerCase() : "";
     const sportId = sportParam
       ? betbySportIdForPulseSport(normalizeToPulseSportKey(sportParam))
@@ -206,20 +199,47 @@ router.get("/url", async (req: Request, res: Response) => {
         proxy: null,
         pulseSse: null,
         finalBetbyEventId: null,
+        finalStatscoreEventId: null,
+        usedFallbackSmartBetbyId: false,
       });
     }
     const finalBetbyEventId = resolved.finalBetbyEventId!;
+    const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
+      ? req.query.statscoreEventId.trim()
+      : null;
+    let finalStatscoreEventId: string | null = explicitStatscoreId;
+    let usedFallbackSmartBetbyId = false;
+    if (!finalStatscoreEventId) {
+      try {
+        finalStatscoreEventId = await Promise.race([
+          resolveStatscoreEventIdFromBetby(finalBetbyEventId, 5000),
+          new Promise<null>((ok) => setTimeout(() => ok(null), 5600)),
+        ]) as string | null;
+      } catch (_) { finalStatscoreEventId = null; }
+    }
+    if (!finalStatscoreEventId) {
+      finalStatscoreEventId = finalBetbyEventId;
+      usedFallbackSmartBetbyId = true;
+    }
     const publicDirectUrl = buildBetbyTrackerPublicUrl({
       betbyEventId: finalBetbyEventId,
+      statscoreEventId: finalStatscoreEventId ?? undefined,
       lang,
       sportId,
     });
     const apiBase = `${req.protocol}://${req.get("host") ?? ""}`;
-    const proxyUrl = `${apiBase}/api/betby-live-tracker/${encodeURIComponent(finalBetbyEventId)}?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`;
+    let proxyUrl = `${apiBase}/api/betby-live-tracker/${encodeURIComponent(finalBetbyEventId)}?lang=${encodeURIComponent(lang)}&sportId=${encodeURIComponent(sportId)}`;
+    if (finalStatscoreEventId) proxyUrl += `&statscoreEventId=${encodeURIComponent(finalStatscoreEventId)}`;
+    const rawHome = typeof req.query.home === "string" ? req.query.home : "";
+    const rawAway = typeof req.query.away === "string" ? req.query.away : "";
+    if (rawHome) proxyUrl += `&home=${encodeURIComponent(rawHome)}`;
+    if (rawAway) proxyUrl += `&away=${encodeURIComponent(rawAway)}`;
     void resolveBetbyMatchMeta(finalBetbyEventId, 3500).catch(() => null);
     return res.status(200).json({
       ok: true,
       finalBetbyEventId,
+      finalStatscoreEventId,
+      usedFallbackSmartBetbyId,
       upstream: publicDirectUrl,
       direct: true,
       lang,
@@ -238,25 +258,26 @@ router.get("/url", async (req: Request, res: Response) => {
       proxy: null,
       pulseSse: null,
       finalBetbyEventId: null,
+      finalStatscoreEventId: null,
+      usedFallbackSmartBetbyId: false,
     });
   }
 });
 
 router.get("/", async (req: Request, res: Response) => {
-  // EVERYTHING inside a single outer try/catch so a stray throw from
-  // resolveFinalBetbyEventId or any helper can never bubble past the
-  // handler and crash the node process. Also, all responses are HTTP 200
-  // — returning 502/400/etc makes Cloudflare intercept the response and
-  // show its own generic "Bad Gateway" error page, which users read as
-  // the whole site being down instead of "this specific tracker is
-  // unavailable right now".
+  const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
+    ? req.query.lang
+    : "pt-br";
+  const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
+    ? req.query.sportId
+    : "1";
+  const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
+    ? req.query.statscoreEventId.trim()
+    : null;
+  let finalBetbyEventId: string | null = null;
   try {
-    const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
-      ? req.query.lang
-      : "pt-br";
-    const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
-      ? req.query.sportId
-      : "1";
+    const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
+    const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
     const resolved = await resolveFinalBetbyEventId(req);
     if (resolved.error) {
       return res
@@ -264,18 +285,22 @@ router.get("/", async (req: Request, res: Response) => {
         .type("text/plain")
         .send(resolved.error.msg);
     }
-    const finalBetbyEventId = resolved.finalBetbyEventId!;
+    finalBetbyEventId = resolved.finalBetbyEventId!;
 
     const parentOrigin = getOriginFromRequest(req) ?? "*";
-    await resolveBetbyMatchMeta(finalBetbyEventId, 3500)
+    const meta = await resolveBetbyMatchMeta(finalBetbyEventId, 3500)
       .catch(() => null);
     const upstreamPreview = buildBetbyTrackerUpstreamUrl({
       betbyEventId: finalBetbyEventId,
+      statscoreEventId: explicitStatscoreId ?? undefined,
       lang,
       sportId,
     });
     const { html, upstreamUrl } = await fetchBetbyTrackerHtml({
       betbyEventId: finalBetbyEventId,
+      statscoreEventId: explicitStatscoreId ?? undefined,
+      homeTeamName: meta?.homeName || queryHome || undefined,
+      awayTeamName: meta?.awayName || queryAway || undefined,
       lang,
       sportId,
       theme: DEFAULT_THEME,
@@ -290,33 +315,50 @@ router.get("/", async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg }, "[betbyTracker] / handler failed");
-    // Always HTTP 200 — Cloudflare replaces 5xx with its own landing page
+    if (explicitStatscoreId && finalBetbyEventId) {
+      try {
+        const u = buildBetbyTrackerUpstreamUrl({ betbyEventId: finalBetbyEventId, statscoreEventId: explicitStatscoreId, lang, sportId });
+        res.set(BETBY_TRACKER_RESPONSE_HEADERS);
+        return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
+      } catch (_) {}
+    }
     return res.status(200).type("text/html").send(trackerUnavailableHtml());
   }
 });
 
 router.get("/:betbyEventId", async (req: Request, res: Response) => {
+  const betbyEventId = String(req.params.betbyEventId);
+  const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
+    ? req.query.lang
+    : "pt-br";
+  const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
+    ? req.query.sportId
+    : "1";
+  const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
+    ? req.query.statscoreEventId.trim()
+    : null;
   try {
-    const betbyEventId = String(req.params.betbyEventId);
     if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {
       return res.status(200).type("text/plain").send("Invalid betbyEventId (expected numeric id)");
     }
-    const lang = typeof req.query.lang === "string" && req.query.lang.length > 0
-      ? req.query.lang
-      : "pt-br";
-    const sportId = typeof req.query.sportId === "string" && req.query.sportId.length > 0
-      ? req.query.sportId
-      : "1";
+    const queryHome = typeof req.query.home === "string" ? req.query.home.trim() : "";
+    const queryAway = typeof req.query.away === "string" ? req.query.away.trim() : "";
     const parentOrigin = getOriginFromRequest(req) ?? "*";
+
+    const meta = await resolveBetbyMatchMeta(betbyEventId, 3500).catch(() => null);
 
     const upstreamPreview = buildBetbyTrackerUpstreamUrl({
       betbyEventId,
+      statscoreEventId: explicitStatscoreId ?? undefined,
       lang,
       sportId,
     });
 
     const { html, upstreamUrl } = await fetchBetbyTrackerHtml({
       betbyEventId,
+      statscoreEventId: explicitStatscoreId ?? undefined,
+      homeTeamName: meta?.homeName || queryHome || undefined,
+      awayTeamName: meta?.awayName || queryAway || undefined,
       lang,
       sportId,
       theme: DEFAULT_THEME,
@@ -332,9 +374,13 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg, betbyEventId: req.params.betbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
-    // Always HTTP 200 — returning 502 here made Cloudflare show its own
-    // generic "Bad Gateway" page to users, which looked like the whole
-    // site was down. Now users see our own "Tracker indisponível" card.
+    if (explicitStatscoreId && betbyEventId && /^\d+$/.test(betbyEventId) && betbyEventId.length >= 6) {
+      try {
+        const u = buildBetbyTrackerUpstreamUrl({ betbyEventId, statscoreEventId: explicitStatscoreId, lang, sportId });
+        res.set(BETBY_TRACKER_RESPONSE_HEADERS);
+        return res.status(200).type("text/html").send(buildClientRedirectBypassWafHtml(u, DEFAULT_THEME));
+      } catch (_) {}
+    }
     return res.status(200).type("text/html").send(trackerUnavailableHtml());
   }
 });
