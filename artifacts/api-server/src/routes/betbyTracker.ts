@@ -6,6 +6,7 @@ import {
   buildBetbyTrackerPublicUrl,
   resolveStatscoreEventIdFromBetby,
   buildClientRedirectBypassWafHtml,
+  tryManualTeamStatscoreId,
   type BetbyThemeInjection,
 } from "../services/betbyTracker/proxy.js";
 import { listMappings } from "../services/liveStream/mapping.js";
@@ -207,6 +208,8 @@ router.get("/url", async (req: Request, res: Response) => {
     const explicitStatscoreId = typeof req.query.statscoreEventId === "string" && req.query.statscoreEventId.length >= 4
       ? req.query.statscoreEventId.trim()
       : null;
+    const homeForResolve = typeof req.query.home === "string" ? req.query.home.trim() : "";
+    const awayForResolve = typeof req.query.away === "string" ? req.query.away.trim() : "";
     let finalStatscoreEventId: string | null = explicitStatscoreId;
     let usedFallbackSmartBetbyId = false;
     if (!finalStatscoreEventId) {
@@ -216,6 +219,23 @@ router.get("/url", async (req: Request, res: Response) => {
           new Promise<null>((ok) => setTimeout(() => ok(null), 5600)),
         ]) as string | null;
       } catch (_) { finalStatscoreEventId = null; }
+    }
+    // Bug found 2026-08-14 auditing every BetBY URL config end-to-end: this
+    // route bakes finalStatscoreEventId into the proxy URL it returns, and
+    // once that URL is built with SOME value (real or the wrong-ID
+    // fallback below), fetchBetbyTrackerHtml's "SHORTCUT PRIORIDADE 0"
+    // treats whatever arrives on the query string as already-resolved and
+    // never re-checks anything — including tryManualTeamStatscoreId (the
+    // Mirassol/LDU hand-mapped override). Since THIS route never consulted
+    // that table itself, a match covered by the manual map but not by
+    // automatic resolution had its correct ID silently overridden by the
+    // wrong-ID fallback below before the manual map ever got a chance to
+    // run — making that override effectively dead code for any request
+    // that goes through the normal /url → <iframe src> flow (which is all
+    // of them). Checking it here, in the same priority slot
+    // fetchBetbyTrackerHtml itself uses, is what actually makes it apply.
+    if (!finalStatscoreEventId && (homeForResolve || awayForResolve)) {
+      finalStatscoreEventId = tryManualTeamStatscoreId(homeForResolve, awayForResolve);
     }
     if (!finalStatscoreEventId) {
       finalStatscoreEventId = finalBetbyEventId;
