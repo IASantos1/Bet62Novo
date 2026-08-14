@@ -170,7 +170,7 @@ async function resolveFinalBetbyEventId(
     finalBetbyEventId = byName.betbyEventId;
   }
 
-  if (!finalBetbyEventId || finalBetbyEventId.length < 6 || !/^\d+$/.test(finalBetbyEventId)) {
+  if (!finalBetbyEventId || !/^\d+$/.test(finalBetbyEventId) || (finalBetbyEventId !== "0" && finalBetbyEventId.length < 6)) {
     return {
       finalBetbyEventId: null,
       error: { code: 400, msg: "Invalid betbyEventId (expected numeric id)" },
@@ -490,7 +490,7 @@ router.get("/", async (req: Request, res: Response) => {
     // (BetBY-id-as-Statscore-id) just returns the bridge shell so the parent
     // frame degrades to "Tracker indisponível" instead of a silent black
     // screen after the cross-origin widget 404s.
-    const isRealStatscore = finalStatscoreEventId && !usedFallbackSmartBetbyId && String(finalStatscoreEventId).length >= 4;
+    const isRealStatscore = finalStatscoreEventId && !usedFallbackSmartBetbyId && isRealStatscoreId(finalStatscoreEventId);
     if (finalStatscoreEventId) {
       try {
         const u = buildBetbyTrackerUpstreamUrl({
@@ -552,8 +552,14 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   let usedFallbackSmartBetbyId = false;
 
   try {
-    if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {
-      return res.status(200).type("text/plain").send("Invalid betbyEventId (expected numeric id)");
+    if (!hadRealStatscoreBeforeResolve) {
+      if (!betbyEventId || betbyEventId.length < 6 || !/^\d+$/.test(betbyEventId)) {
+        return res.status(200).type("html").send(trackerUnavailableHtml());
+      }
+    } else {
+      if (betbyEventId && !/^\d+$/.test(betbyEventId)) {
+        return res.status(200).type("html").send(trackerUnavailableHtml());
+      }
     }
     const parentOrigin = getOriginFromRequest(req) ?? "*";
 
@@ -603,10 +609,10 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
     logger.warn({ err: msg, betbyEventId: req.params.betbyEventId }, "[betbyTracker] fetchBetbyTrackerHtml failed");
     const isRealStatscore = finalStatscoreEventId
       && !usedFallbackSmartBetbyId
-      && String(finalStatscoreEventId).length >= 4
+      && isRealStatscoreId(finalStatscoreEventId)
       && /^\d+$/.test(betbyEventId)
-      && betbyEventId.length >= 6;
-    const okForRedirect = finalStatscoreEventId && /^\d+$/.test(betbyEventId) && betbyEventId.length >= 6;
+      && (betbyEventId === "0" || betbyEventId.length >= 6);
+    const okForRedirect = finalStatscoreEventId && /^\d+$/.test(betbyEventId) && (betbyEventId === "0" || betbyEventId.length >= 6);
     if (okForRedirect) {
       try {
         const u = buildBetbyTrackerUpstreamUrl({ betbyEventId, statscoreEventId: finalStatscoreEventId!, lang, sportId });
