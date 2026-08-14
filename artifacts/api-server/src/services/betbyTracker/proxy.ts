@@ -107,7 +107,7 @@ const MANUAL_TEAM_TO_STATSCORE_ID: Array<{ homeLike: RegExp; awayLike: RegExp; s
   },
 ];
 
-function tryManualTeamStatscoreId(home?: string, away?: string): string | null {
+export function tryManualTeamStatscoreId(home?: string, away?: string): string | null {
   if (!home && !away) return null;
   const h = (home ?? "").trim();
   const a = (away ?? "").trim();
