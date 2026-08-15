@@ -12557,6 +12557,21 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (override?.teamGoals) {
       rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
     }
+    if (override?.btts1H) {
+      rawMarkets.btts1H = { ...rawMarkets.btts1H, ...override.btts1H };
+    }
+    if (override?.exactGoals) {
+      rawMarkets.exactGoals = { ...rawMarkets.exactGoals, ...override.exactGoals };
+    }
+    if (override?.corners) {
+      rawMarkets.corners = { ...rawMarkets.corners, ...override.corners };
+    }
+    if (override?.cards) {
+      rawMarkets.cards = { ...rawMarkets.cards, ...override.cards };
+    }
+    if (override?.htft) {
+      rawMarkets.htft = { ...rawMarkets.htft, ...override.htft };
+    }
     const id = `pulsescore-football-${ev.eventId}`;
     const existing = liveMatchState.get(id);
     // Same "don't regenerate from a default, keep the last known real value"
