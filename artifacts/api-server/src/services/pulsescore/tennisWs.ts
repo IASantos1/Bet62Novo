@@ -52,7 +52,7 @@ import { pulseScoreWsUrl, type PulseScoreEvent } from "./client.js";
 
 let ws: WebSocket | null = null;
 let connected = false;
-let retryDelayMs = 5_000;
+let retryDelayMs = 2_000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let startedOnce = false;
 
@@ -209,7 +209,7 @@ function connect(): void {
 
   socket.addEventListener("open", () => {
     connected = true;
-    retryDelayMs = 5_000; // reset backoff on success
+    retryDelayMs = 2_000; // reset backoff on success
     logger.info("[pulsescore] tennis WS connected");
   });
 

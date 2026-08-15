@@ -51,6 +51,7 @@ import {
   getPulseScoreVolleyballLive,
   extractVolleyballOverride,
 } from "../services/pulsescore/volleyball.js";
+import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 import {
@@ -6366,7 +6367,7 @@ let broadcastPending = false;
 let consecutiveEmptyBroadcasts = 0;
 let lastBroadcastAt = 0;
 
-// Global buffer for delta updates — collected over 100ms and flushed in a single packet
+// Global buffer for delta updates — collected over 40ms and flushed in a single packet (MAX plan tuned)
 let pendingBatchUpdates: Array<{
   matchId: string;
   delta: Partial<LiveMatchState>;
@@ -6457,7 +6458,7 @@ setInterval(() => {
 // the const exists — and would throw. Use a literal delay here instead.
 setInterval(() => {
   getLivePayloadCached().catch(() => {});
-}, 1_500);
+}, 900);
 
 // v2/daily today: cache 5min
 let dailyCache: SAPILeagueV2[] | null = null;
@@ -12248,6 +12249,215 @@ async function rebuildUpcomingCache(): Promise<void> {
 // match's lifetime — the api_football_name_mismatches row it upserts
 // already tracks repeat occurrences across restarts, so this Set only
 // needs to prevent same-process log/write spam.
+const HOCKEY_DISAPPEAR_GRACE_MS = 15_000;
+const BASEBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Hockey live odds + score, sourced from PulseScore generic REST live source
+ * (ice-hockey, bookmaker=bwin — independent rate-limit budget). Uses the same
+ * `pulsescore-hockey-${eventId}` id scheme as buildHockeyUpcomingFromPulseScore
+ * so prematch/live identity carries over. Odds use extractHockeyOverride (hockey.ts)
+ * when available, falling back to makeHockeyMarketsFromTeams's calibrated synthetic
+ * model (identical to the prematch builder's pattern above). Finalized via the
+ * same finalizeStaleLiveMatch + 15s disappear grace pattern as basketball/volleyball. */
+async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await pulseScoreHockey.getLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const period = ev.matchClock?.period ?? "";
+    if (!period || period.toLowerCase().includes("not started")) continue;
+
+    const id = `pulsescore-hockey-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
+    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const override = extractHockeyOverride(ev);
+    const baseMarkets = makeHockeyMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    if (override.spread) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.spread.home,
+        awayPlusOne: override.spread.away,
+      };
+      markets._spread = -override.spread.line;
+      markets._spreadLine = -override.spread.line;
+    }
+    if (override.total) {
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over25: override.total.over,
+        under25: override.total.under,
+      };
+      markets._total = override.total.line;
+    }
+    const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
+
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const pointsScored =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (pointsScored) {
+      const now = Date.now();
+      marketSuspension = {
+        result: now + 8_000,
+        handicap: now + 8_000,
+        totalGoals: now + 8_000,
+      };
+      suspensionReason = "GOL!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Hóquei no Gelo",
+      country: ev.country || "Internacional",
+      sport: "hockey",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: period,
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+      events: [],
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-hockey-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > HOCKEY_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[pulsescore] hockey finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+/** Baseball live odds + score, sourced from PulseScore generic REST live source
+ * (baseball, bookmaker=draftkings — independent rate-limit budget under MAX plan).
+ * No dedicated extractBaseballOverride exists — the safe
+ * pulseScoreBaseball.findOverride(home,away,events) only maps MATCH_RESULT
+ * (moneyline) odds, all other markets (handicap/totals/innings) use the
+ * calibrated makeBasketballMarketsFromTeams synthetic seed with
+ * makeBasketballMoneylineFromTeams fallbacks. Same disappear grace GC as
+ * basketball. */
+async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await pulseScoreBaseball.getLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const ev of events) {
+    const home = ev.home?.trim();
+    const away = ev.away?.trim();
+    if (!home || !away) continue;
+    const period = ev.matchClock?.period ?? "";
+    if (!period || period.toLowerCase().includes("not started")) continue;
+
+    const id = `pulsescore-baseball-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
+    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const override = pulseScoreBaseball.findOverride(home, away, events);
+    const baseMarkets = makeBasketballMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    const odds = override?.odds
+      ? { home: override.odds.home, draw: override.odds.draw ?? 0, away: override.odds.away }
+      : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
+
+    let marketSuspension = existing?.marketSuspension;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const pointsScored =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (pointsScored) {
+      const now = Date.now();
+      marketSuspension = {
+        result: now + 8_000,
+        handicap: now + 8_000,
+        totalGoals: now + 8_000,
+      };
+      suspensionReason = "RUN!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Beisebol",
+      country: ev.country || "Internacional",
+      sport: "baseball",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: period,
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets,
+      events: [],
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-baseball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > BASEBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[pulsescore] baseball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 const _apiFootballMissLogged = new Set<string>();
 
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
@@ -13547,8 +13757,26 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
-  const hockeyLive: LiveMatchState[] = [];
-  const baseballLive: LiveMatchState[] = [];
+  let hockeyLiveRaw: LiveMatchState[] = [];
+  try {
+    hockeyLiveRaw = await buildHockeyLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildHockeyLiveFromPulseScore failed this tick",
+    );
+  }
+  const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
+  let baseballLiveRaw: LiveMatchState[] = [];
+  try {
+    baseballLiveRaw = await buildBaseballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildBaseballLiveFromPulseScore failed this tick",
+    );
+  }
+  const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
   // Re-enabled 2026-08-09 on a THIRD bookmaker ("unibetau") after bwin (no
   // score field) and bet365 (score stuck at 0-0/empty even when genuinely
   // in-play) both failed and were reverted the same day — see
@@ -13893,7 +14121,7 @@ let livePayloadFallbackCache: {
 // this cache used to outlive the tick that reads it (1.5s cache vs 1s tick),
 // so every other broadcast could serve payload up to 500ms stale on top of
 // the tick's own 1s cadence. Aligning it removes that extra lag layer.
-const LIVE_PAYLOAD_CACHE_TTL_MS = 1_000;
+const LIVE_PAYLOAD_CACHE_TTL_MS = 700;
 let livePayloadCache: {
   payload: { matches: LiveMatchState[] };
   builtAt: number;

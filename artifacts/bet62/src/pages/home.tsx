@@ -8206,7 +8206,7 @@ export default function Home({
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
-    const tid = setInterval(() => setLivePollTick((t) => t + 1), 3000);
+    const tid = setInterval(() => setLivePollTick((t) => t + 1), 1000);
     return () => clearInterval(tid);
   }, [matchViewTab, expandedMatch?.id, !!expandedMatch?.isLive]);
 
@@ -8673,7 +8673,7 @@ export default function Home({
     }
     if (activeTab !== "sports") return;
     fetchUpcoming(!canUseSnap);
-    const id = setInterval(() => fetchUpcoming(false), 30_000);
+    const id = setInterval(() => fetchUpcoming(false), 15_000);
     return () => clearInterval(id);
   }, [
     fetchUpcoming,
@@ -9178,7 +9178,7 @@ export default function Home({
     }
 
     let cancelled = false;
-    const LIVE_FALLBACK_DELAYS_MS = [2_000, 3_500, 5_000, 8_000] as const;
+    const LIVE_FALLBACK_DELAYS_MS = [1_000, 1_800, 2_600, 4_000] as const;
     const getFallbackDelay = () =>
       LIVE_FALLBACK_DELAYS_MS[
         Math.min(
@@ -9342,7 +9342,7 @@ export default function Home({
         sseReconnectTimerRef.current = setTimeout(() => {
           if (sseRef.current === null && activeTabRef.current === "live")
             openSSE();
-        }, 2_000);
+        }, 700);
       };
     };
     openSSE();
@@ -9355,7 +9355,7 @@ export default function Home({
       livePollTimerRef.current = setTimeout(async () => {
         if (cancelled) return;
         const streamAgeMs = Date.now() - (liveDataFetchedAt.current ?? 0);
-        const sseHealthy = sseActiveRef.current && streamAgeMs <= 6_000;
+        const sseHealthy = sseActiveRef.current && streamAgeMs <= 2_500;
 
         if (!sseHealthy) {
           const result = await fetchLive(false);

@@ -14,6 +14,16 @@ import {
   getBasketballWsEvents,
   basketballWsIsFresh,
 } from "../pulsescore/basketballWs.js";
+import {
+  getHockeyWsEventIfFresh,
+  getHockeyWsEvents,
+  hockeyWsIsFresh,
+} from "../pulsescore/hockeyWs.js";
+import {
+  getVolleyballWsEventIfFresh,
+  getVolleyballWsEvents,
+  volleyballWsIsFresh,
+} from "../pulsescore/volleyballWs.js";
 import type { PulseScoreEvent } from "../pulsescore/client.js";
 import { logger } from "../../lib/logger.js";
 
@@ -95,6 +105,48 @@ export const BETBY_SPORT_ID_TO_WS_GETTERS: Record<
     fresh: getBasketballWsEventIfFresh,
     isFresh: basketballWsIsFresh,
     pulseSport: "basketball",
+  },
+  "27": {
+    all: getBasketballWsEvents,
+    fresh: getBasketballWsEventIfFresh,
+    isFresh: basketballWsIsFresh,
+    pulseSport: "basketball",
+  },
+  "5": {
+    all: getBasketballWsEvents,
+    fresh: getBasketballWsEventIfFresh,
+    isFresh: basketballWsIsFresh,
+    pulseSport: "basketball",
+  },
+  "6": {
+    all: getBasketballWsEvents,
+    fresh: getBasketballWsEventIfFresh,
+    isFresh: basketballWsIsFresh,
+    pulseSport: "basketball",
+  },
+  "20": {
+    all: getHockeyWsEvents,
+    fresh: getHockeyWsEventIfFresh,
+    isFresh: hockeyWsIsFresh,
+    pulseSport: "hockey",
+  },
+  "12": {
+    all: getVolleyballWsEvents,
+    fresh: getVolleyballWsEventIfFresh,
+    isFresh: volleyballWsIsFresh,
+    pulseSport: "volleyball",
+  },
+  "25": {
+    all: getFootballWsEvents,
+    fresh: getFootballWsEventIfFresh,
+    isFresh: footballWsIsFresh,
+    pulseSport: "soccer",
+  },
+  "28": {
+    all: getFootballWsEvents,
+    fresh: getFootballWsEventIfFresh,
+    isFresh: footballWsIsFresh,
+    pulseSport: "soccer",
   },
 };
 
