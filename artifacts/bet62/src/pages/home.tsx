@@ -14046,13 +14046,20 @@ export default function Home({
       (isTennis || isVolleyball) && (match as any).status?.startsWith("Set")
         ? parseInt(((match as any).status as string).replace("Set ", "")) || 0
         : 0;
-    // Basketball: "HT" = NBA halftime (between Q2 and Q3 → quartersDone = 2)
+    // Basketball: "HT" = NBA halftime (between Q2 and Q3 → quartersDone = 2).
+    // "OT"/"Overtime" (real values, see basketball.ts's PERIOD_RANK) means
+    // all 4 regulation quarters are already over — 5 (>4) so every q1-q4
+    // market and the half markets correctly stay hidden, same as if the
+    // match had actually finished, rather than falling through to the
+    // "unknown, show everything" 0 sentinel.
     const currentQ = isBasketball
       ? (match as any).status?.startsWith("Q")
         ? parseInt(((match as any).status as string).replace("Q", "")) || 0
         : (match as any).status === "HT"
           ? 2
-          : 0
+          : /^(ot|overtime)/i.test((match as any).status ?? "")
+            ? 5
+            : 0
       : 0;
     const currentP =
       isHockey && (match as any).status?.startsWith("P")
@@ -14117,6 +14124,22 @@ export default function Home({
       currentSet >= 2 &&
       (match.homeScore ?? 0) !== (match.awayScore ?? 0) &&
       tennisSetIsDominant;
+
+    // isLateGameBasketball: same "winner already apparent, keep only popular
+    // markets" reduction football (85'+) and tennis (dominant 2nd+ set)
+    // already do — user request 2026-08-15. Basketball has no per-second
+    // clock (see basketball.ts's own header: matchClock only ever carries
+    // `period`), so there's no equivalent to football's "minute ≥85" signal
+    // — Q4 + a 15-point margin is the closest available proxy for "this
+    // game is decided" (NBA broadcasters/analytics commonly treat a Q4 lead
+    // in that range as functionally over). A UI-declutter heuristic only —
+    // doesn't touch settlement, which already resolves each market off the
+    // real final score regardless of when a button was shown or hidden.
+    const isLateGameBasketball =
+      isBasketball &&
+      match.isLive &&
+      currentQ === 4 &&
+      Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0)) >= 15;
 
     const tabs = isBasketball
       ? [
@@ -17833,7 +17856,17 @@ export default function Home({
                           "3º Quarto",
                           "4º Quarto",
                         ];
-                        // All quarter markets remain visible throughout the match (settled by server once quarter ends)
+                        // Progressive reveal, same pattern as tennis sets
+                        // (showSet1/2/3 above): once a quarter is over, its
+                        // market disappears and only the current one shows —
+                        // user request 2026-08-15 ("igual o Set de ténis").
+                        // currentQ===0 means pre-match/unknown (show all 4,
+                        // same as tennis showing Set 1 pre-match); otherwise
+                        // only the quarter actually being played renders.
+                        // Settlement itself is unaffected — a market still
+                        // resolves off the real score even while hidden.
+                        const quarterNum = qi + 1;
+                        if (currentQ !== 0 && currentQ !== quarterNum) return null;
                         return ex?.[q]?.home > 0 ? (
                           <div key={q}>
                             <MarketGroup title={`Vencedor — ${labels[qi]}`}>
@@ -17943,7 +17976,12 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
-                    {(m as any).basketballExtra?.anyQuarter?.home > 0 && (
+                    {/* Hidden once the game is effectively decided (Q4, 15+
+                        point margin) — same "keep only popular markets"
+                        reduction as football's isLateGame/tennis's
+                        isLateGameTennis, user request 2026-08-15. */}
+                    {!isLateGameBasketball &&
+                      (m as any).basketballExtra?.anyQuarter?.home > 0 && (
                       <MarketGroup title="Vence Qualquer Quarto">
                         <MarketOddsBtn
                           match={match}
@@ -17963,7 +18001,8 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
-                    {(m as any).basketballExtra?.allQuarters?.home > 0 && (
+                    {!isLateGameBasketball &&
+                      (m as any).basketballExtra?.allQuarters?.home > 0 && (
                       <MarketGroup title="Vence Todos os Quartos">
                         <MarketOddsBtn
                           match={match}
