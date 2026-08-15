@@ -25,6 +25,8 @@ import {
   scanNBAForFinished,
   scanMLBForFinished,
 } from "./routes/matches.js";
+import { startSettlementQueueWorker } from "./lib/settlementQueue.js";
+import { runSettlementRecovery } from "./jobs/settlementRecovery.js";
 
 export type SelectionRecord = {
   matchId?: string;
@@ -5586,12 +5588,13 @@ async function notifySettledBetsInBackground(): Promise<void> {
 
     // Batch-fetch user emails
     const userIds = [...new Set(fresh.map((b) => b.userId))];
-    const users = await db
+    type NotifiedUserRow = { id: number; email: string; name: string };
+    const users = (await db
       .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name })
       .from(usersTable)
-      .where(sql`${usersTable.id} = ANY(${userIds})`);
+      .where(sql`${usersTable.id} = ANY(${userIds})`)) as NotifiedUserRow[];
 
-    const userMap = new Map(users.map((u) => [u.id, u]));
+    const userMap = new Map<number, NotifiedUserRow>(users.map((u: NotifiedUserRow) => [u.id, u]));
 
     for (const bet of fresh) {
       _notifiedBetIds.add(bet.id);
@@ -5841,8 +5844,32 @@ export function startSettlementWorker(): void {
     void run().finally(schedule);
   }, initialDelayMs);
 
+  // BullMQ queue consumer — picks up enqueueMatchSettlement() jobs from Canal A (GC disappear)
+  startSettlementQueueWorker(async ({ matchId }) => {
+    try {
+      await autoSettlePendingBets({ matchIds: [matchId] });
+    } catch (err) {
+      logger.error({ err, matchId }, "Queue settlement handler failed");
+      throw err;
+    }
+  });
+
+  // Recovery scheduler: unstick bets pending >3h without settlement
+  const rawRecoveryIntervalMs = process.env.SETTLEMENT_RECOVERY_INTERVAL_MS ?? "3600000";
+  const recoveryIntervalMs = parseMs(
+    rawRecoveryIntervalMs,
+    3_600_000,
+    60_000,
+    "SETTLEMENT_RECOVERY_INTERVAL_MS",
+  );
+  setInterval(() => {
+    void runSettlementRecovery().catch((err) =>
+      logger.error({ err }, "Scheduled settlement recovery failed"),
+    );
+  }, recoveryIntervalMs);
+
   logger.info(
-    { intervalMs, initialDelayMs, queueEnabled, catchupMs },
+    { intervalMs, initialDelayMs, queueEnabled, catchupMs, recoveryIntervalMs },
     "Bet auto-settlement worker started (self-scheduling, all sports)",
   );
 }
