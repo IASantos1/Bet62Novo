@@ -67,22 +67,66 @@ export function getPulseScoreFootballUsage(): {
 // matchers below for the concrete shape differences that required.
 const FOOTBALL_BOOKMAKER = "bwin";
 
+// Bug report 2026-08-14: a whole league (2. Bundesliga, but "several
+// leagues" per the report) showing only a handful of its real live matches
+// — e.g. 3 of 10. Root cause: this fetch only ever requested page 1
+// (limit=200), never checked `hasNextPage`/`totalPages` on the response,
+// unlike fetchAllFootballLeagues below which does loop pages. limit=200
+// was sized against an "18 events observed" quiet-moment baseline — but
+// worldwide live soccer volume spikes well past 200 at simultaneous-
+// kickoff windows (Bundesliga 2's Saturday 15:30 slot lines up with
+// EPL/Bundesliga 1/Ligue 2/Serie B and others all kicking off together).
+// PulseScore's event ordering isn't grouped by league, so once total live
+// events exceed 200 the cutoff falls in the MIDDLE of whichever leagues
+// happen to sort near position 200 — losing an arbitrary subset of THEIR
+// matches (not all of them, explaining 3-of-10 rather than 0-of-10) and
+// hitting several different leagues at once during the same peak
+// (explaining "várias assim" rather than one league's config).
+const FOOTBALL_LIVE_MAX_PAGES = 3; // 3 * 200 = 600 — comfortable headroom above the busiest realistic simultaneous-kickoff peak, not just the quiet-moment baseline.
+
 async function fetchFootballLive(): Promise<PulseScoreEvent[]> {
   rollUsageDateIfNeeded();
-  requestsToday += 1;
-  // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
-  // not a bare array as the public docs' example showed — confirmed via a
-  // real authenticated call. limit=200 comfortably covers real live-soccer
-  // volume (18 events observed) in a single request within the 1 req/s
-  // PRO-plan rate limit. Lets errors (429s from the shared bookmaker
-  // budget, timeouts, ...) propagate — see getPulseScoreFootballLive's
-  // .catch() for why swallowing them here was a real bug, not a safety net.
-  const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
-    "/live-events?sport=soccer&limit=200",
-    undefined,
-    FOOTBALL_BOOKMAKER,
-  );
-  return Array.isArray(data?.events) ? data.events : [];
+  const events: PulseScoreEvent[] = [];
+  let page = 1;
+  for (;;) {
+    requestsToday += 1;
+    // Response is a paginated wrapper ({ total, page, ..., events: [...] }),
+    // not a bare array as the public docs' example showed — confirmed via a
+    // real authenticated call.
+    if (page === 1) {
+      // Page 1 keeps the original "let errors propagate" behavior — see
+      // getPulseScoreFootballLive's .catch() for why swallowing them here
+      // was a real bug, not a safety net. A missing page 1 means we have
+      // nothing at all; the caller needs to know that, not silently get an
+      // empty list treated as "no live matches right now".
+      const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+        `/live-events?sport=soccer&limit=200&page=${page}`,
+        undefined,
+        FOOTBALL_BOOKMAKER,
+      );
+      if (Array.isArray(data?.events)) events.push(...data.events);
+      if (!data?.hasNextPage || page >= FOOTBALL_LIVE_MAX_PAGES) break;
+    } else {
+      // Page 2+ is best-effort: a failure here (429 from the shared bwin
+      // budget, timeout, ...) shouldn't discard page 1's already-fetched
+      // matches or turn a partial success into a total one — keep what we
+      // have and stop paging.
+      try {
+        const data = await pulseScoreGet<PulseScoreLiveEventsResponse>(
+          `/live-events?sport=soccer&limit=200&page=${page}`,
+          undefined,
+          FOOTBALL_BOOKMAKER,
+        );
+        if (Array.isArray(data?.events)) events.push(...data.events);
+        if (!data?.hasNextPage || page >= FOOTBALL_LIVE_MAX_PAGES) break;
+      } catch (err) {
+        logger.warn({ err, page }, "[pulsescore] fetchFootballLive: extra page failed — keeping matches already fetched");
+        break;
+      }
+    }
+    page += 1;
+  }
+  return events;
 }
 
 // How fresh a WS-broadcast reading for ONE specific event must be to be
