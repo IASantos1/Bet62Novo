@@ -12461,6 +12461,33 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
 const _apiFootballMissLogged = new Set<string>();
 
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  // Helpers for PARTIAL PulseScore overrides: each selection slot can come
+  // back null individually (bwin 2H inactivates the winning side, canonical
+  // flips on some live matches, etc.). Instead of all-or-nothing (which
+  // collapsed every real-odds slot back onto Poisson the moment a single
+  // selection went dark, producing the "--" and flipped odds reported in
+  // production), we copy only the fields that the override actually priced,
+  // falling back per-slot to existing last-known-real then to the Poisson
+  // synthetic baseline for anything still missing.
+  type DefinedKeys<T> = { [K in keyof T]?: Exclude<T[K], null | undefined> };
+  const assignNonNull = <T extends Record<string, any>>(
+    target: T,
+    patch: DefinedKeys<T> | null | undefined,
+  ): T => {
+    if (!patch) return target;
+    for (const k of Object.keys(patch) as Array<keyof T>) {
+      const v = patch[k];
+      if (v !== null && v !== undefined) target[k] = v as any;
+    }
+    return target;
+  };
+  const hasAnyReal = (
+    patch: Record<string, number | null | undefined> | null | undefined,
+  ): boolean => {
+    if (!patch) return false;
+    for (const v of Object.values(patch)) if (v !== null && v !== undefined) return true;
+    return false;
+  };
   // GET /live-events?sport=soccer already returns only live events — no
   // separate `live` boolean field exists on each event to filter by.
   const events = await getPulseScoreFootballLive();
@@ -12518,59 +12545,57 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const override = extractFootballOverride(ev);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const rawMarkets: AdvancedMarkets = { ...baseMarkets };
+    // Real PulseScore prices override the synthetic model WHERE THEY ACTUALLY
+    // PRICED. assignNonNull ignores null slots (individual selections inactivated by bwin mid-2H
+    // or canonical-tag flip events) instead of overwriting good Poisson defaults with null,
+    // which previously produced "--" / empty rows when 1 selection went dark.
     if (override?.totalGoals) {
-      rawMarkets.totalGoals = { ...rawMarkets.totalGoals, ...override.totalGoals };
+      assignNonNull(rawMarkets.totalGoals, override.totalGoals);
     }
-    // Real bet365 prices via PulseScore override the synthetic model
-    // wherever it actually priced the market — same "real wins, synthetic
-    // fills the gap" pattern as tennis's tennisExtra merge (see
-    // buildTennisLiveFromPulseScore). Every field here maps onto an
-    // existing AdvancedMarkets shape the frontend already renders, so no UI
-    // changes were needed — this just swaps what's underneath it.
     if (override?.doubleChance) {
-      rawMarkets.doubleChance = { ...rawMarkets.doubleChance, ...override.doubleChance };
+      assignNonNull(rawMarkets.doubleChance, override.doubleChance);
     }
     if (override?.bothTeamsScore) {
-      rawMarkets.bothTeamsScore = { ...rawMarkets.bothTeamsScore, ...override.bothTeamsScore };
+      Object.assign(rawMarkets.bothTeamsScore, override.bothTeamsScore);
     }
     if (override?.firstGoal) {
-      rawMarkets.firstGoal = { ...rawMarkets.firstGoal, ...override.firstGoal };
+      assignNonNull(rawMarkets.firstGoal, override.firstGoal);
     }
     if (override?.anytimeGoalscorer) {
       rawMarkets.anytimeGoalscorer = override.anytimeGoalscorer;
     }
     if (override?.drawNoBet) {
-      rawMarkets.drawNoBet = { ...rawMarkets.drawNoBet, ...override.drawNoBet };
+      assignNonNull(rawMarkets.drawNoBet, override.drawNoBet);
     }
     if (override?.secondHalf) {
-      rawMarkets.secondHalf = { ...rawMarkets.secondHalf, ...override.secondHalf };
+      assignNonNull(rawMarkets.secondHalf, override.secondHalf);
     }
     if (override?.goalOddEven) {
-      rawMarkets.goalOddEven = { ...rawMarkets.goalOddEven, ...override.goalOddEven };
+      Object.assign(rawMarkets.goalOddEven, override.goalOddEven);
     }
     if (override?.cleanSheet) {
-      rawMarkets.cleanSheet = { ...rawMarkets.cleanSheet, ...override.cleanSheet };
+      assignNonNull(rawMarkets.cleanSheet, override.cleanSheet);
     }
     if (override?.correctScore) {
-      rawMarkets.correctScore = { ...rawMarkets.correctScore, ...override.correctScore };
+      Object.assign(rawMarkets.correctScore ??= {}, override.correctScore);
     }
     if (override?.teamGoals) {
       rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
     }
     if (override?.btts1H) {
-      rawMarkets.btts1H = { ...rawMarkets.btts1H, ...override.btts1H };
+      Object.assign(rawMarkets.btts1H, override.btts1H);
     }
     if (override?.exactGoals) {
-      rawMarkets.exactGoals = { ...rawMarkets.exactGoals, ...override.exactGoals };
+      Object.assign(rawMarkets.exactGoals, override.exactGoals);
     }
     if (override?.corners) {
-      rawMarkets.corners = { ...rawMarkets.corners, ...override.corners };
+      Object.assign(rawMarkets.corners, override.corners);
     }
     if (override?.cards) {
-      rawMarkets.cards = { ...rawMarkets.cards, ...override.cards };
+      Object.assign(rawMarkets.cards, override.cards);
     }
     if (override?.htft) {
-      rawMarkets.htft = { ...rawMarkets.htft, ...override.htft };
+      Object.assign(rawMarkets.htft, override.htft);
     }
     const id = `pulsescore-football-${ev.eventId}`;
     const existing = liveMatchState.get(id);
@@ -13020,9 +13045,100 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // below) until PulseScore prices it again or the match leaves the live
     // list. Only a match that has NEVER had real odds (still bootstrapping
     // right after it appeared) gets the synthetic starting price.
-    const hasRealOddsNow = !!override?.odds;
-    const odds =
-      override?.odds ?? (existing?.hasRealOdds ? existing.odds : makeOddsFromTeams(home, away));
+    // PER-SLOT real-odds merge: odds are no longer all-or-nothing. Each
+    // individual side (home/draw/away) cascades through 3 donors in order:
+    //   1. fresh PulseScore real price THIS TICK (if non-null)
+    //   2. last-known real price carried in existing.odds (if the match once had real odds)
+    //   3. Poisson synthetic baseline as final guaranteed fallback — NEVER null.
+    // This eliminates "--" rows from matches where bwin inactivates just the
+    // already-winning side in 2H (common when a match is effectively decided),
+    // while still preferring real prices everywhere they actually exist.
+    const poissonOdds = makeOddsFromTeams(home, away);
+    const hasRealOddsNow = hasAnyReal(override?.odds);
+    const odds = {
+      home: (override?.odds?.home as number | undefined) ??
+        (existing?.hasRealOdds ? (existing.odds.home as number | undefined) : undefined) ??
+        poissonOdds.home,
+      draw: (override?.odds?.draw as number | undefined) ??
+        (existing?.hasRealOdds ? (existing.odds.draw as number | undefined) : undefined) ??
+        poissonOdds.draw,
+      away: (override?.odds?.away as number | undefined) ??
+        (existing?.hasRealOdds ? (existing.odds.away as number | undefined) : undefined) ??
+        poissonOdds.away,
+    };
+    // Same 3-donor cascade for the slot-based markets that can carry partial
+    // data (doubleChance / firstGoal / drawNoBet / secondHalf / cleanSheet).
+    // If no real data exists anywhere we just leave the Poisson-merged value
+    // already computed into rawMarkets above — nothing to override.
+    if (existing?.hasRealOdds || hasRealOddsNow) {
+      const dc = rawMarkets.doubleChance;
+      if (dc) {
+        dc.homeOrDraw =
+          (override?.doubleChance?.homeOrDraw as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.doubleChance?.homeOrDraw as number | undefined) : undefined) ??
+          dc.homeOrDraw;
+        dc.awayOrDraw =
+          (override?.doubleChance?.awayOrDraw as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.doubleChance?.awayOrDraw as number | undefined) : undefined) ??
+          dc.awayOrDraw;
+        dc.homeOrAway =
+          (override?.doubleChance?.homeOrAway as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.doubleChance?.homeOrAway as number | undefined) : undefined) ??
+          dc.homeOrAway;
+      }
+      const fg = rawMarkets.firstGoal;
+      if (fg) {
+        fg.home =
+          (override?.firstGoal?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.firstGoal?.home as number | undefined) : undefined) ??
+          fg.home;
+        fg.noGoal =
+          (override?.firstGoal?.noGoal as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.firstGoal?.noGoal as number | undefined) : undefined) ??
+          fg.noGoal;
+        fg.away =
+          (override?.firstGoal?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.firstGoal?.away as number | undefined) : undefined) ??
+          fg.away;
+      }
+      const dnb = rawMarkets.drawNoBet;
+      if (dnb) {
+        dnb.home =
+          (override?.drawNoBet?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.drawNoBet?.home as number | undefined) : undefined) ??
+          dnb.home;
+        dnb.away =
+          (override?.drawNoBet?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.drawNoBet?.away as number | undefined) : undefined) ??
+          dnb.away;
+      }
+      const sh = rawMarkets.secondHalf;
+      if (sh) {
+        sh.home =
+          (override?.secondHalf?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.secondHalf?.home as number | undefined) : undefined) ??
+          sh.home;
+        sh.draw =
+          (override?.secondHalf?.draw as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.secondHalf?.draw as number | undefined) : undefined) ??
+          sh.draw;
+        sh.away =
+          (override?.secondHalf?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.secondHalf?.away as number | undefined) : undefined) ??
+          sh.away;
+      }
+      const cs = rawMarkets.cleanSheet;
+      if (cs) {
+        cs.home =
+          (override?.cleanSheet?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.cleanSheet?.home as number | undefined) : undefined) ??
+          cs.home;
+        cs.away =
+          (override?.cleanSheet?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.cleanSheet?.away as number | undefined) : undefined) ??
+          cs.away;
+      }
+    }
 
     // Goal-based market suspension — same trigger condition and delay table
     // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /

@@ -304,20 +304,20 @@ export type TotalGoalsOverride = Partial<{
 }>;
 
 export type PulseScoreFootballOverride = {
-  odds?: { home: number; draw: number; away: number };
+  odds?: { home: number | null; draw: number | null; away: number | null };
   totalGoals?: TotalGoalsOverride;
   // Extended markets — verified against a real GET /live-events?sport=soccer
   // sample (2026-08-08). Each maps 1:1 onto an existing AdvancedMarkets field
   // shape (matches.ts) so buildFootballLiveFromPulseScore can merge it
   // straight in, same as totalGoals above — no new UI needed, just real data
   // replacing the synthetic model wherever PulseScore actually priced it.
-  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  doubleChance?: { homeOrDraw: number | null; awayOrDraw: number | null; homeOrAway: number | null };
   bothTeamsScore?: { yes: number; no: number };
-  firstGoal?: { home: number; noGoal: number; away: number };
-  drawNoBet?: { home: number; away: number };
-  secondHalf?: { home: number; draw: number; away: number };
+  firstGoal?: { home: number | null; noGoal: number | null; away: number | null };
+  drawNoBet?: { home: number | null; away: number | null };
+  secondHalf?: { home: number | null; draw: number | null; away: number | null };
   goalOddEven?: { odd: number; even: number };
-  cleanSheet?: { home: number; away: number };
+  cleanSheet?: { home: number | null; away: number | null };
   correctScore?: Record<string, number>;
   teamGoals?: Partial<{
     homeOver05: number; homeUnder05: number;
@@ -640,13 +640,31 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         if (!sel.isActive) continue;
         const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        if (sel.canonicalOutcome === "HOME") home = val;
+        // Team-name match FIRST — raw names are the ground truth for which
+        // side a selection represents, because bwin has been observed sending
+        // canonicalOutcome=HOME on the AWAY team's row (and vice-versa) for
+        // specific live matches, which flipped every 1X2 price in the UI.
+        // The canonical tag is a weak hint that is only trusted if the
+        // selection's raw name doesn't explicitly match either team.
+        if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
+        else if (sel.canonicalOutcome === "HOME") home = val;
         else if (sel.canonicalOutcome === "AWAY") away = val;
         else if (sel.canonicalOutcome === "DRAW") draw = val;
-        else if (teamNamesMatch(sel.rawName, ev.home)) home = val;
-        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
+        else {
+          const raw = (sel.rawName || "").toLowerCase().trim();
+          if (/draw|empate|x\b/.test(raw)) draw = val;
+        }
       }
-      if (home !== null && draw !== null && away !== null) {
+      // Accept PARTIAL results now — previously this required all three
+      // sides to be non-null, which meant bwin inactivating just the
+      // already-winning side (common in the 2nd half for a decided scoreline)
+      // caused the entire real-odds slot to collapse back onto the Poisson
+      // synthetic baseline (or stale last-known values), producing the
+      // "--" / inverted odds reported in production. Missing pieces are
+      // filled in by the builder on the matches.ts side using the Poisson
+      // model as a local donor for the individual missing slot.
+      if (home !== null || draw !== null || away !== null) {
         out.odds = { home, draw, away };
       }
     } else if (isTotalGoalsMarket(market)) {
@@ -718,7 +736,7 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         else if ((aIsAway && isDrawToken(b)) || (isDrawToken(a) && bIsAway)) awayOrDraw = val;
         else if ((aIsHome && bIsAway) || (aIsAway && bIsHome)) homeOrAway = val;
       }
-      if (homeOrDraw !== null && awayOrDraw !== null && homeOrAway !== null) {
+      if (homeOrDraw !== null || awayOrDraw !== null || homeOrAway !== null) {
         out.doubleChance = { homeOrDraw, awayOrDraw, homeOrAway };
       }
     } else if (isBothTeamsToScoreMarket(market)) {
@@ -740,11 +758,18 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         if (!sel.isActive) continue;
         const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        if (sel.canonicalOutcome === "HOME") home = val;
+        // Name-first ordering, same reasoning as the 1X2 handler above.
+        if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
+        else if (sel.canonicalOutcome === "HOME") home = val;
         else if (sel.canonicalOutcome === "AWAY") away = val;
         else if (sel.canonicalOutcome === "NEITHER") noGoal = val;
+        else {
+          const raw = (sel.rawName || "").toLowerCase().trim();
+          if (raw.includes("no goal") || raw.includes("sem gol") || raw === "ng") noGoal = val;
+        }
       }
-      if (home !== null && noGoal !== null && away !== null) {
+      if (home !== null || noGoal !== null || away !== null) {
         out.firstGoal = { home, noGoal, away };
       }
     } else if (isAnytimeGoalscorerMarket(market)) {
@@ -765,10 +790,13 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         if (!sel.isActive) continue;
         const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        if (sel.canonicalOutcome === "HOME") home = val;
+        // Name-first ordering, same reasoning as the 1X2 handler above.
+        if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
+        else if (sel.canonicalOutcome === "HOME") home = val;
         else if (sel.canonicalOutcome === "AWAY") away = val;
       }
-      if (home !== null && away !== null) out.drawNoBet = { home, away };
+      if (home !== null || away !== null) out.drawNoBet = { home, away };
     } else if (isSecondHalfWinnerMarket(market)) {
       let home: number | null = null;
       let draw: number | null = null;
@@ -777,11 +805,18 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         if (!sel.isActive) continue;
         const val = oddsToNumber(sel.odds);
         if (val === null) continue;
-        if (sel.canonicalOutcome === "HOME") home = val;
+        // Name-first ordering, same reasoning as the 1X2 handler above.
+        if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
+        else if (sel.canonicalOutcome === "HOME") home = val;
         else if (sel.canonicalOutcome === "AWAY") away = val;
         else if (sel.canonicalOutcome === "DRAW") draw = val;
+        else {
+          const raw = (sel.rawName || "").toLowerCase().trim();
+          if (/draw|empate|x\b/.test(raw)) draw = val;
+        }
       }
-      if (home !== null && draw !== null && away !== null) {
+      if (home !== null || draw !== null || away !== null) {
         out.secondHalf = { home, draw, away };
       }
     } else if (isGoalOddEvenMarket(market)) {
@@ -807,10 +842,13 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         // rows share the same HOME/AWAY canonicalOutcome, so HD is the only
         // way to tell which side of the market a row is on.
         if (String(sel.moreInfo?.["HD"] ?? "").toLowerCase() !== "yes") continue;
-        if (sel.canonicalOutcome === "HOME") home = val;
+        // Name-first ordering, same reasoning as the 1X2 handler above.
+        if (teamNamesMatch(sel.rawName, ev.home)) home = val;
+        else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
+        else if (sel.canonicalOutcome === "HOME") home = val;
         else if (sel.canonicalOutcome === "AWAY") away = val;
       }
-      if (home !== null && away !== null) out.cleanSheet = { home, away };
+      if (home !== null || away !== null) out.cleanSheet = { home, away };
     } else if (isCorrectScoreMarket(market)) {
       const scores: Record<string, number> = {};
       for (const sel of market.selections ?? []) {
