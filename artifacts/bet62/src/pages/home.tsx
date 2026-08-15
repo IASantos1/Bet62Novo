@@ -4662,6 +4662,21 @@ function BetbyTrackerIframe({
   // Guarda DATA.available=false do bridge: o widget Statscore EXPLICITOU
   // que não tem dados para esse evento → pula direto para indisponível.
   const dataExplicitUnavailable = useRef(false);
+  // Guarda DATA.available=true do bridge (redirect shell enviou antes do
+  // window.location.replace para origin cross demoapi.betby.com → bridge é
+  // perdido depois, mas já temos prova que o shell estava OK).
+  const dataExplicitAvailable = useRef(false);
+  // Conta quantas vezes o iframe disparou onLoad. 1x = shell WAF redirect.
+  // 2x ou mais = o iframe NAVEGOU de fato para demoapi.betby.com (origin
+  // cross, bridge perdido, widget carregando normalmente). Esse cenário é
+  // TRATADO IGUAL a isDirectUpstream=true nos detectors, para não disparar
+  // falsos positivos de "widget vazio" (gotRealResize nunca chega via
+  // postMessage cross-origin).
+  const iframeLoadCount = useRef(0);
+  // Flag cinemática: seta TRUE se qualquer critério que torne o iframe
+  // "efetivamente direct upstream" for atendido (2+ onLoad, explicit
+  // available=true vindo do bridge shell, ou upstream direto).
+  const treatAsDirectUpstream = useRef(false);
   const apiBase = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
     : "";
@@ -4779,6 +4794,9 @@ function BetbyTrackerIframe({
     // Reset flags do detector de widget vazio sempre que mudar o URL alvo
     gotRealResize.current = false;
     dataExplicitUnavailable.current = false;
+    dataExplicitAvailable.current = false;
+    iframeLoadCount.current = 0;
+    treatAsDirectUpstream.current = false;
     setNaturalHeight(null);
   }, [finalUrl, queryError]);
 
@@ -4796,11 +4814,31 @@ function BetbyTrackerIframe({
   // way to ever clear on its own. A hard wall-clock cap here means a stuck
   // load degrades to the same clear "Tracker indisponível" message a
   // resolved failure already shows, instead of spinning indefinitely.
+  //
+  // Fix 2026-08-15 #Killer12sTimeout: o timeout FIXO de 12s era INCONDICIONAL
+  // (não checava isDirectUpstream nem se onLoad já tinha disparado N vezes).
+  // Resultado: MESMO quando o widget carregava 100% corretamente (campo verde,
+  // 100 requests Statscore OK) — 12s depois ele era KILLADO e mostrava overlay
+  // "indisponível" (bg zinc-900) → usuário via "tela preta". Agora o wall cap é
+  // de 30s, e SÓ dispara setFailed(true) SE (nenhum onLoad disparou ATE ENTAO
+  // AND nenhum critério de direct-upstream foi atendido AND não houve sinal
+  // data.available=true do bridge). Widgets que carregam normalmente nunca são
+  // mais mortos por tempo fixo.
   useEffect(() => {
     if (!finalUrl) return;
-    const t = setTimeout(() => setFailed(true), 12_000);
+    const t = setTimeout(() => {
+      const effectivelyDirect =
+        Boolean(urlInfo?.isDirectUpstream) ||
+        treatAsDirectUpstream.current ||
+        dataExplicitAvailable.current ||
+        iframeLoadCount.current >= 2;
+      // NÃO há nenhum sinal de vida → realmente travado. Degrada amigavelmente.
+      if (iframeLoadCount.current === 0 && !effectivelyDirect) {
+        setFailed(true);
+      }
+    }, 30_000);
     return () => clearTimeout(t);
-  }, [finalUrl]);
+  }, [finalUrl, urlInfo?.isDirectUpstream]);
 
   // Listen to postMessage bridge signals from the proxied tracker HTML.
   // Our own bridge script (proxy.ts) sends: { source: "bet62-betby-tracker", payload: { type, ... } }
@@ -4831,6 +4869,16 @@ function BetbyTrackerIframe({
             // visual, proxy.ts swap()).
             dataExplicitUnavailable.current = true;
             setFailed(true);
+          } else if (available === true) {
+            // Redirect shell (buildClientRedirectBypassWafHtml no proxy.ts)
+            // envia data.available=true SÍNCRONO ANTES do window.location.replace
+            // para demoapi.betby.com. Depois do redirect o iframe fica
+            // cross-origin e a bridge é perdida (nenhum postMessage chega
+            // mais). Essa flag prova que o shell estava funcional, portanto
+            // qualquer detector de "widget vazio" baseado na AUSÊNCIA de
+            // sinais subsequentes NÃO DEVE disparar (igual isDirectUpstream).
+            dataExplicitAvailable.current = true;
+            treatAsDirectUpstream.current = true;
           }
           setReady(true);
           return;
@@ -4907,7 +4955,19 @@ function BetbyTrackerIframe({
       // origin (the 0-byte origin block is the main reason we preferred it
       // over the proxy path to begin with), and the user can see whether
       // content loaded visually.
-      if (isDirectUpstream) return;
+      //
+      // Fix 2026-08-15 #IframeInternalRedirectLostBridge: adicionado critério
+      // "efetivamente direct" também quando: (a) o redirect shell enviou
+      // data.available=true antes de trocar de origin; (b) o iframe já teve
+      // 2+ eventos onLoad (prova que navegou do shell → demoapi e bridge foi
+      // perdido no cross-origin). Sem isso, o detector matava 50% dos casos
+      // de proxy-redirect e o usuário via "tela preta" injustamente.
+      const effectivelyDirect =
+        isDirectUpstream ||
+        treatAsDirectUpstream.current ||
+        dataExplicitAvailable.current ||
+        iframeLoadCount.current >= 2;
+      if (effectivelyDirect) return;
       if (!gotRealResize.current) setFailed(true);
     }, 7_000);
     return () => clearTimeout(t);
@@ -4920,7 +4980,12 @@ function BetbyTrackerIframe({
         setFailed(true);
         return;
       }
-      if (isDirectUpstream) return;
+      const effectivelyDirect =
+        isDirectUpstream ||
+        treatAsDirectUpstream.current ||
+        dataExplicitAvailable.current ||
+        iframeLoadCount.current >= 2;
+      if (effectivelyDirect) return;
       if (!gotRealResize.current) setFailed(true);
     }, 18_000);
     return () => clearTimeout(t);
@@ -5029,6 +5094,16 @@ function BetbyTrackerIframe({
           }}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           onLoad={() => {
+            // Cada onLoad = uma navegação completa dentro do iframe.
+            //  1x = carregou nosso redirect shell (bet62.plus/api/betby-live-tracker...)
+            //  2x = window.location.replace do shell → demoapi.betby.com/tracker.html (cross-origin!)
+            // A partir de 2x: garantimos que o iframe navegou para a origin real do BetBY
+            // (perdemos bridge postMessage, cross-origin) → NÃO podemos usar detectors
+            // baseados na AUSÊNCIA de sinais. Tratamos igual a isDirectUpstream.
+            iframeLoadCount.current = iframeLoadCount.current + 1;
+            if (iframeLoadCount.current >= 2) {
+              treatAsDirectUpstream.current = true;
+            }
             setReady(true);
           }}
           onError={() => setFailed(true)}
