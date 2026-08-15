@@ -3664,6 +3664,10 @@ type AdvancedMarkets = {
   // Anytime Goalscorer market. sel key must be `pg:${player}` to settle via the
   // existing player-goal settlement pipeline (parseSelectionPlayerMarket).
   anytimeGoalscorer?: Array<{ player: string; odds: number }>;
+  // First Goalscorer — sel key prefix `fg:${player}` (settled on first goal of match)
+  firstGoalscorer?: Array<{ player: string; odds: number }>;
+  // Last Goalscorer — sel key prefix `lg:${player}` (settled after final whistle on last goal)
+  lastGoalscorer?: Array<{ player: string; odds: number }>;
   corners?: {
     o85: number;
     u85: number;
@@ -13732,6 +13736,16 @@ export default function Home({
     if ((match.sport ?? "football") === "tennis" && sel === "draw") return null;
     if (odd <= 0) return null; // settled/impossible market line — hide completely
     if (market === "result" && odd <= 1.01) return null;
+    const cleanLabel = (() => {
+      const n = (label ?? "").trim();
+      if (!n) return n;
+      const stripped = n
+        .replace(/\s*\((Women|Women's|Women’s|Men|Men's|Men’s|U-?\d{1,2})\)\s*$/i, "")
+        .trim();
+      const MAX = 14;
+      if (stripped.length <= MAX) return stripped;
+      return stripped.slice(0, MAX - 1).trimEnd() + "…";
+    })();
     const now = Date.now();
     const globalSusp =
       match.marketSuspension?.["result"] != null &&
@@ -13747,7 +13761,7 @@ export default function Home({
       return (
         <div className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-60 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/60" : "border-zinc-200 bg-white"}`}>
           <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
-            {label}
+            {cleanLabel}
           </span>
           <svg
             className="text-zinc-400"
@@ -13779,7 +13793,7 @@ export default function Home({
         className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${active ? isDarkTheme ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30" : "border-red-300 bg-red-50 ring-1 ring-red-200" : isDarkTheme ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
       >
         <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
-          {label}
+          {cleanLabel}
         </span>
         <span
           className={`text-sm font-black leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}`}
@@ -16975,13 +16989,85 @@ export default function Home({
                     </MarketAccordionSection>
                   </div>
                 )}
+              {/* ── FUTEBOL: PRIMEIRO MARCADOR ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "marcadores" || modalTab === "todos") &&
+                m &&
+                m.firstGoalscorer &&
+                m.firstGoalscorer.length > 0 && (
+                  <div>
+                    <MarketAccordionSection
+                      title="Primeiro Marcador"
+                      defaultOpen={false}
+                      count={m.firstGoalscorer.length}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione o jogador que marcar o PRIMEIRO gol da partida.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.firstGoalscorer.map(({ player, odds }) => (
+                          <MarketOddsBtn
+                            key={player}
+                            match={match}
+                            sel={`fg:${player}`}
+                            odd={odds}
+                            market="marcadores"
+                            label={player}
+                            suspKey="firstGoalscorer"
+                          />
+                        ))}
+                      </div>
+                    </MarketAccordionSection>
+                  </div>
+                )}
+
+              {/* ── FUTEBOL: ÚLTIMO MARCADOR ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "marcadores" || modalTab === "todos") &&
+                m &&
+                m.lastGoalscorer &&
+                m.lastGoalscorer.length > 0 && (
+                  <div>
+                    <MarketAccordionSection
+                      title="Último Marcador"
+                      defaultOpen={false}
+                      count={m.lastGoalscorer.length}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione o jogador que marcar o ÚLTIMO gol da partida.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.lastGoalscorer.map(({ player, odds }) => (
+                          <MarketOddsBtn
+                            key={player}
+                            match={match}
+                            sel={`lg:${player}`}
+                            odd={odds}
+                            market="marcadores"
+                            label={player}
+                            suspKey="lastGoalscorer"
+                          />
+                        ))}
+                      </div>
+                    </MarketAccordionSection>
+                  </div>
+                )}
+
               {isFootball &&
                 !showET &&
                 !showPen &&
                 !isLateGame &&
                 modalTab === "marcadores" &&
                 m &&
-                (!m.anytimeGoalscorer || m.anytimeGoalscorer.length === 0) && (
+                (!m.anytimeGoalscorer || m.anytimeGoalscorer.length === 0) &&
+                (!m.firstGoalscorer || m.firstGoalscorer.length === 0) &&
+                (!m.lastGoalscorer || m.lastGoalscorer.length === 0) && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>

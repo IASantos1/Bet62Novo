@@ -213,6 +213,13 @@ type AdvancedMarkets = {
   // settlement.ts's parseSelectionPlayerMarket/getFootballGoalEventsFromExtras
   // to auto-settle it against Statpal's own goal-incident player names.
   anytimeGoalscorer?: Array<{ player: string; odds: number }>;
+  // First Goalscorer — same shape as anytimeGoalscorer. Selection key prefix
+  // `fg:{player}` in the frontend; settlement matches it against goal events
+  // in the order they happened (first one wins; no goal → stays open).
+  firstGoalscorer?: Array<{ player: string; odds: number }>;
+  // Last Goalscorer — same shape. Selection key prefix `lg:{player}`;
+  // settlement resolves only when the match ends (last goal wins).
+  lastGoalscorer?: Array<{ player: string; odds: number }>;
   corners?: {
     o85: number;
     u85: number;
@@ -387,8 +394,10 @@ type AdvancedMarkets = {
   // Half-time and 2nd-half exact score markets
   htCorrectScore?: Record<string, number>;
   h2CorrectScore?: Record<string, number>;
-  // Team goals O/U (each team individually)
-  teamGoals?: {
+  // Team goals O/U (each team individually) — kept Partial because providers
+  // (bwin) often price only a subset of lines (e.g. just home team O/U or just
+  // the 2.5 line); missing lines simply stay unpopulated.
+  teamGoals?: Partial<{
     homeOver05: number;
     homeUnder05: number;
     homeOver15: number;
@@ -401,7 +410,7 @@ type AdvancedMarkets = {
     awayUnder15: number;
     awayOver25: number;
     awayUnder25: number;
-  };
+  }>;
 };
 
 export type LiveMatchState = {
@@ -10519,6 +10528,19 @@ function isWomensLeague(name: string): boolean {
   );
 }
 
+/** Remove redundant "(Women)", "(Men)", "(Women's)", "(Men's)" suffixes from
+ *  team names so narrow UI buttons don't truncate to just "(Women)".
+ *  These suffixes are always redundant because the league name already shows
+ *  "- Women" / "- Men" in the header above the match card. */
+function stripGenderTeamSuffix(name: string | null | undefined): string | null {
+  if (name == null) return null;
+  const n = name.trim();
+  if (!n) return n;
+  return n
+    .replace(/\s*\((Women|Women's|Women’s|Men|Men's|Men’s|U-?\d{1,2})\)\s*$/i, "")
+    .trim();
+}
+
 /** Simulated/eSoccer football (e.g. "Esoccer Battle Volta - 6 Mins Play",
  * "Esoccer H2H GG League - 8 Mins Play") — not a real match, block outright.
  * "X Mins Play" is included as a secondary signal since it's specific to
@@ -11361,8 +11383,8 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     // into football's upcoming list). Checking here too means this loop is
     // safe regardless of whether a bad league slipped past the first filter.
     if (ev.sport !== "soccer") continue;
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
@@ -11384,9 +11406,29 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const override = extractFootballOverride(ev);
     const baseOdds = makeOddsFromTeams(home, away);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const markets: AdvancedMarkets = override?.totalGoals
-      ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
-      : baseMarkets;
+    const markets: AdvancedMarkets = (() => {
+      const m: AdvancedMarkets = override?.totalGoals
+        ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
+        : baseMarkets;
+      if (override?.anytimeGoalscorer) m.anytimeGoalscorer = override.anytimeGoalscorer;
+      if (override?.firstGoalscorer) m.firstGoalscorer = override.firstGoalscorer;
+      if (override?.lastGoalscorer) m.lastGoalscorer = override.lastGoalscorer;
+      if (override?.doubleChance) Object.assign(m.doubleChance, override.doubleChance);
+      if (override?.bothTeamsScore) Object.assign(m.bothTeamsScore, override.bothTeamsScore);
+      if (override?.firstGoal) Object.assign(m.firstGoal, override.firstGoal);
+      if (override?.drawNoBet) m.drawNoBet = override.drawNoBet as any;
+      if (override?.secondHalf) m.secondHalf = override.secondHalf as any;
+      if (override?.goalOddEven) m.goalOddEven = override.goalOddEven;
+      if (override?.cleanSheet) m.cleanSheet = override.cleanSheet as any;
+      if (override?.correctScore) m.correctScore = { ...(m.correctScore ?? {}), ...override.correctScore };
+      if (override?.teamGoals) m.teamGoals = { ...(m.teamGoals ?? {}), ...override.teamGoals };
+      if (override?.corners) m.corners = override.corners;
+      if (override?.cards) m.cards = override.cards;
+      if (override?.htft) m.htft = override.htft;
+      if (override?.exactGoals) m.exactGoals = override.exactGoals;
+      if (override?.btts1H) m.btts1H = override.btts1H;
+      return m;
+    })();
     const odds = override?.odds ?? baseOdds;
     const isWomens = isWomensLeague(leagueName);
 
@@ -11474,8 +11516,8 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   );
   const results: UpcomingMatch[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     // bet365 sometimes lists the same real match twice under different tour/
@@ -11600,8 +11642,8 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     const key = `${home}|${away}`;
@@ -11702,8 +11744,8 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
@@ -11832,8 +11874,8 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     const key = `${home}|${away}`;
@@ -11897,8 +11939,8 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   );
   const results: UpcomingMatch[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     const isDuplicate = results.some(
@@ -11994,8 +12036,8 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     // matchClock is this feed's actual "is this genuinely live" signal —
     // confirmed real samples always carried it for in-play matches.
@@ -12264,8 +12306,8 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
@@ -12375,8 +12417,8 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
@@ -12507,8 +12549,8 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // sport-tag scoping has now proven unreliable on multiple endpoints
     // (tennis WS, this endpoint's prematch counterpart). Cheap to check.
     if (ev.sport !== "soccer") continue;
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
@@ -12563,6 +12605,12 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     }
     if (override?.anytimeGoalscorer) {
       rawMarkets.anytimeGoalscorer = override.anytimeGoalscorer;
+    }
+    if (override?.firstGoalscorer) {
+      rawMarkets.firstGoalscorer = override.firstGoalscorer;
+    }
+    if (override?.lastGoalscorer) {
+      rawMarkets.lastGoalscorer = override.lastGoalscorer;
     }
     if (override?.drawNoBet) {
       assignNonNull(rawMarkets.drawNoBet, override.drawNoBet);
@@ -13627,8 +13675,8 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       );
       continue;
     }
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     const override = extractTennisOverride(ev);
     const baseOdds = makeTennisBaseOdds(home, away);

@@ -1593,22 +1593,29 @@ function normalizeCompactFootballSelectionKey(
 function parseSelectionPlayerMarket(selection: string): {
   market: "goal" | "assist" | "card";
   period: "any" | "1h" | "2h";
+  scope: "any" | "first" | "last";
   playerName: string;
 } | null {
   const raw = String(selection ?? "").trim();
   if (!raw) return null;
-  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc):(.+)$/i);
+  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc|fg1h|fg2h|fg|lg1h|lg2h|lg):(.+)$/i);
   if (!match) return null;
   const key = match[1]!.toLowerCase();
   const playerName = match[2]!.trim();
   if (!playerName) return null;
-  if (key === "pa") return { market: "assist", period: "any", playerName };
-  if (key === "pg") return { market: "goal", period: "any", playerName };
-  if (key === "pg1h") return { market: "goal", period: "1h", playerName };
-  if (key === "pg2h") return { market: "goal", period: "2h", playerName };
-  if (key === "pc") return { market: "card", period: "any", playerName };
-  if (key === "pc1h") return { market: "card", period: "1h", playerName };
-  if (key === "pc2h") return { market: "card", period: "2h", playerName };
+  if (key === "pa") return { market: "assist", period: "any", scope: "any", playerName };
+  if (key === "pg") return { market: "goal", period: "any", scope: "any", playerName };
+  if (key === "pg1h") return { market: "goal", period: "1h", scope: "any", playerName };
+  if (key === "pg2h") return { market: "goal", period: "2h", scope: "any", playerName };
+  if (key === "fg") return { market: "goal", period: "any", scope: "first", playerName };
+  if (key === "fg1h") return { market: "goal", period: "1h", scope: "first", playerName };
+  if (key === "fg2h") return { market: "goal", period: "2h", scope: "first", playerName };
+  if (key === "lg") return { market: "goal", period: "any", scope: "last", playerName };
+  if (key === "lg1h") return { market: "goal", period: "1h", scope: "last", playerName };
+  if (key === "lg2h") return { market: "goal", period: "2h", scope: "last", playerName };
+  if (key === "pc") return { market: "card", period: "any", scope: "any", playerName };
+  if (key === "pc1h") return { market: "card", period: "1h", scope: "any", playerName };
+  if (key === "pc2h") return { market: "card", period: "2h", scope: "any", playerName };
   return null;
 }
 
@@ -2500,17 +2507,27 @@ export function scoreOutcomeForSel(
     } else {
       const goals = getFootballGoalEventsFromExtras(extra?.extras);
       if (!goals) return null;
-      winning = goals.some((goal) => {
+      const filtered = goals.filter((goal) => {
         if (goal.ownGoal || goal.varCancelled) return false;
-        if (!footballEventMatchesPeriod(goal.minute, playerSelection.period))
-          return false;
-        if (playerSelection.market === "goal") {
-          const playerName = normalizeParticipantName(goal.playerName ?? "");
-          return !!playerName && playerName === wantedName;
-        }
-        const assistName = normalizeParticipantName(goal.assistName ?? "");
-        return !!assistName && assistName === wantedName;
+        return footballEventMatchesPeriod(goal.minute, playerSelection.period);
       });
+      if (playerSelection.market === "assist") {
+        winning = filtered.some((goal) => {
+          const assistName = normalizeParticipantName(goal.assistName ?? "");
+          return !!assistName && assistName === wantedName;
+        });
+      } else {
+        const mapped = filtered.map((goal) =>
+          normalizeParticipantName(goal.playerName ?? ""),
+        ).filter((n) => !!n);
+        if (playerSelection.scope === "any") {
+          winning = mapped.some((playerName) => playerName === wantedName);
+        } else if (playerSelection.scope === "first") {
+          winning = mapped.length > 0 && mapped[0] === wantedName;
+        } else if (playerSelection.scope === "last") {
+          winning = mapped.length > 0 && mapped[mapped.length - 1] === wantedName;
+        }
+      }
     }
   }
   // ── Asian totals (settle full win/loss/void; quarter split stays pending) ─

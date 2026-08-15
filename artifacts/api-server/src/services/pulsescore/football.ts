@@ -337,6 +337,13 @@ export type PulseScoreFootballOverride = {
   // matches Statpal also covers; otherwise it just stays pending, same as
   // any other player-market bet on this codebase already does.
   anytimeGoalscorer?: Array<{ player: string; odds: number }>;
+  // First Goalscorer — same shape as anytime: raw player name + odds.
+  // 10bet sends canonicalMarket "FIRST_GOALSCORER"; bwin falls back to
+  // rawName "First Goalscorer" in the OTHER bucket.
+  firstGoalscorer?: Array<{ player: string; odds: number }>;
+  // Last Goalscorer — same shape. 10bet canonicalMarket "LAST_GOALSCORER"
+  // confirmed in tmp-10bet.json L7230; bwin uses rawName "Last Goalscorer".
+  lastGoalscorer?: Array<{ player: string; odds: number }>;
   btts1H?: { yes: number; no: number };
   exactGoals?: {
     g0: number; g1: number; g2: number; g3: number; g4: number; g5plus: number;
@@ -483,6 +490,24 @@ function isFirstTeamToScoreMarket(market: PulseScoreMarket): boolean {
 function isAnytimeGoalscorerMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
   return (market.rawName || "").trim().toLowerCase() === "anytime goalscorer";
+}
+
+// First Goalscorer market — covered by:
+//   - 10bet: canonicalMarket === "FIRST_GOALSCORER" (own dedicated canonical)
+//   - bwin: canonicalMarket === "OTHER", rawName === "First Goalscorer"
+function isFirstGoalscorerMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  const raw = (market.rawName || "").trim().toLowerCase();
+  return market.canonicalMarket === "FIRST_GOALSCORER" || raw === "first goalscorer";
+}
+
+// Last Goalscorer market — covered by:
+//   - 10bet: canonicalMarket === "LAST_GOALSCORER" (confirmed in tmp-10bet.json L7230)
+//   - bwin: canonicalMarket === "OTHER", rawName === "Last Goalscorer" (if sent)
+function isLastGoalscorerMarket(market: PulseScoreMarket): boolean {
+  if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
+  const raw = (market.rawName || "").trim().toLowerCase();
+  return market.canonicalMarket === "LAST_GOALSCORER" || raw === "last goalscorer";
 }
 
 // bet365: rawName "goals odd/even" (unverified naming, never actually seen).
@@ -783,6 +808,28 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         scorers.push({ player, odds: val });
       }
       if (scorers.length > 0) out.anytimeGoalscorer = scorers;
+    } else if (isFirstGoalscorerMarket(market)) {
+      const scorers: Array<{ player: string; odds: number }> = [];
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const player = (sel.rawName || "").trim();
+        if (!player || /no (first )?goal(scorer)?/i.test(player)) continue;
+        scorers.push({ player, odds: val });
+      }
+      if (scorers.length > 0) out.firstGoalscorer = scorers;
+    } else if (isLastGoalscorerMarket(market)) {
+      const scorers: Array<{ player: string; odds: number }> = [];
+      for (const sel of market.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const player = (sel.rawName || "").trim();
+        if (!player || /no (last )?goal(scorer)?/i.test(player)) continue;
+        scorers.push({ player, odds: val });
+      }
+      if (scorers.length > 0) out.lastGoalscorer = scorers;
     } else if (isDrawNoBetMarket(market)) {
       let home: number | null = null;
       let away: number | null = null;
