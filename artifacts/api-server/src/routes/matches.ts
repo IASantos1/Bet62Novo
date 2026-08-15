@@ -10541,6 +10541,23 @@ function stripGenderTeamSuffix(name: string | null | undefined): string | null {
     .trim();
 }
 
+/** REMOÇÃO IMEDIATA de jogos do feed AO VIVO no EXATO INSTANTE em que o provedor
+ *  sinaliza término (bwin period="Finished"/"FT" · matchClock.finished === true).
+ *  Requisito P60 (user): jogos terminados em Ao Vivo têm de ser retirado já.
+ *  Antes esta remoção só acontecia via GC missing_ids (desaparecer do feed + grace de
+ *  3min futebol / 15s basquete etc.). Valores cobertos: Finished, FT, Full Time,
+ *  AET, After Extra Time, After Penalties, PEN, Final, Ended, Complete, Completed. */
+function isPulseScoreEventFinished(ev: PulseScoreEvent): boolean {
+  if (ev.matchClock && (ev.matchClock as any).finished === true) return true;
+  const period = String(ev.matchClock?.period ?? "").toLowerCase().trim();
+  if (!period) return false;
+  if (period === "finished" || period === "ft" || period === "full time") return true;
+  if (period === "aet") return true;
+  if (period.startsWith("after extra") || period.startsWith("after penalties")) return true;
+  if (period === "pen" || period === "final" || period === "ended" || period === "complete" || period === "completed") return true;
+  return false;
+}
+
 /** Simulated/eSoccer football (e.g. "Esoccer Battle Volta - 6 Mins Play",
  * "Esoccer H2H GG League - 8 Mins Play") — not a real match, block outright.
  * "X Mins Play" is included as a secondary signal since it's specific to
@@ -11749,6 +11766,18 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-basketball-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] basketball immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
 
     const id = `pulsescore-basketball-${ev.eventId}`;
     currentIds.add(id);
@@ -12042,6 +12071,18 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // matchClock is this feed's actual "is this genuinely live" signal —
     // confirmed real samples always carried it for in-play matches.
     if (!ev.matchClock) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-volleyball-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] volleyball immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
 
     const id = `pulsescore-volleyball-${ev.eventId}`;
     currentIds.add(id);
@@ -12311,6 +12352,18 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-hockey-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] hockey immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
 
     const id = `pulsescore-hockey-${ev.eventId}`;
     currentIds.add(id);
@@ -12422,6 +12475,18 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-baseball-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] baseball immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
 
     const id = `pulsescore-baseball-${ev.eventId}`;
     currentIds.add(id);
@@ -12571,6 +12636,18 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     )
       continue;
     const country = countryKey ?? "Internacional";
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-football-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] football immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
     const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
     const prio = leaguePriority(prioKey, countryKey ?? undefined);
     const tier = footballMarketTier(leagueName, country);
@@ -13678,6 +13755,18 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const home = stripGenderTeamSuffix(ev.home);
     const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-tennis-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] tennis immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
     const override = extractTennisOverride(ev);
     const baseOdds = makeTennisBaseOdds(home, away);
     const sets = override.sets.length > 0 ? override.sets : [[0, 0] as [number, number]];
