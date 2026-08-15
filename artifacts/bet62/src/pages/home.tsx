@@ -17901,6 +17901,48 @@ export default function Home({
                           </div>
                         ) : null;
                       })}
+                    {(m as any).basketballExtra?.firstHalf?.home > 0 && (
+                      <MarketGroup title="Vencedor — 1ª Parte">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="b-fh-home"
+                          odd={(m as any).basketballExtra.firstHalf.home}
+                          market="quartos"
+                          label={match.home}
+                          suspKey="basketballExtra"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="b-fh-away"
+                          odd={(m as any).basketballExtra.firstHalf.away}
+                          market="quartos"
+                          label={match.away}
+                          suspKey="basketballExtra"
+                        />
+                      </MarketGroup>
+                    )}
+                    {(m as any).basketballExtra?.firstHalfTotal?.over > 0 && (
+                      <MarketGroup
+                        title={`Total — 1ª Parte O/U ${(m as any).basketballExtra.firstHalfTotal.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`b-fht-o-${(m as any).basketballExtra.firstHalfTotal.line}`}
+                          odd={(m as any).basketballExtra.firstHalfTotal.over}
+                          market="quartos"
+                          label={`Mais de ${(m as any).basketballExtra.firstHalfTotal.line}`}
+                          suspKey="basketballExtra"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`b-fht-u-${(m as any).basketballExtra.firstHalfTotal.line}`}
+                          odd={(m as any).basketballExtra.firstHalfTotal.under}
+                          market="quartos"
+                          label={`Menos de ${(m as any).basketballExtra.firstHalfTotal.line}`}
+                          suspKey="basketballExtra"
+                        />
+                      </MarketGroup>
+                    )}
                     {(m as any).basketballExtra?.anyQuarter?.home > 0 && (
                       <MarketGroup title="Vence Qualquer Quarto">
                         <MarketOddsBtn

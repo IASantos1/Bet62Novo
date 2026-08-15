@@ -507,7 +507,7 @@ function makeMoneylineMarket(period: string, homeOdds: number, awayOdds: number)
   };
 }
 
-test("extractBasketballOverride: ignores FIRST_HALF/FIRST_QUARTER Money Line duplicates (bwin)", () => {
+test("extractBasketballOverride: FULL_TIME Money Line stays unaffected by FIRST_HALF/FIRST_QUARTER duplicates (bwin)", () => {
   const ev = makeBasketballEvent([
     makeMoneylineMarket("FULL_TIME", 1.5, 2.6),
     makeMoneylineMarket("FIRST_HALF", 1.4, 2.9),
@@ -516,6 +516,59 @@ test("extractBasketballOverride: ignores FIRST_HALF/FIRST_QUARTER Money Line dup
   const override = extractBasketballOverride(ev);
   assert.equal(override.odds?.home, 1.5);
   assert.equal(override.odds?.away, 2.6);
+});
+
+// 2026-08-15: FIRST_QUARTER, THIRD_QUARTER and FIRST_HALF are now extracted
+// into their own q1/q3/firstHalf blocks (confirmed real periods, same
+// 2026-08-09 bwin sample as FULL_TIME above) — the "duplicates" from the
+// test above aren't just discarded anymore, each period gets its own slot.
+test("extractBasketballOverride: extracts FIRST_QUARTER and FIRST_HALF Money Line into q1/firstHalf", () => {
+  const ev = makeBasketballEvent([
+    makeMoneylineMarket("FULL_TIME", 1.5, 2.6),
+    makeMoneylineMarket("FIRST_QUARTER", 1.45, 2.5),
+    makeMoneylineMarket("FIRST_HALF", 1.4, 2.9),
+  ]);
+  const override = extractBasketballOverride(ev);
+  assert.equal(override.q1?.odds?.home, 1.45);
+  assert.equal(override.q1?.odds?.away, 2.5);
+  assert.equal(override.firstHalf?.odds?.home, 1.4);
+  assert.equal(override.firstHalf?.odds?.away, 2.9);
+  assert.equal(override.q3, undefined, "no THIRD_QUARTER market was provided");
+});
+
+test("extractBasketballOverride: extracts THIRD_QUARTER Handicap and Totals into q3", () => {
+  const ev = makeBasketballEvent([
+    makeHandicapMarket("THIRD_QUARTER", -2.5, 1.9, 1.9),
+    {
+      canonicalMarket: "OVER_UNDER",
+      rawName: "Totals",
+      period: "THIRD_QUARTER",
+      line: 42.5,
+      isActive: true,
+      marketId: "test:q3-totals",
+      selections: [
+        { canonicalOutcome: "OVER", rawName: "Over 42.5", odds: 1.87, isActive: true },
+        { canonicalOutcome: "UNDER", rawName: "Under 42.5", odds: 1.87, isActive: true },
+      ],
+    },
+  ]);
+  const override = extractBasketballOverride(ev);
+  assert.equal(override.q3?.spread?.line, -2.5);
+  assert.equal(override.q3?.total?.line, 42.5);
+  assert.equal(override.q3?.total?.over, 1.87);
+});
+
+// SECOND_QUARTER/FOURTH_QUARTER were never confirmed in a real sample (see
+// this file's own header) — an event carrying one must not have it silently
+// mapped into q1/q3/firstHalf by accident (would misattribute a real market
+// to the wrong period, a settlement-correctness risk).
+test("extractBasketballOverride: does not misattribute an unconfirmed SECOND_QUARTER market to q1/q3", () => {
+  const ev = makeBasketballEvent([makeMoneylineMarket("SECOND_QUARTER", 1.6, 2.3)]);
+  const override = extractBasketballOverride(ev);
+  assert.equal(override.q1, undefined);
+  assert.equal(override.q3, undefined);
+  assert.equal(override.firstHalf, undefined);
+  assert.equal(override.odds, undefined);
 });
 
 // bwin: canonicalMarket "EUROPEAN_HANDICAP" (not bet365's "ASIAN_HANDICAP"),

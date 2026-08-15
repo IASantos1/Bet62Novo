@@ -50,8 +50,26 @@ function recordUnknownCanonicalMarket(canonicalMarket: string): void {
 //      odds would never have been extracted at all. Now filtered to
 //      FULL_TIME first, matching the period-scoping pattern already used in
 //      football.ts.
-// Only these three are mapped for now; anything else seen in real traffic is
-// logged once instead of guessed at.
+// Only these three FULL_TIME markets, plus the period-scoped extension right
+// below, are mapped; anything else seen in real traffic is logged once
+// instead of guessed at.
+//
+// Period-scoped extension (2026-08-15): the FULL_TIME triplication noted
+// above (point 2) is itself the evidence — bwin sends the same MATCH_RESULT/
+// HANDICAP/OVER_UNDER markets again under FIRST_QUARTER, THIRD_QUARTER and
+// FIRST_HALF (confirmed real periods on the same 2026-08-09 sample this
+// file's FULL_TIME extraction was built from). SECOND_QUARTER, FOURTH_QUARTER
+// and SECOND_HALF were NOT named in that sample — rather than assume a
+// standard 4-quarter taxonomy and guess at those, extraction below is
+// limited to the three confirmed periods; recordUnknownPeriod() logs any
+// OTHER period value actually seen on a known canonicalMarket so those three
+// can be added for real once (if) confirmed, the same "log once instead of
+// guessed at" discipline as recordUnknownCanonicalMarket above.
+export type PulseScoreBasketballPeriodOverride = {
+  odds?: { home: number; away: number };
+  spread?: { line: number; home: number; away: number };
+  total?: { line: number; over: number; under: number };
+};
 export type PulseScoreBasketballOverride = {
   odds?: { home: number; away: number };
   // `line` is the signed handicap line for the HOME selection (e.g. +1.5 =
@@ -60,10 +78,25 @@ export type PulseScoreBasketballOverride = {
   // `_spread` convention) must negate it themselves.
   spread?: { line: number; home: number; away: number };
   total?: { line: number; over: number; under: number };
+  q1?: PulseScoreBasketballPeriodOverride;
+  q3?: PulseScoreBasketballPeriodOverride;
+  firstHalf?: PulseScoreBasketballPeriodOverride;
 };
 
-function isFullTimeMarket(market: PulseScoreMarket): boolean {
-  return (market.period || "").toUpperCase() === "FULL_TIME";
+// Period values this file is confident about extracting — see this file's
+// header for exactly which were confirmed real and why SECOND_QUARTER/
+// FOURTH_QUARTER/SECOND_HALF are deliberately absent from this list.
+const KNOWN_PERIODS = new Set(["FULL_TIME", "FIRST_QUARTER", "THIRD_QUARTER", "FIRST_HALF"]);
+
+const seenUnknownPeriods = new Set<string>();
+function recordUnknownPeriod(canonicalMarket: string, period: string): void {
+  const key = `${canonicalMarket}:${period}`;
+  if (seenUnknownPeriods.has(key)) return;
+  seenUnknownPeriods.add(key);
+  logger.info(
+    { canonicalMarket, period },
+    "[pulsescore] unmapped basketball market period seen — candidate to add once confirmed",
+  );
 }
 
 function extractMoneyline(market: PulseScoreMarket): { home: number; away: number } | null {
@@ -119,27 +152,31 @@ function extractTotal(market: PulseScoreMarket): { line: number; over: number; u
   return over !== null && under !== null && line !== null ? { line, over, under } : null;
 }
 
-/** Builds a market override from one PulseScore basketball event's Money
- * Line / Spread / Total markets. Returns an empty object (not null) when
- * none are recognised yet — callers should only apply fields present. */
-export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasketballOverride {
-  const out: PulseScoreBasketballOverride = {};
-  const moneylineMarkets = (ev.markets ?? []).filter(
-    (m) => m.canonicalMarket === "MATCH_RESULT" && isFullTimeMarket(m),
+/** Same extraction logic as the FULL_TIME block below, generalized to any
+ * single period string — used both for FULL_TIME (via extractBasketballOverride)
+ * and for the confirmed period-scoped blocks (FIRST_QUARTER, THIRD_QUARTER,
+ * FIRST_HALF). Picks the most-even-odds line for the handicap/spread market
+ * the same way FULL_TIME does, for the same reason (bwin lists several
+ * alternate lines per period, not just per event). */
+function extractPeriodBlock(
+  markets: PulseScoreMarket[],
+  period: string,
+): PulseScoreBasketballPeriodOverride {
+  const isThisPeriod = (m: PulseScoreMarket) => (m.period || "").toUpperCase() === period;
+  const out: PulseScoreBasketballPeriodOverride = {};
+
+  const moneylineMarkets = markets.filter(
+    (m) => m.canonicalMarket === "MATCH_RESULT" && isThisPeriod(m),
   );
-  const spreadMarkets = (ev.markets ?? []).filter(
+  const totalMarkets = markets.filter(
+    (m) => m.canonicalMarket === "OVER_UNDER" && isThisPeriod(m),
+  );
+  const spreadMarkets = markets.filter(
     (m) =>
       (m.canonicalMarket === "ASIAN_HANDICAP" || m.canonicalMarket === "EUROPEAN_HANDICAP") &&
-      isFullTimeMarket(m),
-  );
-  const totalMarkets = (ev.markets ?? []).filter(
-    (m) => m.canonicalMarket === "OVER_UNDER" && isFullTimeMarket(m),
+      isThisPeriod(m),
   );
 
-  // If more than one FULL_TIME moneyline/total market still shows up, skip
-  // rather than risk mixing them up — same caution as football/
-  // genericSportLive. Moneyline/Totals showed exactly one FULL_TIME entry
-  // each in every real bwin sample seen so far (2026-08-09).
   if (moneylineMarkets.length === 1) {
     const ml = extractMoneyline(moneylineMarkets[0]!);
     if (ml) out.odds = ml;
@@ -148,14 +185,6 @@ export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasket
     const tot = extractTotal(totalMarkets[0]!);
     if (tot) out.total = tot;
   }
-  // Handicap is different: bwin lists several alternate FULL_TIME lines per
-  // event (confirmed real, 2026-08-09 — one match carried Handicap at -8.5,
-  // -9.5, -10.5, -11.5, -12.5 all at once). AdvancedMarkets.spread only holds
-  // one line, so pick the one closest to even odds (min |home - away|) as
-  // the "main" line — same heuristic tennis.ts's pickMostEvenLine already
-  // uses for the same kind of multi-line market, and it lines up with how
-  // sportsbooks pick their headline spread (in that sample, -10.5 at
-  // 1.85/1.83 was clearly the intended main line vs. -8.5's 1.65/2.05).
   const spreadCandidates = spreadMarkets
     .map((m) => extractSpread(m))
     .filter((sp): sp is { line: number; home: number; away: number } => sp !== null);
@@ -164,10 +193,33 @@ export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasket
       Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
     );
   }
+  return out;
+}
+
+/** Builds a market override from one PulseScore basketball event's Money
+ * Line / Spread / Total markets — FULL_TIME plus the three confirmed
+ * period-scoped blocks (q1/q3/firstHalf; see this file's header for why
+ * q2/q4/secondHalf aren't included yet). Returns an empty object (not null)
+ * when none are recognised yet — callers should only apply fields present. */
+export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasketballOverride {
+  const markets = ev.markets ?? [];
+  const out: PulseScoreBasketballOverride = extractPeriodBlock(markets, "FULL_TIME");
+
+  const q1 = extractPeriodBlock(markets, "FIRST_QUARTER");
+  if (q1.odds || q1.spread || q1.total) out.q1 = q1;
+  const q3 = extractPeriodBlock(markets, "THIRD_QUARTER");
+  if (q3.odds || q3.spread || q3.total) out.q3 = q3;
+  const firstHalf = extractPeriodBlock(markets, "FIRST_HALF");
+  if (firstHalf.odds || firstHalf.spread || firstHalf.total) out.firstHalf = firstHalf;
 
   const known = new Set(["MATCH_RESULT", "ASIAN_HANDICAP", "EUROPEAN_HANDICAP", "OVER_UNDER"]);
-  for (const market of ev.markets ?? []) {
-    if (!known.has(market.canonicalMarket)) recordUnknownCanonicalMarket(market.canonicalMarket);
+  for (const market of markets) {
+    if (!known.has(market.canonicalMarket)) {
+      recordUnknownCanonicalMarket(market.canonicalMarket);
+      continue;
+    }
+    const period = (market.period || "").toUpperCase();
+    if (period && !KNOWN_PERIODS.has(period)) recordUnknownPeriod(market.canonicalMarket, period);
   }
   return out;
 }

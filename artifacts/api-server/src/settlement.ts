@@ -999,7 +999,14 @@ function scoreOutcomeForSelLastResort(
           ? "won"
           : "lost";
     }
-    const qSpread = s.match(/^q([1-4])s-(home|away)-([\d.]+)$/);
+    // Line accepts an optional leading "-" (bug found 2026-08-15 while
+    // wiring up real bwin quarter-handicap data for Q1/Q3 — a favored
+    // team's line is negative, e.g. "-2.5", and the old digits-only
+    // pattern never matched that, leaving any such bet stuck pending
+    // forever. Pre-existing, not introduced by that change — synthetic
+    // quarter-spread lines could already be negative before real data was
+    // wired up, this was just less exercised).
+    const qSpread = s.match(/^q([1-4])s-(home|away)-(-?[\d.]+)$/);
     if (qSpread) {
       const qIndex = Number(qSpread[1]) - 1;
       const qScore = quarters[qIndex] ?? null;
@@ -1709,9 +1716,10 @@ export function normalizeSettlementSelectionKey(selection: string): string {
     const m = s.match(/^b-q([1-4])t-([ou])-([\d.]+)$/);
     s = `q${m![1]}t-${m![2]}-${m![3]}`;
   }
-  // Basketball quarter spreads
-  else if (/^b-q([1-4])s-(home|away)-([\d.]+)$/.test(s)) {
-    const m = s.match(/^b-q([1-4])s-(home|away)-([\d.]+)$/);
+  // Basketball quarter spreads — line accepts an optional leading "-" (see
+  // the qSpread regex's own comment above for why).
+  else if (/^b-q([1-4])s-(home|away)-(-?[\d.]+)$/.test(s)) {
+    const m = s.match(/^b-q([1-4])s-(home|away)-(-?[\d.]+)$/);
     s = `q${m![1]}s-${m![2]}-${m![3]}`;
   }
   // Basketball any/all quarters

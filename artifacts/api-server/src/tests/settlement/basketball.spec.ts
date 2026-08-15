@@ -108,6 +108,26 @@ const basketballCases: FinishedSettlementCase[] = [
     extra: basketballQuarterAliasExtras,
     expected: "won",
   },
+  // Regression (2026-08-15): a favored team's spread line is negative
+  // (e.g. "-2.5") — the old q1s-/b-q1s- regexes only matched digits, no
+  // leading "-", so a negative-line selection never matched at all and sat
+  // pending forever. Q1 in basketballQuarterAliasExtras is 31-25 (home by
+  // 6), so "home -5.5" (home must win Q1 by MORE than 5.5) wins the same
+  // way the positive-line case above does — same numbers, negative sign.
+  {
+    name: "basketball quarter spread with a negative line is settled as won (not stuck pending)",
+    selection: makeSelection("b-q1s-home--5.5"),
+    ft: { home: 101, away: 88 },
+    extra: basketballQuarterAliasExtras,
+    expected: "won",
+  },
+  {
+    name: "basketball quarter spread with a negative line, bare (non-aliased) form is settled as won",
+    selection: makeSelection("q1s-home--5.5"),
+    ft: { home: 101, away: 88 },
+    extra: basketballQuarterAliasExtras,
+    expected: "won",
+  },
   {
     name: "basketball total points over 180.5 is settled as won",
     selection: makeSelection("b-pts-o-180.5"),

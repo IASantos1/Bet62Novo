@@ -40,6 +40,7 @@ import {
   getPulseScoreBasketballUpcoming,
   getPulseScoreBasketballLive,
   extractBasketballOverride,
+  type PulseScoreBasketballOverride,
 } from "../services/pulsescore/basketball.js";
 import {
   getPulseScoreHockeyUpcoming,
@@ -247,6 +248,18 @@ type AdvancedMarkets = {
     nextPoint?: { home: number; away: number };
     nextThree?: { home: number; away: number };
     totalsRange?: Array<{ line: number; over: number; under: number }>;
+    // Real bwin data (extractBasketballOverride) overrides q1/q1Total and
+    // q3/q3Total above when present — see that function's header for why
+    // q2/q4 stay synthetic-only, and applyBasketballPeriodOverrides's header
+    // for why q1Spread/q3Spread are deliberately NOT overridden yet (a
+    // pre-existing sign-handling bug in spread settlement, found but not
+    // fixed while wiring this up). firstHalf/firstHalfTotal below have no
+    // synthetic equivalent (added 2026-08-15 alongside the real extraction),
+    // so they're simply absent until real data populates them; no
+    // firstHalfSpread field for the same reason q1Spread/q3Spread aren't
+    // wired yet.
+    firstHalf?: { home: number; away: number };
+    firstHalfTotal?: { line: number; over: number; under: number };
   };
   // Tennis extended markets
   tennisExtra?: {
@@ -11530,6 +11543,41 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+// Applies extractBasketballOverride's confirmed-real q1/q3/firstHalf blocks
+// on top of an already-built (synthetic) basketballExtra object — same "real
+// wins, synthetic fills the gap" pattern as spread/total above, just scoped
+// to the fields that now have a real source (2026-08-15). q2/q4 stay
+// synthetic-only (see extractBasketballOverride's own header for why), and
+// firstHalf simply doesn't exist until real data provides it.
+//
+// Deliberately excludes spread/handicap (q1Spread/q3Spread/firstHalfSpread)
+// even though extractBasketballOverride already computes it: while wiring
+// this up, b-spread-home/b-spread-away's settlement (settlement.ts ~2873)
+// was found to silently discard the spread's sign (Math.abs(_spread) as the
+// selector line) and apply the same "-line" adjustment to whichever side is
+// backed — verified numerically to invert the correct outcome whenever AWAY
+// is the actual favorite (e.g. home wins by 3 with away truly favored by
+// -5.5: home's +5.5 bet should win, away's -5.5 bet should lose; the current
+// formula settles the exact opposite). That's a pre-existing bug in the
+// FULL-GAME spread market too (in production since basketball moved to bwin,
+// 2026-08-09/10), not something introduced here — flagged separately, not
+// fixed in this change, since it needs its own dedicated fix+tests rather
+// than being extended to two more markets while still broken. Winner and
+// total have no such sign ambiguity (plain score comparisons) and are safe.
+function applyBasketballPeriodOverrides(
+  markets: AdvancedMarkets,
+  override: PulseScoreBasketballOverride,
+): void {
+  const extra = markets.basketballExtra;
+  if (!extra) return;
+  if (override.q1?.odds) extra.q1 = override.q1.odds;
+  if (override.q1?.total) extra.q1Total = override.q1.total;
+  if (override.q3?.odds) extra.q3 = override.q3.odds;
+  if (override.q3?.total) extra.q3Total = override.q3.total;
+  if (override.firstHalf?.odds) extra.firstHalf = override.firstHalf.odds;
+  if (override.firstHalf?.total) extra.firstHalfTotal = override.firstHalf.total;
+}
+
 /**
  * Basketball prematch, sourced entirely from PulseScore (getPulseScoreBasketballUpcoming).
  * Confirmed against a real GET /api/v3/bet365/basketball/leagues sample (2026-08-07) —
@@ -11538,8 +11586,9 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
  * applied and country is hardcoded "Internacional" — mirrors tennis's
  * no-catalog approach since there's no existing basketball country table to
  * reuse. Money Line / Spread / Total all confirmed real (extractBasketballOverride);
- * quarter-level markets (basketballExtra) stay synthetic-only — no real
- * per-quarter sample seen yet. Same `pulsescore-basketball-${eventId}` id
+ * q1/q3/firstHalf are now real too (2026-08-15) via
+ * applyBasketballPeriodOverrides — q2/q4 stay synthetic-only, no real
+ * per-quarter sample confirmed for those yet. Same `pulsescore-basketball-${eventId}` id
  * scheme as football/tennis so a match's identity doesn't change if a live
  * pipeline is added later.
  */
@@ -11580,6 +11629,7 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
       };
       markets._total = override.total.line;
     }
+    applyBasketballPeriodOverrides(markets, override);
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
       : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
@@ -11683,6 +11733,7 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       };
       markets._total = override.total.line;
     }
+    applyBasketballPeriodOverrides(markets, override);
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
       : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
