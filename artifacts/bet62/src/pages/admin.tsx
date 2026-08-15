@@ -97,6 +97,15 @@ type AdminUser = {
   kycSubmittedAt?: string | null;
 };
 
+type AdminBetSelection = {
+  matchTitle?: string;
+  market?: string;
+  selection?: string;
+  label?: string;
+  odd?: number;
+  outcome?: "won" | "lost" | "void" | null;
+};
+
 type AdminBet = {
   id: number;
   userId: number;
@@ -108,6 +117,7 @@ type AdminBet = {
   createdAt: string;
   userName: string | null;
   userEmail: string | null;
+  selections?: AdminBetSelection[] | unknown;
 };
 
 type AdminWithdrawal = {
@@ -1066,6 +1076,8 @@ export default function AdminPage() {
   const [bannerAiPrompt, setBannerAiPrompt] = useState("");
   const [bannerAiLoading, setBannerAiLoading] = useState(false);
   const [bannerSaving, setBannerSaving] = useState(false);
+
+  const [betDetailModal, setBetDetailModal] = useState<AdminBet | null>(null);
 
   const [balanceModal, setBalanceModal] = useState<AdminUser | null>(null);
   const [balanceAmount, setBalanceAmount] = useState("");
@@ -4191,7 +4203,8 @@ export default function AdminPage() {
                           {filteredBets.map((bet) => (
                             <tr
                               key={bet.id}
-                              className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors"
+                              onClick={() => setBetDetailModal(bet)}
+                              className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors cursor-pointer"
                             >
                               <td className="px-3 sm:px-4 py-3 text-zinc-600 font-mono text-xs hidden sm:table-cell">
                                 #{bet.id}
@@ -4236,44 +4249,59 @@ export default function AdminPage() {
                                 {fmtDate(bet.createdAt)}
                               </td>
                               <td className="px-3 sm:px-4 py-3">
-                                {bet.status === "pending" && (
-                                  <div className="flex items-center justify-end gap-1">
-                                    <Button
-                                      size="sm"
-                                      disabled={updatingBet === bet.id}
-                                      onClick={() =>
-                                        handleUpdateBetStatus(bet.id, "won")
-                                      }
-                                      className="h-7 px-2 text-xs bg-green-700 hover:bg-green-600 text-white"
-                                    >
-                                      {updatingBet === bet.id ? (
-                                        <Loader2
-                                          size={12}
-                                          className="animate-spin"
-                                        />
-                                      ) : (
-                                        <CheckCircle size={12} />
-                                      )}
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      disabled={updatingBet === bet.id}
-                                      onClick={() =>
-                                        handleUpdateBetStatus(bet.id, "lost")
-                                      }
-                                      className="h-7 px-2 text-xs bg-red-800 hover:bg-red-700 text-white"
-                                    >
-                                      {updatingBet === bet.id ? (
-                                        <Loader2
-                                          size={12}
-                                          className="animate-spin"
-                                        />
-                                      ) : (
-                                        <XCircle size={12} />
-                                      )}
-                                    </Button>
-                                  </div>
-                                )}
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setBetDetailModal(bet);
+                                    }}
+                                    className="h-7 px-2 text-xs bg-zinc-800 hover:bg-zinc-700 text-white"
+                                    title="Ver seleções"
+                                  >
+                                    <Eye size={12} />
+                                  </Button>
+                                  {bet.status === "pending" && (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        disabled={updatingBet === bet.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleUpdateBetStatus(bet.id, "won");
+                                        }}
+                                        className="h-7 px-2 text-xs bg-green-700 hover:bg-green-600 text-white"
+                                      >
+                                        {updatingBet === bet.id ? (
+                                          <Loader2
+                                            size={12}
+                                            className="animate-spin"
+                                          />
+                                        ) : (
+                                          <CheckCircle size={12} />
+                                        )}
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        disabled={updatingBet === bet.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleUpdateBetStatus(bet.id, "lost");
+                                        }}
+                                        className="h-7 px-2 text-xs bg-red-800 hover:bg-red-700 text-white"
+                                      >
+                                        {updatingBet === bet.id ? (
+                                          <Loader2
+                                            size={12}
+                                            className="animate-spin"
+                                          />
+                                        ) : (
+                                          <XCircle size={12} />
+                                        )}
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -8313,6 +8341,161 @@ export default function AdminPage() {
                   </div>
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL: Bilhete da Aposta ── user request 2026-08-15: clicar numa
+          aposta na lista do admin mostra todas as seleções, no mesmo estilo
+          de bilhete/recibo da página do utilizador (home.tsx's "Minhas
+          Apostas" ticket card) — versão estática, sem tracking de odds ao
+          vivo (o admin está a ver apostas já feitas, não a acompanhar um
+          jogo em curso). ── */}
+      <AnimatePresence>
+        {betDetailModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setBetDetailModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95 }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {(() => {
+                const bet = betDetailModal;
+                const sels: AdminBetSelection[] = Array.isArray(bet.selections)
+                  ? (bet.selections as AdminBetSelection[])
+                  : [];
+                const isMultiple = sels.length > 1;
+                const statusInfo = STATUS_BET[bet.status] || {
+                  label: bet.status,
+                  cls: "bg-zinc-800 text-zinc-400",
+                };
+                const outcomeIcon = (outcome: AdminBetSelection["outcome"]) => {
+                  if (outcome === "won")
+                    return (
+                      <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                        <CheckCircle size={13} className="text-white" />
+                      </div>
+                    );
+                  if (outcome === "lost")
+                    return (
+                      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0">
+                        <XCircle size={13} className="text-white" />
+                      </div>
+                    );
+                  if (outcome === "void")
+                    return (
+                      <div className="w-6 h-6 rounded-full bg-zinc-700 border border-zinc-600 flex items-center justify-center shrink-0">
+                        <span className="text-zinc-300 text-[11px] font-black leading-none">
+                          —
+                        </span>
+                      </div>
+                    );
+                  return (
+                    <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0" />
+                  );
+                };
+                return (
+                  <>
+                    {/* ── HEADER ── */}
+                    <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3 border-b border-zinc-800">
+                      <div className="min-w-0">
+                        <div className="font-black text-white text-lg leading-tight">
+                          {isMultiple ? `Múltipla (${sels.length})` : "Simples"}
+                        </div>
+                        <div className="text-zinc-500 text-xs mt-1">
+                          Bilhete #{bet.id} · {bet.userName || "—"} (
+                          {bet.userEmail || "—"})
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`text-[11px] font-black uppercase tracking-wide px-3 py-1.5 rounded-full ${statusInfo.cls}`}
+                        >
+                          {statusInfo.label}
+                        </span>
+                        <button
+                          onClick={() => setBetDetailModal(null)}
+                          className="text-zinc-500 hover:text-white"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ── SELECTIONS LIST ── */}
+                    <div className="overflow-y-auto flex-1">
+                      {sels.length === 0 ? (
+                        <div className="px-5 py-8 text-center text-zinc-500 text-sm">
+                          {bet.matchTitle || "Sem seleções registadas."}
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-zinc-800">
+                          {sels.map((sel, i) => (
+                            <div
+                              key={i}
+                              className="px-5 py-3 flex items-center gap-3"
+                            >
+                              {outcomeIcon(sel.outcome)}
+                              <div className="min-w-0 flex-1">
+                                <div className="text-white text-sm font-medium leading-tight truncate">
+                                  {sel.matchTitle || bet.matchTitle}
+                                </div>
+                                <div className="text-zinc-500 text-xs mt-0.5 truncate">
+                                  {sel.market ? `${sel.market} · ` : ""}
+                                  {sel.label || sel.selection || "—"}
+                                </div>
+                              </div>
+                              <div className="text-white text-sm font-bold shrink-0">
+                                {Number(sel.odd ?? 0) > 0
+                                  ? Number(sel.odd).toFixed(2)
+                                  : "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── SUMMARY ── */}
+                    <div className="px-5 py-4 border-t border-zinc-800 space-y-2 shrink-0">
+                      <div className="flex items-center justify-between text-sm text-zinc-400">
+                        <span>Valor apostado:</span>
+                        <span className="font-semibold text-white">
+                          {fmtEur(bet.stake)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-zinc-400">
+                        <span>Odd total:</span>
+                        <span className="font-semibold text-white">
+                          {parseFloat(bet.totalOdds).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-zinc-400">
+                        <span>
+                          {bet.status === "won"
+                            ? "Ganho confirmado:"
+                            : "Retorno potencial:"}
+                        </span>
+                        <span className="font-black text-green-400 text-base">
+                          {fmtEur(bet.potentialWin)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-zinc-600 pt-1">
+                        <span>{fmtDate(bet.createdAt)}</span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </motion.div>
           </motion.div>
         )}

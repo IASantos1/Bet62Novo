@@ -979,6 +979,13 @@ router.get(
           createdAt: betsTable.createdAt,
           userName: usersTable.name,
           userEmail: usersTable.email,
+          // Individual legs of the bet (match/market/selection/odd per leg) —
+          // user request 2026-08-15: let an admin click a bet in the list
+          // and see every selection it's made of, not just the flat
+          // matchTitle summary string. Read-only for the admin view; the
+          // settlement engine reads this same column directly from the DB,
+          // never through this endpoint.
+          selections: betsTable.selections,
         })
         .from(betsTable)
         .leftJoin(usersTable, eq(betsTable.userId, usersTable.id))
