@@ -398,10 +398,20 @@ function isMatchWinnerMarket(market: PulseScoreMarket): boolean {
 // Goals", bwin calls the identical canonicalMarket/period combo "Total
 // Goals"); bwin's sample never showed a colliding Goal-Line-style market
 // under that name, so no extra disambiguation was needed there.
+// "over/under total goals" added 2026-08-15 after a real bwin sample (5
+// live soccer events, /live-events?sport=soccer) showed several leagues
+// (Turkey Super League, Bundesliga 2, Romania Liga I, Slovakia Super Liga)
+// pricing the exact same canonicalMarket/period/shape (line on the market,
+// OVER/UNDER selections at .5 lines) under this longer name instead of the
+// previously-confirmed "Total Goals" — meaning isTotalGoalsMarket silently
+// returned false and out.totalGoals never got real odds for any event using
+// this label, even though bwin had real data. Additive only — "total goals"
+// stays in case some leagues still use the shorter form.
 const TOTAL_GOALS_RAW_NAMES = new Set([
   "match goals",
   "alternative match goals",
   "total goals",
+  "over/under total goals",
 ]);
 
 function isTotalGoalsMarket(market: PulseScoreMarket): boolean {
@@ -501,12 +511,26 @@ function isCorrectScoreMarket(market: PulseScoreMarket): boolean {
   return rawName === "final score" || rawName === "correct score";
 }
 
-// "{Team} Goals" (O/U at .5 lines) — distinct from "{Team} Exact Goals"
-// (discrete 0/1/2/3+ buckets, not extracted here: no matching AdvancedMarkets
-// field shape exists for a discrete per-team distribution).
+// "{Team} Goals" (O/U at .5 lines) — distinct from "{Team} Total Goals"
+// (discrete 0/1/2+ buckets under canonicalMarket HOME_OVER_UNDER/
+// AWAY_OVER_UNDER, confirmed in the same 2026-08-15 sample below but NOT
+// extracted here: no matching AdvancedMarkets field shape exists for a
+// discrete per-team distribution, and critically its selections carry no
+// `line` at all, so applyTeamGoalsMarket's line-keyed grouping would just
+// skip every row anyway — safe by construction, not by this check alone).
+//
+// "Over/Under {Team} Total Goals" added 2026-08-15 after the same real bwin
+// sample that motivated the TOTAL_GOALS_RAW_NAMES widening above showed
+// several leagues pricing the identical O/U-at-.5-lines shape (line on the
+// market, OVER/UNDER selections) under this longer name instead of the
+// previously-confirmed "{Team} Goals" — same gap, same fix shape: additive,
+// old name kept in case any league still uses the short form.
 function isTeamGoalsMarket(market: PulseScoreMarket, teamName: string): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
-  return (market.rawName || "") === `${teamName} Goals`;
+  const rawName = market.rawName || "";
+  return (
+    rawName === `${teamName} Goals` || rawName === `Over/Under ${teamName} Total Goals`
+  );
 }
 
 function applyTeamGoalsMarket(

@@ -225,6 +225,74 @@ test("extractFootballOverride: recognizes bwin's 'Total Goals' market name", () 
   assert.equal(override.totalGoals?.under25, 1.9);
 });
 
+// Regression (2026-08-15): a real bwin /live-events?sport=soccer sample (5
+// events — Turkey Super League, Bundesliga 2, Romania Liga I, Slovakia
+// Super Liga) named the identical FULL_TIME OVER_UNDER market "Over/Under
+// Total Goals" instead of "Total Goals" — isTotalGoalsMarket only matched
+// the shorter name, so out.totalGoals silently stayed empty (falling back
+// to the synthetic price) for every event using this label despite bwin
+// having real odds.
+test("extractFootballOverride: recognizes bwin's 'Over/Under Total Goals' market name", () => {
+  const totalGoals = makeOverUnderMarket("Over/Under Total Goals", 2.5, 2.1, 1.7);
+  const override = extractFootballOverride(makeFootballEvent([totalGoals]));
+  assert.equal(override.totalGoals?.over25, 2.1);
+  assert.equal(override.totalGoals?.under25, 1.7);
+});
+
+function makeTeamGoalsMarket(rawName: string, line: number, overOdds: number, underOdds: number) {
+  return {
+    canonicalMarket: "HOME_OVER_UNDER",
+    rawName,
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: `test:${rawName}`,
+    line,
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over", odds: overOdds, isActive: true },
+      { canonicalOutcome: "UNDER", rawName: "Under", odds: underOdds, isActive: true },
+    ],
+  };
+}
+
+test("extractFootballOverride: recognizes the confirmed '{Team} Goals' market name", () => {
+  const homeGoals = makeTeamGoalsMarket("Home FC Goals", 1.5, 2.4, 1.5);
+  const override = extractFootballOverride(makeFootballEvent([homeGoals]));
+  assert.equal(override.teamGoals?.homeOver15, 2.4);
+  assert.equal(override.teamGoals?.homeUnder15, 1.5);
+});
+
+// Regression (2026-08-15): the same real bwin sample above named the
+// identical per-team O/U market "Over/Under {Team} Total Goals" instead of
+// "{Team} Goals" — isTeamGoalsMarket only matched the shorter name, so
+// out.teamGoals silently stayed empty for every event using this label.
+// Deliberately distinct from bwin's OTHER real per-team market, "{Team}
+// Total Goals" (no "Over/Under " prefix, discrete 0/1/2+ buckets under
+// canonicalMarket HOME_OVER_UNDER/AWAY_OVER_UNDER, no `line` on its
+// selections at all) — this fix must not start matching that one too.
+test("extractFootballOverride: recognizes bwin's 'Over/Under {Team} Total Goals' market name", () => {
+  const homeGoals = makeTeamGoalsMarket("Over/Under Home FC Total Goals", 1.5, 2.4, 1.5);
+  const override = extractFootballOverride(makeFootballEvent([homeGoals]));
+  assert.equal(override.teamGoals?.homeOver15, 2.4);
+  assert.equal(override.teamGoals?.homeUnder15, 1.5);
+});
+
+test("extractFootballOverride: does not misattribute the discrete '{Team} Total Goals' 0/1/2+ market to teamGoals", () => {
+  const discreteGoals = {
+    canonicalMarket: "HOME_OVER_UNDER",
+    rawName: "Home FC Total Goals",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:discrete",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "0", odds: 3.3, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "1", odds: 2.5, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "2+", odds: 2.4, isActive: true },
+    ],
+  };
+  const override = extractFootballOverride(makeFootballEvent([discreteGoals]));
+  assert.equal(override.teamGoals, undefined);
+});
+
 // bwin-only canonicalMarket "FIRST_TEAM_TO_SCORE" — confirmed against real
 // live and prematch samples (2026-08-08). Maps onto the existing
 // AdvancedMarkets.firstGoal field.
