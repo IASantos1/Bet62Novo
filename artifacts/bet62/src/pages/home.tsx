@@ -10586,7 +10586,14 @@ export default function Home({
         publicKey: {
           challenge,
           rpId: window.location.hostname,
-          allowCredentials: [{ type: "public-key" as const, id: credIdBytes }],
+          // transports: ["internal"] tells Safari/Chrome this credential
+          // only lives on this device's own authenticator (Face ID/Touch
+          // ID) — without it, the browser doesn't know it can skip its
+          // "sign in another way" chooser (QR code / security key) and
+          // shows that full-screen dialog before ever touching biometrics.
+          allowCredentials: [
+            { type: "public-key" as const, id: credIdBytes, transports: ["internal"] },
+          ],
           userVerification: "required",
           timeout: 60000,
         },
@@ -10622,10 +10629,18 @@ export default function Home({
             { alg: -7, type: "public-key" as const },
             { alg: -257, type: "public-key" as const },
           ],
+          // residentKey "discouraged" (was "preferred"): "preferred" tells
+          // Safari to save this as a synced iCloud Keychain Passkey, and
+          // Safari always resolves passkey get() calls through its full
+          // "Iniciar sessão" chooser (QR code / security key options) even
+          // when a matching one exists — that's the screen this lock was
+          // supposed to skip straight past. A plain (non-resident) platform
+          // credential tied to just this device's Face ID/Touch ID goes
+          // straight to the biometric prompt instead.
           authenticatorSelection: {
             authenticatorAttachment: "platform",
             userVerification: "required",
-            residentKey: "preferred",
+            residentKey: "discouraged",
           },
           timeout: 60000,
         },
