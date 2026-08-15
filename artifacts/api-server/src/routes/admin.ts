@@ -1034,21 +1034,13 @@ router.put(
 
       const oldStatus = bet.status;
       const isFreebet = String(bet.isFreebet ?? "") === "true";
-      // A freebet win pays winnings only (bet.stake is never returned —
-      // same convention as the auto-settlement engine's
-      // freebetAwareWinPayout, settlement.ts) since the stake was debited
-      // from freebetBalance at placement, not real balance.
-      const winPayout = isFreebet
-        ? Math.max(
-            0,
-            Number(
-              (
-                parseFloat(bet.stake) *
-                (parseFloat(bet.totalOdds) - 1)
-              ).toFixed(2),
-            ),
-          ).toFixed(2)
-        : bet.potentialWin;
+      // A freebet win pays stake-inclusive, same as bet.potentialWin — see
+      // settlement.ts's freebetAwareWinPayout for the full policy history
+      // (2026-08-15: explicit, informed platform-owner decision to pay a
+      // freebet win exactly like a real-money bet). isFreebet is still
+      // read above/used below for freebetBalance vs real-balance credit
+      // routing, just no longer changes the payout AMOUNT for a win.
+      const winPayout = bet.potentialWin;
       let changed = false;
 
       await db.transaction(async (tx) => {
@@ -1077,8 +1069,15 @@ router.put(
         // this can't double-claw-back since it only fires once, exactly
         // when actually leaving that status (oldStatus check).
         if (oldStatus === "won" && status !== "won") {
-          const clawback = isFreebet ? applyFreebetBalanceDelta : applyBalanceDelta;
-          await clawback(tx, {
+          // A win — freebet or not — was credited to REAL balance below
+          // (matching settlement.ts's primary auto-settlement path, which
+          // always uses applyBalanceDelta for a win regardless of
+          // isFreebet), so the clawback must also target real balance, not
+          // freebetBalance. Previously this branched on isFreebet, which
+          // was inconsistent with what the credit below actually did —
+          // fixed 2026-08-15 alongside the freebet win payout policy
+          // change, found while touching this exact code.
+          await applyBalanceDelta(tx, {
             userId: bet.userId,
             amount: `-${winPayout}`,
             kind: "admin_bet_settlement_clawback",
@@ -1099,10 +1098,15 @@ router.put(
           });
         }
 
-        // Credit balance atomically when marking won (only from non-won state)
+        // Credit balance atomically when marking won (only from non-won
+        // state) — always REAL balance, freebet or not, matching
+        // settlement.ts's primary auto-settlement path (which always uses
+        // applyBalanceDelta for a win). The freebet-vs-real distinction only
+        // affects the STAKE (debited from freebetBalance at placement,
+        // refunded to freebetBalance on void) — a win's payout is real
+        // money either way.
         if (status === "won" && oldStatus !== "won") {
-          const credit = isFreebet ? applyFreebetBalanceDelta : applyBalanceDelta;
-          await credit(tx, {
+          await applyBalanceDelta(tx, {
             userId: bet.userId,
             amount: winPayout,
             kind: "admin_bet_settlement_payout",

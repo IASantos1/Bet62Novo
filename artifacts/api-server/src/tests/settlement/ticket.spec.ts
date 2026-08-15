@@ -129,13 +129,19 @@ test("multi-bet aggregation settles as lost immediately even while another leg i
   assert.equal(decision.payout, "0.00");
 });
 
-// Regression (audit, 2026-08-10): a freebet's stake is debited from
-// freebetBalance at placement, never real balance. deriveSettlementDecision
-// previously computed the same stake-inclusive payout regardless of
-// bet.isFreebet, which — combined with settleBet() crediting that full
-// amount to real balance — turned every freebet win/void into real,
-// withdrawable money never actually risked.
-test("freebet win pays winnings only — stake is not returned", () => {
+// History: an audit (2026-08-10) found a freebet win/void paying the full
+// stake-inclusive amount to real balance was exploitable — a freebet's
+// stake is debited from freebetBalance at placement, never real balance,
+// so crediting stake*odds back to real balance on a win manufactured real,
+// withdrawable money that was never actually risked, repeatable with every
+// freebet granted. That was fixed with a "stake not returned" (winnings-
+// only) payout. Reverted 2026-08-15: explicit, informed platform-owner
+// decision (confirmed twice via AskUserQuestion, shown the exact exploit
+// and a concrete numeric example both times) that a freebet win should pay
+// exactly like a real-money bet — stake included. Freebet VOIDs are
+// unaffected by this reversal and still refund to freebetBalance, not real
+// balance (see settlement.ts's applyVoidRefund) — only WINS changed.
+test("freebet win pays stake-inclusive, same as a real-money bet", () => {
   const decision = deriveSettlementDecision(
     {
       id: 20,
@@ -147,9 +153,7 @@ test("freebet win pays winnings only — stake is not returned", () => {
   );
 
   assert.equal(decision.status, "won");
-  // Non-freebet would be 10 * 2.0 = 20.00; freebet is winnings-only:
-  // 10 * (2.0 - 1) = 10.00.
-  assert.equal(decision.payout, "10.00");
+  assert.equal(decision.payout, "20.00");
 });
 
 test("a non-freebet win is unaffected — stake is included as before", () => {
@@ -167,17 +171,27 @@ test("a non-freebet win is unaffected — stake is included as before", () => {
   assert.equal(decision.payout, "20.00");
 });
 
-test("freebet win at odds so low winnings would be negative floors at zero, not a real loss", () => {
-  const decision = deriveSettlementDecision(
+test("freebet and non-freebet wins compute the exact same payout at identical stake/odds", () => {
+  const freebetDecision = deriveSettlementDecision(
     {
       id: 22,
       stake: "10.00",
       matchId: "freebet-3",
       isFreebet: "true",
     },
-    [makeSelection("home", { odd: 1.0, outcome: "won" })],
+    [makeSelection("home", { odd: 1.5, outcome: "won" })],
+  );
+  const realDecision = deriveSettlementDecision(
+    {
+      id: 23,
+      stake: "10.00",
+      matchId: "freebet-4",
+      isFreebet: "false",
+    },
+    [makeSelection("home", { odd: 1.5, outcome: "won" })],
   );
 
-  assert.equal(decision.status, "won");
-  assert.equal(decision.payout, "0.00");
+  assert.equal(freebetDecision.status, "won");
+  assert.equal(freebetDecision.payout, "15.00");
+  assert.equal(freebetDecision.payout, realDecision.payout);
 });

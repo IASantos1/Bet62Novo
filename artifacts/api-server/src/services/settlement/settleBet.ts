@@ -163,15 +163,16 @@ function normalizeSelections(selections: any[]): SelectionRecord[] {
 }
 
 // A freebet's stake is debited from freebetBalance at placement, never real
-// balance — no real money was ever risked. Mirrors settlement.ts's
-// freebetAwareWinPayout/applyVoidRefund (same audit finding, 2026-08-10):
-// a freebet win pays winnings only (stake not returned), and a freebet void
-// refunds the stake back to freebetBalance rather than manufacturing real,
-// withdrawable money for a bet that risked nothing real. This is the
-// recovery/replay settlement path (jobs/settlementRecovery.ts,
-// lib/replayEngine.ts) — kept consistent with the primary worker so a bet
-// doesn't get treated differently depending on which path happens to
-// settle it.
+// balance — no real money was ever risked to place the bet itself. WIN
+// payout is stake-inclusive (stake*odds), same as a real-money bet — see
+// settlement.ts's freebetAwareWinPayout for the full history (2026-08-10
+// audit found the exploit this used to guard against; 2026-08-15 explicit,
+// informed platform-owner decision reverted it anyway). A freebet VOID
+// still refunds the stake to freebetBalance rather than real balance —
+// only WINS changed. This is the recovery/replay settlement path
+// (jobs/settlementRecovery.ts, lib/replayEngine.ts) — kept consistent with
+// the primary worker so a bet doesn't get treated differently depending on
+// which path happens to settle it.
 function isFreebetBet(bet: { isFreebet?: unknown }): boolean {
   return String(bet.isFreebet ?? "") === "true";
 }
@@ -238,9 +239,10 @@ export function deriveSettlementDecision(
 
   const stakeNum = Number.parseFloat(String(bet.stake ?? "0"));
   const effectiveOdds = computeResolvedTicketOdds(updatedSelections, outcomes);
-  const rawPayout = isFreebetBet(bet)
-    ? stakeNum * (effectiveOdds - 1)
-    : stakeNum * effectiveOdds;
+  // Stake-inclusive for freebet wins too — see isFreebetBet's own header
+  // comment for why (explicit, informed platform-owner decision,
+  // 2026-08-15, reverting the "stake not returned" convention).
+  const rawPayout = stakeNum * effectiveOdds;
   const payout = formatCurrency(Math.max(0, Number(rawPayout.toFixed(2))));
 
   return {

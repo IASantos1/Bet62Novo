@@ -148,18 +148,20 @@ export async function acquireBetSettlementLock(
 // ── Freebet-aware settlement payout ────────────────────────────────────────
 // A freebet's stake is debited from usersTable.freebetBalance at placement
 // (routes/bets.ts), never from real usersTable.balance — no real money was
-// ever risked. Every payout site in this file previously computed the same
-// stake-inclusive payout (won: stake*odds, void: stake refund) regardless
-// of bet.isFreebet and credited it straight to real balance — meaning a
-// freebet win or void conjured real, withdrawable money that was never
-// actually staked. Confirmed exploitable via audit (2026-08-10): grant a
-// freebet, bet it, win or void it, the "stake" portion becomes real cash
-// repeatable with every freebet granted. Fixed with the industry-standard
-// "stake not returned" convention: a freebet win pays winnings only
-// (stake*(odds-1)) to real balance; a freebet void returns the stake to
-// freebetBalance (the pool it came from) instead of manufacturing real
-// money. A non-freebet bet is completely unaffected — every call site below
-// falls through to the exact original stake-inclusive formula.
+// ever risked to place the bet itself.
+//
+// WIN payout: stake-inclusive (stake*odds), same formula as a real-money
+// bet — explicit, informed platform-owner decision (2026-08-15), reverting
+// the "stake not returned" convention this function used to enforce. That
+// convention was added after an audit (2026-08-10) found the prior
+// stake-inclusive behavior exploitable: repeatedly granted freebets could
+// each be converted into real, withdrawable cash for the full stake*odds
+// amount, not just the winnings. The owner was shown that exact finding —
+// concrete numeric example, exploit explained — and confirmed twice
+// (AskUserQuestion) that a freebet win should pay exactly like a real-money
+// bet regardless. Only WINS changed; a freebet VOID still returns the stake
+// to freebetBalance (the pool it came from), not real balance — the owner's
+// request was specifically about winning bets, not voids.
 function isFreebetBet(bet: { isFreebet?: unknown }): boolean {
   return String((bet as { isFreebet?: unknown }).isFreebet ?? "") === "true";
 }
@@ -167,11 +169,9 @@ function isFreebetBet(bet: { isFreebet?: unknown }): boolean {
 function freebetAwareWinPayout(
   stakeNum: number,
   effectiveOdds: number,
-  isFreebet: boolean,
+  _isFreebet: boolean,
 ): number {
-  return isFreebet
-    ? Math.max(0, Number((stakeNum * (effectiveOdds - 1)).toFixed(2)))
-    : Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+  return Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
 }
 
 /** Refunds a voided bet's stake to the pool it actually came from — real
