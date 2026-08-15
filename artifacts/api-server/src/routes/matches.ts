@@ -1321,6 +1321,57 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["indonesia: bri liga 1", 999],
 ];
 
+// ─── Minor 2nd/3rd-division suppression (Pré-Jogos only) ──────────────────────
+// Bug report 2026-08-15: too many small Division B/C matches cluttering
+// "Pré-Jogos". Deliberately NARROW — only the genuinely minor lower
+// divisions below (low betting interest, buried in Tier 4 alongside
+// smaller countries' legitimate top flights) get suppressed, and only on
+// a day that already has real coverage from a bigger competition. The
+// well-followed 2nd divisions that live in Tier 3 (Championship, Serie B,
+// Ligue 2, LaLiga2, 2. Bundesliga, Série B) are explicitly EXCLUDED from
+// this list — confirmed with the user (2026-08-15) they want those always
+// visible, which matches the very fix that landed the day before for
+// 2. Bundesliga specifically (fetchFootballLive pagination). Smaller
+// countries' TOP-flight leagues (Uruguay, Croatia, Ecuador, ...) are also
+// excluded on purpose — confirmed with the user they shouldn't be treated
+// the same as an actual 2nd/3rd division just because they share Tier 4's
+// numeric priority band for display-order purposes.
+const MINOR_LOWER_DIVISION_PATTERNS: string[] = [
+  "netherlands: eerste divisie",
+  "netherlands: keuken",
+  "belgium: challenger",
+  "turkey: 1. lig", // TFF 1. Lig — Turkey's 2nd tier despite the "1" in the name
+  "turkey: tff 1. lig",
+  "mexico: liga de expansion",
+  "mexico: ascenso",
+  "japan: j2 league",
+  "south korea: k league 2",
+  "korea: k league 2",
+  "colombia: categoria primera b",
+  "colombia: primera b",
+  "scotland: championship",
+];
+
+function isMinorLowerDivisionLeague(
+  countryKey: string | null | undefined,
+  leagueDisplayName: string,
+): boolean {
+  const key = `${countryKey ?? ""}: ${leagueDisplayName}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  const mainPart = key.split(" - ")[0];
+  return MINOR_LOWER_DIVISION_PATTERNS.some((p) => mainPart.includes(p));
+}
+
+// Below this priority, a match counts as "real coverage" for a day — big
+// domestic top flights, well-followed 2nd divisions (Tier ≤3) and cups
+// (40-59) all count; only Tier 4 (≥60, where the minor lower divisions
+// above live) does not. Kept as its own named constant rather than
+// inlining 60 at each call site since it's the exact boundary
+// isMinorLowerDivisionLeague's suppression logic is built around.
+const BIG_LEAGUE_DAY_PRIORITY_THRESHOLD = 60;
+
 // League name → country, derived from DOMESTIC_PRIORITY rather than
 // hand-maintained separately (would drift out of sync otherwise). Needed
 // for any fixture source whose schema doesn't carry a country field of its
@@ -11282,6 +11333,11 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   const events = [...(await getPulseScoreFootballUpcoming())].sort((a, b) =>
     (a.startTime || "").localeCompare(b.startTime || ""),
   );
+  // Tracks each pushed match's priority/minor-lower-division status
+  // alongside `results` (same index) purely for the suppression pass below
+  // — kept out of the UpcomingMatch objects themselves since neither field
+  // is part of that public shape.
+  const meta: Array<{ prio: number; isMinor: boolean }> = [];
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const ev of events) {
@@ -11335,7 +11391,33 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       isWomens,
       isPriorityLeague: prio > 0,
     });
+    meta.push({
+      prio,
+      isMinor: isMinorLowerDivisionLeague(countryKey, leagueName),
+    });
   }
+
+  // ── Suppress minor 2nd/3rd-division leagues on days that already have
+  // real top-flight/cup/well-followed-2nd-division coverage — see
+  // isMinorLowerDivisionLeague's own header comment for exactly which
+  // leagues this narrow list covers and why (bug report 2026-08-15).
+  // Grouped by `date` (not global) so a quiet Tuesday with only Eerste
+  // Divisie on the schedule still shows it — this only kicks in once a
+  // given day already has somewhere else to bet on.
+  const bigLeagueDayHasCoverage = new Set<string>();
+  for (let i = 0; i < results.length; i++) {
+    if (meta[i]!.prio < BIG_LEAGUE_DAY_PRIORITY_THRESHOLD) {
+      bigLeagueDayHasCoverage.add(results[i]!.date);
+    }
+  }
+  const suppressed: UpcomingMatch[] = [];
+  for (let i = 0; i < results.length; i++) {
+    if (meta[i]!.isMinor && bigLeagueDayHasCoverage.has(results[i]!.date)) continue;
+    suppressed.push(results[i]!);
+  }
+  results.length = 0;
+  results.push(...suppressed);
+
   // Team crests — batched once per rebuild cycle (not per match) so
   // MAX_NEW_TEAM_LOOKUPS_PER_BATCH applies across the whole prematch list,
   // not per team; see batchResolveApiFootballTeamLogos's own comment for why
