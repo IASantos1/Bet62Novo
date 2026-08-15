@@ -11749,7 +11749,7 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // suspends "result"/"handicap"/"totalGoals" for 8s, which the frontend's
     // generic marketSuspension["result"] fallback already turns into a
     // full match-lock banner (home.tsx, SuspensionBanner).
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -12075,7 +12075,7 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // (sets won, not points — see vollSets above) rather than every point,
     // since individual points barely move the whole-match price and
     // suspending on every one would make live volleyball near-unbettable.
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -12298,7 +12298,7 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
     }
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -12394,7 +12394,7 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       ? { home: override.odds.home, draw: override.odds.draw ?? 0, away: override.odds.away }
       : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
 
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -13015,7 +13015,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // no VAR/red-card signal, so only the goal trigger is covered here —
     // narrower than before, but still closes the main window where a stale
     // price could be backed right after a goal.
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -13544,7 +13544,7 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // betting with no real financial-safety benefit. Triggered on a set
     // changing hands (the biggest single win-probability swing), not every
     // point/game, for the same reason volleyball's trigger is set-level.
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -17221,8 +17221,8 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
             awayScore: ls.awayScore ?? 0,
             minute: ls.minute,
             status: String(ls.status ?? "Live"),
-            marketSuspension: ls.marketSuspension,
-            _suspensionReason: ls._suspensionReason,
+            marketSuspension: ls.marketSuspension ? { ...ls.marketSuspension } : undefined,
+            _suspensionReason: ls._suspensionReason ?? undefined,
             _liveExtra: ls._liveExtra,
             redCardsHome: ls.redCardsHome,
             redCardsAway: ls.redCardsAway,

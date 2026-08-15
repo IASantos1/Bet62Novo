@@ -10926,6 +10926,10 @@ export default function Home({
       .toUpperCase();
     if (!rawReason) return false;
     if (rawReason === "SINAL INSTÁVEL") return false;
+    const now = Date.now();
+    const ms = match.marketSuspension;
+    const hasAnyActiveSuspension = ms && typeof ms === "object" && Object.values(ms).some((ts) => typeof ts === "number" && ts > now);
+    if (!hasAnyActiveSuspension) return false;
     return true;
   };
 
