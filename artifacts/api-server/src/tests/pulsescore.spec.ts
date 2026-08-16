@@ -892,6 +892,33 @@ test("extractFootballOverride: extracts bwin's Anytime Goalscorer market, exclud
   ]);
 });
 
+// Regression/diagnostic (2026-08-16): isFirstGoalscorerMarket/
+// isLastGoalscorerMarket's bwin rawName check ("first goalscorer" /
+// "last goalscorer") was never confirmed against a real bwin sample, unlike
+// every other bwin check in this file. If bwin's real label differs (this
+// test simulates that with a plausible near-miss name), the market must NOT
+// be silently misattributed to the wrong field, must not throw, and the
+// diagnostic logger (recordUnknownGoalscorerRawName) must not crash on it —
+// it should just leave out.firstGoalscorer/lastGoalscorer/anytimeGoalscorer
+// all unset, exactly reproducing the "Mercado de Jogador não aparece"
+// symptom this test exists to pin down.
+test("extractFootballOverride: an unconfirmed goalscorer-shaped rawName is safely ignored, not misattributed", () => {
+  const nearMiss = {
+    canonicalMarket: "OTHER",
+    rawName: "First Team Goalscorer",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:near-miss-scorer",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "Jan Kliment", odds: 3.1, isActive: true },
+    ],
+  };
+  const override = extractFootballOverride(makeFootballEvent([nearMiss]));
+  assert.equal(override.firstGoalscorer, undefined);
+  assert.equal(override.lastGoalscorer, undefined);
+  assert.equal(override.anytimeGoalscorer, undefined);
+});
+
 function makeTennisPrematchEvent(markets: unknown[]) {
   return {
     eventId: "test-tennis-1",

@@ -493,21 +493,61 @@ function isAnytimeGoalscorerMarket(market: PulseScoreMarket): boolean {
 }
 
 // First Goalscorer market — covered by:
-//   - 10bet: canonicalMarket === "FIRST_GOALSCORER" (own dedicated canonical)
-//   - bwin: canonicalMarket === "OTHER", rawName === "First Goalscorer"
+//   - 10bet: canonicalMarket === "FIRST_GOALSCORER" (own dedicated canonical,
+//     confirmed in tmp-10bet.json) — NOT the bookmaker bet62's live football
+//     feed actually uses (FOOTBALL_BOOKMAKER is "bwin", see client.ts), so
+//     this branch never fires for real traffic on this platform.
+//   - bwin: canonicalMarket === "OTHER", rawName === "First Goalscorer" —
+//     UNCONFIRMED. Unlike every other bwin rawName check in this file (all
+//     say "confirmed against a real live sample"), this one was never
+//     actually seen in a real bwin payload — it's a guess by analogy with
+//     "Anytime Goalscorer"'s confirmed name. If bwin uses a different label
+//     (or doesn't offer this market at all), out.firstGoalscorer stays
+//     permanently empty and the frontend's "Primeiro Marcador" section never
+//     shows for any real match. See recordUnknownGoalscorerRawName below —
+//     it logs bwin's actual rawName the next time a goalscorer-shaped OTHER
+//     market slips through unmatched, which is what confirming this needs.
 function isFirstGoalscorerMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
   const raw = (market.rawName || "").trim().toLowerCase();
   return market.canonicalMarket === "FIRST_GOALSCORER" || raw === "first goalscorer";
 }
 
-// Last Goalscorer market — covered by:
+// Last Goalscorer market — same unconfirmed-bwin-name situation as First
+// Goalscorer above; see that function's comment.
 //   - 10bet: canonicalMarket === "LAST_GOALSCORER" (confirmed in tmp-10bet.json L7230)
-//   - bwin: canonicalMarket === "OTHER", rawName === "Last Goalscorer" (if sent)
+//   - bwin: canonicalMarket === "OTHER", rawName === "Last Goalscorer" — UNCONFIRMED
 function isLastGoalscorerMarket(market: PulseScoreMarket): boolean {
   if ((market.period || "").toUpperCase() !== "FULL_TIME") return false;
   const raw = (market.rawName || "").trim().toLowerCase();
   return market.canonicalMarket === "LAST_GOALSCORER" || raw === "last goalscorer";
+}
+
+// Diagnostic-only (2026-08-16): fires when an OTHER-bucket market's rawName
+// looks like it's some kind of goalscorer market but didn't match any of
+// isAnytimeGoalscorerMarket/isFirstGoalscorerMarket/isLastGoalscorerMarket
+// above — the exact situation that would happen if bwin's real label for
+// First/Last Goalscorer differs from the unconfirmed guess those two use.
+// Deliberately separate from recordUnknownCanonicalMarket's dedup (keyed
+// only by canonicalMarket, which is "OTHER" for dozens of already-handled
+// markets — a goalscorer-shaped miss would be invisible in those logs,
+// swallowed by whichever OTHER market got logged first) so the next real
+// bwin payload carrying this market leaves a distinguishable trace with its
+// actual rawName, giving future work real evidence instead of another guess.
+const seenUnknownGoalscorerRawNames = new Set<string>();
+function recordUnknownGoalscorerRawName(market: PulseScoreMarket): void {
+  const raw = (market.rawName || "").trim();
+  if (!raw) return;
+  const lower = raw.toLowerCase();
+  if (!lower.includes("goal") || !(lower.includes("score") || lower.includes("scorer"))) return;
+  if (lower === "anytime goalscorer") return; // already handled — not a miss
+  const key = `${market.canonicalMarket}::${raw}`;
+  if (seenUnknownGoalscorerRawNames.has(key)) return;
+  seenUnknownGoalscorerRawNames.add(key);
+  logger.warn(
+    { canonicalMarket: market.canonicalMarket, rawName: raw, period: market.period },
+    "[pulsescore] goalscorer-shaped market didn't match any known handler — candidate real bwin name for First/Last Goalscorer",
+  );
 }
 
 // bet365: rawName "goals odd/even" (unverified naming, never actually seen).
@@ -1024,6 +1064,7 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
         out.htft = htft as NonNullable<PulseScoreFootballOverride["htft"]>;
       }
     } else {
+      recordUnknownGoalscorerRawName(market);
       recordUnknownCanonicalMarket(market.canonicalMarket);
     }
   }
