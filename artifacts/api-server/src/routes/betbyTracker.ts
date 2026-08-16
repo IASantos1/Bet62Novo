@@ -37,6 +37,35 @@ function normalizeToPulseSportKey(sport: string): string {
   return sport === "football" ? "soccer" : sport;
 }
 
+// Bug found 2026-08-16 auditing the whole pipeline end to end: live_stream_
+// mappings has a statscoreEventId column, an admin UI to edit it (PATCH
+// /api/admin/live-stream/mappings/:betbyEventId), and a "Guardar" button
+// that reports success — but nothing downstream ever actually READ that
+// column. resolveBetbyEventIdByName below only ever pulled row.betbyEventId
+// out of a name-matched row, then re-derived a Statscore id from scratch via
+// resolveStatscoreEventIdFromBetby's HTML-scraping (fragile: 6 different
+// regexes hunting for "eventId" anywhere in whatever HTML BetBY's demo
+// origin happens to return) — completely discarding the exact answer an
+// admin had already typed in. This is the same priority slot as
+// tryManualTeamStatscoreId (proxy.ts's hardcoded array): a real, admin-
+// entered Statscore id always wins over any auto-resolution attempt.
+async function tryDbTeamStatscoreId(home: string, away: string): Promise<string | null> {
+  if (!home || !away) return null;
+  try {
+    const rows = await listMappings();
+    for (const row of rows) {
+      if (row.statscoreEventId == null) continue;
+      const direct = teamNamesMatch(row.home, home) && teamNamesMatch(row.away, away);
+      const swapped = teamNamesMatch(row.away, home) && teamNamesMatch(row.home, away);
+      if (direct || swapped) return String(row.statscoreEventId);
+    }
+    return null;
+  } catch (err) {
+    logger.warn({ err, home, away }, "[betbyTracker] tryDbTeamStatscoreId failed");
+    return null;
+  }
+}
+
 const DEFAULT_THEME: BetbyThemeInjection = {
   fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
   backgroundMain: "rgba(12, 22, 33, 1)",
@@ -220,6 +249,9 @@ router.get("/url", async (req: Request, res: Response) => {
     if (!finalStatscoreEventId && (homeForResolve || awayForResolve)) {
       finalStatscoreEventId = tryManualTeamStatscoreId(homeForResolve, awayForResolve);
     }
+    if (!finalStatscoreEventId && homeForResolve && awayForResolve) {
+      finalStatscoreEventId = await tryDbTeamStatscoreId(homeForResolve, awayForResolve);
+    }
 
     const hasRealStatscore = finalStatscoreEventId != null && isRealStatscoreId(finalStatscoreEventId);
     // Guard CRITICO: se jah temos statscore REAL (explicito ou mapa manual)
@@ -392,6 +424,9 @@ router.get("/", async (req: Request, res: Response) => {
   if (!finalStatscoreEventId && (queryHome || queryAway)) {
     finalStatscoreEventId = tryManualTeamStatscoreId(queryHome, queryAway);
   }
+  if (!finalStatscoreEventId && queryHome && queryAway) {
+    finalStatscoreEventId = await tryDbTeamStatscoreId(queryHome, queryAway);
+  }
   const hasRealStatscore = finalStatscoreEventId != null && isRealStatscoreId(finalStatscoreEventId);
 
   let finalBetbyEventId: string | null = null;
@@ -540,6 +575,9 @@ router.get("/:betbyEventId", async (req: Request, res: Response) => {
   let finalStatscoreEventId: string | null = explicitStatscoreId;
   if (!finalStatscoreEventId && (queryHome || queryAway)) {
     finalStatscoreEventId = tryManualTeamStatscoreId(queryHome, queryAway);
+  }
+  if (!finalStatscoreEventId && queryHome && queryAway) {
+    finalStatscoreEventId = await tryDbTeamStatscoreId(queryHome, queryAway);
   }
   const hadRealStatscoreBeforeResolve = finalStatscoreEventId != null && isRealStatscoreId(finalStatscoreEventId);
   // usedFallbackSmartBetbyId mirrors /url & route "/" above: true if

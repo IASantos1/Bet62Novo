@@ -1046,6 +1046,15 @@ export default function AdminPage() {
   const [liveMappingStatusFilter, setLiveMappingStatusFilter] = useState<
     "all" | "mapped" | "unmapped"
   >("all");
+  // Bug found 2026-08-16: this whole tab only ever let you EDIT a mapping
+  // that already existed (PATCH by betbyEventId) — no row was ever created
+  // automatically, and there was no "add new" form, so the list was
+  // permanently empty in practice. This is the create-side counterpart.
+  const [newMappingHome, setNewMappingHome] = useState("");
+  const [newMappingAway, setNewMappingAway] = useState("");
+  const [newMappingLeague, setNewMappingLeague] = useState("");
+  const [newMappingStatscoreId, setNewMappingStatscoreId] = useState("");
+  const [newMappingSaving, setNewMappingSaving] = useState(false);
 
   const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
   const [bannerForm, setBannerForm] = useState<{
@@ -1663,6 +1672,40 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [liveMappingEdits, token],
   );
+
+  const createLiveMapping = useCallback(async () => {
+    const home = newMappingHome.trim();
+    const away = newMappingAway.trim();
+    if (!home || !away) {
+      toast.error("Equipa da casa e visitante são obrigatórias");
+      return;
+    }
+    setNewMappingSaving(true);
+    try {
+      const res = await fetch("/api/admin/live-stream/mappings", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          home,
+          away,
+          league: newMappingLeague.trim() || undefined,
+          statscoreEventId: newMappingStatscoreId.trim() || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Mapeamento criado");
+      setNewMappingHome("");
+      setNewMappingAway("");
+      setNewMappingLeague("");
+      setNewMappingStatscoreId("");
+      refetchLiveMappings();
+    } catch {
+      toast.error("Erro ao criar mapeamento");
+    } finally {
+      setNewMappingSaving(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newMappingHome, newMappingAway, newMappingLeague, newMappingStatscoreId, token]);
 
   const openBannerModal = (banner: "new" | AdminCasinoBanner) => {
     if (banner === "new") {
@@ -6846,10 +6889,65 @@ export default function AdminPage() {
                 className="space-y-4"
               >
                 <div className="text-xs text-zinc-500 -mt-2">
-                  O Match Tracker resolve automaticamente (SportScore/Statpal/
-                  PulseScore, por nome das equipas) sem precisar de nenhum
-                  mapeamento aqui; a transmissão SMYTDRYT só aparece depois de
-                  preencheres os campos de vídeo abaixo, por evento.
+                  O Tracker tenta resolver automaticamente pelo catálogo ao
+                  vivo da BetBY, mas isso só funciona por coincidência (nomes
+                  batendo com o que a BetBY tiver ao vivo naquele momento).
+                  Adiciona o StatScore Event ID de um jogo aqui para garantir
+                  que o Tracker dele funciona sempre; a transmissão SMYTDRYT
+                  só aparece depois de preencheres os campos de vídeo, por
+                  evento.
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-zinc-300">
+                    Novo mapeamento
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <Label className="text-[10px] text-zinc-500">Equipa da casa</Label>
+                      <Input
+                        value={newMappingHome}
+                        onChange={(e) => setNewMappingHome(e.target.value)}
+                        placeholder="ex: Flamengo"
+                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-zinc-500">Equipa visitante</Label>
+                      <Input
+                        value={newMappingAway}
+                        onChange={(e) => setNewMappingAway(e.target.value)}
+                        placeholder="ex: Palmeiras"
+                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-zinc-500">Liga (opcional)</Label>
+                      <Input
+                        value={newMappingLeague}
+                        onChange={(e) => setNewMappingLeague(e.target.value)}
+                        placeholder="ex: Brasileirão"
+                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-zinc-500">StatScore Event ID</Label>
+                      <Input
+                        value={newMappingStatscoreId}
+                        onChange={(e) => setNewMappingStatscoreId(e.target.value)}
+                        placeholder="ex: 6309926"
+                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    disabled={newMappingSaving}
+                    onClick={() => void createLiveMapping()}
+                    className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    {newMappingSaving && <Loader2 size={12} className="animate-spin" />}
+                    Adicionar mapeamento
+                  </button>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">

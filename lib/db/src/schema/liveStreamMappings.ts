@@ -4,14 +4,22 @@ import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 // its own eventId — real auth confirmed, but no "list live events" endpoint
 // exists to auto-resolve one from a BetBY event) and SMYTDRYT (HLS stream,
 // keyed by its own matchId). None of the three share an identifier and none
-// have a known automatic resolution, so this is a manual-mapping table: a
-// row is seeded per live BetBY event automatically (home/away/league only),
-// and an admin fills in statscoreEventId/video* fields to complete the
-// wiring (see services/liveStream/mapping.ts). Until statscoreEventId is
-// set, the tracker automatically falls back to PulseScore, matched by team
-// name (see services/pulsescore/betbyTracker.ts) — so this table only gates
-// the stream side strictly, and the tracker side is a quality upgrade, not a
-// hard requirement.
+// have a known automatic resolution, so this is a manual-mapping table: an
+// admin fills in home/away/statscoreEventId/video* fields via
+// /api/admin/live-stream/mappings (see services/liveStream/mapping.ts).
+//
+// Corrected 2026-08-16: this comment used to say a row gets seeded per live
+// BetBY event automatically and that the tracker side falls back to
+// PulseScore/never needs this table — neither was true. No poller ever
+// seeded rows (grep confirms zero writers besides admin.ts's mapping
+// routes), so with only an UPDATE-by-betbyEventId route existing (no
+// CREATE), this table was permanently empty in practice. And
+// routes/betbyTracker.ts's resolveBetbyEventIdByName DOES read this table
+// as a real fallback layer (by team name) when BetBY's own live catalogue
+// doesn't have the match — it just had no rows to find. Both gaps (missing
+// CREATE route, and statscoreEventId never actually being read once found)
+// were fixed the same day; this table is now a real, load-bearing part of
+// the tracker resolution pipeline, not just a stream-side nicety.
 export const liveStreamMappingsTable = pgTable("live_stream_mappings", {
   id: serial("id").primaryKey(),
   betbyEventId: text("betby_event_id").notNull().unique(),

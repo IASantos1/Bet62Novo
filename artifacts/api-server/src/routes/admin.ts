@@ -55,7 +55,7 @@ import {
   getPalaceCasinoProviders,
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
-import { listMappings, setMapping } from "../services/liveStream/mapping.js";
+import { listMappings, setMapping, createMapping } from "../services/liveStream/mapping.js";
 import { memberAccountForUser } from "./casino.js";
 
 function escapeCsv(val: unknown): string {
@@ -3029,9 +3029,17 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
 // An admin fills in statscoreEventId (looked up on StatScore's own
 // dashboard for the same fixture — real auth confirmed, see
 // CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to complete the
-// tracker/stream wiring for a match. Leaving statscoreEventId unset is
-// fine — the tracker automatically falls back to PulseScore, matched by
-// team name (see services/pulsescore/genericTracker.ts).
+// tracker/stream wiring for a match.
+//
+// Fixed 2026-08-16: this comment used to say leaving statscoreEventId unset
+// was fine because "the tracker automatically falls back to PulseScore" —
+// that's not accurate for the BetBY Tracker widget (routes/betbyTracker.ts),
+// whose only real automatic path is BetBY's own live catalogue (unverified
+// against real traffic, see pulseBridge.ts's own header comment) plus a
+// handful of markets hardcoded in proxy.ts. A statscoreEventId set here via
+// POST/PATCH is a genuine, reliable third path BetBY's resolver actually
+// reads now (see tryDbTeamStatscoreId in routes/betbyTracker.ts) — filling
+// this in for a match is the correct way to guarantee its Tracker works.
 router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
     const mappings = await listMappings();
@@ -3039,6 +3047,46 @@ router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, 
   } catch (err) {
     logger.error({ err }, "GET /api/admin/live-stream/mappings error");
     res.status(500).json({ error: "Erro ao listar mapeamentos" });
+  }
+});
+
+// Was missing entirely until 2026-08-16: only an UPDATE-by-betbyEventId
+// route existed below (PATCH), which 404s on any team pair that doesn't
+// already have a row — and nothing ever auto-seeded rows, so there was no
+// way to add a new team↔Statscore mapping through the admin UI at all.
+// betbyEventId isn't a real BetBY id here (the whole point of this route is
+// mapping teams BetBY's own catalogue doesn't have) — a stable placeholder
+// is generated so the NOT NULL UNIQUE column is satisfied without pretending
+// to know a real one.
+router.post("/live-stream/mappings", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const home = String(body["home"] ?? "").trim();
+    const away = String(body["away"] ?? "").trim();
+    const league = typeof body["league"] === "string" && body["league"].trim() ? body["league"].trim() : null;
+    const statscoreRaw = body["statscoreEventId"];
+    const statscoreEventId =
+      statscoreRaw === undefined || statscoreRaw === null || statscoreRaw === ""
+        ? null
+        : Number(statscoreRaw);
+    if (!home || !away) {
+      res.status(400).json({ error: "home e away são obrigatórios" });
+      return;
+    }
+    if (statscoreEventId !== null && !Number.isFinite(statscoreEventId)) {
+      res.status(400).json({ error: "statscoreEventId inválido" });
+      return;
+    }
+    const betbyEventId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const created = await createMapping({ betbyEventId, home, away, league, statscoreEventId });
+    logger.info(
+      { home, away, statscoreEventId, admin: req.admin!.username },
+      "Admin created live-stream/tracker mapping",
+    );
+    res.status(201).json(created);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/live-stream/mappings error");
+    res.status(500).json({ error: "Erro ao criar mapeamento" });
   }
 });
 
