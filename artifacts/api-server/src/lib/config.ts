@@ -169,7 +169,7 @@ export const CONFIG = {
   SMYTDRYT_DEFAULT_STATS_HOST,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
-  LIVE_UPDATE_INTERVAL: 1000,
+  LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,
   REOPEN_DELAY_VAR_LOW: 20_000,
@@ -178,13 +178,15 @@ export const CONFIG = {
   MAX_ODDS_DRIFT: 0.40,
   CACHE_TTL_MS: 86_400_000,
 
-  // Kept below LIVE_UPDATE_INTERVAL (the SSE broadcastLive() tick) on
+  // Kept well below LIVE_UPDATE_INTERVAL (the SSE broadcastLive() tick) on
   // purpose: broadcastLive() forces a fresh payload rebuild every tick, but
   // that rebuild reads these same per-sport caches — if this TTL matched or
   // exceeded the tick interval, the two timers could drift out of phase and
   // serve up to ~2x LIVE_UPDATE_INTERVAL-stale data at some ticks instead of
-  // the ~1s the broadcast cadence implies.
-  LIVE_CACHE_TTL: 700,
+  // the ~750ms the broadcast cadence implies.
+  // MAX plan allows 3 req/sec per bookmaker, so 350ms is safe (~2.85 req/s
+  // = ~95% of the 333ms floor, leaving headroom for manual debug calls).
+  LIVE_CACHE_TTL: 350,
   DAILY_CACHE_TTL: 300_000,
   TOMORROW_CACHE_TTL: 1_800_000,
   ODDS_CACHE_TTL: 300_000,

@@ -7,6 +7,8 @@ import { startSettlementWorker } from "../settlement.js";
 import { startPulseScoreFootballWs } from "../services/pulsescore/footballWs.js";
 import { startPulseScoreBasketballWs } from "../services/pulsescore/basketballWs.js";
 import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
+import { startPulseScoreHockeyWs } from "../services/pulsescore/hockeyWs.js";
+import { startPulseScoreVolleyballWs } from "../services/pulsescore/volleyballWs.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
@@ -114,9 +116,21 @@ server.listen(port, () => {
   // if the account ever drops back to a lower tier, whichever connections
   // get closed by PulseScore simply degrade to REST-only for that sport,
   // nothing needs to change here.
+  // MAX plan (2026-08-15 docs) allows 3 concurrent WebSocket connections
+  // (one per sport) across the ENTIRE account — per-plan connections are NOT
+  // per-sport independent. The 3 highest-volume live sports (soccer, tennis,
+  // basketball) get the real-time WS feed; the rest (hockey, volleyball,
+  // baseball, ...) are intentionally left REST-polled via genericSportLive
+  // + per-sport builders below, which already tolerate no WS overlay cleanly.
+  // If the plan ever upgrades to ULTRA (10 concurrent) simply uncomment the
+  // disabled lines; the hockeyWs/volleyballWs modules themselves already
+  // exist and are safe to start — we just skip them here to stay under the
+  // 4029 "Connection limit reached" close code.
   startPulseScoreFootballWs();
   startPulseScoreTennisWs();
   startPulseScoreBasketballWs();
+  // startPulseScoreHockeyWs();      // MAX limit 3/3 used — REST fallback
+  // startPulseScoreVolleyballWs();  // MAX limit 3/3 used — REST fallback
 
   void statpalQuotaCheck("startup");
   setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);

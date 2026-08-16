@@ -51,6 +51,7 @@ import {
   getPulseScoreVolleyballLive,
   extractVolleyballOverride,
 } from "../services/pulsescore/volleyball.js";
+import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 import {
@@ -212,6 +213,13 @@ type AdvancedMarkets = {
   // settlement.ts's parseSelectionPlayerMarket/getFootballGoalEventsFromExtras
   // to auto-settle it against Statpal's own goal-incident player names.
   anytimeGoalscorer?: Array<{ player: string; odds: number }>;
+  // First Goalscorer — same shape as anytimeGoalscorer. Selection key prefix
+  // `fg:{player}` in the frontend; settlement matches it against goal events
+  // in the order they happened (first one wins; no goal → stays open).
+  firstGoalscorer?: Array<{ player: string; odds: number }>;
+  // Last Goalscorer — same shape. Selection key prefix `lg:{player}`;
+  // settlement resolves only when the match ends (last goal wins).
+  lastGoalscorer?: Array<{ player: string; odds: number }>;
   corners?: {
     o85: number;
     u85: number;
@@ -386,8 +394,10 @@ type AdvancedMarkets = {
   // Half-time and 2nd-half exact score markets
   htCorrectScore?: Record<string, number>;
   h2CorrectScore?: Record<string, number>;
-  // Team goals O/U (each team individually)
-  teamGoals?: {
+  // Team goals O/U (each team individually) — kept Partial because providers
+  // (bwin) often price only a subset of lines (e.g. just home team O/U or just
+  // the 2.5 line); missing lines simply stay unpopulated.
+  teamGoals?: Partial<{
     homeOver05: number;
     homeUnder05: number;
     homeOver15: number;
@@ -400,7 +410,7 @@ type AdvancedMarkets = {
     awayUnder15: number;
     awayOver25: number;
     awayUnder25: number;
-  };
+  }>;
 };
 
 export type LiveMatchState = {
@@ -6366,7 +6376,7 @@ let broadcastPending = false;
 let consecutiveEmptyBroadcasts = 0;
 let lastBroadcastAt = 0;
 
-// Global buffer for delta updates — collected over 100ms and flushed in a single packet
+// Global buffer for delta updates — collected over 40ms and flushed in a single packet (MAX plan tuned)
 let pendingBatchUpdates: Array<{
   matchId: string;
   delta: Partial<LiveMatchState>;
@@ -6457,7 +6467,7 @@ setInterval(() => {
 // the const exists — and would throw. Use a literal delay here instead.
 setInterval(() => {
   getLivePayloadCached().catch(() => {});
-}, 1_500);
+}, 900);
 
 // v2/daily today: cache 5min
 let dailyCache: SAPILeagueV2[] | null = null;
@@ -10518,6 +10528,36 @@ function isWomensLeague(name: string): boolean {
   );
 }
 
+/** Remove redundant "(Women)", "(Men)", "(Women's)", "(Men's)" suffixes from
+ *  team names so narrow UI buttons don't truncate to just "(Women)".
+ *  These suffixes are always redundant because the league name already shows
+ *  "- Women" / "- Men" in the header above the match card. */
+function stripGenderTeamSuffix(name: string | null | undefined): string | null {
+  if (name == null) return null;
+  const n = name.trim();
+  if (!n) return n;
+  return n
+    .replace(/\s*\((Women|Women's|Women’s|Men|Men's|Men’s|U-?\d{1,2})\)\s*$/i, "")
+    .trim();
+}
+
+/** REMOÇÃO IMEDIATA de jogos do feed AO VIVO no EXATO INSTANTE em que o provedor
+ *  sinaliza término (bwin period="Finished"/"FT" · matchClock.finished === true).
+ *  Requisito P60 (user): jogos terminados em Ao Vivo têm de ser retirado já.
+ *  Antes esta remoção só acontecia via GC missing_ids (desaparecer do feed + grace de
+ *  3min futebol / 15s basquete etc.). Valores cobertos: Finished, FT, Full Time,
+ *  AET, After Extra Time, After Penalties, PEN, Final, Ended, Complete, Completed. */
+function isPulseScoreEventFinished(ev: PulseScoreEvent): boolean {
+  if (ev.matchClock && (ev.matchClock as any).finished === true) return true;
+  const period = String(ev.matchClock?.period ?? "").toLowerCase().trim();
+  if (!period) return false;
+  if (period === "finished" || period === "ft" || period === "full time") return true;
+  if (period === "aet") return true;
+  if (period.startsWith("after extra") || period.startsWith("after penalties")) return true;
+  if (period === "pen" || period === "final" || period === "ended" || period === "complete" || period === "completed") return true;
+  return false;
+}
+
 /** Simulated/eSoccer football (e.g. "Esoccer Battle Volta - 6 Mins Play",
  * "Esoccer H2H GG League - 8 Mins Play") — not a real match, block outright.
  * "X Mins Play" is included as a secondary signal since it's specific to
@@ -11360,8 +11400,8 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     // into football's upcoming list). Checking here too means this loop is
     // safe regardless of whether a bad league slipped past the first filter.
     if (ev.sport !== "soccer") continue;
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
@@ -11383,9 +11423,29 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const override = extractFootballOverride(ev);
     const baseOdds = makeOddsFromTeams(home, away);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const markets: AdvancedMarkets = override?.totalGoals
-      ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
-      : baseMarkets;
+    const markets: AdvancedMarkets = (() => {
+      const m: AdvancedMarkets = override?.totalGoals
+        ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
+        : baseMarkets;
+      if (override?.anytimeGoalscorer) m.anytimeGoalscorer = override.anytimeGoalscorer;
+      if (override?.firstGoalscorer) m.firstGoalscorer = override.firstGoalscorer;
+      if (override?.lastGoalscorer) m.lastGoalscorer = override.lastGoalscorer;
+      if (override?.doubleChance) Object.assign(m.doubleChance, override.doubleChance);
+      if (override?.bothTeamsScore) Object.assign(m.bothTeamsScore, override.bothTeamsScore);
+      if (override?.firstGoal) Object.assign(m.firstGoal, override.firstGoal);
+      if (override?.drawNoBet) m.drawNoBet = override.drawNoBet as any;
+      if (override?.secondHalf) m.secondHalf = override.secondHalf as any;
+      if (override?.goalOddEven) m.goalOddEven = override.goalOddEven;
+      if (override?.cleanSheet) m.cleanSheet = override.cleanSheet as any;
+      if (override?.correctScore) m.correctScore = { ...(m.correctScore ?? {}), ...override.correctScore };
+      if (override?.teamGoals) m.teamGoals = { ...(m.teamGoals ?? {}), ...override.teamGoals };
+      if (override?.corners) m.corners = override.corners;
+      if (override?.cards) m.cards = override.cards;
+      if (override?.htft) m.htft = override.htft;
+      if (override?.exactGoals) m.exactGoals = override.exactGoals;
+      if (override?.btts1H) m.btts1H = override.btts1H;
+      return m;
+    })();
     const odds = override?.odds ?? baseOdds;
     const isWomens = isWomensLeague(leagueName);
 
@@ -11473,8 +11533,8 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   );
   const results: UpcomingMatch[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     // bet365 sometimes lists the same real match twice under different tour/
@@ -11599,8 +11659,8 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     const key = `${home}|${away}`;
@@ -11701,11 +11761,23 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     const period = ev.matchClock?.period ?? "";
     if (!period || period.toLowerCase().includes("not started")) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-basketball-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] basketball immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
 
     const id = `pulsescore-basketball-${ev.eventId}`;
     currentIds.add(id);
@@ -11748,7 +11820,7 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // suspends "result"/"handicap"/"totalGoals" for 8s, which the frontend's
     // generic marketSuspension["result"] fallback already turns into a
     // full match-lock banner (home.tsx, SuspensionBanner).
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -11831,8 +11903,8 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     const key = `${home}|${away}`;
@@ -11896,8 +11968,8 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
   );
   const results: UpcomingMatch[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
 
     const isDuplicate = results.some(
@@ -11993,12 +12065,24 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const ev of events) {
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     // matchClock is this feed's actual "is this genuinely live" signal —
     // confirmed real samples always carried it for in-play matches.
     if (!ev.matchClock) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-volleyball-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] volleyball immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
 
     const id = `pulsescore-volleyball-${ev.eventId}`;
     currentIds.add(id);
@@ -12074,7 +12158,7 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // (sets won, not points — see vollSets above) rather than every point,
     // since individual points barely move the whole-match price and
     // suspending on every one would make live volleyball near-unbettable.
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -12248,9 +12332,269 @@ async function rebuildUpcomingCache(): Promise<void> {
 // match's lifetime — the api_football_name_mismatches row it upserts
 // already tracks repeat occurrences across restarts, so this Set only
 // needs to prevent same-process log/write spam.
+const HOCKEY_DISAPPEAR_GRACE_MS = 15_000;
+const BASEBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Hockey live odds + score, sourced from PulseScore generic REST live source
+ * (ice-hockey, bookmaker=bwin — independent rate-limit budget). Uses the same
+ * `pulsescore-hockey-${eventId}` id scheme as buildHockeyUpcomingFromPulseScore
+ * so prematch/live identity carries over. Odds use extractHockeyOverride (hockey.ts)
+ * when available, falling back to makeHockeyMarketsFromTeams's calibrated synthetic
+ * model (identical to the prematch builder's pattern above). Finalized via the
+ * same finalizeStaleLiveMatch + 15s disappear grace pattern as basketball/volleyball. */
+async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await pulseScoreHockey.getLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+    const period = ev.matchClock?.period ?? "";
+    if (!period || period.toLowerCase().includes("not started")) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-hockey-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] hockey immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
+
+    const id = `pulsescore-hockey-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
+    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const override = extractHockeyOverride(ev);
+    const baseMarkets = makeHockeyMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    if (override.spread) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.spread.home,
+        awayPlusOne: override.spread.away,
+      };
+      markets._spread = -override.spread.line;
+      markets._spreadLine = -override.spread.line;
+    }
+    if (override.total) {
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over25: override.total.over,
+        under25: override.total.under,
+      };
+      markets._total = override.total.line;
+    }
+    const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
+
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const pointsScored =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (pointsScored) {
+      const now = Date.now();
+      marketSuspension = {
+        result: now + 8_000,
+        handicap: now + 8_000,
+        totalGoals: now + 8_000,
+      };
+      suspensionReason = "GOL!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Hóquei no Gelo",
+      country: ev.country || "Internacional",
+      sport: "hockey",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: period,
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+      events: [],
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-hockey-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > HOCKEY_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[pulsescore] hockey finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+/** Baseball live odds + score, sourced from PulseScore generic REST live source
+ * (baseball, bookmaker=draftkings — independent rate-limit budget under MAX plan).
+ * No dedicated extractBaseballOverride exists — the safe
+ * pulseScoreBaseball.findOverride(home,away,events) only maps MATCH_RESULT
+ * (moneyline) odds, all other markets (handicap/totals/innings) use the
+ * calibrated makeBasketballMarketsFromTeams synthetic seed with
+ * makeBasketballMoneylineFromTeams fallbacks. Same disappear grace GC as
+ * basketball. */
+async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  const events = await pulseScoreBaseball.getLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+    const period = ev.matchClock?.period ?? "";
+    if (!period || period.toLowerCase().includes("not started")) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-baseball-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] baseball immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
+
+    const id = `pulsescore-baseball-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const homeScore = Number(ev.score?.home ?? existing?.homeScore ?? 0);
+    const awayScore = Number(ev.score?.away ?? existing?.awayScore ?? 0);
+
+    const override = pulseScoreBaseball.findOverride(home, away, events);
+    const baseMarkets = makeBasketballMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = { ...baseMarkets };
+    const odds = override?.odds
+      ? { home: override.odds.home, draw: override.odds.draw ?? 0, away: override.odds.away }
+      : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
+
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const pointsScored =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (pointsScored) {
+      const now = Date.now();
+      marketSuspension = {
+        result: now + 8_000,
+        handicap: now + 8_000,
+        totalGoals: now + 8_000,
+      };
+      suspensionReason = "RUN!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: ev.league || "Beisebol",
+      country: ev.country || "Internacional",
+      sport: "baseball",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: period,
+      hasRealOdds: !!override?.odds,
+      odds,
+      markets,
+      events: [],
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("pulsescore-baseball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > BASEBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[pulsescore] baseball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 const _apiFootballMissLogged = new Set<string>();
 
 async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
+  // Helpers for PARTIAL PulseScore overrides: each selection slot can come
+  // back null individually (bwin 2H inactivates the winning side, canonical
+  // flips on some live matches, etc.). Instead of all-or-nothing (which
+  // collapsed every real-odds slot back onto Poisson the moment a single
+  // selection went dark, producing the "--" and flipped odds reported in
+  // production), we copy only the fields that the override actually priced,
+  // falling back per-slot to existing last-known-real then to the Poisson
+  // synthetic baseline for anything still missing.
+  type DefinedKeys<T> = { [K in keyof T]?: Exclude<T[K], null | undefined> };
+  const assignNonNull = <T extends Record<string, any>>(
+    target: T,
+    patch: DefinedKeys<T> | null | undefined,
+  ): T => {
+    if (!patch) return target;
+    for (const k of Object.keys(patch) as Array<keyof T>) {
+      const v = patch[k];
+      if (v !== null && v !== undefined) target[k] = v as any;
+    }
+    return target;
+  };
+  const hasAnyReal = (
+    patch: Record<string, number | null | undefined> | null | undefined,
+  ): boolean => {
+    if (!patch) return false;
+    for (const v of Object.values(patch)) if (v !== null && v !== undefined) return true;
+    return false;
+  };
   // GET /live-events?sport=soccer already returns only live events — no
   // separate `live` boolean field exists on each event to filter by.
   const events = await getPulseScoreFootballLive();
@@ -12270,8 +12614,8 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // sport-tag scoping has now proven unreliable on multiple endpoints
     // (tennis WS, this endpoint's prematch counterpart). Cheap to check.
     if (ev.sport !== "soccer") continue;
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
@@ -12292,6 +12636,18 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     )
       continue;
     const country = countryKey ?? "Internacional";
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-football-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] football immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
     const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
     const prio = leaguePriority(prioKey, countryKey ?? undefined);
     const tier = footballMarketTier(leagueName, country);
@@ -12308,44 +12664,63 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const override = extractFootballOverride(ev);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const rawMarkets: AdvancedMarkets = { ...baseMarkets };
+    // Real PulseScore prices override the synthetic model WHERE THEY ACTUALLY
+    // PRICED. assignNonNull ignores null slots (individual selections inactivated by bwin mid-2H
+    // or canonical-tag flip events) instead of overwriting good Poisson defaults with null,
+    // which previously produced "--" / empty rows when 1 selection went dark.
     if (override?.totalGoals) {
-      rawMarkets.totalGoals = { ...rawMarkets.totalGoals, ...override.totalGoals };
+      assignNonNull(rawMarkets.totalGoals, override.totalGoals);
     }
-    // Real bet365 prices via PulseScore override the synthetic model
-    // wherever it actually priced the market — same "real wins, synthetic
-    // fills the gap" pattern as tennis's tennisExtra merge (see
-    // buildTennisLiveFromPulseScore). Every field here maps onto an
-    // existing AdvancedMarkets shape the frontend already renders, so no UI
-    // changes were needed — this just swaps what's underneath it.
     if (override?.doubleChance) {
-      rawMarkets.doubleChance = { ...rawMarkets.doubleChance, ...override.doubleChance };
+      assignNonNull(rawMarkets.doubleChance, override.doubleChance);
     }
     if (override?.bothTeamsScore) {
-      rawMarkets.bothTeamsScore = { ...rawMarkets.bothTeamsScore, ...override.bothTeamsScore };
+      Object.assign(rawMarkets.bothTeamsScore, override.bothTeamsScore);
     }
     if (override?.firstGoal) {
-      rawMarkets.firstGoal = { ...rawMarkets.firstGoal, ...override.firstGoal };
+      assignNonNull(rawMarkets.firstGoal, override.firstGoal);
     }
     if (override?.anytimeGoalscorer) {
       rawMarkets.anytimeGoalscorer = override.anytimeGoalscorer;
     }
+    if (override?.firstGoalscorer) {
+      rawMarkets.firstGoalscorer = override.firstGoalscorer;
+    }
+    if (override?.lastGoalscorer) {
+      rawMarkets.lastGoalscorer = override.lastGoalscorer;
+    }
     if (override?.drawNoBet) {
-      rawMarkets.drawNoBet = { ...rawMarkets.drawNoBet, ...override.drawNoBet };
+      assignNonNull(rawMarkets.drawNoBet, override.drawNoBet);
     }
     if (override?.secondHalf) {
-      rawMarkets.secondHalf = { ...rawMarkets.secondHalf, ...override.secondHalf };
+      assignNonNull(rawMarkets.secondHalf, override.secondHalf);
     }
     if (override?.goalOddEven) {
-      rawMarkets.goalOddEven = { ...rawMarkets.goalOddEven, ...override.goalOddEven };
+      Object.assign(rawMarkets.goalOddEven, override.goalOddEven);
     }
     if (override?.cleanSheet) {
-      rawMarkets.cleanSheet = { ...rawMarkets.cleanSheet, ...override.cleanSheet };
+      assignNonNull(rawMarkets.cleanSheet, override.cleanSheet);
     }
     if (override?.correctScore) {
-      rawMarkets.correctScore = { ...rawMarkets.correctScore, ...override.correctScore };
+      Object.assign(rawMarkets.correctScore ??= {}, override.correctScore);
     }
     if (override?.teamGoals) {
       rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
+    }
+    if (override?.btts1H) {
+      Object.assign(rawMarkets.btts1H, override.btts1H);
+    }
+    if (override?.exactGoals) {
+      Object.assign(rawMarkets.exactGoals, override.exactGoals);
+    }
+    if (override?.corners) {
+      Object.assign(rawMarkets.corners, override.corners);
+    }
+    if (override?.cards) {
+      Object.assign(rawMarkets.cards, override.cards);
+    }
+    if (override?.htft) {
+      Object.assign(rawMarkets.htft, override.htft);
     }
     const id = `pulsescore-football-${ev.eventId}`;
     const existing = liveMatchState.get(id);
@@ -12795,9 +13170,100 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // below) until PulseScore prices it again or the match leaves the live
     // list. Only a match that has NEVER had real odds (still bootstrapping
     // right after it appeared) gets the synthetic starting price.
-    const hasRealOddsNow = !!override?.odds;
-    const odds =
-      override?.odds ?? (existing?.hasRealOdds ? existing.odds : makeOddsFromTeams(home, away));
+    // PER-SLOT real-odds merge: odds are no longer all-or-nothing. Each
+    // individual side (home/draw/away) cascades through 3 donors in order:
+    //   1. fresh PulseScore real price THIS TICK (if non-null)
+    //   2. last-known real price carried in existing.odds (if the match once had real odds)
+    //   3. Poisson synthetic baseline as final guaranteed fallback — NEVER null.
+    // This eliminates "--" rows from matches where bwin inactivates just the
+    // already-winning side in 2H (common when a match is effectively decided),
+    // while still preferring real prices everywhere they actually exist.
+    const poissonOdds = makeOddsFromTeams(home, away);
+    const hasRealOddsNow = hasAnyReal(override?.odds);
+    const odds = {
+      home: (override?.odds?.home as number | undefined) ??
+        (existing?.hasRealOdds ? (existing.odds.home as number | undefined) : undefined) ??
+        poissonOdds.home,
+      draw: (override?.odds?.draw as number | undefined) ??
+        (existing?.hasRealOdds ? (existing.odds.draw as number | undefined) : undefined) ??
+        poissonOdds.draw,
+      away: (override?.odds?.away as number | undefined) ??
+        (existing?.hasRealOdds ? (existing.odds.away as number | undefined) : undefined) ??
+        poissonOdds.away,
+    };
+    // Same 3-donor cascade for the slot-based markets that can carry partial
+    // data (doubleChance / firstGoal / drawNoBet / secondHalf / cleanSheet).
+    // If no real data exists anywhere we just leave the Poisson-merged value
+    // already computed into rawMarkets above — nothing to override.
+    if (existing?.hasRealOdds || hasRealOddsNow) {
+      const dc = rawMarkets.doubleChance;
+      if (dc) {
+        dc.homeOrDraw =
+          (override?.doubleChance?.homeOrDraw as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.doubleChance?.homeOrDraw as number | undefined) : undefined) ??
+          dc.homeOrDraw;
+        dc.awayOrDraw =
+          (override?.doubleChance?.awayOrDraw as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.doubleChance?.awayOrDraw as number | undefined) : undefined) ??
+          dc.awayOrDraw;
+        dc.homeOrAway =
+          (override?.doubleChance?.homeOrAway as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.doubleChance?.homeOrAway as number | undefined) : undefined) ??
+          dc.homeOrAway;
+      }
+      const fg = rawMarkets.firstGoal;
+      if (fg) {
+        fg.home =
+          (override?.firstGoal?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.firstGoal?.home as number | undefined) : undefined) ??
+          fg.home;
+        fg.noGoal =
+          (override?.firstGoal?.noGoal as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.firstGoal?.noGoal as number | undefined) : undefined) ??
+          fg.noGoal;
+        fg.away =
+          (override?.firstGoal?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.firstGoal?.away as number | undefined) : undefined) ??
+          fg.away;
+      }
+      const dnb = rawMarkets.drawNoBet;
+      if (dnb) {
+        dnb.home =
+          (override?.drawNoBet?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.drawNoBet?.home as number | undefined) : undefined) ??
+          dnb.home;
+        dnb.away =
+          (override?.drawNoBet?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.drawNoBet?.away as number | undefined) : undefined) ??
+          dnb.away;
+      }
+      const sh = rawMarkets.secondHalf;
+      if (sh) {
+        sh.home =
+          (override?.secondHalf?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.secondHalf?.home as number | undefined) : undefined) ??
+          sh.home;
+        sh.draw =
+          (override?.secondHalf?.draw as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.secondHalf?.draw as number | undefined) : undefined) ??
+          sh.draw;
+        sh.away =
+          (override?.secondHalf?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.secondHalf?.away as number | undefined) : undefined) ??
+          sh.away;
+      }
+      const cs = rawMarkets.cleanSheet;
+      if (cs) {
+        cs.home =
+          (override?.cleanSheet?.home as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.cleanSheet?.home as number | undefined) : undefined) ??
+          cs.home;
+        cs.away =
+          (override?.cleanSheet?.away as number | undefined) ??
+          (existing?.hasRealOdds ? (existing.markets.cleanSheet?.away as number | undefined) : undefined) ??
+          cs.away;
+      }
+    }
 
     // Goal-based market suspension — same trigger condition and delay table
     // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
@@ -12805,7 +13271,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // no VAR/red-card signal, so only the goal trigger is covered here —
     // narrower than before, but still closes the main window where a stale
     // price could be backed right after a goal.
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -13286,9 +13752,21 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
       );
       continue;
     }
-    const home = ev.home?.trim();
-    const away = ev.away?.trim();
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
+    if (isPulseScoreEventFinished(ev)) {
+      const idDone = `pulsescore-tennis-${ev.eventId}`;
+      currentIds.add(idDone);
+      const existing = liveMatchState.get(idDone);
+      if (existing) {
+        try { await finalizeStaleLiveMatch(existing); } catch (err) {
+          logger.error({ err, id: idDone }, "[pulsescore] tennis immediate finalize failed");
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
     const override = extractTennisOverride(ev);
     const baseOdds = makeTennisBaseOdds(home, away);
     const sets = override.sets.length > 0 ? override.sets : [[0, 0] as [number, number]];
@@ -13334,7 +13812,7 @@ async function buildTennisLiveFromPulseScore(): Promise<LiveMatchState[]> {
     // betting with no real financial-safety benefit. Triggered on a set
     // changing hands (the biggest single win-probability swing), not every
     // point/game, for the same reason volleyball's trigger is set-level.
-    let marketSuspension = existing?.marketSuspension;
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
     if (marketSuspension) {
       const active = Object.fromEntries(
         Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
@@ -13547,8 +14025,26 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
-  const hockeyLive: LiveMatchState[] = [];
-  const baseballLive: LiveMatchState[] = [];
+  let hockeyLiveRaw: LiveMatchState[] = [];
+  try {
+    hockeyLiveRaw = await buildHockeyLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildHockeyLiveFromPulseScore failed this tick",
+    );
+  }
+  const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
+  let baseballLiveRaw: LiveMatchState[] = [];
+  try {
+    baseballLiveRaw = await buildBaseballLiveFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildBaseballLiveFromPulseScore failed this tick",
+    );
+  }
+  const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
   // Re-enabled 2026-08-09 on a THIRD bookmaker ("unibetau") after bwin (no
   // score field) and bet365 (score stuck at 0-0/empty even when genuinely
   // in-play) both failed and were reverted the same day — see
@@ -13893,7 +14389,7 @@ let livePayloadFallbackCache: {
 // this cache used to outlive the tick that reads it (1.5s cache vs 1s tick),
 // so every other broadcast could serve payload up to 500ms stale on top of
 // the tick's own 1s cadence. Aligning it removes that extra lag layer.
-const LIVE_PAYLOAD_CACHE_TTL_MS = 1_000;
+const LIVE_PAYLOAD_CACHE_TTL_MS = 700;
 let livePayloadCache: {
   payload: { matches: LiveMatchState[] };
   builtAt: number;
@@ -16993,8 +17489,8 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
             awayScore: ls.awayScore ?? 0,
             minute: ls.minute,
             status: String(ls.status ?? "Live"),
-            marketSuspension: ls.marketSuspension,
-            _suspensionReason: ls._suspensionReason,
+            marketSuspension: ls.marketSuspension ? { ...ls.marketSuspension } : undefined,
+            _suspensionReason: ls._suspensionReason ?? undefined,
             _liveExtra: ls._liveExtra,
             redCardsHome: ls.redCardsHome,
             redCardsAway: ls.redCardsAway,

@@ -25,6 +25,8 @@ import {
   scanNBAForFinished,
   scanMLBForFinished,
 } from "./routes/matches.js";
+import { startSettlementQueueWorker } from "./lib/settlementQueue.js";
+import { runSettlementRecovery } from "./jobs/settlementRecovery.js";
 
 export type SelectionRecord = {
   matchId?: string;
@@ -1591,22 +1593,29 @@ function normalizeCompactFootballSelectionKey(
 function parseSelectionPlayerMarket(selection: string): {
   market: "goal" | "assist" | "card";
   period: "any" | "1h" | "2h";
+  scope: "any" | "first" | "last";
   playerName: string;
 } | null {
   const raw = String(selection ?? "").trim();
   if (!raw) return null;
-  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc):(.+)$/i);
+  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc|fg1h|fg2h|fg|lg1h|lg2h|lg):(.+)$/i);
   if (!match) return null;
   const key = match[1]!.toLowerCase();
   const playerName = match[2]!.trim();
   if (!playerName) return null;
-  if (key === "pa") return { market: "assist", period: "any", playerName };
-  if (key === "pg") return { market: "goal", period: "any", playerName };
-  if (key === "pg1h") return { market: "goal", period: "1h", playerName };
-  if (key === "pg2h") return { market: "goal", period: "2h", playerName };
-  if (key === "pc") return { market: "card", period: "any", playerName };
-  if (key === "pc1h") return { market: "card", period: "1h", playerName };
-  if (key === "pc2h") return { market: "card", period: "2h", playerName };
+  if (key === "pa") return { market: "assist", period: "any", scope: "any", playerName };
+  if (key === "pg") return { market: "goal", period: "any", scope: "any", playerName };
+  if (key === "pg1h") return { market: "goal", period: "1h", scope: "any", playerName };
+  if (key === "pg2h") return { market: "goal", period: "2h", scope: "any", playerName };
+  if (key === "fg") return { market: "goal", period: "any", scope: "first", playerName };
+  if (key === "fg1h") return { market: "goal", period: "1h", scope: "first", playerName };
+  if (key === "fg2h") return { market: "goal", period: "2h", scope: "first", playerName };
+  if (key === "lg") return { market: "goal", period: "any", scope: "last", playerName };
+  if (key === "lg1h") return { market: "goal", period: "1h", scope: "last", playerName };
+  if (key === "lg2h") return { market: "goal", period: "2h", scope: "last", playerName };
+  if (key === "pc") return { market: "card", period: "any", scope: "any", playerName };
+  if (key === "pc1h") return { market: "card", period: "1h", scope: "any", playerName };
+  if (key === "pc2h") return { market: "card", period: "2h", scope: "any", playerName };
   return null;
 }
 
@@ -2498,17 +2507,27 @@ export function scoreOutcomeForSel(
     } else {
       const goals = getFootballGoalEventsFromExtras(extra?.extras);
       if (!goals) return null;
-      winning = goals.some((goal) => {
+      const filtered = goals.filter((goal) => {
         if (goal.ownGoal || goal.varCancelled) return false;
-        if (!footballEventMatchesPeriod(goal.minute, playerSelection.period))
-          return false;
-        if (playerSelection.market === "goal") {
-          const playerName = normalizeParticipantName(goal.playerName ?? "");
-          return !!playerName && playerName === wantedName;
-        }
-        const assistName = normalizeParticipantName(goal.assistName ?? "");
-        return !!assistName && assistName === wantedName;
+        return footballEventMatchesPeriod(goal.minute, playerSelection.period);
       });
+      if (playerSelection.market === "assist") {
+        winning = filtered.some((goal) => {
+          const assistName = normalizeParticipantName(goal.assistName ?? "");
+          return !!assistName && assistName === wantedName;
+        });
+      } else {
+        const mapped = filtered.map((goal) =>
+          normalizeParticipantName(goal.playerName ?? ""),
+        ).filter((n) => !!n);
+        if (playerSelection.scope === "any") {
+          winning = mapped.some((playerName) => playerName === wantedName);
+        } else if (playerSelection.scope === "first") {
+          winning = mapped.length > 0 && mapped[0] === wantedName;
+        } else if (playerSelection.scope === "last") {
+          winning = mapped.length > 0 && mapped[mapped.length - 1] === wantedName;
+        }
+      }
     }
   }
   // ── Asian totals (settle full win/loss/void; quarter split stays pending) ─
@@ -5586,12 +5605,13 @@ async function notifySettledBetsInBackground(): Promise<void> {
 
     // Batch-fetch user emails
     const userIds = [...new Set(fresh.map((b) => b.userId))];
-    const users = await db
+    type NotifiedUserRow = { id: number; email: string; name: string };
+    const users = (await db
       .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name })
       .from(usersTable)
-      .where(sql`${usersTable.id} = ANY(${userIds})`);
+      .where(sql`${usersTable.id} = ANY(${userIds})`)) as NotifiedUserRow[];
 
-    const userMap = new Map(users.map((u) => [u.id, u]));
+    const userMap = new Map<number, NotifiedUserRow>(users.map((u: NotifiedUserRow) => [u.id, u]));
 
     for (const bet of fresh) {
       _notifiedBetIds.add(bet.id);
@@ -5841,8 +5861,32 @@ export function startSettlementWorker(): void {
     void run().finally(schedule);
   }, initialDelayMs);
 
+  // BullMQ queue consumer — picks up enqueueMatchSettlement() jobs from Canal A (GC disappear)
+  startSettlementQueueWorker(async ({ matchId }) => {
+    try {
+      await autoSettlePendingBets({ matchIds: [matchId] });
+    } catch (err) {
+      logger.error({ err, matchId }, "Queue settlement handler failed");
+      throw err;
+    }
+  });
+
+  // Recovery scheduler: unstick bets pending >3h without settlement
+  const rawRecoveryIntervalMs = process.env.SETTLEMENT_RECOVERY_INTERVAL_MS ?? "3600000";
+  const recoveryIntervalMs = parseMs(
+    rawRecoveryIntervalMs,
+    3_600_000,
+    60_000,
+    "SETTLEMENT_RECOVERY_INTERVAL_MS",
+  );
+  setInterval(() => {
+    void runSettlementRecovery().catch((err) =>
+      logger.error({ err }, "Scheduled settlement recovery failed"),
+    );
+  }, recoveryIntervalMs);
+
   logger.info(
-    { intervalMs, initialDelayMs, queueEnabled, catchupMs },
+    { intervalMs, initialDelayMs, queueEnabled, catchupMs, recoveryIntervalMs },
     "Bet auto-settlement worker started (self-scheduling, all sports)",
   );
 }
