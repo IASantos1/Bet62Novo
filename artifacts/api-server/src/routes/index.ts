@@ -17,6 +17,7 @@ import liveStreamRouter from "./liveStream.js";
 import statscoreTrackerRouter from "./statscoreTracker.js";
 import betbyTrackerRouter from "./betbyTracker.js";
 import pulseBridgeRouter from "./pulseBridge.js";
+import sportscoreTrackerRouter from "./sportscoreTracker.js";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use("/casino", casinoRouter);
 router.use("/statscore-tracker", statscoreTrackerRouter);
 router.use("/betby-live-tracker", betbyTrackerRouter);
 router.use("/pulsebridge", pulseBridgeRouter);
+router.use("/sportscore-tracker", sportscoreTrackerRouter);
 
 export default router;

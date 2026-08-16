@@ -4633,6 +4633,7 @@ function BetbyTrackerIframe({
   aspectRatio = "16 / 9",
   className,
   statscoreEventId,
+  matchId,
 }: {
   home: string;
   away: string;
@@ -4641,9 +4642,32 @@ function BetbyTrackerIframe({
   aspectRatio?: string;
   className?: string;
   statscoreEventId?: string;
+  matchId?: string;
 }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Automatic fallback (2026-08-16): BetBY's zero-config default is its own
+  // DEMO brand (demoapi.betby.com — a limited test-fixture catalogue, not
+  // real match coverage), so `failed` ends up true for most real matches no
+  // matter how good the team-name matching is — there's often just no
+  // fixture to find. SportScore's free API has real coverage, so once BetBY
+  // gives up, try it automatically (no admin mapping needed) before
+  // showing "Tracker indisponível". SportScore's embed is plain CORS-open
+  // iframe — no bridge/postMessage machinery needed, unlike BetBY's proxied
+  // HTML above.
+  const [sportscoreUrl, setSportscoreUrl] = useState<string | null>(null);
+  const sportscoreTried = useRef(false);
+  useEffect(() => {
+    if (!failed || sportscoreTried.current || !matchId || !home || !away) return;
+    sportscoreTried.current = true;
+    const params = new URLSearchParams({ sport, home, away, matchId });
+    fetch(`/api/sportscore-tracker/url?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { ok?: boolean; embedUrl?: string | null } | null) => {
+        if (d?.ok && d.embedUrl) setSportscoreUrl(d.embedUrl);
+      })
+      .catch(() => {});
+  }, [failed, matchId, home, away, sport]);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // Flag que nos diz se o bridge de dentro do iframe JÁ ENVIOU pelo menos
@@ -4802,6 +4826,8 @@ function BetbyTrackerIframe({
     iframeLoadCount.current = 0;
     treatAsDirectUpstream.current = false;
     setNaturalHeight(null);
+    sportscoreTried.current = false;
+    setSportscoreUrl(null);
   }, [finalUrl, queryError]);
 
   useEffect(() => {
@@ -5113,6 +5139,21 @@ function BetbyTrackerIframe({
           onError={() => setFailed(true)}
           referrerPolicy="strict-origin-when-cross-origin"
         />
+      ) : failed && sportscoreUrl ? (
+        // SportScore's real (non-demo) fixtures list found this match
+        // automatically — plain CORS-open iframe, no proxy/bridge needed
+        // (see the useEffect above for why this only kicks in once BetBY
+        // gives up).
+        <iframe
+          key={sportscoreUrl}
+          src={sportscoreUrl}
+          title={`SportScore Live Tracker · ${home} vs ${away}`}
+          className="w-full border-0 block relative"
+          style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
+          allow="autoplay; fullscreen"
+          onError={() => setSportscoreUrl(null)}
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
       ) : failed ? (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 p-4 text-center bg-zinc-900/95 text-zinc-200 pointer-events-none">
           <div className="text-[13px] font-semibold text-zinc-100">Tracker indisponível neste momento.</div>
@@ -5206,6 +5247,7 @@ function TrackerModal({
                   lang="pt-br"
                   aspectRatio="16 / 9"
                   statscoreEventId={event.statscoreEventId}
+                  matchId={event.matchId}
                 />
               </TrackerErrorBoundary>
             </div>
@@ -19884,6 +19926,7 @@ export default function Home({
                             lang="pt-br"
                             aspectRatio="16 / 9"
                             statscoreEventId={expandedMatch.statscoreEventId}
+                            matchId={expandedMatch.id}
                           />
                         </TrackerErrorBoundary>
                       </div>

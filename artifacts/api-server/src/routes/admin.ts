@@ -56,6 +56,12 @@ import {
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
 import { listMappings, setMapping, createMapping } from "../services/liveStream/mapping.js";
+import {
+  SPORTSCORE_BASE,
+  resolveSportscoreMatchByTeams,
+  fetchSportscoreTracker,
+  type SportscoreTrackerSummary,
+} from "../services/sportscore/client.js";
 import { memberAccountForUser } from "./casino.js";
 
 function escapeCsv(val: unknown): string {
@@ -2317,6 +2323,62 @@ router.delete("/sportscore-map/:id", adminMiddleware, async (req: AdminRequest, 
   } catch (err) {
     logger.error({ err }, "DELETE /api/admin/sportscore-map/:id error");
     res.status(500).json({ error: "Erro ao remover mapeamento do SportScore" });
+  }
+});
+
+// Was referenced by the admin frontend's "Testar casamento automático"
+// button since it was built, but never actually existed on the backend —
+// every click just 404'd. Now runs the real automatic resolver: searches
+// SportScore's real fixtures list for a team-name match, and if found,
+// fetches its live tracker JSON too so the admin can see actual data, not
+// just a resolved id.
+router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) => {
+  const sport = String(req.body?.sport ?? "").trim().toLowerCase() || "football";
+  const homeTeam = String(req.body?.homeTeam ?? "").trim();
+  const awayTeam = String(req.body?.awayTeam ?? "").trim();
+  if (!homeTeam || !awayTeam) {
+    res.status(400).json({ error: "homeTeam e awayTeam são obrigatórios" });
+    return;
+  }
+  const steps: Array<{ step: string; url: string; ok: boolean; status?: number; detail: string }> = [];
+  const matchesUrl = `${SPORTSCORE_BASE}/api/widget/matches/?sport=${encodeURIComponent(sport)}`;
+  try {
+    const match = await resolveSportscoreMatchByTeams(sport, homeTeam, awayTeam);
+    steps.push({
+      step: "search-fixtures",
+      url: matchesUrl,
+      ok: !!match,
+      detail: match
+        ? `Encontrado: "${match.home}" vs "${match.away}" (id: ${match.sportscoreId})`
+        : `Nenhum jogo de "${homeTeam}" vs "${awayTeam}" encontrado no catálogo real da SportScore agora.`,
+    });
+    if (!match) {
+      res.json({ result: null, steps, error: "Não encontrado" });
+      return;
+    }
+    let tracker: { ok: boolean; status?: number; raw?: unknown; error?: string } = { ok: false, error: "sem trackerId" };
+    let mappedTracker: SportscoreTrackerSummary | null = null;
+    if (match.trackerId) {
+      const trackerRes = await fetchSportscoreTracker(sport, match.trackerId);
+      tracker = { ok: trackerRes.ok, status: trackerRes.status, raw: trackerRes.raw, error: trackerRes.error };
+      mappedTracker = trackerRes.mapped;
+      steps.push({
+        step: "fetch-tracker",
+        url: `${SPORTSCORE_BASE}/api/widget/tracker/?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(match.trackerId)}`,
+        ok: trackerRes.ok,
+        status: trackerRes.status,
+        detail: trackerRes.ok ? "Tracker respondeu" : (trackerRes.error ?? "falhou"),
+      });
+    }
+    res.json({
+      result: { id: match.sportscoreId, slug: match.sportscoreId },
+      steps,
+      tracker,
+      mappedTracker,
+    });
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/sportscore-test error");
+    res.status(500).json({ error: "Erro ao testar casamento automático", detail: err instanceof Error ? err.message : String(err) });
   }
 });
 
