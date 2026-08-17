@@ -73,6 +73,16 @@ onlyBuiltDependencies:
   - esbuild
   - msw
   - unrs-resolver
+  # Real production bug found 2026-08-17: without this, pnpm's default-deny
+  # on dependency postinstall scripts silently skips playwright's own
+  # postinstall (the one that downloads Chromium), so `chromium.launch()`
+  # in services/betbyTracker/session.ts always fails with "Executable
+  # doesn't exist at ~/.cache/ms-playwright/..." on every deploy — the
+  # BetBY Tracker auto-discovery never even gets a browser to work with.
+  # Confirmed via production logs on Railway (pnpm install, no Docker
+  # build step) — this silently degrades to "no session" rather than
+  # crashing, which is why nothing else looked broken.
+  - playwright
 
 overrides:
   # NOTE: Original setup below was optimized for Railway/Replit (linux-x64 only).
