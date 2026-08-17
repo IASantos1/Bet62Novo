@@ -4670,6 +4670,25 @@ function BetbyTrackerIframe({
   }, [failed, matchId, home, away, sport]);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const sportscoreIframeRef = useRef<HTMLIFrameElement>(null);
+  // Bug report 2026-08-17 (Safari): "Um problema ocorreu repetidamente"
+  // (WebKit tab crash) when tapping "Voltar aos eventos" right after the
+  // Tracker iframe had loaded real third-party content (demoapi.betby.com
+  // or sportscore.com — both keep a live WebSocket/canvas connection
+  // running). React unmounting the <iframe> just yanks the DOM node out
+  // from under that live connection with no chance for the frame's own
+  // unload/teardown to run first, which iOS Safari can crash on. Blanking
+  // src on unmount lets the frame tear itself down cleanly before removal.
+  useEffect(() => {
+    return () => {
+      try {
+        if (iframeRef.current) iframeRef.current.src = "about:blank";
+      } catch { /* no-op */ }
+      try {
+        if (sportscoreIframeRef.current) sportscoreIframeRef.current.src = "about:blank";
+      } catch { /* no-op */ }
+    };
+  }, []);
   // Flag que nos diz se o bridge de dentro do iframe JÁ ENVIOU pelo menos
   // 1 sinal "resize" com altura REAL do widget (não o nosso fallback 470).
   // Se após 10s READY essa flag continuar FALSE, significa que o widget
@@ -5145,6 +5164,7 @@ function BetbyTrackerIframe({
         // (see the useEffect above for why this only kicks in once BetBY
         // gives up).
         <iframe
+          ref={sportscoreIframeRef}
           key={sportscoreUrl}
           src={sportscoreUrl}
           title={`SportScore Live Tracker · ${home} vs ${away}`}
