@@ -4625,481 +4625,96 @@ class TrackerErrorBoundary extends Component<
 // loaded-state size.
 const MINI_TRACKER_MAX_HEIGHT = 180;
 
-function BetbyTrackerIframe({
+function SportscoreTrackerIframe({
   home,
   away,
   sport = "football",
-  lang = "pt-br",
   aspectRatio = "16 / 9",
   className,
-  statscoreEventId,
   matchId,
 }: {
   home: string;
   away: string;
   sport?: string;
-  lang?: string;
   aspectRatio?: string;
   className?: string;
-  statscoreEventId?: string;
   matchId?: string;
 }) {
-  const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
-  // Automatic fallback, promoted to PRIMARY source (2026-08-17): BetBY's
-  // zero-config default is its own DEMO brand (demoapi.betby.com — a
-  // limited test-fixture catalogue, not real match coverage) and, even
-  // when a real fixture matches, its widget requires our own Playwright
-  // session-capture pipeline to work at all in production — which has
-  // proven unreliable (Chromium launch failures, a Safari tab crash on
-  // unmount). SportScore's free API has real coverage and is a plain
-  // CORS-open iframe with no session/proxy/bridge machinery needed, so it
-  // is now tried immediately in parallel with BetBY (not gated behind
-  // BetBY failing first) and preferred whenever it resolves — see the
-  // render below, which shows the SportScore iframe first if available.
+  // BetBY removed (2026-08-17): its real widget needed our own Playwright
+  // session-capture pipeline just to work at all, which proved unreliable
+  // in production (Chromium launch failures, a Safari tab crash on
+  // unmount). SportScore is a plain CORS-open iframe with real fixture
+  // coverage and no session/proxy/bridge machinery to break — this
+  // component now does nothing but resolve and render that iframe.
   const [sportscoreUrl, setSportscoreUrl] = useState<string | null>(null);
-  const sportscoreTried = useRef(false);
+  const [failed, setFailed] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const triedKey = useRef<string | null>(null);
+
   useEffect(() => {
-    if (sportscoreTried.current || !matchId || !home || !away) return;
-    sportscoreTried.current = true;
+    if (!matchId || !home || !away) {
+      setFailed(true);
+      return;
+    }
+    const key = `${matchId}:${home}:${away}:${sport}`;
+    if (triedKey.current === key) return;
+    triedKey.current = key;
+    setFailed(false);
+    setSportscoreUrl(null);
+    let cancelled = false;
     const params = new URLSearchParams({ sport, home, away, matchId });
     fetch(`/api/sportscore-tracker/url?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { ok?: boolean; embedUrl?: string | null } | null) => {
+        if (cancelled) return;
         if (d?.ok && d.embedUrl) setSportscoreUrl(d.embedUrl);
+        else setFailed(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [matchId, home, away, sport]);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const sportscoreIframeRef = useRef<HTMLIFrameElement>(null);
+
   // Bug report 2026-08-17 (Safari): "Um problema ocorreu repetidamente"
   // (WebKit tab crash) when tapping "Voltar aos eventos" right after the
-  // Tracker iframe had loaded real third-party content (demoapi.betby.com
-  // or sportscore.com — both keep a live WebSocket/canvas connection
-  // running). React unmounting the <iframe> just yanks the DOM node out
-  // from under that live connection with no chance for the frame's own
-  // unload/teardown to run first, which iOS Safari can crash on. Blanking
-  // src on unmount lets the frame tear itself down cleanly before removal.
+  // Tracker iframe had loaded live third-party content (sportscore.com,
+  // which keeps a WebSocket/canvas connection running). React unmounting
+  // the <iframe> yanks the DOM node out from under that live connection
+  // with no chance for the frame's own unload/teardown to run first,
+  // which iOS Safari can crash on. Blanking src on unmount lets the frame
+  // tear itself down cleanly before removal.
   useEffect(() => {
     return () => {
       try {
         if (iframeRef.current) iframeRef.current.src = "about:blank";
       } catch { /* no-op */ }
-      try {
-        if (sportscoreIframeRef.current) sportscoreIframeRef.current.src = "about:blank";
-      } catch { /* no-op */ }
     };
   }, []);
-  // Flag que nos diz se o bridge de dentro do iframe JÁ ENVIOU pelo menos
-  // 1 sinal "resize" com altura REAL do widget (não o nosso fallback 470).
-  // Se após 10s READY essa flag continuar FALSE, significa que o widget
-  // Statscore NÃO RENDERIZOU NADA (recebeu ID inválido/fallback BetbyID)
-  // → container fica VAZIO, cor de fundo = PRETO → o usuário vê "tela preta
-  // sem conteúdo". Acionamos setFailed e mostramos a mensagem amigável.
-  const gotRealResize = useRef(false);
-  // Bug report 2026-08-14: shrinking the box by capping its height with
-  // overflow:hidden alone doesn't actually shrink the WIDGET — it just
-  // clips the visible window down to whatever happens to be in the
-  // top-left corner of a much taller natural layout, which reads as
-  // "content stuck over to the left" (it's really just a crop, not a
-  // scaled-down view). naturalHeight (from the widget's own real resize
-  // report) drives a CSS transform: scale() on the iframe instead, so the
-  // whole widget shrinks proportionally and stays centered, rather than
-  // being cropped to one corner.
-  const [naturalHeight, setNaturalHeight] = useState<number | null>(null);
-  // Guarda DATA.available=false do bridge: o widget Statscore EXPLICITOU
-  // que não tem dados para esse evento → pula direto para indisponível.
-  const dataExplicitUnavailable = useRef(false);
-  // Guarda DATA.available=true do bridge (redirect shell enviou antes do
-  // window.location.replace para origin cross demoapi.betby.com → bridge é
-  // perdido depois, mas já temos prova que o shell estava OK).
-  const dataExplicitAvailable = useRef(false);
-  // Conta quantas vezes o iframe disparou onLoad. 1x = shell WAF redirect.
-  // 2x ou mais = o iframe NAVEGOU de fato para demoapi.betby.com (origin
-  // cross, bridge perdido, widget carregando normalmente). Esse cenário é
-  // TRATADO IGUAL a isDirectUpstream=true nos detectors, para não disparar
-  // falsos positivos de "widget vazio" (gotRealResize nunca chega via
-  // postMessage cross-origin).
-  const iframeLoadCount = useRef(0);
-  // Flag cinemática: seta TRUE se qualquer critério que torne o iframe
-  // "efetivamente direct upstream" for atendido (2+ onLoad, explicit
-  // available=true vindo do bridge shell, ou upstream direto).
-  const treatAsDirectUpstream = useRef(false);
-  const apiBase = (typeof import.meta.env.VITE_API_BASE_URL === "string" && import.meta.env.VITE_API_BASE_URL)
-    ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
-    : "";
-  // Always PROXY mode (our own server fetches the BetBY/Statscore tracker
-  // HTML and re-serves it from our origin, with a <base href> + relaxed
-  // CSP base-uri fixing the relative-resource resolution that used to
-  // break it — see fetchBetbyTrackerHtml's own comment). DIRECT mode (an
-  // <iframe> pointing straight at demoapi.betby.com) used to be reachable
-  // via VITE_USE_BETBY_DIRECT_IFRAME and was already hit and reverted once
-  // in production: BetBY's own CSP/X-Frame-Options silently refuses to be
-  // framed cross-origin, the outer <iframe>'s onLoad still fires (the HTTP
-  // request itself succeeds), and nothing ever paints — a black screen
-  // with zero errors surfaced anywhere, and this component has no way to
-  // detect it (DIRECT mode carries none of the bridge postMessage
-  // signaling that only exists in the HTML our own proxy injects). A
-  // stray env var left set in a build's config could silently re-enable
-  // that dead end with no trace visible in the code, so the escape hatch
-  // (and its DIRECT-only pulse overlay wiring) was removed outright
-  // instead of trusting a flag no one can see is set.
-  const { data: urlInfo, isFetching, error: queryError } = useQuery({
-    queryKey: ["betby-tracker-url", home, away, sport, lang, apiBase, statscoreEventId],
-    queryFn: async () => {
-      try {
-        // sport (Bet62's own sport key — "football", "tennis",
-        // "basketball", ...) used to not be sent at all, so the backend
-        // always assumed football regardless of the match's real sport —
-        // see routes/betbyTracker.ts's /url handler for the fix on that
-        // side (converts this to BetBY's own numeric sportId convention).
-        const q = new URLSearchParams({ home, away, lang, sport });
-        // Defense-in-depth: só envia statscoreEventId explicitamente se
-        // formato for Statscore NATIVO REAL (5-10 dígitos). BetBY IDs ~19
-        // dígitos não chegam aqui — backend já teria que resolver por nome.
-        if (statscoreEventId && /^\d{5,10}$/.test(statscoreEventId.trim())) {
-          q.set("statscoreEventId", statscoreEventId.trim());
-        }
-        const endpoint = `${apiBase}/api/betby-live-tracker/url?${q.toString()}`;
-        const res = await fetch(endpoint, { method: "GET", headers: { Accept: "application/json" } });
-        if (!res.ok) return null;
-        const json = (await res.json().catch(() => null)) as null | {
-          ok?: boolean;
-          finalBetbyEventId?: string | null;
-          finalStatscoreEventId?: string | null;
-          usedFallbackSmartBetbyId?: boolean;
-          proxy?: string | null;
-          // direct upstream URL returned by /url: https://demoapi.betby.com/a82d758c/tracker.html?providers=...
-          // When hasRealStatscore (usedFallbackSmartBetbyId=false) WE WANT this as iframe src DIRECTLY,
-          // BYPASSING our proxy fetch (which can hit BetBY WAF 503 Node.js block AND
-          // is guaranteed to render from demoapi.betby.com origin — avoiding widget
-          // tracker.57e48a41.js 0-byte origin block).
-          upstream?: string | null;
-        };
-        // Update 2026-08-14: BetBY Event ID is now 100% OPTIONAL. The
-        // Statscore widget does NOT need BetBY id for anything at all — it
-        // only reads the providers.eventId inside the HTML, which is driven
-        // by statscoreEventId. BetBY id is only needed for BetBY-side pulse
-        // SSE and betby match metadata. As long as /url returned a valid
-        // proxy URL (which can be the no-path-param route /api/betby-live-tracker
-        // when there is no BetBY id at all but statscoreEventId is real), we
-        // must render. The previous check (`!json.finalBetbyEventId`) was
-        // silently returning null (black screen with no iframe src) for any
-        // match where BetBY had no mapping — even when the user had
-        // explicitly provided a working statscoreEventId.
-        if (!json || !json.ok) return null;
-        // If we have a REAL statscore id (not a BetBY fallback), prefer the
-        // upstream URL directly from demoapi.betby.com as the iframe src —
-        // the browser fetches it directly as a human user request, so it
-        // bypasses the BetBY WAF 503 that kills server-side Node fetches AND
-        // guarantees the widget runs under the correct origin (demoapi.betby.com)
-        // so tracker.57e48a41.js / EmbederESM.js paint correctly instead of
-        // returning zero bytes. We only fall back to our own proxy URL when
-        // fallback-smart BetBY id is being used (the widget likely 404s
-        // anyway, but the proxy route at least returns our friendly "not
-        // available" shell with postMessage bridge signals so this component
-        // can detect and show the same state instead of a silent black iframe).
-        const finalStat = json.finalStatscoreEventId ?? "";
-        // Defense-in-depth: mesmos critérios do backend isRealStatscoreId(...)
-        // (5-10 dígitos = Statscore NATIVO real). BetBY IDs ~19 dígitos NUNCA
-        // passam, então useUpstream=false → iframe aponta para NOSSO proxy
-        // (que retorna bridge shell amigável) em vez de demoapi.betby.com
-        // direto (que dava net::ERR_ABORTED + widget Statscore 404 silencioso
-        // com origin betby e SEM bridge postMessage).
-        const isRealStatscoreIdFront = /^\d{5,10}$/.test(finalStat.trim());
-        const hasRealStat = isRealStatscoreIdFront && !json.usedFallbackSmartBetbyId;
-        const useUpstream = hasRealStat && !!json.upstream;
-        const finalIframeSrc: string | null = useUpstream ? json.upstream! : (json.proxy ?? null);
-        if (!finalIframeSrc) return null;
-        // isDirectUpstream = we're pointing the <iframe> straight at BetBY's
-        // own demoapi.betby.com HTML (NOT our proxied wrapper that injects
-        // the custom `bet62-betby-tracker` postMessage bridge). In this mode
-        // we cannot hear any resize/data/ready signals from inside the
-        // cross-origin iframe of a third party, so the "widget empty"
-        // detectors below would always fire a false positive after 7s/18s
-        // (gotRealResize would stay false forever) and kill the visible
-        // widget right when it finishes painting — the exact symptom the
-        // user reported: "the field's color showed, then it went black".
-        // The trade-off we accept here: we lose automatic "tracker
-        // indisponível" detection for this iframe, but in return we get the
-        // Statscore widget's real origin (demoapi.betby.com) where it is
-        // known to paint perfectly without the 0-byte origin block, so the
-        // user actually sees the green field instead of a dead fallback.
-        return { ...json, finalIframeSrc, isDirectUpstream: useUpstream } as
-          typeof json & { ok: true; finalIframeSrc: string; isDirectUpstream: boolean };
-      } catch { return null; }
-    },
-    staleTime: 120_000,
-    gcTime: 300_000,
-    retry: false,
-    throwOnError: false,
-  });
 
-  const finalUrl = urlInfo?.finalIframeSrc ?? null;
-
-  useEffect(() => {
-    setFailed(!finalUrl || !!queryError);
-    // Reset flags do detector de widget vazio sempre que mudar o URL alvo
-    gotRealResize.current = false;
-    dataExplicitUnavailable.current = false;
-    dataExplicitAvailable.current = false;
-    iframeLoadCount.current = 0;
-    treatAsDirectUpstream.current = false;
-    setNaturalHeight(null);
-    sportscoreTried.current = false;
-    setSportscoreUrl(null);
-  }, [finalUrl, queryError]);
-
-  useEffect(() => {
-    setReady(false);
-  }, [finalUrl]);
-
-  // Bug report 2026-08-13 ("fica assim é querendo carregar" — stuck on the
-  // loading spinner forever): the proxy route this iframe's src points at
-  // (fetchBetbyTrackerHtml) does its own upstream fetches with real
-  // timeouts, but an <iframe> only fires onLoad/onError once the browser
-  // gets a response at all — if the underlying request stalls (a slow or
-  // half-open upstream connection, a proxy hop that never completes) with
-  // neither event firing, ready never flips to true and the spinner has no
-  // way to ever clear on its own. A hard wall-clock cap here means a stuck
-  // load degrades to the same clear "Tracker indisponível" message a
-  // resolved failure already shows, instead of spinning indefinitely.
-  //
-  // Fix 2026-08-15 #Killer12sTimeout: o timeout FIXO de 12s era INCONDICIONAL
-  // (não checava isDirectUpstream nem se onLoad já tinha disparado N vezes).
-  // Resultado: MESMO quando o widget carregava 100% corretamente (campo verde,
-  // 100 requests Statscore OK) — 12s depois ele era KILLADO e mostrava overlay
-  // "indisponível" (bg zinc-900) → usuário via "tela preta". Agora o wall cap é
-  // de 30s, e SÓ dispara setFailed(true) SE (nenhum onLoad disparou ATE ENTAO
-  // AND nenhum critério de direct-upstream foi atendido AND não houve sinal
-  // data.available=true do bridge). Widgets que carregam normalmente nunca são
-  // mais mortos por tempo fixo.
-  useEffect(() => {
-    if (!finalUrl) return;
-    const t = setTimeout(() => {
-      const effectivelyDirect =
-        Boolean(urlInfo?.isDirectUpstream) ||
-        treatAsDirectUpstream.current ||
-        dataExplicitAvailable.current ||
-        iframeLoadCount.current >= 2;
-      // NÃO há nenhum sinal de vida → realmente travado. Degrada amigavelmente.
-      if (iframeLoadCount.current === 0 && !effectivelyDirect) {
-        setFailed(true);
-      }
-    }, 30_000);
-    return () => clearTimeout(t);
-  }, [finalUrl, urlInfo?.isDirectUpstream]);
-
-  // Listen to postMessage bridge signals from the proxied tracker HTML.
-  // Our own bridge script (proxy.ts) sends: { source: "bet62-betby-tracker", payload: { type, ... } }
-  // - ready / load / data  → widget actually rendered → stop showing spinner
-  // - resize                → widget statscore reported real height → no fixed aspect ratio cut
-  // - error                 → widget failed to load → fallback message
-  useEffect(() => {
-    if (!finalUrl) return;
-    const handler = (ev: MessageEvent) => {
-      try {
-        const data = ev.data;
-        if (!data || data.source !== "bet62-betby-tracker") return;
-        const payload = data.payload || {};
-        const type: unknown = payload.type;
-        if (typeof type !== "string") return;
-
-        if (type === "ready" || type === "load" || type === "datachange" || type === "loaded") {
-          setReady(true);
-          return;
-        }
-        if (type === "data") {
-          const available: unknown = payload.available;
-          if (available === false) {
-            // Widget Statscore EXPLICITA que não tem dados para esse evento.
-            // NÃO espera 7s do detector — aciona IMEDIATAMENTE o overlay
-            // "Tracker indisponível" (fail fast, UX melhor). O iframe também
-            // já troca DENTRO DELE a mensagem sozinho após 1.5s (fail closed
-            // visual, proxy.ts swap()).
-            dataExplicitUnavailable.current = true;
-            setFailed(true);
-          } else if (available === true) {
-            // Redirect shell (buildClientRedirectBypassWafHtml no proxy.ts)
-            // envia data.available=true SÍNCRONO ANTES do window.location.replace
-            // para demoapi.betby.com. Depois do redirect o iframe fica
-            // cross-origin e a bridge é perdida (nenhum postMessage chega
-            // mais). Essa flag prova que o shell estava funcional, portanto
-            // qualquer detector de "widget vazio" baseado na AUSÊNCIA de
-            // sinais subsequentes NÃO DEVE disparar (igual isDirectUpstream).
-            dataExplicitAvailable.current = true;
-            treatAsDirectUpstream.current = true;
-          }
-          setReady(true);
-          return;
-        }
-        if (type === "resize") {
-          const h = Number(payload.height);
-          if (Number.isFinite(h) && h > 100) {
-            // Alturas < 700px quase sempre são o nosso fallback inicial,
-            // NÃO UM RESIZE REAL do widget Statscore com dados. Widgets
-            // reais de futebol são > 900px, tênis/vôlei > 1200px — essa
-            // heurística separa "pintou algo" de "ainda está preto vazio".
-            if (h > 700) gotRealResize.current = true;
-            setNaturalHeight(Math.round(h));
-          }
-          setReady(true);
-          return;
-        }
-        if (type === "error") {
-          setFailed(true);
-          return;
-        }
-      } catch (_) { /* no-op, ignore stray messages */ }
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [finalUrl]);
-
-  // Fallback safety: even if NO postMessage signals arrive at all (e.g.
-  // upstream BetBY/Statscore silently broke their own message format),
-  // remove the spinner overlay after 8s so the user doesn't see a loading
-  // state forever on top of a potentially valid widget.
-  useEffect(() => {
-    if (!finalUrl || ready || failed) return;
-    const t = setTimeout(() => setReady(true), 8_000);
-    return () => clearTimeout(t);
-  }, [finalUrl, ready, failed]);
-
-  // ──────────────────────────────────────────────────────────────────
-  // DETECTOR DE WIDGET VAZIO (TELA PRETA SEM CONTEÚDO, sem dados Statscore)
-  //
-  // Bug report 2026-08-13: o widget carregava, mostrava um pedaço real do
-  // mini-campo, e voltava pra tela preta sozinho. Causa: esta checagem
-  // usava innerText.length < 50 como sinal de "widget vazio" — mas o
-  // mini-campo é majoritariamente gráfico (campo, bolinha, escudos via
-  // SVG/canvas), então tem pouco texto mesmo quando está renderizando
-  // PERFEITAMENTE. Um checador de 1.5s (removido) e este de 4s ainda
-  // rodavam ANTES do widget terminar de montar em conexões normais,
-  // confundindo "ainda carregando" com "vazio de vez" — e, como não há
-  // como reverter failed=true depois, a primeira falsa-alarme matava o
-  // iframe pra sempre mesmo que o widget fosse terminar de carregar 1s
-  // depois. Removido o check de innerText; agora só os dois sinais
-  // realmente confiáveis contam: o bridge dizendo explicitamente que não
-  // há dados (dataExplicitUnavailable) e a ausência de qualquer resize
-  // real vindo do próprio widget (gotRealResize) — e as janelas de tempo
-  // foram alargadas (4s→7s, 12s→18s) para dar folga a conexões mais
-  // lentas antes de desistir.
-  const isDirectUpstream = !!urlInfo?.isDirectUpstream;
-
-  useEffect(() => {
-    if (!finalUrl || !ready || failed) return;
-    const t = setTimeout(() => {
-      if (dataExplicitUnavailable.current) {
-        setFailed(true);
-        return;
-      }
-      // Direct-upstream iframe src = demoapi.betby.com (third-party HTML, no
-      // custom `bet62-betby-tracker` postMessage bridge injected inside it).
-      // We cannot hear the widget's real resize signals from outside a
-      // cross-origin iframe we don't control, so `gotRealResize` would stay
-      // `false` forever here — triggering a guaranteed false positive that
-      // swaps the painted green field for a black "indisponível" fallback
-      // right at the 7s mark. Skip this check entirely in that mode; the
-      // widget is known to render correctly when served from its own real
-      // origin (the 0-byte origin block is the main reason we preferred it
-      // over the proxy path to begin with), and the user can see whether
-      // content loaded visually.
-      //
-      // Fix 2026-08-15 #IframeInternalRedirectLostBridge: adicionado critério
-      // "efetivamente direct" também quando: (a) o redirect shell enviou
-      // data.available=true antes de trocar de origin; (b) o iframe já teve
-      // 2+ eventos onLoad (prova que navegou do shell → demoapi e bridge foi
-      // perdido no cross-origin). Sem isso, o detector matava 50% dos casos
-      // de proxy-redirect e o usuário via "tela preta" injustamente.
-      const effectivelyDirect =
-        isDirectUpstream ||
-        treatAsDirectUpstream.current ||
-        dataExplicitAvailable.current ||
-        iframeLoadCount.current >= 2;
-      if (effectivelyDirect) return;
-      if (!gotRealResize.current) setFailed(true);
-    }, 7_000);
-    return () => clearTimeout(t);
-  }, [finalUrl, ready, failed, isDirectUpstream]);
-
-  useEffect(() => {
-    if (!finalUrl || failed) return;
-    const t = setTimeout(() => {
-      if (dataExplicitUnavailable.current) {
-        setFailed(true);
-        return;
-      }
-      const effectivelyDirect =
-        isDirectUpstream ||
-        treatAsDirectUpstream.current ||
-        dataExplicitAvailable.current ||
-        iframeLoadCount.current >= 2;
-      if (effectivelyDirect) return;
-      if (!gotRealResize.current) setFailed(true);
-    }, 18_000);
-    return () => clearTimeout(t);
-  }, [finalUrl, failed, isDirectUpstream]);
-
-  const showLoading = !sportscoreUrl && (!ready || isFetching) && !failed;
-  // Scale the whole widget down proportionally once we know its real
-  // height, instead of the container's overflow:hidden clipping whatever
-  // happens to be in its top-left corner (see naturalHeight's own comment).
-  const iframeScale = naturalHeight && naturalHeight > MINI_TRACKER_MAX_HEIGHT
-    ? MINI_TRACKER_MAX_HEIGHT / naturalHeight
-    : 1;
+  const showLoading = !sportscoreUrl && !failed;
 
   return (
     <div
-      ref={containerRef}
       className={className}
       style={{
         aspectRatio,
         position: "relative",
-        // Bug report 2026-08-14: box reads as shifted toward the left edge
-        // instead of centered/filling its card. Neither call site passes a
-        // className, so this div had no explicit width at all — a block
-        // element with no width set should default to filling its parent,
-        // but the maxHeight cap above makes the box shorter and wider than
-        // its aspectRatio (see that comment), which is exactly the kind of
-        // layout this element was never explicitly tested to hold. Setting
-        // width/display explicitly removes any ambiguity instead of
-        // relying on block-level defaults still holding under that shape.
         display: "block",
         width: "100%",
-        // ── BUG FIX 2026-08-13 (TELA PRETA) ──────────────────────────
-        // Container pai precisa de um piso de altura (não só aspectRatio
-        // 16/9, que dá ~220px no mobile) para não cortar o meio do widget
-        // antes de qualquer resize real chegar — ver histórico desta
-        // constante para o porquê original de 470px fixo.
         minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
-        // ── BUG FIX 2026-08-13, rounds 2-4 ("Mini Tracker ainda grande")
-        // Reducing minHeight alone never actually shrank anything: it's a
-        // FLOOR, and aspectRatio ("16 / 9") was still computing a taller
-        // height at typical mobile container widths (~380px wide → ~214px
-        // tall from aspect-ratio ALONE, before minHeight even entered the
-        // picture) — so every earlier minHeight reduction this round was
-        // fighting a constraint that wasn't the actual bottleneck. maxHeight
-        // is a real ceiling regardless of what aspectRatio computes; this is
-        // what actually makes the box small on mobile/PWA.
         maxHeight: MINI_TRACKER_MAX_HEIGHT,
         overflow: "hidden",
         borderRadius: 20,
         isolation: "isolate",
-        // ── BUG FIX 2026-08-13 (PRETO = ZINC-900 VISÍVEL) ─────────
-        // #09090b (zinc-950) RGB(9,9,11) é INDISTINGUÍVEL de preto
-        // puro #000 em telas OLED (iPhone/Samsung A tops) → usuário
-        // chama tudo de "preto quebrado". Substituímos por #18181b
-        // (zinc-900) RGB(24,24,27). Essa cor é um CINZA ESCURO, não
-        // preto qualquer usuário percebe a diferença vs preto puro.
+        // #09090b (zinc-950) is indistinguishable from pure black on OLED
+        // screens, so an empty/loading tracker reads as "broken" — use
+        // #18181b (zinc-900), a dark gray visibly distinct from pure black.
         backgroundColor: "#18181b",
       }}
     >
-      {/* CAMADA BASE GARANTIDA: fundo cinza #18181b (z-0, na frente de container).
-         Nunca some, independente de iframe/failed/ready. Garante que se iframe
-         for transparente ou carregar widget vazio = usuario ve CINZA,
-         nunca preto puro #000. */}
       <div
         aria-hidden
         className="absolute inset-0 pointer-events-none"
@@ -5111,67 +4726,14 @@ function BetbyTrackerIframe({
         </div>
       )}
       {sportscoreUrl ? (
-        // SportScore is now the PRIMARY source (see the useEffect above) —
-        // real fixture coverage, plain CORS-open iframe, no session/proxy
-        // machinery to break. Checked first regardless of BetBY's own state.
         <iframe
-          ref={sportscoreIframeRef}
+          ref={iframeRef}
           key={sportscoreUrl}
           src={sportscoreUrl}
           title={`SportScore Live Tracker · ${home} vs ${away}`}
           className="w-full border-0 block relative"
           style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
           allow="autoplay; fullscreen"
-          onError={() => setSportscoreUrl(null)}
-          referrerPolicy="strict-origin-when-cross-origin"
-        />
-      ) : !failed && finalUrl ? (
-        <iframe
-          ref={iframeRef}
-          key={finalUrl}
-          src={finalUrl}
-          title={`BetBY Live Tracker · ${home} vs ${away}`}
-          className="w-full border-0 block relative"
-          style={{
-            backgroundColor: "#18181b",
-            zIndex: 1,
-            // Before the widget's real height is known: fill the container
-            // normally (same as before), clipped by its overflow:hidden —
-            // there's nothing to scale yet. Once naturalHeight arrives, the
-            // iframe is laid out at its OWN true height (not clipped) and
-            // visually shrunk with transform: scale() instead, so the whole
-            // widget shrinks proportionally and stays centered rather than
-            // being cropped to whatever's in the top-left corner of a much
-            // taller layout. transform doesn't affect how the *parent*
-            // computes overflow — a descendant's PAINTED (post-transform)
-            // bounds are what gets clipped, so a widget scaled down to
-            // exactly fill the container's fixed height needs no clipping
-            // at all once naturalHeight is set.
-            ...(naturalHeight
-              ? {
-                  height: `${naturalHeight}px`,
-                  transform: `scale(${iframeScale})`,
-                  transformOrigin: "top center",
-                }
-              : {
-                  height: "100%",
-                  minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
-                }),
-          }}
-          allow="autoplay; fullscreen; clipboard-read; clipboard-write"
-          onLoad={() => {
-            // Cada onLoad = uma navegação completa dentro do iframe.
-            //  1x = carregou nosso redirect shell (bet62.plus/api/betby-live-tracker...)
-            //  2x = window.location.replace do shell → demoapi.betby.com/tracker.html (cross-origin!)
-            // A partir de 2x: garantimos que o iframe navegou para a origin real do BetBY
-            // (perdemos bridge postMessage, cross-origin) → NÃO podemos usar detectors
-            // baseados na AUSÊNCIA de sinais. Tratamos igual a isDirectUpstream.
-            iframeLoadCount.current = iframeLoadCount.current + 1;
-            if (iframeLoadCount.current >= 2) {
-              treatAsDirectUpstream.current = true;
-            }
-            setReady(true);
-          }}
           onError={() => setFailed(true)}
           referrerPolicy="strict-origin-when-cross-origin"
         />
@@ -5261,13 +4823,11 @@ function TrackerModal({
             </div>
             <div className="mb-4 rounded-[24px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] overflow-hidden">
               <TrackerErrorBoundary home={event.home} away={event.away} aspectRatio="16 / 9">
-                <BetbyTrackerIframe
+                <SportscoreTrackerIframe
                   home={event.home}
                   away={event.away}
                   sport={event.sport}
-                  lang="pt-br"
                   aspectRatio="16 / 9"
-                  statscoreEventId={event.statscoreEventId}
                   matchId={event.matchId}
                 />
               </TrackerErrorBoundary>
@@ -19940,13 +19500,11 @@ export default function Home({
                     {showFieldView ? (
                       <div className="mb-3">
                         <TrackerErrorBoundary home={expandedMatch.home} away={expandedMatch.away} aspectRatio="16 / 9">
-                          <BetbyTrackerIframe
+                          <SportscoreTrackerIframe
                             home={expandedMatch.home}
                             away={expandedMatch.away}
                             sport={expandedMatch.sport ?? "football"}
-                            lang="pt-br"
                             aspectRatio="16 / 9"
-                            statscoreEventId={expandedMatch.statscoreEventId}
                             matchId={expandedMatch.id}
                           />
                         </TrackerErrorBoundary>
