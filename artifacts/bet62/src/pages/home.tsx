@@ -4646,19 +4646,21 @@ function BetbyTrackerIframe({
 }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  // Automatic fallback (2026-08-16): BetBY's zero-config default is its own
-  // DEMO brand (demoapi.betby.com — a limited test-fixture catalogue, not
-  // real match coverage), so `failed` ends up true for most real matches no
-  // matter how good the team-name matching is — there's often just no
-  // fixture to find. SportScore's free API has real coverage, so once BetBY
-  // gives up, try it automatically (no admin mapping needed) before
-  // showing "Tracker indisponível". SportScore's embed is plain CORS-open
-  // iframe — no bridge/postMessage machinery needed, unlike BetBY's proxied
-  // HTML above.
+  // Automatic fallback, promoted to PRIMARY source (2026-08-17): BetBY's
+  // zero-config default is its own DEMO brand (demoapi.betby.com — a
+  // limited test-fixture catalogue, not real match coverage) and, even
+  // when a real fixture matches, its widget requires our own Playwright
+  // session-capture pipeline to work at all in production — which has
+  // proven unreliable (Chromium launch failures, a Safari tab crash on
+  // unmount). SportScore's free API has real coverage and is a plain
+  // CORS-open iframe with no session/proxy/bridge machinery needed, so it
+  // is now tried immediately in parallel with BetBY (not gated behind
+  // BetBY failing first) and preferred whenever it resolves — see the
+  // render below, which shows the SportScore iframe first if available.
   const [sportscoreUrl, setSportscoreUrl] = useState<string | null>(null);
   const sportscoreTried = useRef(false);
   useEffect(() => {
-    if (!failed || sportscoreTried.current || !matchId || !home || !away) return;
+    if (sportscoreTried.current || !matchId || !home || !away) return;
     sportscoreTried.current = true;
     const params = new URLSearchParams({ sport, home, away, matchId });
     fetch(`/api/sportscore-tracker/url?${params.toString()}`)
@@ -4667,7 +4669,7 @@ function BetbyTrackerIframe({
         if (d?.ok && d.embedUrl) setSportscoreUrl(d.embedUrl);
       })
       .catch(() => {});
-  }, [failed, matchId, home, away, sport]);
+  }, [matchId, home, away, sport]);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const sportscoreIframeRef = useRef<HTMLIFrameElement>(null);
@@ -5040,7 +5042,7 @@ function BetbyTrackerIframe({
     return () => clearTimeout(t);
   }, [finalUrl, failed, isDirectUpstream]);
 
-  const showLoading = (!ready || isFetching) && !failed;
+  const showLoading = !sportscoreUrl && (!ready || isFetching) && !failed;
   // Scale the whole widget down proportionally once we know its real
   // height, instead of the container's overflow:hidden clipping whatever
   // happens to be in its top-left corner (see naturalHeight's own comment).
@@ -5108,7 +5110,22 @@ function BetbyTrackerIframe({
           <RefreshCw className="animate-spin text-green-500/80" size={24} />
         </div>
       )}
-      {!failed && finalUrl ? (
+      {sportscoreUrl ? (
+        // SportScore is now the PRIMARY source (see the useEffect above) —
+        // real fixture coverage, plain CORS-open iframe, no session/proxy
+        // machinery to break. Checked first regardless of BetBY's own state.
+        <iframe
+          ref={sportscoreIframeRef}
+          key={sportscoreUrl}
+          src={sportscoreUrl}
+          title={`SportScore Live Tracker · ${home} vs ${away}`}
+          className="w-full border-0 block relative"
+          style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
+          allow="autoplay; fullscreen"
+          onError={() => setSportscoreUrl(null)}
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      ) : !failed && finalUrl ? (
         <iframe
           ref={iframeRef}
           key={finalUrl}
@@ -5156,22 +5173,6 @@ function BetbyTrackerIframe({
             setReady(true);
           }}
           onError={() => setFailed(true)}
-          referrerPolicy="strict-origin-when-cross-origin"
-        />
-      ) : failed && sportscoreUrl ? (
-        // SportScore's real (non-demo) fixtures list found this match
-        // automatically — plain CORS-open iframe, no proxy/bridge needed
-        // (see the useEffect above for why this only kicks in once BetBY
-        // gives up).
-        <iframe
-          ref={sportscoreIframeRef}
-          key={sportscoreUrl}
-          src={sportscoreUrl}
-          title={`SportScore Live Tracker · ${home} vs ${away}`}
-          className="w-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
-          allow="autoplay; fullscreen"
-          onError={() => setSportscoreUrl(null)}
           referrerPolicy="strict-origin-when-cross-origin"
         />
       ) : failed ? (
