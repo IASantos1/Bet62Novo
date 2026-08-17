@@ -5,7 +5,7 @@
     "buildCommand": "pnpm --filter @workspace/bet62 run build && pnpm --filter @workspace/api-server run build && (pnpm exec playwright install --with-deps chromium || pnpm exec playwright install chromium)"
   },
   "deploy": {
-    "startCommand": "NODE_ENV=production pnpm --filter @workspace/api-server run start",
+    "startCommand": "export LD_LIBRARY_PATH=$(find /nix/store -maxdepth 2 -type d -name lib 2>/dev/null | tr '\\n' ':')$LD_LIBRARY_PATH; NODE_ENV=production pnpm --filter @workspace/api-server run start",
     "restartPolicyType": "on_failure",
     "restartPolicyMaxRetries": 5
   }
