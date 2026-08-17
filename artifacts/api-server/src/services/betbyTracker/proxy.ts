@@ -1,3 +1,5 @@
+import { getBetbySession } from "./session.js";
+
 export type BetbyThemeInjection = {
   fontFamily?: string;
   backgroundMain?: string;
@@ -192,6 +194,68 @@ export function buildBetbyTrackerPublicUrl(
   return buildBetbyTrackerUpstreamUrl(safe);
 }
 
+/** Real, confirmed-reachable descriptions endpoint (see session.ts),
+ * searched tolerantly for anything that looks like a Statscore/tracker
+ * event id embedded in the match state — field name not independently
+ * confirmed (the one manual capture this was built from used a stale
+ * event id and only showed {players, markets}, not the fully-authenticated
+ * shape the real flow documents). Returns null on any miss rather than
+ * guessing a value, exactly like every other diagnostic-only extractor in
+ * this codebase — resolveStatscoreEventIdFromBetby's caller falls through
+ * to the pre-existing HTML-scrape approach when this returns null. */
+async function resolveStatscoreIdFromDescriptions(
+  betbyEventId: string,
+  lang: string,
+): Promise<string | null> {
+  const session = await getBetbySession();
+  const host = session?.apiHost ?? process.env.BETBY_API_HOST ?? "demoapi.betby.com";
+  const brandId = process.env.BETBY_BRAND_ID || "1653815133341880320";
+  const url = `https://${host}/api/v3/descriptions/brand/${brandId}/event/${betbyEventId}/${lang}`;
+  const controller = new AbortController();
+  const to = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
+        ...(session?.headers ?? {}),
+      },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const body: unknown = await res.json();
+    return findStatscoreIdInObject(body, 0);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+const STATSCORE_ID_KEY_PATTERN = /statscore.*(event)?id|tracker.*id|external.*id/i;
+
+export function findStatscoreIdInObject(node: unknown, depth: number): string | null {
+  if (depth > 6 || !node || typeof node !== "object") return null;
+  for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+    if (STATSCORE_ID_KEY_PATTERN.test(key)) {
+      if (typeof val === "string" && /^\d{5,10}$/.test(val)) return val;
+      if (typeof val === "number" && Number.isInteger(val) && val >= 10_000 && val <= 9_999_999_999) {
+        return String(val);
+      }
+    }
+  }
+  for (const val of Object.values(node as Record<string, unknown>)) {
+    if (val && typeof val === "object") {
+      const found = findStatscoreIdInObject(val, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export async function resolveStatscoreEventIdFromBetby(
   betbyEventId: string,
   timeoutMs = 8000,
@@ -325,7 +389,27 @@ export async function resolveStatscoreEventIdFromBetby(
   }
   try {
     let candidateUrls: string[] = [];
-    // (1) Melhor caminho: puxar slugs reais via REST /api/v4/live/brand/.../event/en/ID
+    // (0) Best path (added 2026-08-16, replaces the old wrong-host/no-auth
+    // REST attempt below): the REAL, confirmed-reachable descriptions
+    // endpoint (see session.ts's header comment for the full real BetBY
+    // flow this was reverse-engineered from) — real host + real
+    // Playwright-captured session auth, via fetchBetbyDescriptions in
+    // pulseBridge.ts. A fully-authenticated response is documented (by the
+    // real flow, not independently re-confirmed here) to carry match
+    // state alongside teams/markets, which is where an embedded Statscore/
+    // tracker id would live if BetBY exposes one directly — searched
+    // tolerantly since the exact field name isn't confirmed. Falls through
+    // to the pre-existing HTML-scrape approach below on any miss, so this
+    // can only ever add a chance of success, never remove one.
+    try {
+      const direct = await resolveStatscoreIdFromDescriptions(betbyEventId, BETBY_LANG);
+      if (direct) return direct;
+    } catch (_directErr) {
+      // fallback below
+    }
+    // (1) Antigo caminho REST /api/v4/live/brand/.../event/en/ID — host e
+    // formato nunca confirmados (ver comentário de session.ts); mantido só
+    // como mais uma tentativa de baixo custo antes do scraping de HTML.
     try {
       const restUrl = `https://${BETBY_API_HOST}/api/v4/live/brand/${BETBY_BRAND_ID_LIVE}/event/${BETBY_LANG}/${betbyEventId}`;
       const restRes = await fetch(restUrl, {
