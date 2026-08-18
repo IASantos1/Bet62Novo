@@ -4697,26 +4697,24 @@ function SportscoreTrackerIframe({
   const showLoading = !sportscoreUrl && !failed;
 
   return (
-    <div style={{ display: "inline-block", maxWidth: "100%", width: "100%" }}>
-      <div
-        className={className}
-        style={{
-          aspectRatio,
-          position: "relative",
-          display: "block",
-          width: "100%",
-          minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
-          maxHeight: MINI_TRACKER_MAX_HEIGHT,
-          overflow: "hidden",
-          borderRadius: 8,
-          border: "1px solid #e5e7ef",
-          isolation: "isolate",
-          // #09090b (zinc-950) is indistinguishable from pure black on OLED
-          // screens, so an empty/loading tracker reads as "broken" — use
-          // #18181b (zinc-900), a dark gray visibly distinct from pure black.
-          backgroundColor: "#18181b",
-        }}
-      >
+    <div
+      className={className}
+      style={{
+        aspectRatio,
+        position: "relative",
+        display: "block",
+        width: "100%",
+        minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+        maxHeight: MINI_TRACKER_MAX_HEIGHT,
+        overflow: "hidden",
+        borderRadius: 8,
+        isolation: "isolate",
+        // #09090b (zinc-950) is indistinguishable from pure black on OLED
+        // screens, so an empty/loading tracker reads as "broken" — use
+        // #18181b (zinc-900), a dark gray visibly distinct from pure black.
+        backgroundColor: "#18181b",
+      }}
+    >
         <div
           aria-hidden
           className="absolute inset-0 pointer-events-none"
@@ -4732,13 +4730,31 @@ function SportscoreTrackerIframe({
           // referrerpolicy="no-referrer-when-downgrade") — deviating from it
           // risks the widget refusing to render, since this is exactly what
           // sportscore.com's own embed generator outputs for a match page.
+          //
+          // Bug report 2026-08-18: their tracker page has its own white
+          // "SportScore.com" watermark header bar and a score bar at the
+          // bottom, which showed up as an ugly white border inside our dark
+          // card. We can't reach into a cross-origin iframe's DOM to hide
+          // them, so instead the iframe is rendered TALLER than the visible
+          // box and shifted up (position:absolute, negative top) so the
+          // parent's overflow:hidden crops those bars off the top/bottom,
+          // leaving just the field. The exact crop amounts are estimated
+          // from screenshots, not measured — may need retuning.
           <iframe
             ref={iframeRef}
             key={sportscoreUrl}
             src={sportscoreUrl}
             title={`SportScore Live Tracker · ${home} vs ${away}`}
-            className="w-full border-0 block relative"
-            style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
+            className="w-full border-0 block"
+            style={{
+              backgroundColor: "#18181b",
+              zIndex: 1,
+              position: "absolute",
+              top: -48,
+              left: 0,
+              width: "100%",
+              height: "calc(100% + 88px)",
+            }}
             loading="lazy"
             allow="autoplay; fullscreen"
             // SportScore's own tracker page renders taller than our small
@@ -4762,26 +4778,6 @@ function SportscoreTrackerIframe({
           </div>
         ) : null}
       </div>
-      {sportscoreUrl && (
-        // Attribution required by SportScore's real, published terms
-        // (sportscore.com/embed/): "one visible 'Powered by SportScore'
-        // link... rel='dofollow'... anchor text 'SportScore'". This is
-        // their own official "minimal text link" badge verbatim — the
-        // earlier wording here was guessed from an unverified snippet, not
-        // sourced from their actual docs.
-        <div style={{ font: "400 11px/1.5 sans-serif", textAlign: "center", padding: "4px 2px", color: "#6b7280" }}>
-          Data from{" "}
-          <a
-            href="https://sportscore.com/"
-            target="_blank"
-            rel="dofollow noopener"
-            style={{ color: "#563EF1", textDecoration: "none", fontWeight: 600 }}
-          >
-            SportScore
-          </a>
-        </div>
-      )}
-    </div>
   );
 }
 
