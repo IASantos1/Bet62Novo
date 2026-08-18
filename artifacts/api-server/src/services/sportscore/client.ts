@@ -126,7 +126,7 @@ export async function fetchSportscoreMatches(
   sport: string,
   limit = 50,
 ): Promise<SportscoreMatchSummary[]> {
-  const url = `${SPORTSCORE_BASE}/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=${limit}`;
+  const url = `${SPORTSCORE_BASE}/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=${limit}&src=bet62.plus`;
   const body = await fetchJson(url);
   if (body == null) return [];
   const arr = extractMatchArray(body);
@@ -217,7 +217,7 @@ export async function fetchSportscoreTracker(
   sport: string,
   trackerId: string,
 ): Promise<{ ok: boolean; status?: number; raw?: unknown; error?: string; mapped: SportscoreTrackerSummary | null }> {
-  const url = `${SPORTSCORE_BASE}/api/widget/tracker/?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(trackerId)}`;
+  const url = `${SPORTSCORE_BASE}/api/widget/tracker/?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(trackerId)}&src=bet62.plus`;
   const controller = new AbortController();
   const to = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -234,11 +234,21 @@ export async function fetchSportscoreTracker(
   }
 }
 
-/** Direct embeddable iframe URL for SportScore's own tracker widget —
- * unlike BetBY's tracker (proxied through our own server, with a
- * postMessage bridge injected into the HTML — see services/betbyTracker/
- * proxy.ts), SportScore's is CORS-open and meant to be embedded directly,
- * no proxying needed. */
+/** Direct embeddable iframe URL for SportScore's own tracker widget.
+ *
+ * UNCONFIRMED (2026-08-17): this exact path was provided by the user as an
+ * embed snippet allegedly copied from sportscore.com, but the site's own
+ * published API docs (sportscore.com/embed/ — confirmed real, pasted in
+ * full by the user) document ONLY JSON REST endpoints (/api/widget/matches/,
+ * /api/widget/match/, /api/widget/tracker/ — the last one returns raw
+ * position/animation JSON, explicitly NOT a renderable HTML page) and never
+ * mention a ready-made iframe route at all. This path may be a real but
+ * undocumented convenience feature (a per-match "share/embed" button), or it
+ * may not exist — pending direct confirmation. If it turns out to be fake,
+ * the real integration has to render its own mini-field from
+ * /api/widget/match/ or /api/widget/tracker/'s JSON instead, the same way
+ * this codebase's own MatchTracker/TrackerModal components already do for
+ * other providers. */
 export function buildSportscoreEmbedUrl(sport: string, slug: string): string {
-  return `${SPORTSCORE_BASE}/embed/tracker/${encodeURIComponent(sport)}/${encodeURIComponent(slug)}/`;
+  return `${SPORTSCORE_BASE}/embed/tracker/${encodeURIComponent(sport)}/${encodeURIComponent(slug)}/?src=bet62.plus`;
 }

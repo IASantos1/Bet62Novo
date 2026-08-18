@@ -4754,15 +4754,18 @@ function SportscoreTrackerIframe({
         ) : null}
       </div>
       {sportscoreUrl && (
-        // Attribution required by SportScore's free embed widget — present
-        // verbatim (text + link) in every real embed snippet their site
-        // generates.
+        // Attribution required by SportScore's real, published terms
+        // (sportscore.com/embed/): "one visible 'Powered by SportScore'
+        // link... rel='dofollow'... anchor text 'SportScore'". This is
+        // their own official "minimal text link" badge verbatim — the
+        // earlier wording here was guessed from an unverified snippet, not
+        // sourced from their actual docs.
         <div style={{ font: "400 11px/1.5 sans-serif", textAlign: "center", padding: "4px 2px", color: "#6b7280" }}>
-          {sport === "football" ? "Football" : sport.charAt(0).toUpperCase() + sport.slice(1)} live match tracker by{" "}
+          Data from{" "}
           <a
-            href={`https://sportscore.com/${sport}/`}
+            href="https://sportscore.com/"
             target="_blank"
-            rel="noopener noreferrer"
+            rel="dofollow noopener"
             style={{ color: "#563EF1", textDecoration: "none", fontWeight: 600 }}
           >
             SportScore
