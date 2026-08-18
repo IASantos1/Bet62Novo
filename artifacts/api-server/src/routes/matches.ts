@@ -10575,6 +10575,25 @@ function isVirtualFootballLeague(name: string): boolean {
   );
 }
 
+// Attempted 2026-08-18: PulseScore/bwin sometimes labels a celebrity-name
+// eFootball simulation product under a REAL competition name ("UEFA
+// Champions League", "Copa Argentina") with real odds attached — confirmed
+// via production samples ("Sergio Araujo vs Maicon", "Diego Carlos" — real
+// footballers' own names used as the two player-controlled sides).
+// isVirtualFootballLeague above can't catch these since the league string
+// itself isn't a giveaway. A name-shape heuristic (block when both sides
+// are a bare "Firstname Lastname" with no club-type qualifier) was tried
+// and REJECTED even scoped to just those two league labels: real Champions
+// League fixtures very commonly pair two such names too (e.g. "Bayern
+// Munich vs Inter Milan" — both 2-word, no recognized qualifier token,
+// would have been wrongly hidden). No structural field in what PulseScore
+// sends distinguishes a real 2-word club name from a real footballer's own
+// name, so there is currently no safe automatic filter for this — hiding a
+// marquee real fixture by mistake is worse than occasionally showing one of
+// these simulated matches. Revisit only with a real structural signal (a
+// type/category field, a dedicated PulseScore endpoint for this product,
+// etc.), not another name-shape guess.
+
 // Explicit allowlist for PulseScore-sourced live football (buildFootballLiveFromPulseScore
 // below) — add league names here to show ONLY those leagues; every other real league gets
 // hidden (virtual/eSoccer stays blocked either way via isVirtualFootballLeague above).
