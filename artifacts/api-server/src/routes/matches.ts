@@ -10575,24 +10575,27 @@ function isVirtualFootballLeague(name: string): boolean {
   );
 }
 
-// Attempted 2026-08-18: PulseScore/bwin sometimes labels a celebrity-name
-// eFootball simulation product under a REAL competition name ("UEFA
-// Champions League", "Copa Argentina") with real odds attached — confirmed
-// via production samples ("Sergio Araujo vs Maicon", "Diego Carlos" — real
-// footballers' own names used as the two player-controlled sides).
-// isVirtualFootballLeague above can't catch these since the league string
-// itself isn't a giveaway. A name-shape heuristic (block when both sides
-// are a bare "Firstname Lastname" with no club-type qualifier) was tried
-// and REJECTED even scoped to just those two league labels: real Champions
-// League fixtures very commonly pair two such names too (e.g. "Bayern
-// Munich vs Inter Milan" — both 2-word, no recognized qualifier token,
-// would have been wrongly hidden). No structural field in what PulseScore
-// sends distinguishes a real 2-word club name from a real footballer's own
-// name, so there is currently no safe automatic filter for this — hiding a
-// marquee real fixture by mistake is worse than occasionally showing one of
-// these simulated matches. Revisit only with a real structural signal (a
-// type/category field, a dedicated PulseScore endpoint for this product,
-// etc.), not another name-shape guess.
+// Confirmed 2026-08-18: PulseScore/bwin labels a celebrity-name eFootball
+// simulation product under bare REAL competition names ("UEFA Champions
+// League", "Copa Argentina") with real odds attached, using real
+// footballers' own names as the two player-controlled sides ("Sergio
+// Araujo vs Maicon", "Diego Carlos"). A name-shape heuristic on the teams
+// themselves was tried and rejected (see git history) — it would have
+// wrongly hidden real fixtures like "Bayern Munich vs Inter Milan" too.
+// The signal that IS safe: real fixtures for a genuine multi-stage
+// competition like the Champions League always carry their stage/round as
+// part of the league string (confirmed by the user against Bet62's own
+// live data — real matches show "UEFA Champions League, Qualification",
+// never the bare name alone), while this simulation product's league
+// field is always exactly the bare competition name with nothing appended.
+// Blocking only an EXACT match (not a substring) on the bare string is
+// therefore safe: a real Champions League or Copa Argentina fixture is
+// never labeled with just that string alone in what PulseScore sends.
+const BARE_VIRTUAL_LEAGUE_LABELS = new Set(["uefa champions league", "copa argentina"]);
+
+function isBareVirtualLeagueLabel(league: string): boolean {
+  return BARE_VIRTUAL_LEAGUE_LABELS.has(league.trim().toLowerCase());
+}
 
 // Explicit allowlist for PulseScore-sourced live football (buildFootballLiveFromPulseScore
 // below) — add league names here to show ONLY those leagues; every other real league gets
@@ -11423,6 +11426,7 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
+    if (isBareVirtualLeagueLabel(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
 
     const leagueName = ev.league || "";
@@ -12637,6 +12641,7 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
+    if (isBareVirtualLeagueLabel(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
 
     const leagueName = ev.league || "";
