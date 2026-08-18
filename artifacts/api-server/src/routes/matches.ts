@@ -10591,7 +10591,27 @@ function isVirtualFootballLeague(name: string): boolean {
 // Blocking only an EXACT match (not a substring) on the bare string is
 // therefore safe: a real Champions League or Copa Argentina fixture is
 // never labeled with just that string alone in what PulseScore sends.
-const BARE_VIRTUAL_LEAGUE_LABELS = new Set(["uefa champions league", "copa argentina"]);
+//
+// Update 2026-08-18: also seen under "Copa Libertadores" and "Copa
+// Sul-Americana" (same reasoning applies — both are genuine multi-stage
+// continental cups, so a real fixture should likewise always carry a
+// group/round qualifier). Deliberately NOT extending this to something
+// like "Brasileiro Série B" even though the same fake-player pattern was
+// seen there too: a continuous round-robin domestic league has no
+// stage/round concept to append in the first place, so a REAL match there
+// is expected to show as just the bare league name — the "bare = fake"
+// signal this list relies on does not hold for that kind of competition,
+// and adding it would risk hiding genuine Série B matches. This list is
+// reactive by nature (the product appears to rotate through an unknown,
+// growing set of real cup names) — the durable fix is asking
+// PulseScore/bwin for an actual type/category field to filter on instead
+// of doing this one league name at a time.
+const BARE_VIRTUAL_LEAGUE_LABELS = new Set([
+  "uefa champions league",
+  "copa argentina",
+  "copa libertadores",
+  "copa sul-americana",
+]);
 
 function isBareVirtualLeagueLabel(league: string): boolean {
   return BARE_VIRTUAL_LEAGUE_LABELS.has(league.trim().toLowerCase());
