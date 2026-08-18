@@ -10575,47 +10575,19 @@ function isVirtualFootballLeague(name: string): boolean {
   );
 }
 
-// Confirmed 2026-08-18: PulseScore/bwin labels a celebrity-name eFootball
-// simulation product under bare REAL competition names ("UEFA Champions
-// League", "Copa Argentina") with real odds attached, using real
-// footballers' own names as the two player-controlled sides ("Sergio
-// Araujo vs Maicon", "Diego Carlos"). A name-shape heuristic on the teams
-// themselves was tried and rejected (see git history) — it would have
-// wrongly hidden real fixtures like "Bayern Munich vs Inter Milan" too.
-// The signal that IS safe: real fixtures for a genuine multi-stage
-// competition like the Champions League always carry their stage/round as
-// part of the league string (confirmed by the user against Bet62's own
-// live data — real matches show "UEFA Champions League, Qualification",
-// never the bare name alone), while this simulation product's league
-// field is always exactly the bare competition name with nothing appended.
-// Blocking only an EXACT match (not a substring) on the bare string is
-// therefore safe: a real Champions League or Copa Argentina fixture is
-// never labeled with just that string alone in what PulseScore sends.
-//
-// Update 2026-08-18: also seen under "Copa Libertadores" and "Copa
-// Sul-Americana" (same reasoning applies — both are genuine multi-stage
-// continental cups, so a real fixture should likewise always carry a
-// group/round qualifier). Deliberately NOT extending this to something
-// like "Brasileiro Série B" even though the same fake-player pattern was
-// seen there too: a continuous round-robin domestic league has no
-// stage/round concept to append in the first place, so a REAL match there
-// is expected to show as just the bare league name — the "bare = fake"
-// signal this list relies on does not hold for that kind of competition,
-// and adding it would risk hiding genuine Série B matches. This list is
-// reactive by nature (the product appears to rotate through an unknown,
-// growing set of real cup names) — the durable fix is asking
-// PulseScore/bwin for an actual type/category field to filter on instead
-// of doing this one league name at a time.
-const BARE_VIRTUAL_LEAGUE_LABELS = new Set([
-  "uefa champions league",
-  "copa argentina",
-  "copa libertadores",
-  "copa sul-americana",
-]);
-
-function isBareVirtualLeagueLabel(league: string): boolean {
-  return BARE_VIRTUAL_LEAGUE_LABELS.has(league.trim().toLowerCase());
-}
+// REVERTED 2026-08-18: the theory below (a celebrity-name eFootball
+// simulation product squatting on real competition names) turned out to be
+// WRONG. The user clarified these are REAL matches: they show correctly
+// with real team names when a match first goes live, then get overwritten
+// with the two involved players' names once an incident (goal, card) fires
+// — and never revert back. That's a display bug in how incident/event data
+// gets merged onto the match's home/away fields (likely in the football WS
+// live-update path, which replaces an event's entire cached object on every
+// frame — see footballWs.ts's applyFrame), NOT a separate fake-match
+// product to filter out. The blocklist below was actively hiding real
+// Champions League/Copa Argentina/Libertadores/Sul-Americana matches from
+// real bettors and has been removed. Find and fix the actual field-merge
+// bug instead of filtering by league name.
 
 // Explicit allowlist for PulseScore-sourced live football (buildFootballLiveFromPulseScore
 // below) — add league names here to show ONLY those leagues; every other real league gets
@@ -11446,7 +11418,6 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
-    if (isBareVirtualLeagueLabel(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
 
     const leagueName = ev.league || "";
@@ -12661,7 +12632,6 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const away = stripGenderTeamSuffix(ev.away);
     if (!home || !away) continue;
     if (isVirtualFootballLeague(ev.league || "")) continue;
-    if (isBareVirtualLeagueLabel(ev.league || "")) continue;
     if (!isAllowedFootballLeague(ev.league || "")) continue;
 
     const leagueName = ev.league || "";
