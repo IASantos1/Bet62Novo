@@ -4741,6 +4741,15 @@ function SportscoreTrackerIframe({
             style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
             loading="lazy"
             allow="autoplay; fullscreen"
+            // SportScore's own tracker page renders taller than our small
+            // card (their own default snippet uses height=420) — without
+            // this, the browser shows the iframe's native scrollbar for the
+            // hidden overflow. scrolling="no" is a deprecated HTML
+            // attribute but still universally honored, and is the only way
+            // to suppress that scrollbar for a cross-origin iframe we have
+            // no other control over (no bridge/postMessage from SportScore
+            // the way the removed BetBY proxy had).
+            scrolling="no"
             onError={() => setFailed(true)}
             referrerPolicy="no-referrer-when-downgrade"
           />
