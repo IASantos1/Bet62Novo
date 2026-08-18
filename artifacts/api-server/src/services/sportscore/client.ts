@@ -9,18 +9,19 @@
 // Built 2026-08-16 without live access to sportscore.com from the
 // environment this was written in (network egress blocked in that sandbox,
 // same restriction that affected the BetBY work earlier this session) — the
-// endpoint paths and query params ARE confirmed (from the public docs and
-// the sportscore-mcp source, which hits these exact routes), but the exact
-// JSON field names inside each match/tracker object were NOT independently
-// verified against a real response. normalizeSportscoreMatch/
-// normalizeSportscoreTracker below are deliberately tolerant — they try
-// several plausible field-name variants rather than assuming one shape —
-// and recordUnknownSportscoreShape logs the raw response once so the first
-// real call in production immediately shows whether the guesses were right,
-// the same confirm-with-real-evidence approach already established
-// elsewhere in this codebase (see e.g. football.ts's
-// recordUnknownGoalscorerRawName). Tighten the field list here once that
-// log line shows the real shape.
+// endpoint paths and query params were confirmed from public docs, but the
+// exact JSON field names were guessed, and the guess was wrong: real field
+// names confirmed 2026-08-18 (production Railway console, direct call to
+// /api/widget/matches/) turned out flat (`home`/`away` as plain strings,
+// no `teams` object) with NO id/slug field at all — the per-match
+// identifier only exists inside the `url` field's trailing path segment
+// (see slugFromMatchUrl below). normalizeSportscoreMatch/
+// normalizeSportscoreTracker are still deliberately tolerant of several
+// shape variants (the /api/widget/tracker/ single-match/tracker endpoints
+// were never directly confirmed the way /api/widget/matches/ now is), and
+// recordUnknownSportscoreShape still logs any future unrecognized shape —
+// same confirm-with-real-evidence approach used elsewhere in this codebase
+// (see e.g. football.ts's recordUnknownGoalscorerRawName).
 import { logger } from "../../lib/logger.js";
 import { teamNamesMatch } from "../pulsescore/teamMatch.js";
 
@@ -92,6 +93,22 @@ function firstString(...candidates: unknown[]): string | null {
   return null;
 }
 
+// Real response confirmed 2026-08-18 (production Railway console, direct
+// call to /api/widget/matches/?sport=football&limit=50): match objects are
+// FLAT — `home`/`away` are plain strings, not nested under `teams`, and
+// there is NO `id`/`slug`/`matchId` field anywhere on the object. The only
+// per-match identifier is embedded in the `url` field, e.g.
+// "/football/match/macara-vs-cd-universidad-catolica/" — the trailing path
+// segment IS the slug the /embed/tracker/{sport}/{slug}/ page expects. Its
+// team order isn't reliably home-vs-away either (confirmed: some entries
+// are away-vs-home instead), so the slug can only be read off `url`, never
+// constructed from `home`/`away` ourselves.
+function slugFromMatchUrl(url: string | null): string | null {
+  if (!url) return null;
+  const segments = url.split("/").filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : null;
+}
+
 export function normalizeSportscoreMatch(raw: unknown, sport: string): SportscoreMatchSummary | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -112,7 +129,13 @@ export function normalizeSportscoreMatch(raw: unknown, sport: string): Sportscor
     o["awayTeamName"],
     o["visitorTeam"],
   );
-  const sportscoreId = firstString(o["slug"], o["id"], o["matchId"], o["match_id"]);
+  const sportscoreId = firstString(
+    o["slug"],
+    slugFromMatchUrl(firstString(o["url"])),
+    o["id"],
+    o["matchId"],
+    o["match_id"],
+  );
   const trackerId = firstString(o["trackerId"], o["tracker_id"], o["id"]);
   if (!home || !away || !sportscoreId) return null;
   return { sportscoreId, trackerId, home, away, sport };

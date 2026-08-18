@@ -44,6 +44,28 @@ test("normalizeSportscoreMatch: flat homeTeam/awayTeam + numeric id shape", () =
   });
 });
 
+test("normalizeSportscoreMatch: real /api/widget/matches/ shape (flat home/away, slug from url)", () => {
+  // Confirmed 2026-08-18 via a direct production call to
+  // /api/widget/matches/?sport=football&limit=50 — no id/slug field at
+  // all, the identifier only exists in the trailing segment of `url`.
+  const raw = {
+    home: "Macara",
+    away: "CD Universidad Católica",
+    home_score: "1",
+    away_score: "1",
+    status: "finished",
+    url: "/football/match/macara-vs-cd-universidad-catolica/",
+  };
+  const m = normalizeSportscoreMatch(raw, "football");
+  assert.deepEqual(m, {
+    sportscoreId: "macara-vs-cd-universidad-catolica",
+    trackerId: null,
+    home: "Macara",
+    away: "CD Universidad Católica",
+    sport: "football",
+  });
+});
+
 test("normalizeSportscoreMatch: missing team names returns null, never throws", () => {
   assert.equal(normalizeSportscoreMatch({ slug: "x" }, "football"), null);
   assert.equal(normalizeSportscoreMatch(null, "football"), null);
@@ -81,9 +103,9 @@ test("normalizeSportscoreTracker: missing fields default safely, never throws", 
   assert.equal(normalizeSportscoreTracker(null), null);
 });
 
-test("buildSportscoreEmbedUrl: builds the documented /embed/tracker/{sport}/{slug}/ path", () => {
+test("buildSportscoreEmbedUrl: builds the /embed/tracker/{sport}/{slug}/ path with src=", () => {
   assert.equal(
     buildSportscoreEmbedUrl("football", "flamengo-vs-palmeiras"),
-    "https://sportscore.com/embed/tracker/football/flamengo-vs-palmeiras/",
+    "https://sportscore.com/embed/tracker/football/flamengo-vs-palmeiras/?src=bet62.plus",
   );
 });
