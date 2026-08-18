@@ -4697,54 +4697,78 @@ function SportscoreTrackerIframe({
   const showLoading = !sportscoreUrl && !failed;
 
   return (
-    <div
-      className={className}
-      style={{
-        aspectRatio,
-        position: "relative",
-        display: "block",
-        width: "100%",
-        minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
-        maxHeight: MINI_TRACKER_MAX_HEIGHT,
-        overflow: "hidden",
-        borderRadius: 20,
-        isolation: "isolate",
-        // #09090b (zinc-950) is indistinguishable from pure black on OLED
-        // screens, so an empty/loading tracker reads as "broken" — use
-        // #18181b (zinc-900), a dark gray visibly distinct from pure black.
-        backgroundColor: "#18181b",
-      }}
-    >
+    <div style={{ display: "inline-block", maxWidth: "100%", width: "100%" }}>
       <div
-        aria-hidden
-        className="absolute inset-0 pointer-events-none"
-        style={{ backgroundColor: "#18181b", zIndex: 0 }}
-      />
-      {showLoading && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
-          <RefreshCw className="animate-spin text-green-500/80" size={24} />
+        className={className}
+        style={{
+          aspectRatio,
+          position: "relative",
+          display: "block",
+          width: "100%",
+          minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
+          maxHeight: MINI_TRACKER_MAX_HEIGHT,
+          overflow: "hidden",
+          borderRadius: 8,
+          border: "1px solid #e5e7ef",
+          isolation: "isolate",
+          // #09090b (zinc-950) is indistinguishable from pure black on OLED
+          // screens, so an empty/loading tracker reads as "broken" — use
+          // #18181b (zinc-900), a dark gray visibly distinct from pure black.
+          backgroundColor: "#18181b",
+        }}
+      >
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{ backgroundColor: "#18181b", zIndex: 0 }}
+        />
+        {showLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
+            <RefreshCw className="animate-spin text-green-500/80" size={24} />
+          </div>
+        )}
+        {sportscoreUrl ? (
+          // Matches SportScore's own official embed snippet (loading="lazy",
+          // referrerpolicy="no-referrer-when-downgrade") — deviating from it
+          // risks the widget refusing to render, since this is exactly what
+          // sportscore.com's own embed generator outputs for a match page.
+          <iframe
+            ref={iframeRef}
+            key={sportscoreUrl}
+            src={sportscoreUrl}
+            title={`SportScore Live Tracker · ${home} vs ${away}`}
+            className="w-full border-0 block relative"
+            style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
+            loading="lazy"
+            allow="autoplay; fullscreen"
+            onError={() => setFailed(true)}
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        ) : failed ? (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 p-4 text-center bg-zinc-900/95 text-zinc-200 pointer-events-none">
+            <div className="text-[13px] font-semibold text-zinc-100">Tracker indisponível neste momento.</div>
+            <div className="text-[11px] text-zinc-400 max-w-[80%] leading-tight">
+              {home} vs {away}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {sportscoreUrl && (
+        // Attribution required by SportScore's free embed widget — present
+        // verbatim (text + link) in every real embed snippet their site
+        // generates.
+        <div style={{ font: "400 11px/1.5 sans-serif", textAlign: "center", padding: "4px 2px", color: "#6b7280" }}>
+          {sport === "football" ? "Football" : sport.charAt(0).toUpperCase() + sport.slice(1)} live match tracker by{" "}
+          <a
+            href={`https://sportscore.com/${sport}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#563EF1", textDecoration: "none", fontWeight: 600 }}
+          >
+            SportScore
+          </a>
         </div>
       )}
-      {sportscoreUrl ? (
-        <iframe
-          ref={iframeRef}
-          key={sportscoreUrl}
-          src={sportscoreUrl}
-          title={`SportScore Live Tracker · ${home} vs ${away}`}
-          className="w-full border-0 block relative"
-          style={{ backgroundColor: "#18181b", zIndex: 1, height: "100%", minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)` }}
-          allow="autoplay; fullscreen"
-          onError={() => setFailed(true)}
-          referrerPolicy="strict-origin-when-cross-origin"
-        />
-      ) : failed ? (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 p-4 text-center bg-zinc-900/95 text-zinc-200 pointer-events-none">
-          <div className="text-[13px] font-semibold text-zinc-100">Tracker indisponível neste momento.</div>
-          <div className="text-[11px] text-zinc-400 max-w-[80%] leading-tight">
-            {home} vs {away}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
