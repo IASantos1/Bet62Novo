@@ -172,22 +172,95 @@ export async function fetchSportscoreMatches(
   return out;
 }
 
+function findByTeams(
+  matches: SportscoreMatchSummary[],
+  home: string,
+  away: string,
+): SportscoreMatchSummary | null {
+  for (const m of matches) {
+    const direct = teamNamesMatch(m.home, home) && teamNamesMatch(m.away, away);
+    const swapped = teamNamesMatch(m.away, home) && teamNamesMatch(m.home, away);
+    if (direct || swapped) return m;
+  }
+  return null;
+}
+
+const CLUB_SUFFIX_PATTERN = /\b(FC|CF|SC|AC|CD|EC|AFC|CFC|SAD)\b/gi;
+
+function slugifyTeamName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** A couple of plausible SportScore team-slug guesses for a team name —
+ * the full name slugified, and the same with common club suffixes (FC, CF,
+ * SC...) stripped, since we have no way to look up their real slug without
+ * already knowing it. */
+function teamSlugCandidates(name: string): string[] {
+  const candidates: string[] = [];
+  const full = slugifyTeamName(name);
+  if (full) candidates.push(full);
+  const stripped = slugifyTeamName(name.replace(CLUB_SUFFIX_PATTERN, "").trim());
+  if (stripped && stripped !== full) candidates.push(stripped);
+  return candidates;
+}
+
+/** GET /api/widget/team/?sport={sport}&slug={teamSlug}&limit={limit} — one
+ * team's own recent+upcoming fixtures. Scoped to a single team rather than
+ * every match in the sport, so unlike fetchSportscoreMatches (capped at 50
+ * matches total, across every competition worldwide — confirmed too small
+ * to reliably include even high-profile matches like Valencia CF vs PSG)
+ * this should include today's fixture for that team regardless of how many
+ * other matches are happening globally right now. */
+export async function fetchSportscoreTeamMatches(
+  sport: string,
+  teamSlug: string,
+  limit = 30,
+): Promise<SportscoreMatchSummary[]> {
+  const url = `${SPORTSCORE_BASE}/api/widget/team/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(teamSlug)}&limit=${limit}&src=bet62.plus`;
+  const body = await fetchJson(url);
+  if (body == null) return [];
+  const arr = extractMatchArray(body);
+  if (!arr) return [];
+  const out: SportscoreMatchSummary[] = [];
+  for (const raw of arr) {
+    const m = normalizeSportscoreMatch(raw, sport);
+    if (m) out.push(m);
+  }
+  return out;
+}
+
 /** Finds the best team-name match for `home`/`away` within `sport`'s
  * current SportScore fixtures list. Real fixtures only — unlike BetBY's
  * demo catalogue, a miss here means SportScore genuinely doesn't have this
  * match right now (wrong window, not yet listed, very minor competition),
- * not that the data source itself is fake. */
+ * not that the data source itself is fake.
+ *
+ * Two passes: the global matches list first (cheap, one request), then —
+ * only if that misses — each team's own fixtures list via a couple of
+ * guessed slugs, since the global list's 50-match cap across every
+ * competition worldwide doesn't reliably include every live match. */
 export async function resolveSportscoreMatchByTeams(
   sport: string,
   home: string,
   away: string,
 ): Promise<SportscoreMatchSummary | null> {
   if (!home || !away) return null;
-  const matches = await fetchSportscoreMatches(sport);
-  for (const m of matches) {
-    const direct = teamNamesMatch(m.home, home) && teamNamesMatch(m.away, away);
-    const swapped = teamNamesMatch(m.away, home) && teamNamesMatch(m.home, away);
-    if (direct || swapped) return m;
+
+  const globalMatches = await fetchSportscoreMatches(sport);
+  const globalHit = findByTeams(globalMatches, home, away);
+  if (globalHit) return globalHit;
+
+  for (const teamName of [home, away]) {
+    for (const slug of teamSlugCandidates(teamName)) {
+      const teamMatches = await fetchSportscoreTeamMatches(sport, slug);
+      const hit = findByTeams(teamMatches, home, away);
+      if (hit) return hit;
+    }
   }
   return null;
 }
