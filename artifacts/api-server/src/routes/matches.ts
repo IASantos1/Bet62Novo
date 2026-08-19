@@ -8359,6 +8359,32 @@ export async function ensureFinishedMatchResult(
   return false;
 }
 
+// ─── Legacy scan functions (2026-08-19 audit) ──────────────────────────────
+// scanVolleyballForFinished / scanNHLForFinished / scanNBAForFinished /
+// scanMLBForFinished below write finished results under legacy match-id
+// prefixes (volley-live-*/volley-odds-*, nhl-*, nba-*, mlb-*). Every bet
+// placed today on these sports gets a `pulsescore-<sport>-*` matchId
+// instead (see build*LiveFromPulseScore below) — those are already settled
+// through a completely different, non-Statpal path: PulseScore's own
+// finished-signal / feed-disappearance detection drives
+// finalizeStaleLiveMatch() → enqueueMatchSettlement(), independent of
+// anything here. Confirmed by full-codebase audit: no bet created since the
+// PulseScore migration can ever match a `volley-live-`/`nhl-`/`nba-`/`mlb-`
+// prefixed key, so these four functions are dead for current activity.
+// scanVolleyballForFinished is fully inert without STATPAL_API_KEY (its
+// data source, getVolleyballLive(), returns nothing without one) and
+// scanNHLForFinished/scanNBAForFinished/scanMLBForFinished below each
+// short-circuit on `if (!CONFIG.STATPAL_API_KEY) return;`.
+//
+// Left in place rather than deleted, on purpose: if this deployment ever
+// carries pre-migration bets still pending under one of those legacy match
+// ids (this repo has no way to check a live production database), these are
+// the only code path that could ever resolve them. They cost nothing when
+// dormant. (scanTennisV1ForFinished right after this block is NOT part of
+// this group — despite its name and older comments elsewhere calling it
+// "Statpal V1", it actually calls SportsAPI Pro's v1.tennis endpoint via
+// CONFIG.SPORTSAPI_KEY, not Statpal at all — see SAPI_V1_TENNIS/sapiHeaders
+// above.)
 export async function scanVolleyballForFinished(): Promise<void> {
   try {
     const tournaments = await getVolleyballLive();

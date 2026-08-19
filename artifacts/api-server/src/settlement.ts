@@ -3593,8 +3593,9 @@ function providerMatchIdPrefixesForSport(
       return ["pulsescore-football", "football-v2"];
     case "tennis":
       // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
-      // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
-      // kept for the same pre-migration reason as football-v2 above.
+      // tennis-v1 (SportsAPI Pro v1.tennis — not Statpal, despite the name) and
+      // tennis-v2 (legacy SportsAPI V2) are both dead now but kept for the same
+      // pre-migration reason as football-v2 above.
       return ["pulsescore-tennis", "tennis-v1", "tennis-v2"];
     case "basketball":
       // pulsescore-basketball is the current live prefix
@@ -5822,15 +5823,21 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: Statpal-only — volleyball, tennis, NHL, NBA, MLB.
-      // Football is no longer scanned here — see startSettlementWorker's
+      // Parallel scan — legacy match-id-prefix path only (see the
+      // "Legacy scan functions" comment above scanVolleyballForFinished in
+      // matches.ts, 2026-08-19 audit): dead for any bet placed since the
+      // PulseScore migration, which already settles volleyball/tennis/
+      // hockey/basketball/baseball through finalizeStaleLiveMatch()
+      // instead, independent of this scan entirely. Kept dormant only as a
+      // safety net for any pre-migration bet still pending under a legacy
+      // id. Football is no longer scanned here — see startSettlementWorker's
       // doc comment above for why.
       await Promise.allSettled([
-        scanVolleyballForFinished(),   // volleyball (Statpal live)
-        scanTennisV1ForFinished(),     // tennis (Statpal V1)
-        scanNHLForFinished(),          // hockey (Statpal live + daily)
-        scanNBAForFinished(),          // basketball (Statpal live + daily)
-        scanMLBForFinished(),          // baseball (Statpal live + daily)
+        scanVolleyballForFinished(),   // legacy volley-live-*/volley-odds-* ids (Statpal-gated, inert without STATPAL_API_KEY)
+        scanTennisV1ForFinished(),     // legacy tennis-v1-* ids (SportsAPI Pro, NOT Statpal despite the name)
+        scanNHLForFinished(),          // legacy nhl-* ids (Statpal-gated, inert without STATPAL_API_KEY)
+        scanNBAForFinished(),          // legacy nba-* ids (Statpal-gated, inert without STATPAL_API_KEY)
+        scanMLBForFinished(),          // legacy mlb-* ids (Statpal-gated, inert without STATPAL_API_KEY)
       ]);
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {

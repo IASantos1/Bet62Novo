@@ -33,7 +33,7 @@ The frontend proxies `/api` and `/ws` to the API server at port 8080.
 | `ADMIN_PASSWORD` | Admin panel login password | ✅ Configured |
 | `DATABASE_URL` | PostgreSQL connection string | ✅ Replit-managed (auto-provided) |
 | `REDIS_URL` | BullMQ settlement queue | ✅ Configured |
-| `STATPAL_API_KEY` | Statpal live scores (primary data source) | ✅ Configured |
+| `STATPAL_API_KEY` | Statpal — **no longer used** (owner directive, 2026-08-19: PulseScore is primary for live odds/markets/scores, API-Football for stats/logos — see .env.example §8). Safe to delete this secret entirely. | ⚠️ Still configured — remove it |
 | `STRIPE_SECRET_KEY` | Stripe payments backend | ✅ Configured |
 | `STRIPE_PUBLISHABLE_KEY` | Stripe frontend key | ✅ Configured |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook verification | ✅ Configured |
@@ -46,8 +46,8 @@ The frontend proxies `/api` and `/ws` to the API server at port 8080.
 - `ADMIN_EMAIL=suportebet62@gmail.com`
 - `SMTP_PORT=587`
 - `SMTP_FROM=suportebet62@gmail.com`
-- `FOOTBALL_LIVE_PROVIDER=statpal`
-- `FOOTBALL_DAILY_PROVIDER=statpal`
+- `FOOTBALL_LIVE_PROVIDER=statpal` — **dead var, not referenced anywhere in the codebase** (live football data comes from PulseScore regardless of this). Safe to delete.
+- `FOOTBALL_DAILY_PROVIDER=statpal` — **⚠️ ACTION NEEDED**: this explicit env var overrides the code's default (now `"sportsapipro"` as of 2026-08-19, see lib/config.ts). An explicit value set in Replit/Railway always wins over the code default, so Statpal keeps being used for the daily/pre-match football schedule until this is changed here to `sportsapipro` (or removed, which falls back to the new default) AND `SPORTSAPI_KEY` is set — Claude Code cannot edit this from a git checkout, only a human with deployment access can.
 - `NODE_ENV=development`
 
 ## Database
