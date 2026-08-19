@@ -146,6 +146,38 @@ const SMYTDRYT_HOST_URL =
 const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
+// Revolut Business — used to execute approved withdrawals as real bank
+// transfers (IBAN payouts) instead of a manual off-platform transfer. The
+// OAuth2 refresh_token below can only be minted once by a human completing
+// Revolut's authorization-code consent screen in a browser (see
+// docs/REVOLUT_SETUP in .env.example) — it cannot be obtained by this
+// service on its own. Until all of these are set, revolut/client.ts's
+// isRevolutConfigured() returns false and the payout stays manual (same
+// behavior as before this integration existed).
+const REVOLUT_ENVIRONMENT =
+  (process.env["REVOLUT_ENVIRONMENT"]?.trim() || "sandbox").toLowerCase();
+const REVOLUT_API_BASE_URL =
+  process.env["REVOLUT_API_BASE_URL"]?.trim() ||
+  (REVOLUT_ENVIRONMENT === "production"
+    ? "https://b2b.revolut.com/api/1.0"
+    : "https://sandbox-b2b.revolut.com/api/1.0");
+const REVOLUT_CLIENT_ID = process.env["REVOLUT_CLIENT_ID"] ?? "";
+// Certificate private key uploaded to Revolut's API settings; used to sign
+// the client_assertion JWT for token refresh. Stored with literal "\n" in
+// most env-var UIs (Railway/Replit) — normalized back to real newlines in
+// revolut/client.ts, not here, so CONFIG stays a plain passthrough of env.
+const REVOLUT_PRIVATE_KEY = process.env["REVOLUT_PRIVATE_KEY"] ?? "";
+// Must exactly match the "iss" domain registered in the Revolut Business
+// API app settings (e.g. "bet62.com") — arbitrary values are rejected.
+const REVOLUT_ISSUER = process.env["REVOLUT_ISSUER"] ?? "";
+const REVOLUT_REFRESH_TOKEN = process.env["REVOLUT_REFRESH_TOKEN"] ?? "";
+// Revolut Business account (source of funds) that payouts are sent from.
+const REVOLUT_ACCOUNT_ID = process.env["REVOLUT_ACCOUNT_ID"] ?? "";
+// Signing secret for the /api/withdrawals/revolut-webhook endpoint,
+// retrieved when the webhook is registered in the Revolut Business console.
+const REVOLUT_WEBHOOK_SIGNING_SECRET =
+  process.env["REVOLUT_WEBHOOK_SIGNING_SECRET"] ?? "";
+
 export const CONFIG = {
   SPORTSAPI_KEY,
   STATPAL_API_KEY,
@@ -167,6 +199,14 @@ export const CONFIG = {
   AI_AGENTS_MODEL,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
+  REVOLUT_ENVIRONMENT,
+  REVOLUT_API_BASE_URL,
+  REVOLUT_CLIENT_ID,
+  REVOLUT_PRIVATE_KEY,
+  REVOLUT_ISSUER,
+  REVOLUT_REFRESH_TOKEN,
+  REVOLUT_ACCOUNT_ID,
+  REVOLUT_WEBHOOK_SIGNING_SECRET,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,

@@ -23,6 +23,8 @@ import crypto from "crypto";
 import { CONFIG } from "./lib/config.js";
 import { timingSafeEqualString } from "./lib/security.js";
 import { userIdFromMemberAccount } from "./routes/casino.js";
+import { applyPayoutWebhookEvent } from "./routes/withdrawals.js";
+import { verifyRevolutWebhookSignature } from "./services/revolut/client.js";
 
 const app: Express = express();
 
@@ -177,6 +179,60 @@ app.post(
       logger.error({ err, type: event.type }, "Stripe webhook processing error");
       res.status(500).json({ error: "Processing failed" });
     }
+  },
+);
+
+// ── Revolut Business payout webhook MUST be registered before express.json() ──
+// Signature verification is HMAC-SHA256 over the *raw* request body bytes
+// (see services/revolut/client.ts's verifyRevolutWebhookSignature) — same
+// reasoning as the Stripe and SilentAPI webhooks above.
+app.post(
+  "/api/withdrawals/revolut-webhook",
+  express.raw({ type: "application/json" }),
+  async (req: Request, res: Response) => {
+    const secret = CONFIG.REVOLUT_WEBHOOK_SIGNING_SECRET;
+    if (!secret) {
+      res.status(503).json({ error: "Revolut webhook não configurado." });
+      return;
+    }
+
+    const rawBody = req.body as Buffer;
+    const valid = verifyRevolutWebhookSignature({
+      rawBody,
+      signatureHeader: req.headers["revolut-signature"],
+      timestampHeader: req.headers["revolut-request-timestamp"],
+      secret,
+    });
+    if (!valid) {
+      logger.warn({ ip: req.ip }, "[revolut-webhook] signature verification failed");
+      res.status(401).json({ error: "Invalid signature" });
+      return;
+    }
+
+    let payload: { event?: string; data?: { id?: string; state?: string } };
+    try {
+      payload = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      res.status(400).json({ error: "Invalid JSON" });
+      return;
+    }
+
+    const transactionId = payload.data?.id;
+    const state = payload.data?.state;
+    if (!transactionId || !state) {
+      res.status(400).json({ error: "Missing data.id or data.state" });
+      return;
+    }
+
+    const result = await applyPayoutWebhookEvent({
+      providerReference: transactionId,
+      providerStatus: state,
+      eventId: payload.event,
+      payload,
+      actor: "system:revolut_webhook",
+      ip: req.ip ?? null,
+    });
+    res.status(result.httpStatus).json(result.body);
   },
 );
 

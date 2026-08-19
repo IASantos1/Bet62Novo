@@ -626,6 +626,32 @@ export async function initDb(): Promise<void> {
     `);
 
     console.info("[db/init] Schema initialisation complete.");
+
+    // Isolated from the big multi-statement block above on purpose: this
+    // index enforces "at most one open withdrawal per user" (the app layer
+    // already checks this in getWithdrawalEligibility() before inserting,
+    // but that check-then-insert is not atomic — two concurrent
+    // POST /withdrawals requests can both read "no open withdrawal" before
+    // either commits, letting a user open two simultaneous pending_review
+    // holds). If any live account already has duplicate open withdrawals
+    // from before this fix, CREATE UNIQUE INDEX fails against that existing
+    // data — running it as part of the shared multi-statement query above
+    // would roll back every other pending migration in this batch right
+    // along with it. Keeping it in its own try/catch means that failure
+    // (which needs a human to resolve the offending rows) can't block
+    // schema init for anything else, on this boot or any future one.
+    try {
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS withdrawals_one_open_per_user_idx
+          ON withdrawals (user_id)
+          WHERE status IN ('pending_review', 'approved', 'processing');
+      `);
+    } catch (err) {
+      console.error(
+        "[db/init] Could not create withdrawals_one_open_per_user_idx — likely an existing account has more than one open withdrawal already. Resolve the duplicates (cancel/reject extras) then restart to retry:",
+        err,
+      );
+    }
   } catch (err) {
     console.error("[db/init] Schema initialisation failed:", err);
     throw err;

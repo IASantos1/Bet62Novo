@@ -54,6 +54,7 @@ import {
   SortAsc,
   ChevronLeft,
   CircleDot,
+  MoreVertical,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -3348,6 +3349,20 @@ const OTHER_SPORTS: {
       "Ligue Nationale de Handball",
     ],
   },
+];
+
+// Curated quick-switch sport list for the header overflow ("⋮") menu —
+// deliberately a short, fixed set (not the full OTHER_SPORTS tree) matching
+// the sports the platform prioritises in top-level navigation.
+const HEADER_QUICK_SPORTS: { key: string; label: string; icon: string }[] = [
+  { key: "football", label: "Futebol", icon: "⚽" },
+  { key: "tennis", label: "Ténis", icon: "🎾" },
+  { key: "basketball", label: "Basquete", icon: "🏀" },
+  { key: "hockey", label: "Hóquei de Gelo", icon: "🏒" },
+  { key: "baseball", label: "Basebol", icon: "⚾" },
+  { key: "volleyball", label: "Voleibol", icon: "🏐" },
+  { key: "formula1", label: "Fórmula 1", icon: "🏎️" },
+  { key: "mma", label: "MMA", icon: "🥋" },
 ];
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
@@ -19177,6 +19192,66 @@ export default function Home({
               <span className="text-white">BET</span>
               <span className="text-red-600">62</span>
             </div>
+
+            {/* Overflow ("⋮") quick menu — Top Competições + Desportos */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
+                  title="Competições e desportos"
+                  aria-label="Competições e desportos"
+                >
+                  <MoreVertical size={18} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="bg-zinc-900 border-zinc-700 text-white w-64 max-h-[70vh] overflow-y-auto"
+                align="start"
+              >
+                {sidebarTopLeagues.length > 0 && (
+                  <>
+                    <div className="px-3 pt-2 pb-1 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                      Top Competições
+                    </div>
+                    {sidebarTopLeagues.map((l) => (
+                      <DropdownMenuItem
+                        key={l.league}
+                        onClick={() => {
+                          setSelectedLeague(l.league);
+                          setSelectedSport(l.sport || "all");
+                          setActiveTab("sports");
+                        }}
+                        className="text-zinc-300 focus:bg-zinc-800 focus:text-white cursor-pointer text-sm gap-2"
+                      >
+                        <span className="text-xs leading-none shrink-0">
+                          {COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ?? "🏆"}
+                        </span>
+                        <span className="truncate">{l.league}</span>
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator className="bg-zinc-800" />
+                  </>
+                )}
+                <div className="px-3 pt-2 pb-1 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                  Desportos
+                </div>
+                {HEADER_QUICK_SPORTS.map((s) => (
+                  <DropdownMenuItem
+                    key={s.key}
+                    onClick={() => {
+                      setSelectedSport(s.key);
+                      setSelectedLeague(null);
+                      setSelectedCountry(null);
+                      setActiveTab("sports");
+                    }}
+                    className={`cursor-pointer text-sm gap-2 focus:bg-zinc-800 focus:text-white ${selectedSport === s.key ? "text-red-400" : "text-zinc-300"}`}
+                  >
+                    <span className="text-sm leading-none shrink-0">{s.icon}</span>
+                    <span>{s.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Desktop inline nav — hidden on mobile (uses tab strip below) */}
             <div className="hidden lg:flex items-center ml-12 h-16">

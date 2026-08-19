@@ -7,6 +7,12 @@ import { logger } from "../lib/logger.js";
 import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
 import { timingSafeEqualString } from "../lib/security.js";
+import {
+  isRevolutConfigured,
+  findOrCreateCounterparty,
+  payCounterparty,
+  RevolutNotConfiguredError,
+} from "../services/revolut/client.js";
 
 const router: IRouter = Router();
 
@@ -66,7 +72,7 @@ export function normalizeWebhookWithdrawalStatus(value: string): "processing" | 
   if (!normalized) return null;
   if (["processing", "pending", "in_progress", "in-progress"].includes(normalized)) return "processing";
   if (["paid", "completed", "success", "succeeded"].includes(normalized)) return "paid";
-  if (["failed", "error", "rejected", "declined"].includes(normalized)) return "failed";
+  if (["failed", "error", "rejected", "declined", "reverted"].includes(normalized)) return "failed";
   return null;
 }
 
@@ -447,6 +453,20 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
 
     res.json({ withdrawal });
   } catch (err) {
+    // Defense-in-depth for the race the eligibility check above can't close
+    // on its own: two concurrent requests can both pass the "no open
+    // withdrawal" read before either commits. withdrawals_one_open_per_user_idx
+    // (lib/db/src/init.ts) makes the DB reject the second insert instead —
+    // surface that the same way the app-level check already does, rather
+    // than as a generic 500.
+    const pgErr = err as { code?: string; constraint?: string } | undefined;
+    if (pgErr?.code === "23505" && pgErr.constraint === "withdrawals_one_open_per_user_idx") {
+      res.status(409).json({
+        error: "Já existe um levantamento em curso para esta conta.",
+        code: "WITHDRAWAL_ALREADY_OPEN",
+      });
+      return;
+    }
     logger.error({ err }, "Withdrawal error");
     res.status(500).json({ error: "Erro interno" });
   }
@@ -564,19 +584,25 @@ router.post("/:id/cancel", authMiddleware, async (req: AuthRequest, res: Respons
   }
 });
 
-router.post("/webhook/payout", async (req: Request, res: Response): Promise<void> => {
-  if (!PAYOUT_WEBHOOK_SECRET) {
-    res.status(503).json({ error: "Webhook de payout não configurado." });
-    return;
-  }
-
-  const secret = getWithdrawalWebhookSecret(req as { headers: Record<string, unknown> });
-  if (!timingSafeEqualString(secret, PAYOUT_WEBHOOK_SECRET)) {
-    logger.warn({ ip: req.ip }, "Withdrawal payout webhook rejected: invalid secret");
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
-
+// Core webhook decision logic, extracted so callers other than the generic
+// secret-authenticated HTTP route below — namely the raw-body Revolut
+// webhook route (registered in app.ts, authenticated via HMAC signature
+// instead of the shared secret) — can apply the exact same
+// lookup/transition/ledger/audit behavior. Money-moving logic like this
+// must have exactly one implementation (same rule as
+// applyWithdrawalAdminDecision above).
+export async function applyPayoutWebhookEvent(args: {
+  withdrawalId?: number | string;
+  providerReference?: string;
+  status?: string;
+  providerStatus?: string;
+  decisionReason?: string;
+  note?: string;
+  eventId?: string;
+  payload?: unknown;
+  actor?: string;
+  ip?: string | null;
+}): Promise<{ httpStatus: number; body: Record<string, unknown> }> {
   const {
     withdrawalId,
     providerReference,
@@ -586,28 +612,19 @@ router.post("/webhook/payout", async (req: Request, res: Response): Promise<void
     note,
     eventId,
     payload,
-  } = (req.body ?? {}) as {
-    withdrawalId?: number | string;
-    providerReference?: string;
-    status?: string;
-    providerStatus?: string;
-    decisionReason?: string;
-    note?: string;
-    eventId?: string;
-    payload?: unknown;
-  };
+    actor,
+    ip,
+  } = args;
 
   const targetStatus = normalizeWebhookWithdrawalStatus(status || providerStatus || "");
   if (!targetStatus) {
-    res.status(400).json({ error: "Status de payout inválido." });
-    return;
+    return { httpStatus: 400, body: { error: "Status de payout inválido." } };
   }
 
   const numericId = withdrawalId !== undefined ? Number(withdrawalId) : null;
   const providerRef = typeof providerReference === "string" ? providerReference.trim() : "";
   if ((!numericId || !Number.isFinite(numericId) || numericId <= 0) && !providerRef) {
-    res.status(400).json({ error: "É necessário indicar withdrawalId ou providerReference." });
-    return;
+    return { httpStatus: 400, body: { error: "É necessário indicar withdrawalId ou providerReference." } };
   }
 
   try {
@@ -621,39 +638,35 @@ router.post("/webhook/payout", async (req: Request, res: Response): Promise<void
     }
 
     if (!existing) {
-      res.status(404).json({ error: "Levantamento não encontrado." });
-      return;
+      return { httpStatus: 404, body: { error: "Levantamento não encontrado." } };
     }
 
     if (providerRef && existing.providerReference && existing.providerReference !== providerRef) {
-      res.status(409).json({ error: "providerReference não corresponde ao levantamento." });
-      return;
+      return { httpStatus: 409, body: { error: "providerReference não corresponde ao levantamento." } };
     }
 
     if (existing.status === targetStatus) {
-      res.json({ ok: true, idempotent: true, status: existing.status, withdrawalId: existing.id });
-      return;
+      return { httpStatus: 200, body: { ok: true, idempotent: true, status: existing.status, withdrawalId: existing.id } };
     }
 
     if (!canTransitionWithdrawalStatus(existing.status, targetStatus)) {
-      res.status(400).json({ error: `Transição inválida: ${existing.status} -> ${targetStatus}` });
-      return;
+      return { httpStatus: 400, body: { error: `Transição inválida: ${existing.status} -> ${targetStatus}` } };
     }
 
     const now = new Date();
     const [updated] = await db.transaction(async (tx) => {
       if (targetStatus === "paid") {
         await adjustWithdrawalHoldBalance(tx, {
-          userId: existing.userId,
-          amount: (-Number(existing.amount)).toFixed(2),
+          userId: existing!.userId,
+          amount: (-Number(existing!.amount)).toFixed(2),
         });
         await applyBalanceDelta(tx, {
-          userId: existing.userId,
+          userId: existing!.userId,
           amount: "0.00",
           kind: "withdrawal_paid",
-          idempotencyKey: `withdrawal:${existing.id}:paid`,
+          idempotencyKey: `withdrawal:${existing!.id}:paid`,
           refType: "withdrawal",
-          refId: String(existing.id),
+          refId: String(existing!.id),
         });
       }
 
@@ -661,23 +674,23 @@ router.post("/webhook/payout", async (req: Request, res: Response): Promise<void
         .update(withdrawalsTable)
         .set({
           status: targetStatus,
-          notes: note ?? existing.notes ?? null,
-          reviewedBy: "provider_webhook",
+          notes: note ?? existing!.notes ?? null,
+          reviewedBy: actor ?? "provider_webhook",
           reviewedAt: now,
-          decisionReason: decisionReason ?? existing.decisionReason ?? null,
-          providerReference: providerRef || existing.providerReference || null,
-          processedAt: targetStatus === "processing" || targetStatus === "paid" ? now : existing.processedAt,
+          decisionReason: decisionReason ?? existing!.decisionReason ?? null,
+          providerReference: providerRef || existing!.providerReference || null,
+          processedAt: targetStatus === "processing" || targetStatus === "paid" ? now : existing!.processedAt,
           updatedAt: now,
         })
-        .where(eq(withdrawalsTable.id, existing.id))
+        .where(eq(withdrawalsTable.id, existing!.id))
         .returning();
     });
 
     await auditWithdrawalEvent({
-      actor: "system:payout_webhook",
+      actor: actor ?? "system:payout_webhook",
       action: "withdrawal_webhook_status_updated",
       targetId: String(existing.id),
-      ip: req.ip ?? null,
+      ip: ip ?? null,
       details: {
         previousStatus: existing.status,
         newStatus: targetStatus,
@@ -689,11 +702,31 @@ router.post("/webhook/payout", async (req: Request, res: Response): Promise<void
       },
     });
 
-    res.json({ ok: true, withdrawalId: updated.id, status: updated.status });
+    return { httpStatus: 200, body: { ok: true, withdrawalId: updated.id, status: updated.status } };
   } catch (err) {
     logger.error({ err }, "Withdrawal payout webhook error");
-    res.status(500).json({ error: "Erro interno" });
+    return { httpStatus: 500, body: { error: "Erro interno" } };
   }
+}
+
+router.post("/webhook/payout", async (req: Request, res: Response): Promise<void> => {
+  if (!PAYOUT_WEBHOOK_SECRET) {
+    res.status(503).json({ error: "Webhook de payout não configurado." });
+    return;
+  }
+
+  const secret = getWithdrawalWebhookSecret(req as { headers: Record<string, unknown> });
+  if (!timingSafeEqualString(secret, PAYOUT_WEBHOOK_SECRET)) {
+    logger.warn({ ip: req.ip }, "Withdrawal payout webhook rejected: invalid secret");
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const result = await applyPayoutWebhookEvent({
+    ...(req.body ?? {}),
+    ip: req.ip ?? null,
+  });
+  res.status(result.httpStatus).json(result.body);
 });
 
 router.get("/admin/all", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
@@ -878,6 +911,103 @@ router.put("/admin/:id", adminMiddleware, async (req: AdminRequest, res: Respons
     res.status(failure.httpStatus).json({ error: failure.error });
   } catch (err) {
     logger.error({ err }, "Withdrawal update error");
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Admin-triggered payout execution — deliberately a separate, explicit step
+// from the pending_review -> approved decision above rather than an
+// automatic side effect of approval. Keeping a human in the loop between
+// "this withdrawal passed review" and "real money left the account" matches
+// how the rest of this file is built (risk flags + manual approval before
+// any transfer) and is the safer default for a gambling platform's AML
+// posture. Only withdrawals already in "approved" status are eligible —
+// same rule an admin manually wiring a SEPA transfer would follow.
+router.post("/admin/:id/payout/revolut", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const id = parseInt(String(req.params["id"]), 10);
+  if (!Number.isFinite(id) || id <= 0) {
+    res.status(400).json({ error: "Levantamento inválido." });
+    return;
+  }
+
+  if (!isRevolutConfigured()) {
+    res.status(503).json({ error: "Revolut Business API não configurada." });
+    return;
+  }
+
+  try {
+    const [existing] = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.id, id)).limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Levantamento não encontrado." });
+      return;
+    }
+    if (existing.status !== "approved") {
+      res.status(400).json({
+        error: `Só é possível pagar via Revolut levantamentos com status "approved" (atual: "${existing.status}").`,
+        code: "WITHDRAWAL_NOT_APPROVED",
+        currentStatus: existing.status,
+      });
+      return;
+    }
+
+    let payment;
+    try {
+      const counterparty = await findOrCreateCounterparty({
+        iban: existing.iban,
+        holderName: existing.holderName,
+      });
+      payment = await payCounterparty({
+        counterpartyId: counterparty.id,
+        amount: Number(existing.amount),
+        reference: `Bet62 withdrawal #${existing.id}`,
+        // Stable per-withdrawal idempotency key — a retried request after a
+        // timeout won't double-pay on Revolut's side.
+        requestId: `bet62-withdrawal-${existing.id}`,
+      });
+    } catch (revolutErr) {
+      logger.error({ err: revolutErr, withdrawalId: id }, "Revolut payout execution failed");
+      res.status(502).json({
+        error: "Falha ao executar o pagamento na Revolut. O levantamento continua em 'approved' — pode tentar novamente.",
+        detail: revolutErr instanceof Error ? revolutErr.message : String(revolutErr),
+      });
+      return;
+    }
+
+    const result = await applyWithdrawalAdminDecision({
+      id,
+      status: "processing",
+      reviewedBy: `${req.admin?.username ?? "admin"}:revolut`,
+      decisionReason: "Pagamento iniciado via Revolut Business",
+      providerReference: payment.id,
+      ip: req.ip ?? null,
+    });
+
+    if (result.ok) {
+      res.json({ withdrawal: result.withdrawal, revolutPayment: { id: payment.id, state: payment.state } });
+      return;
+    }
+    // See the identical narrowing comment on the PUT /admin/:id route above
+    // — this package's tsconfig needs the positive branch checked first,
+    // with an explicit cast for the failure branch.
+    const failure = result as { ok: false; httpStatus: number; error: string };
+    // Money already left via Revolut but our own status transition failed
+    // (e.g. a concurrent status change) — surface this loudly so an admin
+    // reconciles by hand instead of the payment going unnoticed.
+    logger.error(
+      { withdrawalId: id, revolutPaymentId: payment.id, error: failure.error },
+      "Revolut payout succeeded but local status transition failed — needs manual reconciliation",
+    );
+    res.status(failure.httpStatus).json({
+      error: failure.error,
+      code: "REVOLUT_PAID_LOCAL_UPDATE_FAILED",
+      revolutPaymentId: payment.id,
+    });
+  } catch (err) {
+    if (err instanceof RevolutNotConfiguredError) {
+      res.status(503).json({ error: err.message });
+      return;
+    }
+    logger.error({ err, withdrawalId: id }, "Revolut payout admin route error");
     res.status(500).json({ error: "Erro interno" });
   }
 });
