@@ -8720,12 +8720,16 @@ async function getDailyLeagues(): Promise<SAPILeagueV2[]> {
   const dailyProvider = normalizeFootballProviderMode(
     CONFIG.FOOTBALL_DAILY_PROVIDER,
   );
-  const sportsApiMissing = !CONFIG.SPORTSAPI_KEY;
+  // Deliberately NOT falling back to Statpal when dailyProvider is explicitly
+  // "sportsapipro" and SPORTSAPI_KEY is missing — that used to silently
+  // reach Statpal anyway (a real trap for anyone who set the provider to
+  // "sportsapipro" specifically to avoid Statpal but forgot the key: they'd
+  // get Statpal data with no error or log explaining why). Only "auto" mode
+  // may use whichever key is actually present; an explicit provider choice
+  // is now strict.
   const canUseStatpal =
     !!CONFIG.STATPAL_API_KEY &&
-    (dailyProvider === "auto" ||
-      dailyProvider === "statpal" ||
-      (dailyProvider === "sportsapipro" && sportsApiMissing));
+    (dailyProvider === "auto" || dailyProvider === "statpal");
   const canUseSportsApi =
     !!CONFIG.SPORTSAPI_KEY &&
     (dailyProvider === "auto" ||

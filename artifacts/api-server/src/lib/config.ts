@@ -12,11 +12,19 @@ const STATPAL_API_KEY =
 const STATPAL_BASE_URL =
   process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
 
+// Owner directive (2026-08-19): Statpal is not to be used anywhere on this
+// platform. PulseScore is primary for live odds/markets/scores (already the
+// case — see services/pulsescore/), API-Football is primary for stats and
+// team/league logos (already the case — see services/apiFootball.ts). These
+// two defaults only cover football's PRE-MATCH schedule and reference/H2H
+// data, which PulseScore's football module doesn't expose — SportsAPI Pro is
+// the only other provider already wired in for that, so it's the default
+// now instead of Statpal.
 const FOOTBALL_DAILY_PROVIDER =
-  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "statpal";
+  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "sportsapipro";
 
 const FOOTBALL_REFERENCE_PROVIDER =
-  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "statpal";
+  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "sportsapipro";
 
 // SilentAPI — third-party casino game aggregator (game launch + wallet
 // callback). Secrets only ever come from the environment, never hardcoded —
