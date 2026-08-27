@@ -2891,13 +2891,37 @@ export function scoreOutcomeForSel(
 
     const spread = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
     if (winning === null && spread) {
-      const side = spread[1]!;
-      const line = parseLine(spread[2]!) ?? parseSelectionLabelLine(sel.label);
-      if (line === null) return null;
-      const diff = ft.home - ft.away;
-      const adj = diff - line;
-      if (adj === 0) voided = true;
-      else winning = side === "home" ? adj > 0 : adj < 0;
+      const side = spread[1]! as "home" | "away";
+      // The key only ever carries the UNSIGNED magnitude (see the regex
+      // above — no +/- in the pattern), so a signed source is needed to
+      // know whether THIS side is favorite (must overcome a deficit) or
+      // underdog (covers within the margin, or wins outright) — that's not
+      // implied by magnitude+side alone. Prefer the bet's stored marketLine,
+      // falling back to a +/- sign parsed off its label (same
+      // readSelectionMarketLine + settleAsianSideHandicapOutcome combo
+      // already used correctly for hockey's puck line below).
+      //
+      // Fixed 2026-08-27: the old code (`diff - line` with `line` always
+      // the unsigned magnitude, `winning = side==="home" ? adj>0 : adj<0`)
+      // implicitly assumed home is ALWAYS the favorite — correct when it
+      // was, but INVERTED for both sides whenever away was the true
+      // favorite. Verified: home wins by 3 with away truly favored -5.5 →
+      // home's real +5.5 bet should win (home won outright) and away's real
+      // -5.5 should lose (away lost) — the old formula graded both exactly
+      // backwards. In production since basketball moved to bwin
+      // (2026-08-09/10); flagged then in applyBasketballPeriodOverrides's
+      // comment (matches.ts) as needing its own dedicated fix, not touched
+      // there — this is that fix. Falls back to the old unsigned-magnitude
+      // behavior (home assumed favorite) only when no signed source exists
+      // at all, so bets placed before a signed marketLine/label was
+      // captured still settle exactly as before.
+      const magnitude = parseLine(spread[2]!);
+      if (magnitude === null) return null;
+      const signedLine = readSelectionMarketLine(sel);
+      const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+      const outcome = settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
+      if (outcome === "void") voided = true;
+      else winning = outcome === "won";
     }
 
     const tt = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
