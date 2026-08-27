@@ -11599,6 +11599,7 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       totalGamesLines: prematchExtra.totalGamesLines ?? [],
       set1Games: prematchExtra.set1Games ?? { line: 0, over: 0, under: 0 },
       gameHandicap: { line: 0, home: 0, away: 0 },
+      oddEvenGames: prematchExtra.oddEvenGames ?? { odd: 0, even: 0 },
     };
     const markets: AdvancedMarkets = { ...baseMarkets, tennisExtra };
 

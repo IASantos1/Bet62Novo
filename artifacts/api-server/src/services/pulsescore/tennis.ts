@@ -630,6 +630,14 @@ export type PulseScoreTennisPrematchExtra = {
   totalGamesLines?: Array<{ line: number; over: number; under: number }>;
   set1Games?: { line: number; over: number; under: number };
   exactSets?: { h20: number; h21: number; a02: number; a12: number };
+  // Total games odd/even — canonicalMarket TOTAL_GOALS_ODD_EVEN, confirmed
+  // real (2026-08-27, onexbet /tennis/leagues sample). Settlement.ts already
+  // has a dedicated oe-odd/oe-even key for this (settlement.ts ~2713) that
+  // correctly uses tennis's own games-derived total, NOT the generic
+  // goe-odd/goe-even key (which reads ft.home+ft.away — SETS won for
+  // tennis, not games; using it here would silently grade the wrong stat).
+  // Matches AdvancedMarkets.tennisExtra's existing oddEvenGames field.
+  oddEvenGames?: { odd: number; even: number };
 };
 
 function collectOverUnderLines(
@@ -737,6 +745,24 @@ export function extractTennisPrematchExtra(
   );
   const set1Lines = collectOverUnderLines(totalGamesSet1);
   if (set1Lines.length > 0) out.set1Games = pickMostEvenLine(set1Lines);
+
+  const oddEvenMarket = markets.find(
+    (m) =>
+      m.canonicalMarket === "TOTAL_GOALS_ODD_EVEN" &&
+      (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (oddEvenMarket) {
+    let odd: number | null = null;
+    let even: number | null = null;
+    for (const sel of oddEvenMarket.selections ?? []) {
+      if (!sel.isActive) continue;
+      const val = oddsToNumber(sel.odds);
+      if (val === null) continue;
+      if (sel.canonicalOutcome === "ODD") odd = val;
+      else if (sel.canonicalOutcome === "EVEN") even = val;
+    }
+    if (odd !== null && even !== null) out.oddEvenGames = { odd, even };
+  }
 
   // SET_BETTING: bet365 shape was one market PER PLAYER (moreInfo.subMarket
   // names which), each listing that player's own winning-score odds
