@@ -100,12 +100,29 @@ export type PulseScoreBasketballOverride = {
   q1?: PulseScoreBasketballPeriodOverride;
   q3?: PulseScoreBasketballPeriodOverride;
   firstHalf?: PulseScoreBasketballPeriodOverride;
+  // q2/q4/secondHalf — CONFIRMED real (2026-08-27, onexbet): the original
+  // 2026-08-15 comment said these three periods were "not named in that
+  // [bwin] sample" so extraction was deliberately limited to q1/q3/
+  // firstHalf pending confirmation. A real onexbet sample now shows all
+  // seven periods (q1-q4, both halves, full-time) for MATCH_RESULT/
+  // OVER_UNDER/ASIAN_HANDICAP, so these three are added the same way.
+  q2?: PulseScoreBasketballPeriodOverride;
+  q4?: PulseScoreBasketballPeriodOverride;
+  secondHalf?: PulseScoreBasketballPeriodOverride;
 };
 
 // Period values this file is confident about extracting — see this file's
 // header for exactly which were confirmed real and why SECOND_QUARTER/
 // FOURTH_QUARTER/SECOND_HALF are deliberately absent from this list.
-const KNOWN_PERIODS = new Set(["FULL_TIME", "FIRST_QUARTER", "THIRD_QUARTER", "FIRST_HALF"]);
+const KNOWN_PERIODS = new Set([
+  "FULL_TIME",
+  "FIRST_QUARTER",
+  "SECOND_QUARTER",
+  "THIRD_QUARTER",
+  "FOURTH_QUARTER",
+  "FIRST_HALF",
+  "SECOND_HALF",
+]);
 
 const seenUnknownPeriods = new Set<string>();
 function recordUnknownPeriod(canonicalMarket: string, period: string): void {
@@ -298,6 +315,12 @@ export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasket
   if (q3.odds || q3.spread || q3.total) out.q3 = q3;
   const firstHalf = extractPeriodBlock(markets, "FIRST_HALF");
   if (firstHalf.odds || firstHalf.spread || firstHalf.total) out.firstHalf = firstHalf;
+  const q2 = extractPeriodBlock(markets, "SECOND_QUARTER");
+  if (q2.odds || q2.spread || q2.total) out.q2 = q2;
+  const q4 = extractPeriodBlock(markets, "FOURTH_QUARTER");
+  if (q4.odds || q4.spread || q4.total) out.q4 = q4;
+  const secondHalf = extractPeriodBlock(markets, "SECOND_HALF");
+  if (secondHalf.odds || secondHalf.spread || secondHalf.total) out.secondHalf = secondHalf;
 
   const known = new Set([
     "MATCH_RESULT",

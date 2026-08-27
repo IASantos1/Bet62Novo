@@ -11620,27 +11620,39 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
-// Applies extractBasketballOverride's confirmed-real q1/q3/firstHalf blocks
-// on top of an already-built (synthetic) basketballExtra object — same "real
-// wins, synthetic fills the gap" pattern as spread/total above, just scoped
-// to the fields that now have a real source (2026-08-15). q2/q4 stay
-// synthetic-only (see extractBasketballOverride's own header for why), and
-// firstHalf simply doesn't exist until real data provides it.
+// Applies extractBasketballOverride's confirmed-real per-period blocks on
+// top of an already-built (synthetic) basketballExtra object — same "real
+// wins, synthetic fills the gap" pattern as spread/total above. q2/q4 added
+// 2026-08-27 (a real onexbet sample now confirms all four quarters, unlike
+// the original 2026-08-15 bwin sample that only named q1/q3/firstHalf) —
+// settlement.ts's q([1-4])-/q([1-4])t- branches are already fully generic
+// across all four quarters (q1/q3 were never special-cased), so this is
+// pure data-availability, not a settlement change. secondHalf is
+// deliberately NOT wired here even though extractBasketballOverride now
+// computes it too: the only "second half" settlement key that exists
+// (2h-home/2h-away/2h-draw) reads football's ht/ft halftime-score split,
+// which basketball doesn't have — it uses a `quarters` array instead (see
+// the q([1-4])- branches). There is no basketball-quarters-based "second
+// half = Q3+Q4" settlement key yet, so wiring odds for a market with
+// nothing correct to grade them would be worse than not showing it; needs
+// its own settlement key (e.g. h2-home/h2-away off quarters[2]+quarters[3])
+// before this can be turned on.
 //
-// Deliberately excludes spread/handicap (q1Spread/q3Spread/firstHalfSpread)
-// even though extractBasketballOverride already computes it: while wiring
-// this up, b-spread-home/b-spread-away's settlement (settlement.ts ~2873)
-// was found to silently discard the spread's sign (Math.abs(_spread) as the
-// selector line) and apply the same "-line" adjustment to whichever side is
-// backed — verified numerically to invert the correct outcome whenever AWAY
-// is the actual favorite (e.g. home wins by 3 with away truly favored by
-// -5.5: home's +5.5 bet should win, away's -5.5 bet should lose; the current
-// formula settles the exact opposite). That's a pre-existing bug in the
-// FULL-GAME spread market too (in production since basketball moved to bwin,
-// 2026-08-09/10), not something introduced here — flagged separately, not
-// fixed in this change, since it needs its own dedicated fix+tests rather
-// than being extended to two more markets while still broken. Winner and
-// total have no such sign ambiguity (plain score comparisons) and are safe.
+// Deliberately excludes spread/handicap (q1Spread/q3Spread/q2Spread/
+// q4Spread/firstHalfSpread) even though extractBasketballOverride already
+// computes it: while wiring q1/q3 up, b-spread-home/b-spread-away's
+// settlement (settlement.ts) was found to silently discard the spread's
+// sign and effectively assume home was always the favorite — since fixed
+// (2026-08-27, see settlement.ts's b-spread- branch) for the FULL-GAME
+// market. The period-scoped equivalent (q1s-/q3s-, quarters[]-based) was
+// separately checked and found to already be correct (it captures a signed
+// line directly from the key, using its own self-consistent "positive =
+// favorite" convention) — but extractSpread here pulls PulseScore's real
+// line in the OPPOSITE, standard sportsbook convention ("negative =
+// favorite"), so wiring it in as-is would silently invert every period
+// spread bet. Needs the sign flipped at the point a q1s-/q2s-/q3s-/q4s-
+// selection key gets built from this override, not just here — left
+// synthetic-only until that's done deliberately, not by oversight.
 function applyBasketballPeriodOverrides(
   markets: AdvancedMarkets,
   override: PulseScoreBasketballOverride,
@@ -11653,6 +11665,10 @@ function applyBasketballPeriodOverrides(
   if (override.q3?.total) extra.q3Total = override.q3.total;
   if (override.firstHalf?.odds) extra.firstHalf = override.firstHalf.odds;
   if (override.firstHalf?.total) extra.firstHalfTotal = override.firstHalf.total;
+  if (override.q2?.odds) extra.q2 = override.q2.odds;
+  if (override.q2?.total) extra.q2Total = override.q2.total;
+  if (override.q4?.odds) extra.q4 = override.q4.odds;
+  if (override.q4?.total) extra.q4Total = override.q4.total;
 }
 
 /**
