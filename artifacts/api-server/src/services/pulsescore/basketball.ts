@@ -73,6 +73,10 @@ export type PulseScoreBasketballPeriodOverride = {
   odds?: { home: number; away: number };
   spread?: { line: number; home: number; away: number };
   total?: { line: number; over: number; under: number };
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  teamTotalHome?: { line: number; over: number; under: number };
+  teamTotalAway?: { line: number; over: number; under: number };
+  oddEven?: { odd: number; even: number };
 };
 export type PulseScoreBasketballOverride = {
   odds?: { home: number; away: number };
@@ -82,6 +86,17 @@ export type PulseScoreBasketballOverride = {
   // `_spread` convention) must negate it themselves.
   spread?: { line: number; home: number; away: number };
   total?: { line: number; over: number; under: number };
+  // Double Chance / team totals / odd-even: settlement.ts already grades
+  // these generically for any sport (dc-hd/dc-da/dc-ha off plain
+  // home/away/draw comparisons, goe-odd/goe-even off home+away parity,
+  // b-tt-home/away-o/u-<line> off a plain score-vs-line check — see
+  // scoreOutcomeForSel) so wiring real odds in needs no new settlement
+  // code, unlike spread. Confirmed real (2026-08-27, onexbet
+  // GET /live-events?sport=basketball and /basketball/leagues samples).
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  teamTotalHome?: { line: number; over: number; under: number };
+  teamTotalAway?: { line: number; over: number; under: number };
+  oddEven?: { odd: number; even: number };
   q1?: PulseScoreBasketballPeriodOverride;
   q3?: PulseScoreBasketballPeriodOverride;
   firstHalf?: PulseScoreBasketballPeriodOverride;
@@ -156,6 +171,43 @@ function extractTotal(market: PulseScoreMarket): { line: number; over: number; u
   return over !== null && under !== null && line !== null ? { line, over, under } : null;
 }
 
+function extractDoubleChance(
+  market: PulseScoreMarket,
+): { homeOrDraw: number; awayOrDraw: number; homeOrAway: number } | null {
+  let hd: number | null = null;
+  let da: number | null = null;
+  let ha: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "HOME_DRAW") hd = val;
+    else if (sel.canonicalOutcome === "DRAW_AWAY") da = val;
+    else if (sel.canonicalOutcome === "HOME_AWAY") ha = val;
+  }
+  return hd !== null && da !== null && ha !== null
+    ? { homeOrDraw: hd, awayOrDraw: da, homeOrAway: ha }
+    : null;
+}
+
+function extractOddEven(market: PulseScoreMarket): { odd: number; even: number } | null {
+  let odd: number | null = null;
+  let even: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "ODD") odd = val;
+    else if (sel.canonicalOutcome === "EVEN") even = val;
+  }
+  return odd !== null && even !== null ? { odd, even } : null;
+}
+
+// HOME_OVER_UNDER/AWAY_OVER_UNDER share the exact same over/under selection
+// shape as OVER_UNDER (extractTotal above) — just scoped to one team's own
+// score instead of the combined total.
+const extractTeamTotal = extractTotal;
+
 /** Same extraction logic as the FULL_TIME block below, generalized to any
  * single period string — used both for FULL_TIME (via extractBasketballOverride)
  * and for the confirmed period-scoped blocks (FIRST_QUARTER, THIRD_QUARTER,
@@ -180,6 +232,18 @@ function extractPeriodBlock(
       (m.canonicalMarket === "ASIAN_HANDICAP" || m.canonicalMarket === "EUROPEAN_HANDICAP") &&
       isThisPeriod(m),
   );
+  const doubleChanceMarkets = markets.filter(
+    (m) => m.canonicalMarket === "DOUBLE_CHANCE" && isThisPeriod(m),
+  );
+  const homeTotalMarkets = markets.filter(
+    (m) => m.canonicalMarket === "HOME_OVER_UNDER" && isThisPeriod(m),
+  );
+  const awayTotalMarkets = markets.filter(
+    (m) => m.canonicalMarket === "AWAY_OVER_UNDER" && isThisPeriod(m),
+  );
+  const oddEvenMarkets = markets.filter(
+    (m) => m.canonicalMarket === "TOTAL_GOALS_ODD_EVEN" && isThisPeriod(m),
+  );
 
   if (moneylineMarkets.length === 1) {
     const ml = extractMoneyline(moneylineMarkets[0]!);
@@ -197,14 +261,33 @@ function extractPeriodBlock(
       Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
     );
   }
+  if (doubleChanceMarkets.length === 1) {
+    const dc = extractDoubleChance(doubleChanceMarkets[0]!);
+    if (dc) out.doubleChance = dc;
+  }
+  if (homeTotalMarkets.length === 1) {
+    const tt = extractTeamTotal(homeTotalMarkets[0]!);
+    if (tt) out.teamTotalHome = tt;
+  }
+  if (awayTotalMarkets.length === 1) {
+    const tt = extractTeamTotal(awayTotalMarkets[0]!);
+    if (tt) out.teamTotalAway = tt;
+  }
+  if (oddEvenMarkets.length === 1) {
+    const oe = extractOddEven(oddEvenMarkets[0]!);
+    if (oe) out.oddEven = oe;
+  }
   return out;
 }
 
 /** Builds a market override from one PulseScore basketball event's Money
  * Line / Spread / Total markets — FULL_TIME plus the three confirmed
  * period-scoped blocks (q1/q3/firstHalf; see this file's header for why
- * q2/q4/secondHalf aren't included yet). Returns an empty object (not null)
- * when none are recognised yet — callers should only apply fields present. */
+ * q2/q4/secondHalf aren't included yet). FULL_TIME also carries Double
+ * Chance / home+away team totals / odd-even (2026-08-27) — period-scoped
+ * versions of those four aren't extracted yet, matches.ts only wires the
+ * FULL_TIME ones in for now. Returns an empty object (not null) when none
+ * are recognised yet — callers should only apply fields present. */
 export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasketballOverride {
   const markets = ev.markets ?? [];
   const out: PulseScoreBasketballOverride = extractPeriodBlock(markets, "FULL_TIME");
@@ -216,7 +299,16 @@ export function extractBasketballOverride(ev: PulseScoreEvent): PulseScoreBasket
   const firstHalf = extractPeriodBlock(markets, "FIRST_HALF");
   if (firstHalf.odds || firstHalf.spread || firstHalf.total) out.firstHalf = firstHalf;
 
-  const known = new Set(["MATCH_RESULT", "ASIAN_HANDICAP", "EUROPEAN_HANDICAP", "OVER_UNDER"]);
+  const known = new Set([
+    "MATCH_RESULT",
+    "ASIAN_HANDICAP",
+    "EUROPEAN_HANDICAP",
+    "OVER_UNDER",
+    "DOUBLE_CHANCE",
+    "HOME_OVER_UNDER",
+    "AWAY_OVER_UNDER",
+    "TOTAL_GOALS_ODD_EVEN",
+  ]);
   for (const market of markets) {
     if (!known.has(market.canonicalMarket)) {
       recordUnknownCanonicalMarket(market.canonicalMarket);

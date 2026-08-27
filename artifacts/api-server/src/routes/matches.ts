@@ -11706,6 +11706,20 @@ async function buildBasketballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
       };
       markets._total = override.total.line;
     }
+    // Double Chance / team totals / odd-even: real onexbet FULL_TIME data
+    // overrides basketball's all-zero synthetic doubleChance and
+    // Poisson-derived teamTotalHome/teamTotalAway when present, same
+    // "real wins, synthetic fills the gap" pattern as spread/total above.
+    // No new settlement code needed for any of these three — see
+    // extractBasketballOverride's own header.
+    if (override.doubleChance) markets.doubleChance = override.doubleChance;
+    if (override.teamTotalHome) {
+      markets.basketballExtra = { ...markets.basketballExtra!, teamTotalHome: override.teamTotalHome };
+    }
+    if (override.teamTotalAway) {
+      markets.basketballExtra = { ...markets.basketballExtra!, teamTotalAway: override.teamTotalAway };
+    }
+    if (override.oddEven) markets.goalOddEven = override.oddEven;
     applyBasketballPeriodOverrides(markets, override);
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
@@ -11822,6 +11836,16 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
       };
       markets._total = override.total.line;
     }
+    // Same real-overrides-synthetic wiring as the prematch builder above —
+    // see that function's comment.
+    if (override.doubleChance) markets.doubleChance = override.doubleChance;
+    if (override.teamTotalHome) {
+      markets.basketballExtra = { ...markets.basketballExtra!, teamTotalHome: override.teamTotalHome };
+    }
+    if (override.teamTotalAway) {
+      markets.basketballExtra = { ...markets.basketballExtra!, teamTotalAway: override.teamTotalAway };
+    }
+    if (override.oddEven) markets.goalOddEven = override.oddEven;
     applyBasketballPeriodOverrides(markets, override);
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
@@ -11853,6 +11877,12 @@ async function buildBasketballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         result: now + 8_000,
         handicap: now + 8_000,
         totalGoals: now + 8_000,
+        // Double Chance, team totals, and odd-even are all just as
+        // repriced by a basket as the three markets above — added
+        // 2026-08-27 alongside wiring real odds in for them, same
+        // stale-price exposure this mechanism exists to prevent.
+        doubleChance: now + 8_000,
+        goalOddEven: now + 8_000,
       };
       suspensionReason = "PONTOS!";
     }
