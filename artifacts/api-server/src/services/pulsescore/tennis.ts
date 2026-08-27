@@ -36,20 +36,18 @@
 // support — see their own comments — since they don't regress bet365.
 //
 // Moved to onexbet (1xBet) 2026-08-27 alongside every non-football sport.
-// Unlike bwin, onexbet's own docs explicitly claim real live set/point data
-// for tennis (a `statistics` block with per-set scores, `moreInfo.gamePoints`
-// for the current game's point score, `moreInfo.currentPeriod`) — so this
-// isn't the same dead-end bwin was. But the docs don't give the exact field
-// shape, and no real onexbet tennis live sample has been checked yet (unlike
-// every other bookmaker swap in this file's history, all confirmed against
-// real data before shipping). parseTennisSets/parseTennisPoints below add a
-// best-effort onexbet path (statistics.sets for completed sets + ev.score
-// for the in-progress one, mirroring volleyball.ts's confirmed unibetau
-// shape; moreInfo.gamePoints reusing the XP parser) ADDITIVELY alongside the
-// existing moreInfo.SS/XP path — bet365 keeps working unchanged, onexbet
-// gets a real attempt, but homeSetsWon/awaySetsWon staying at 0-0 for onexbet
-// (the exact settlement bug this comment describes above for bwin) is still
-// possible until this is checked against one real live onexbet tennis event.
+// Unlike bwin, onexbet DOES carry real live set/point data for tennis —
+// CONFIRMED against a real GET /live-events?sport=tennis sample the same
+// day: a `statistics.sets` block with per-set game counts (last entry is
+// the in-progress set, same semantic as bet365's moreInfo.SS),
+// `moreInfo.gamePoints` for the current game's point score ("H:A" with a
+// colon, not bet365's XP hyphen format — see parseTennisPointsFromGamePoints),
+// and `ev.score` as a SETS WON summary (not a live game count — an initial,
+// pre-real-data guess in this file wrongly treated it as one and appended it
+// as a fake extra set; corrected once the real sample arrived). This isn't
+// the bwin dead-end: parseTennisSets/parseTennisPoints below add this
+// confirmed onexbet path ADDITIVELY alongside the existing moreInfo.SS/XP
+// path — bet365 keeps working unchanged if TENNIS_BOOKMAKER ever reverts.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -230,42 +228,40 @@ function parseTennisSetsFromSS(ss: unknown): Array<[number, number]> {
   return sets;
 }
 
-// onexbet (unverified — see this file's header): PulseScore's own docs
-// describe a `statistics` block carrying completed sets' scores as parallel
-// arrays for tennis/volleyball/badminton, with the CURRENT in-progress set's
-// live game count in `ev.score` instead — exactly the split already
-// confirmed real for volleyball's unibetau feed (volleyball.ts's header:
-// statistics.sets = completed sets, ev.score = current set in progress).
-// Applying that same confirmed pattern here since the docs group tennis and
-// volleyball under the identical statistics wording, but this specific
-// mapping has not itself been checked against a real onexbet tennis event.
+// onexbet — CONFIRMED against a real GET /live-events?sport=tennis sample
+// (2026-08-27): statistics.sets.home/away are parallel arrays of GAMES per
+// set, one entry per set INCLUDING the current in-progress set as the last
+// entry — same "last entry is in progress" semantic as bet365's moreInfo.SS,
+// e.g. a real 2nd-set-in-progress event carried sets home=[6,3] away=[2,4]
+// (set 1 finished 6-2 home, set 2 in progress 3-4). ev.score is NOT part of
+// this array — it's SETS WON (a summary count), confirmed by cross-checking
+// that same event: ev.score was {home:"1", away:"0"}, which matches
+// homeSetsWon=1 once isFinishedTennisSetScore below filters the in-progress
+// second set out of statistics.sets. An earlier version of this function
+// wrongly appended ev.score as a fake extra "set" on top of statistics.sets
+// (a guess made before this real sample existed) — corrected now that real
+// data disproved it; don't reintroduce that append.
 function parseTennisSetsFromStatistics(ev: PulseScoreEvent): Array<[number, number]> {
   const stats = (ev as PulseScoreEvent & {
     statistics?: { sets?: { home?: number[]; away?: number[] } };
   }).statistics;
   const home = stats?.sets?.home;
   const away = stats?.sets?.away;
+  if (!Array.isArray(home) || !Array.isArray(away)) return [];
+  const len = Math.min(home.length, away.length);
   const sets: Array<[number, number]> = [];
-  if (Array.isArray(home) && Array.isArray(away)) {
-    const len = Math.min(home.length, away.length);
-    for (let i = 0; i < len; i++) {
-      const h = home[i];
-      const a = away[i];
-      if (typeof h === "number" && typeof a === "number") sets.push([h, a]);
-    }
-  }
-  const curHome = Number(ev.score?.home);
-  const curAway = Number(ev.score?.away);
-  if (Number.isFinite(curHome) && Number.isFinite(curAway) && (curHome > 0 || curAway > 0)) {
-    sets.push([curHome, curAway]);
+  for (let i = 0; i < len; i++) {
+    const h = home[i];
+    const a = away[i];
+    if (typeof h === "number" && typeof a === "number") sets.push([h, a]);
   }
   return sets;
 }
 
-// SS first (bet365, confirmed real), falling back to the statistics/score
-// shape (onexbet, unverified) only when SS is absent — never mixes the two,
-// and produces [] rather than a wrong guess when neither bookmaker's fields
-// are actually populated (e.g. bwin, which has neither).
+// SS first (bet365, confirmed real), falling back to the statistics shape
+// (onexbet, also confirmed real) only when SS is absent — never mixes the
+// two, and produces [] rather than a wrong guess when neither bookmaker's
+// fields are actually populated (e.g. bwin, which has neither).
 function parseTennisSets(ev: PulseScoreEvent): Array<[number, number]> {
   const ssSets = parseTennisSetsFromSS(ev.moreInfo?.["SS"]);
   if (ssSets.length > 0) return ssSets;
@@ -356,25 +352,27 @@ function parseTennisPointsFromXP(xp: unknown): [string, string] | undefined {
   return [h, a];
 }
 
-// onexbet (unverified — see this file's header): docs name a
-// `moreInfo.gamePoints` field for racket sports' current game point score
-// but don't give its exact shape, so this handles both plausible forms —
-// a bet365-style "H-A" string (reuses the XP parser above) or a {home,away}
-// object — and returns undefined for anything else rather than guess wrong.
+// onexbet — CONFIRMED against a real GET /live-events?sport=tennis sample
+// (2026-08-27): moreInfo.gamePoints is a "H:A" string with a COLON
+// separator (e.g. "40:40", "15:40", "0:0"), NOT bet365's XP hyphen format
+// ("15-30") — reusing the XP parser as-is (an earlier, pre-real-data version
+// of this function did exactly that) silently fails to split it. Advantage
+// is denoted "A" here (seen: "40:A"), not bet365's "AD" — handled alongside
+// "AD"/"ad" defensively. Deep-into-a-tiebreak samples showed values past 40
+// (seen: "11:12", "2:8" during a 3rd-set breaker) — passed through as-is,
+// same "unrecognized shape, don't guess" behavior the XP parser already has;
+// whether matches.ts's tennisPointValue displays those usefully is a
+// separate, not-yet-checked concern.
 function parseTennisPointsFromGamePoints(raw: unknown): [string, string] | undefined {
-  if (typeof raw === "string") return parseTennisPointsFromXP(raw);
-  if (raw && typeof raw === "object") {
-    const obj = raw as Record<string, unknown>;
-    const h = obj["home"];
-    const a = obj["away"];
-    if (
-      (typeof h === "string" || typeof h === "number") &&
-      (typeof a === "string" || typeof a === "number")
-    ) {
-      return parseTennisPointsFromXP(`${h}-${a}`);
-    }
-  }
-  return undefined;
+  if (typeof raw !== "string") return undefined;
+  const parts = raw.split(":").map((p) => p.trim());
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return undefined;
+  const [h, a] = parts as [string, string];
+  const hAD = /^a(d)?$/i.test(h);
+  const aAD = /^a(d)?$/i.test(a);
+  if (hAD || aAD) return [hAD ? "AD" : "40", aAD ? "AD" : "40"];
+  if (h === "40" && a === "40") return ["D", "D"];
+  return [h, a];
 }
 
 function parseTennisPoints(ev: PulseScoreEvent): [string, string] | undefined {
