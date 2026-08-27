@@ -1,21 +1,23 @@
 // Volleyball prematch odds from PulseScore. Built from scratch 2026-08-09,
-// pinned to "bwin" (VOLLEYBALL_BOOKMAKER below) — volleyball had no
+// pinned to bwin (VOLLEYBALL_BOOKMAKER below) — volleyball had no
 // PulseScore integration at all before this (odds came from a since-
 // disconnected Statpal feed, used today only to recover final scores for
 // old bets — see matches.ts's scanVolleyballForFinished — and a
 // computeVolleyballExtras synthetic model that was written but never
 // actually wired up anywhere).
 //
-// Live: pinned to bet365 instead (see getPulseScoreVolleyballLive below) —
-// a real GET /live-events?sport=volleyball comparison (2026-08-09) showed
-// bwin's volleyball live events carry NO score field at all (only
-// matchClock.period, e.g. "2nd Set"), while bet365's DO carry a `score`
-// object. Every non-volleyball sport in this codebase uses the SAME
-// bookmaker for prematch and live — volleyball is the first exception,
-// which matters for id/name matching (see matches.ts's
-// isUpcomingAlreadyLive: prematch's bwin "Manaus Nilton Lins" vs live's
-// bet365 "Nilton Lins" need the fuzzy team-name fallback, not exact string
-// match, to recognize the same real match).
+// Live: originally split onto a separate bookmaker (bwin's volleyball live
+// events carried no `score` field at all, only matchClock.period — see git
+// history) then Unibet Australia ("unibetau"), which did carry real score/
+// matchClock/statistics.sets. Both prematch and live moved to onexbet
+// (1xBet) 2026-08-27 alongside every non-football sport — its docs
+// explicitly confirm volleyball live events carry score/matchClock and a
+// per-set statistics block, same shape unibetau had, so this reunifies
+// prematch and live onto one bookmaker again. Not yet re-verified against a
+// real onexbet live sample; if it turns out onexbet's volleyball live feed
+// is missing score/statistics the way bwin's was, VOLLEYBALL_LIVE_BOOKMAKER
+// below is the one line to revert back to "unibetau" — keep prematch and
+// live independently overridable for exactly that reason.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -239,10 +241,8 @@ const VOLLEYBALL_UPCOMING_TTL_MS = 5 * 60_000;
 let upcomingCache: { events: PulseScoreVolleyballPrematchEvent[]; fetchedAt: number } | null = null;
 let upcomingInFlight: Promise<PulseScoreVolleyballPrematchEvent[]> | null = null;
 
-// Pinned explicitly, same reasoning as hockey.ts's HOCKEY_BOOKMAKER —
-// volleyball has no live poller of its own to share a budget with yet (see
-// file header), so this is the only bwin consumer in this file.
-const VOLLEYBALL_BOOKMAKER = "bwin";
+// Pinned explicitly, same reasoning as hockey.ts's HOCKEY_BOOKMAKER.
+const VOLLEYBALL_BOOKMAKER = "onexbet";
 
 async function fetchAllVolleyballLeagues(): Promise<PulseScoreVolleyballLeague[]> {
   const leagues: PulseScoreVolleyballLeague[] = [];
@@ -336,7 +336,7 @@ type UnibetVolleyballLiveResponse = {
   events: PulseScoreVolleyballLiveEvent[];
 };
 
-const VOLLEYBALL_LIVE_BOOKMAKER = "unibetau";
+const VOLLEYBALL_LIVE_BOOKMAKER = "onexbet";
 const VOLLEYBALL_LIVE_TTL_MS = 1_000; // same PRO-plan 1 req/s budget as other live pollers
 let liveCache: { events: PulseScoreVolleyballLiveEvent[]; fetchedAt: number } | null = null;
 let liveInFlight: Promise<PulseScoreVolleyballLiveEvent[]> | null = null;
@@ -350,18 +350,18 @@ async function fetchVolleyballLive(): Promise<PulseScoreVolleyballLiveEvent[]> {
   return Array.isArray(data?.events) ? data.events : [];
 }
 
-/** Live volleyball score from PulseScore (Unibet Australia), REST-only.
+/** Live volleyball score from PulseScore (onexbet), REST-only.
  * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
  * fails on the very first attempt (nothing cached yet to fall back to).
- * Markets use different canonicalMarket/rawName shapes than bwin's
- * (extractVolleyballOverride was built against bwin's "Match Result"/
- * "Set 1 Winner"/"Total Points"/"Correct Score" naming, unibetau's real
- * sample showed "Match Odds"/"Correct Score"/"Total Points - Set N"/
- * "Set N" instead) — NOT re-extracted here yet, matches.ts's live builder
- * uses the same synthetic-odds fallback prematch already falls back to
- * when bwin hasn't priced a market, until unibetau's shapes are mapped
- * separately. Score/clock/sets ARE real and confirmed, unlike the two
- * earlier attempts. */
+ * The live feed's own markets are not re-extracted here — extractVolleyballOverride
+ * was built against bwin's "Match Result"/"Set 1 Winner"/"Total Points"/
+ * "Correct Score" naming, and this bookmaker's rawName conventions weren't
+ * confirmed to line up with it — matches.ts's live builder instead uses the
+ * same synthetic-odds fallback prematch already falls back to when its
+ * bookmaker hasn't priced a market, until this bookmaker's shapes are mapped
+ * separately. Score/clock/sets are the part expected to work (same
+ * statistics.sets shape unibetau confirmed real), not yet re-verified
+ * against a live onexbet sample though — see this file's header. */
 export async function getPulseScoreVolleyballLive(): Promise<PulseScoreVolleyballLiveEvent[]> {
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();

@@ -1,12 +1,12 @@
-// Ice hockey prematch odds from PulseScore. Pinned to "bwin" (HOCKEY_BOOKMAKER
-// below), mirroring football/basketball/tennis's move. Built from scratch
+// Ice hockey prematch odds from PulseScore. Pinned to its own bookmaker
+// (HOCKEY_BOOKMAKER below) — bwin from 2026-08-09, moved to onexbet (1xBet)
+// 2026-08-27 alongside every non-football sport. Built from scratch
 // 2026-08-09 — hockey had no PulseScore integration at all before this
 // (odds came from a since-disconnected Statpal/SportsAPI Pro feed, with
 // most markets synthetic — see matches.ts's makeHockeyMarketsFromTeams).
-// Live is NOT implemented here yet, same reasoning as basketball.ts: no real
-// /live-events?sport=ice-hockey sample has been seen, only the prematch
-// /ice-hockey/leagues catalog — needed before that path can be wired up
-// without guessing.
+// Prematch-only here, reading only canonicalMarket/canonicalOutcome (which
+// PulseScore documents as identical across bookmakers) — live hockey comes
+// from genericSportLive.ts's separate REST poller (also moved to onexbet).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -216,8 +216,8 @@ let upcomingInFlight: Promise<PulseScoreHockeyPrematchEvent[]> | null = null;
 
 // Pinned explicitly, same reasoning as basketball.ts's BASKETBALL_BOOKMAKER —
 // hockey has no live poller of its own to share a budget with yet (see file
-// header), so this is the only bwin consumer in this file.
-const HOCKEY_BOOKMAKER = "bwin";
+// header), so this is the only onexbet consumer in this file.
+const HOCKEY_BOOKMAKER = "onexbet";
 
 async function fetchAllHockeyLeagues(): Promise<PulseScoreHockeyLeague[]> {
   const leagues: PulseScoreHockeyLeague[] = [];

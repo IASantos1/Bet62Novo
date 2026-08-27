@@ -1,11 +1,15 @@
-// Basketball prematch odds from PulseScore. Pinned to its own "bwin"
-// bookmaker (BASKETBALL_BOOKMAKER below) as of 2026-08-09, mirroring
-// football.ts's move — same REST/cache/pacing pattern.
+// Basketball prematch odds from PulseScore. Pinned to its own bookmaker
+// (BASKETBALL_BOOKMAKER below) — bwin from 2026-08-09, moved to onexbet
+// (1xBet) 2026-08-27 alongside every non-football sport, mirroring
+// football.ts's move — same REST/cache/pacing pattern. Uses only
+// canonicalMarket/canonicalOutcome and score/matchClock, which PulseScore
+// documents as identical across bookmakers, so the bwin→onexbet switch
+// carries no bookmaker-specific field risk here (unlike tennis.ts).
 //
-// Live: confirmed against a real GET /live-events?sport=basketball sample
-// (2026-08-09, bwin) — see getPulseScoreBasketballLive below for the shape
-// differences from football's live feed (no per-second clock, score as
-// strings).
+// Live: originally confirmed against a real GET /live-events?sport=basketball
+// sample (2026-08-09, bwin) — see getPulseScoreBasketballLive below for the
+// shape differences from football's live feed (no per-second clock, score as
+// strings). Not yet re-verified against a real onexbet sample.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -266,8 +270,8 @@ let upcomingInFlight: Promise<PulseScoreBasketballPrematchEvent[]> | null = null
 
 // Pinned explicitly, same reasoning as football.ts's FOOTBALL_BOOKMAKER —
 // basketball has no live poller of its own to share a budget with yet (see
-// file header), so this is the only bwin consumer in this file.
-const BASKETBALL_BOOKMAKER = "bwin";
+// file header), so this is the only onexbet consumer in this file.
+const BASKETBALL_BOOKMAKER = "onexbet";
 
 async function fetchAllBasketballLeagues(): Promise<PulseScoreBasketballLeague[]> {
   const leagues: PulseScoreBasketballLeague[] = [];

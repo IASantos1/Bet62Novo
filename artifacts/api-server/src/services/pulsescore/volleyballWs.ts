@@ -1,6 +1,6 @@
-// Volleyball live odds from PulseScore via WebSocket. Pinned to "bwin"
-// for prematch parity (volleyball.ts uses bwin for leagues catalog,
-// unibetau only for live REST poll). Built 2026-08-15 alongside
+// Volleyball live odds from PulseScore via WebSocket. Pinned to onexbet,
+// matching volleyball.ts's VOLLEYBALL_BOOKMAKER/VOLLEYBALL_LIVE_BOOKMAKER
+// (both onexbet as of 2026-08-27). Built 2026-08-15 alongside
 // hockeyWs.ts for P35 (BetBY mini-tracker all-sports activation).
 // Same fail-closed design as hockeyWs: if no frames ever arrive, the
 // in-memory map stays empty and callers (matchBetbyEventToPulseScore)
@@ -87,7 +87,7 @@ function connect(): void {
   if (!CONFIG.PULSESCORE_API_KEY) return;
   if (connected) return;
 
-  const url = pulseScoreWsUrl("volleyball", "bwin");
+  const url = pulseScoreWsUrl("volleyball", "onexbet");
   let socket: WebSocket;
   try {
     socket = new WebSocket(url);

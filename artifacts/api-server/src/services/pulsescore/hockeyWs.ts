@@ -1,4 +1,4 @@
-// Ice hockey live odds from PulseScore via WebSocket. Pinned to "bwin"
+// Ice hockey live odds from PulseScore via WebSocket. Pinned to onexbet
 // (matches hockey.ts's HOCKEY_BOOKMAKER), mirroring basketballWs.ts's
 // per-event freshness design. Built 2026-08-15 alongside volleyballWs.ts
 // for P35 (BetBY mini-tracker all-sports activation — football/tennis/
@@ -91,7 +91,7 @@ function connect(): void {
   if (!CONFIG.PULSESCORE_API_KEY) return;
   if (connected) return;
 
-  const url = pulseScoreWsUrl("ice-hockey", "bwin");
+  const url = pulseScoreWsUrl("ice-hockey", "onexbet");
   let socket: WebSocket;
   try {
     socket = new WebSocket(url);

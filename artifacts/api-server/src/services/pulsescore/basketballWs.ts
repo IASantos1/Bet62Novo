@@ -124,11 +124,11 @@ function connect(): void {
   if (!CONFIG.PULSESCORE_API_KEY) return; // not configured yet
   if (connected) return;
 
-  // Pinned to "bwin" — matches basketball.ts's REST source
-  // (BASKETBALL_BOOKMAKER), the only bookmaker confirmed to carry the
-  // matchClock.period + MATCH_RESULT market shape this codebase's
-  // extraction logic depends on for basketball.
-  const url = pulseScoreWsUrl("basketball", "bwin");
+  // Kept in sync with basketball.ts's REST source (BASKETBALL_BOOKMAKER) —
+  // onexbet as of 2026-08-27, bwin before that (the bookmaker originally
+  // confirmed to carry the matchClock.period + MATCH_RESULT market shape
+  // this codebase's extraction logic depends on for basketball).
+  const url = pulseScoreWsUrl("basketball", "onexbet");
   let socket: WebSocket;
   try {
     socket = new WebSocket(url);

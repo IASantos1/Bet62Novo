@@ -1,20 +1,22 @@
 // Generic REST-polled PulseScore live source, ORIGINALLY built to cover
 // every sport beyond football/tennis. Since then, basketball and volleyball
-// each got their own dedicated module (basketball.ts → bwin, volleyball.ts
-// → unibetau — see those files' own header comments) that fully supersedes
-// what's exported here for them; hockey's real prematch source is
-// hockey.ts (bwin), not this file either. As of 2026-08-10, this file's
-// only live consumer left in the app is admin.ts's read-only
-// /pulsescore-debug diagnostic route (pulseScoreBasketball/pulseScoreHockey/
-// pulseScoreBaseball/pulseScoreVolleyball below) — it still queries THIS
-// file's bookmaker assignments (basketball → fanduel, ice-hockey → bwin,
-// baseball → draftkings, volleyball → paddypower), which for
-// basketball/volleyball no longer match the real product pipeline's
-// bookmaker (that diagnostic output is a useful cross-check against a
-// DIFFERENT bookmaker, not a description of what's actually live). Baseball
-// has no dedicated module and no live/prematch builder wired into
-// matches.ts at all — this file is baseball's only PulseScore code, purely
-// diagnostic today.
+// each got their own dedicated module (basketball.ts, volleyball.ts — see
+// those files' own header comments) that fully supersedes what's exported
+// here for them; hockey's own prematch source is hockey.ts, not this file
+// either. This file's `pulseScoreBasketball`/`pulseScoreVolleyball` exports
+// below are therefore only live consumers for admin.ts's read-only
+// /pulsescore-debug diagnostic route, deliberately kept on their own
+// bookmaker (basketball → fanduel, volleyball → paddypower) as an
+// independent cross-check against a DIFFERENT bookmaker than the real
+// pipeline uses — not a description of what's actually live for those two.
+//
+// Hockey and baseball are different: `pulseScoreHockey.getLive()` is the
+// real live source wired into matches.ts's buildHockeyLiveFromPulseScore,
+// and `pulseScoreBaseball` is baseball's only PulseScore code at all
+// (matches.ts's live builder and findOverride odds lookup both use it) —
+// for those two sports this file IS the product pipeline, not a diagnostic,
+// so their bookmaker below was moved to onexbet alongside every other
+// non-football sport (2026-08-27), not left on the old bookmaker.
 //
 // Each sport here is deliberately assigned a *different* bookmaker prefix
 // rather than piling onto bet365 alongside football. The PRO plan's REST
@@ -198,12 +200,12 @@ export const pulseScoreBasketball = createPulseScoreRestSport({
 });
 export const pulseScoreHockey = createPulseScoreRestSport({
   sport: "ice-hockey",
-  bookmaker: "bwin",
+  bookmaker: "onexbet",
   label: "hockey",
 });
 export const pulseScoreBaseball = createPulseScoreRestSport({
   sport: "baseball",
-  bookmaker: "draftkings",
+  bookmaker: "onexbet",
   label: "baseball",
 });
 export const pulseScoreVolleyball = createPulseScoreRestSport({

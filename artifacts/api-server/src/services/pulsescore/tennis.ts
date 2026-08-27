@@ -29,12 +29,27 @@
 // tennis moneyline bet settle 0-0 (both sides "lost") — confirmed but never
 // shipped past this same-day revert. TENNIS_BOOKMAKER is kept as an explicit
 // constant (rather than silently relying on CONFIG.PULSESCORE_BOOKMAKER's
-// default) specifically so a future bwin retry — if PulseScore ever adds real
-// tennis point/score data — is a one-line change, not a rediscovery. The
-// market-shape fixes made during the brief bwin period (line on the market
-// not the selection, bwin's Set Winner shape, teamNamesMatch's initial+
-// surname fallback) are kept as additive/dual support — see their own
-// comments — since they don't regress bet365 and de-risk trying bwin again.
+// default) specifically so reverting is a one-line change, not a
+// rediscovery. The market-shape fixes made during the brief bwin period
+// (line on the market not the selection, bwin's Set Winner shape,
+// teamNamesMatch's initial+surname fallback) are kept as additive/dual
+// support — see their own comments — since they don't regress bet365.
+//
+// Moved to onexbet (1xBet) 2026-08-27 alongside every non-football sport.
+// Unlike bwin, onexbet's own docs explicitly claim real live set/point data
+// for tennis (a `statistics` block with per-set scores, `moreInfo.gamePoints`
+// for the current game's point score, `moreInfo.currentPeriod`) — so this
+// isn't the same dead-end bwin was. But the docs don't give the exact field
+// shape, and no real onexbet tennis live sample has been checked yet (unlike
+// every other bookmaker swap in this file's history, all confirmed against
+// real data before shipping). parseTennisSets/parseTennisPoints below add a
+// best-effort onexbet path (statistics.sets for completed sets + ev.score
+// for the in-progress one, mirroring volleyball.ts's confirmed unibetau
+// shape; moreInfo.gamePoints reusing the XP parser) ADDITIVELY alongside the
+// existing moreInfo.SS/XP path — bet365 keeps working unchanged, onexbet
+// gets a real attempt, but homeSetsWon/awaySetsWon staying at 0-0 for onexbet
+// (the exact settlement bug this comment describes above for bwin) is still
+// possible until this is checked against one real live onexbet tennis event.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -47,7 +62,7 @@ import {
 import { teamNamesMatch } from "./teamMatch.js";
 import { getTennisWsEventIfFresh } from "./tennisWs.js";
 
-const TENNIS_BOOKMAKER = "bet365";
+const TENNIS_BOOKMAKER = "onexbet";
 
 const TENNIS_LIVE_TTL_MS = 1_500;
 
@@ -203,6 +218,7 @@ function isMatchWinnerMarket(market: PulseScoreMarket): boolean {
 
 // moreInfo.SS: comma-separated per-set scores, "home-away" per set, e.g.
 // "7-6,4-6,3-2" -> [[7,6],[4,6],[3,2]]. Last entry is the in-progress set.
+// bet365-only — confirmed absent for bwin (see this file's header).
 function parseTennisSetsFromSS(ss: unknown): Array<[number, number]> {
   if (typeof ss !== "string" || !ss.trim()) return [];
   const sets: Array<[number, number]> = [];
@@ -214,6 +230,48 @@ function parseTennisSetsFromSS(ss: unknown): Array<[number, number]> {
   return sets;
 }
 
+// onexbet (unverified — see this file's header): PulseScore's own docs
+// describe a `statistics` block carrying completed sets' scores as parallel
+// arrays for tennis/volleyball/badminton, with the CURRENT in-progress set's
+// live game count in `ev.score` instead — exactly the split already
+// confirmed real for volleyball's unibetau feed (volleyball.ts's header:
+// statistics.sets = completed sets, ev.score = current set in progress).
+// Applying that same confirmed pattern here since the docs group tennis and
+// volleyball under the identical statistics wording, but this specific
+// mapping has not itself been checked against a real onexbet tennis event.
+function parseTennisSetsFromStatistics(ev: PulseScoreEvent): Array<[number, number]> {
+  const stats = (ev as PulseScoreEvent & {
+    statistics?: { sets?: { home?: number[]; away?: number[] } };
+  }).statistics;
+  const home = stats?.sets?.home;
+  const away = stats?.sets?.away;
+  const sets: Array<[number, number]> = [];
+  if (Array.isArray(home) && Array.isArray(away)) {
+    const len = Math.min(home.length, away.length);
+    for (let i = 0; i < len; i++) {
+      const h = home[i];
+      const a = away[i];
+      if (typeof h === "number" && typeof a === "number") sets.push([h, a]);
+    }
+  }
+  const curHome = Number(ev.score?.home);
+  const curAway = Number(ev.score?.away);
+  if (Number.isFinite(curHome) && Number.isFinite(curAway) && (curHome > 0 || curAway > 0)) {
+    sets.push([curHome, curAway]);
+  }
+  return sets;
+}
+
+// SS first (bet365, confirmed real), falling back to the statistics/score
+// shape (onexbet, unverified) only when SS is absent — never mixes the two,
+// and produces [] rather than a wrong guess when neither bookmaker's fields
+// are actually populated (e.g. bwin, which has neither).
+function parseTennisSets(ev: PulseScoreEvent): Array<[number, number]> {
+  const ssSets = parseTennisSetsFromSS(ev.moreInfo?.["SS"]);
+  if (ssSets.length > 0) return ssSets;
+  return parseTennisSetsFromStatistics(ev);
+}
+
 // ── WS freshness overlay (2026-08-11 MAX plan reactivation) ────────────────
 // Same "advance-only, per-event" design as football.ts/basketball.ts's WS
 // merges, but applied to moreInfo.SS/XP instead of score/matchClock —
@@ -221,6 +279,13 @@ function parseTennisSetsFromSS(ss: unknown): Array<[number, number]> {
 // header and PulseScoreTennisOverride's comment on ev.score being
 // unpopulated for tennis). Odds (ev.markets) always stay from REST,
 // unchanged — only the live set/game/point data can come from WS.
+//
+// onexbet-only caveat: this merge only ever swaps `moreInfo`, so it still
+// speeds up bet365's moreInfo.SS/XP path but does NOT carry onexbet's
+// statistics/score fields from WS to REST — parseTennisSetsFromStatistics
+// above is REST-poll-only for now (TENNIS_LIVE_TTL_MS cadence, no WS boost).
+// Extending this merge to also compare/carry `statistics` is real future
+// work, deliberately not done blind alongside the parsing itself above.
 const TENNIS_WS_EVENT_FRESHNESS_MS = 4_000;
 
 // A monotonic-ish progress score from moreInfo.SS: completed/in-progress
@@ -291,6 +356,34 @@ function parseTennisPointsFromXP(xp: unknown): [string, string] | undefined {
   return [h, a];
 }
 
+// onexbet (unverified — see this file's header): docs name a
+// `moreInfo.gamePoints` field for racket sports' current game point score
+// but don't give its exact shape, so this handles both plausible forms —
+// a bet365-style "H-A" string (reuses the XP parser above) or a {home,away}
+// object — and returns undefined for anything else rather than guess wrong.
+function parseTennisPointsFromGamePoints(raw: unknown): [string, string] | undefined {
+  if (typeof raw === "string") return parseTennisPointsFromXP(raw);
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const h = obj["home"];
+    const a = obj["away"];
+    if (
+      (typeof h === "string" || typeof h === "number") &&
+      (typeof a === "string" || typeof a === "number")
+    ) {
+      return parseTennisPointsFromXP(`${h}-${a}`);
+    }
+  }
+  return undefined;
+}
+
+function parseTennisPoints(ev: PulseScoreEvent): [string, string] | undefined {
+  return (
+    parseTennisPointsFromXP(ev.moreInfo?.["XP"]) ??
+    parseTennisPointsFromGamePoints(ev.moreInfo?.["gamePoints"])
+  );
+}
+
 // No explicit "serving" field exists anywhere in moreInfo — the only real
 // signal found in the bet365 live sample was bet365 appending " (Svr)" to
 // the serving player's name inside per-game market selections (e.g.
@@ -339,14 +432,14 @@ export function extractTennisOverride(ev: PulseScoreEvent): PulseScoreTennisOver
     }
   }
 
-  const sets = parseTennisSetsFromSS(ev.moreInfo?.["SS"]);
+  const sets = parseTennisSets(ev);
   const homeSetsWon = sets.filter(
     ([h, a]) => isFinishedTennisSetScore(h, a) && h > a,
   ).length;
   const awaySetsWon = sets.filter(
     ([h, a]) => isFinishedTennisSetScore(h, a) && a > h,
   ).length;
-  const currentPoints = parseTennisPointsFromXP(ev.moreInfo?.["XP"]);
+  const currentPoints = parseTennisPoints(ev);
   const serving = detectTennisServer(ev, ev.home, ev.away);
 
   // If more than one match_winner-shaped market shows up (e.g. per-set odds
