@@ -11995,6 +11995,11 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       };
       markets._total = override.total.line;
     }
+    // Double Chance / odd-even: settlement.ts already grades these
+    // generically for any sport (see extractHockeyOverride's header) —
+    // real onexbet odds override the synthetic placeholders directly.
+    if (override.doubleChance) markets.doubleChance = override.doubleChance;
+    if (override.oddEven) markets.goalOddEven = override.oddEven;
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
     results.push({
@@ -12454,6 +12459,8 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
       };
       markets._total = override.total.line;
     }
+    if (override.doubleChance) markets.doubleChance = override.doubleChance;
+    if (override.oddEven) markets.goalOddEven = override.oddEven;
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
@@ -12472,6 +12479,11 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
         result: now + 8_000,
         handicap: now + 8_000,
         totalGoals: now + 8_000,
+        // Double Chance/odd-even reprice on every goal too — added
+        // 2026-08-27 alongside wiring real odds in for them, same
+        // reasoning as basketball's equivalent suspension extension.
+        doubleChance: now + 8_000,
+        goalOddEven: now + 8_000,
       };
       suspensionReason = "GOL!";
     }

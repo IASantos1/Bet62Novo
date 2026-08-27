@@ -62,6 +62,19 @@ export type PulseScoreHockeyOverride = {
   // Same convention as basketball.ts's spread: signed line for HOME.
   spread?: { line: number; home: number; away: number };
   total?: { line: number; over: number; under: number };
+  // Double Chance / odd-even: settlement.ts grades these generically for
+  // any sport off plain home/away/draw comparisons and score parity (dc-hd/
+  // dc-da/dc-ha, goe-odd/goe-even — see scoreOutcomeForSel), no sport-
+  // specific prefix, so no new settlement code needed. Confirmed real
+  // (2026-08-27, onexbet GET /live-events?sport=ice_hockey and
+  // /ice-hockey/leagues samples). Home team totals/away team totals are
+  // NOT extracted here yet — the only existing team-total settlement key
+  // (b-tt-home/away) carries a "b-" prefix that's never been confirmed as
+  // sport-agnostic rather than basketball-specific; wiring hockey odds into
+  // a market with an unconfirmed settlement path risks a bet with nothing
+  // correct to grade it, so left out deliberately pending that check.
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  oddEven?: { odd: number; even: number };
 };
 
 function isFullTimeMarket(market: PulseScoreMarket): boolean {
@@ -137,6 +150,38 @@ function extractTotal(market: PulseScoreMarket): { line: number; over: number; u
   return over !== null && under !== null && line !== null ? { line, over, under } : null;
 }
 
+function extractDoubleChance(
+  market: PulseScoreMarket,
+): { homeOrDraw: number; awayOrDraw: number; homeOrAway: number } | null {
+  let hd: number | null = null;
+  let da: number | null = null;
+  let ha: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "HOME_DRAW") hd = val;
+    else if (sel.canonicalOutcome === "DRAW_AWAY") da = val;
+    else if (sel.canonicalOutcome === "HOME_AWAY") ha = val;
+  }
+  return hd !== null && da !== null && ha !== null
+    ? { homeOrDraw: hd, awayOrDraw: da, homeOrAway: ha }
+    : null;
+}
+
+function extractOddEven(market: PulseScoreMarket): { odd: number; even: number } | null {
+  let odd: number | null = null;
+  let even: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "ODD") odd = val;
+    else if (sel.canonicalOutcome === "EVEN") even = val;
+  }
+  return odd !== null && even !== null ? { odd, even } : null;
+}
+
 /** Builds a market override from one PulseScore hockey event's 3-Way Result
  * / Handicap / Totals markets. Returns an empty object (not null) when none
  * are recognised yet — callers should only apply fields present. */
@@ -150,6 +195,12 @@ export function extractHockeyOverride(ev: PulseScoreEvent): PulseScoreHockeyOver
   );
   const totalMarkets = (ev.markets ?? []).filter(
     (m) => m.canonicalMarket === "OVER_UNDER" && isFullTimeMarket(m),
+  );
+  const doubleChanceMarkets = (ev.markets ?? []).filter(
+    (m) => m.canonicalMarket === "DOUBLE_CHANCE" && isFullTimeMarket(m),
+  );
+  const oddEvenMarkets = (ev.markets ?? []).filter(
+    (m) => m.canonicalMarket === "TOTAL_GOALS_ODD_EVEN" && isFullTimeMarket(m),
   );
 
   // Every real sample so far carries exactly one 3-Way/Totals market — skip
@@ -174,8 +225,22 @@ export function extractHockeyOverride(ev: PulseScoreEvent): PulseScoreHockeyOver
       Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
     );
   }
+  if (doubleChanceMarkets.length === 1) {
+    const dc = extractDoubleChance(doubleChanceMarkets[0]!);
+    if (dc) out.doubleChance = dc;
+  }
+  if (oddEvenMarkets.length === 1) {
+    const oe = extractOddEven(oddEvenMarkets[0]!);
+    if (oe) out.oddEven = oe;
+  }
 
-  const known = new Set(["OTHER", "ASIAN_HANDICAP", "OVER_UNDER"]);
+  const known = new Set([
+    "OTHER",
+    "ASIAN_HANDICAP",
+    "OVER_UNDER",
+    "DOUBLE_CHANCE",
+    "TOTAL_GOALS_ODD_EVEN",
+  ]);
   for (const market of ev.markets ?? []) {
     if (!known.has(market.canonicalMarket)) recordUnknownCanonicalMarket(market.canonicalMarket, market.rawName);
   }
