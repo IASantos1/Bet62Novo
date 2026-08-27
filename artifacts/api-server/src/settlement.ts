@@ -3102,12 +3102,27 @@ export function scoreOutcomeForSel(
       s.match(/^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/) ||
       s.match(/^rl-(home|away)$/);
     if (winning === null && rl) {
-      const side = rl[1]!;
-      const line = parseLine(rl[2]) ?? 1.5;
-      if (line === null) return null;
-      const diff = ft.home - ft.away;
-      if (diff === line) voided = true;
-      else winning = side === "home" ? diff > line : diff < line;
+      const side = rl[1]! as "home" | "away";
+      // Fixed 2026-08-27: same class of bug as basketball's b-spread- key
+      // (fixed earlier this file) — the captured magnitude (or the 1.5
+      // default for the bare rl-home/rl-away form) is always UNSIGNED, and
+      // the old formula (`diff > line` for home, `diff < line` for away,
+      // both using the same positive line) implicitly assumed home was
+      // ALWAYS the run-line favorite. Verified: away truly favored -1.5,
+      // home loses by 1 run (diff=-1) — home's real +1.5 must win (lost by
+      // less than the cushion) and away's real -1.5 must lose (won but not
+      // by enough), but the old formula graded both backwards. Standard
+      // MLB run line is a fixed ±1.5 split, same idea as hockey's puck
+      // line — same readSelectionMarketLine + settleAsianSideHandicapOutcome
+      // combo, defaulting to -1.5/+1.5 the same way pl-home/pl-away does
+      // when no signed source is available.
+      const magnitude = parseLine(rl[2]) ?? 1.5;
+      if (magnitude === null) return null;
+      const signedLine = readSelectionMarketLine(sel);
+      const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+      const outcome = settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
+      if (outcome === "void") voided = true;
+      else winning = outcome === "won";
     }
 
     const f5res =
