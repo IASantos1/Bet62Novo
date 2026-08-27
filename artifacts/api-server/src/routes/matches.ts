@@ -10542,16 +10542,19 @@ function stripGenderTeamSuffix(name: string | null | undefined): string | null {
 }
 
 /** REMOÇÃO IMEDIATA de jogos do feed AO VIVO no EXATO INSTANTE em que o provedor
- *  sinaliza término (bwin period="Finished"/"FT" · matchClock.finished === true).
+ *  sinaliza término (bwin period="Finished"/"FT" · onexbet ice-hockey
+ *  period="Game finished", confirmed real 2026-08-27 · matchClock.finished === true).
  *  Requisito P60 (user): jogos terminados em Ao Vivo têm de ser retirado já.
  *  Antes esta remoção só acontecia via GC missing_ids (desaparecer do feed + grace de
  *  3min futebol / 15s basquete etc.). Valores cobertos: Finished, FT, Full Time,
- *  AET, After Extra Time, After Penalties, PEN, Final, Ended, Complete, Completed. */
+ *  Game Finished, AET, After Extra Time, After Penalties, PEN, Final, Ended,
+ *  Complete, Completed. */
 function isPulseScoreEventFinished(ev: PulseScoreEvent): boolean {
   if (ev.matchClock && (ev.matchClock as any).finished === true) return true;
   const period = String(ev.matchClock?.period ?? "").toLowerCase().trim();
   if (!period) return false;
   if (period === "finished" || period === "ft" || period === "full time") return true;
+  if (period === "game finished") return true;
   if (period === "aet") return true;
   if (period.startsWith("after extra") || period.startsWith("after penalties")) return true;
   if (period === "pen" || period === "final" || period === "ended" || period === "complete" || period === "completed") return true;
