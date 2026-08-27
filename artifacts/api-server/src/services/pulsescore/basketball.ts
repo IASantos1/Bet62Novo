@@ -446,13 +446,24 @@ export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> 
 // header), so "advanced" here means later in this local period ordering,
 // not a real timestamp comparison. Unknown periods rank last (0) so an
 // unrecognized value never wins a comparison it can't actually justify.
+//
+// q1..q4/halftime/ot were bwin's real values. onexbet's real
+// GET /live-events?sport=basketball sample (2026-08-27) instead sends full
+// words — "1st quarter"/"2nd quarter"/"3rd quarter"/"4th quarter" — added
+// below alongside the bwin keys (never seen "halftime"/"overtime" from
+// onexbet yet, so those aren't added — an unrecognized period safely falls
+// through to periodRank's -1/"keep REST" case above, not a wrong guess).
 const PERIOD_RANK: Record<string, number> = {
   "not started": 0,
   q1: 1,
+  "1st quarter": 1,
   q2: 2,
+  "2nd quarter": 2,
   halftime: 3,
   q3: 4,
+  "3rd quarter": 4,
   q4: 5,
+  "4th quarter": 5,
   ot: 6,
   overtime: 6,
 };
