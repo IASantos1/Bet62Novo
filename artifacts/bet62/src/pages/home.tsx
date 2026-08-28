@@ -16717,37 +16717,39 @@ export default function Home({
                   </div>
                 )}
 
-              {/* ── HÓQUEI: 1º PERÍODO — visible throughout match ── */}
+              {/* ── HÓQUEI: 1º PERÍODO — visible throughout match ──
+                  Prefers real onexbet period1 odds (hockeyExtra.period1)
+                  over the synthetic halfTime fallback when present. */}
               {isHockey &&
                 (modalTab === "1periodo" || modalTab === "todos") &&
-                m?.halfTime?.home > 0 && (
+                (((m as any).hockeyExtra?.period1?.home ?? m?.halfTime?.home ?? 0) > 0) && (
                   <div>
                     <MarketGroup title="Resultado — 1º Período">
                       <MarketOddsBtn
                         match={match}
                         sel="p1-home"
-                        odd={m.halfTime.home}
+                        odd={(m as any).hockeyExtra?.period1?.home ?? m.halfTime.home}
                         market="1periodo"
                         label={match.home}
-                        suspKey="halfTime"
+                        suspKey="hockeyExtra"
                       />
-                      {m.halfTime.draw > 0 && (
+                      {((m as any).hockeyExtra?.period1?.draw ?? m.halfTime.draw) > 0 && (
                         <MarketOddsBtn
                           match={match}
                           sel="p1-draw"
-                          odd={m.halfTime.draw}
+                          odd={(m as any).hockeyExtra?.period1?.draw ?? m.halfTime.draw}
                           market="1periodo"
                           label="Empate"
-                          suspKey="halfTime"
+                          suspKey="hockeyExtra"
                         />
                       )}
                       <MarketOddsBtn
                         match={match}
                         sel="p1-away"
-                        odd={m.halfTime.away}
+                        odd={(m as any).hockeyExtra?.period1?.away ?? m.halfTime.away}
                         market="1periodo"
                         label={match.away}
-                        suspKey="halfTime"
+                        suspKey="hockeyExtra"
                       />
                     </MarketGroup>
                   </div>
@@ -18426,6 +18428,63 @@ export default function Home({
                             />
                           </MarketGroup>
                         )}
+                        {/* Draw No Bet — reuses the existing generic dnb-home/
+                            dnb-away settlement keys (void on a draw), same
+                            ones football already uses. */}
+                        {((m as any).hockeyExtra as any).drawNoBet?.home >
+                          0 && (
+                          <MarketGroup title="Vencedor (Empate Anula)">
+                            <MarketOddsBtn
+                              match={match}
+                              sel="dnb-home"
+                              odd={
+                                ((m as any).hockeyExtra as any).drawNoBet.home
+                              }
+                              market="especiais"
+                              label={match.home}
+                              suspKey="hockeyExtra"
+                            />
+                            <MarketOddsBtn
+                              match={match}
+                              sel="dnb-away"
+                              odd={
+                                ((m as any).hockeyExtra as any).drawNoBet.away
+                              }
+                              market="especiais"
+                              label={match.away}
+                              suspKey="hockeyExtra"
+                            />
+                          </MarketGroup>
+                        )}
+                        {/* Correct Score — reuses the existing generic
+                            cs-<home>-<away> settlement key. */}
+                        {Array.isArray(
+                          ((m as any).hockeyExtra as any).correctScore,
+                        ) &&
+                          ((m as any).hockeyExtra as any).correctScore
+                            .length > 0 && (
+                            <MarketGroup title="Resultado Exato">
+                              <div className="flex flex-wrap gap-1 w-full">
+                                {(
+                                  ((m as any).hockeyExtra as any)
+                                    .correctScore as Array<{
+                                    label: string;
+                                    odds: number;
+                                  }>
+                                ).map((entry) => (
+                                  <MarketOddsBtn
+                                    key={`cs-${entry.label}`}
+                                    match={match}
+                                    sel={`cs-${entry.label}`}
+                                    odd={entry.odds}
+                                    market="especiais"
+                                    label={entry.label}
+                                    suspKey="hockeyExtra"
+                                  />
+                                ))}
+                              </div>
+                            </MarketGroup>
+                          )}
                       </>
                     )}
                   </div>

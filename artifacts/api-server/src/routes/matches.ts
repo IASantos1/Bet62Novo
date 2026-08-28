@@ -321,11 +321,19 @@ type AdvancedMarkets = {
   };
   // Hockey extended markets
   hockeyExtra?: {
+    period1?: { home: number; draw: number; away: number };
     period2: { home: number; draw: number; away: number };
     period3: { home: number; draw: number; away: number };
     period1Total: { line: number; over: number; under: number };
+    period2Total?: { line: number; over: number; under: number };
+    period3Total?: { line: number; over: number; under: number };
     bothTeamsScoreGame: { yes: number; no: number };
     shotsOnGoal: { line: number; over: number; under: number };
+    // Real onexbet data (extractHockeyOverride in
+    // services/pulsescore/hockey.ts).
+    drawNoBet?: { home: number; away: number };
+    correctScore?: Array<{ label: string; odds: number }>;
+    nextGoal?: { home: number; away: number; none: number };
   };
   // Volleyball extended markets
   volleyballExtra?: {
@@ -12046,6 +12054,20 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     // real onexbet odds override the synthetic placeholders directly.
     if (override.doubleChance) markets.doubleChance = override.doubleChance;
     if (override.oddEven) markets.goalOddEven = override.oddEven;
+    if (markets.hockeyExtra) {
+      markets.hockeyExtra = {
+        ...markets.hockeyExtra,
+        ...(override.period1 ? { period1: override.period1 } : {}),
+        ...(override.period2 ? { period2: override.period2 } : {}),
+        ...(override.period3 ? { period3: override.period3 } : {}),
+        ...(override.period1Total ? { period1Total: override.period1Total } : {}),
+        ...(override.period2Total ? { period2Total: override.period2Total } : {}),
+        ...(override.period3Total ? { period3Total: override.period3Total } : {}),
+        ...(override.drawNoBet ? { drawNoBet: override.drawNoBet } : {}),
+        ...(override.correctScore ? { correctScore: override.correctScore } : {}),
+        ...(override.nextGoal ? { nextGoal: override.nextGoal } : {}),
+      };
+    }
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
     results.push({
@@ -12623,6 +12645,20 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
     }
     if (override.doubleChance) markets.doubleChance = override.doubleChance;
     if (override.oddEven) markets.goalOddEven = override.oddEven;
+    if (markets.hockeyExtra) {
+      markets.hockeyExtra = {
+        ...markets.hockeyExtra,
+        ...(override.period1 ? { period1: override.period1 } : {}),
+        ...(override.period2 ? { period2: override.period2 } : {}),
+        ...(override.period3 ? { period3: override.period3 } : {}),
+        ...(override.period1Total ? { period1Total: override.period1Total } : {}),
+        ...(override.period2Total ? { period2Total: override.period2Total } : {}),
+        ...(override.period3Total ? { period3Total: override.period3Total } : {}),
+        ...(override.drawNoBet ? { drawNoBet: override.drawNoBet } : {}),
+        ...(override.correctScore ? { correctScore: override.correctScore } : {}),
+        ...(override.nextGoal ? { nextGoal: override.nextGoal } : {}),
+      };
+    }
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;

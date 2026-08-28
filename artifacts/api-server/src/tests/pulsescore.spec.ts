@@ -1220,6 +1220,132 @@ test("extractHockeyOverride: reads Totals line from the market, not the selectio
   assert.equal(override.total?.under, 1.87);
 });
 
+// REGRESSION (2026-08-28): a fresh onexbet /ice-hockey/events sample (6
+// events, several leagues) never once carried the bwin-era canonicalMarket
+// "OTHER"/rawName "3-Way - Result After Regular Time" shape
+// isThreeWayResultMarket alone matches — every event's real moneyline was
+// canonicalMarket "MATCH_RESULT"/rawName "1X2" instead, meaning
+// extractHockeyOverride's `odds` field was silently empty for every real
+// onexbet hockey match since the 2026-08-27 bookmaker switch (falling
+// through to the synthetic fallback matches.ts's builder uses when
+// override.odds is absent). This test locks in the fix (isMatchResultMarket
+// added alongside the old check, not replacing it).
+test("extractHockeyOverride: extracts the real onexbet moneyline shape (MATCH_RESULT/1X2), not just the bwin-era OTHER/3-Way shape", () => {
+  const matchResult = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "1X2",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:1x2",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "W1", odds: 1.22, isActive: true },
+      { canonicalOutcome: "DRAW", rawName: "X", odds: 8.4, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "W2", odds: 5.73, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(
+    makeHockeyEvent("Thunderkittens", "Puck Daddys", [matchResult]),
+  );
+  assert.deepEqual(override.odds, { home: 1.22, draw: 8.4, away: 5.73 });
+});
+
+// Confirmed real (same 2026-08-28 sample): FULL_TIME "Handicap" is
+// canonicalMarket DRAW_NO_BET (not ASIAN_HANDICAP) in most sampled events —
+// a real 2-way "draw voids" market, not a signed-line spread.
+test("extractHockeyOverride: extracts DRAW_NO_BET Handicap as drawNoBet (onexbet)", () => {
+  const dnb = {
+    canonicalMarket: "DRAW_NO_BET",
+    rawName: "Handicap",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:dnb",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "1 (0)", odds: 1.12, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "2 (0)", odds: 6.5, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(makeHockeyEvent("Home", "Away", [dnb]));
+  assert.deepEqual(override.drawNoBet, { home: 1.12, away: 6.5 });
+});
+
+// Confirmed real (same sample): Correct Score rawName is "H-A" (hyphen,
+// e.g. "3-2"), unlike volleyball's "H:S" colon convention — flat
+// label/odds list, not a fixed-key shape.
+test("extractHockeyOverride: extracts Correct Score as a label/odds list (onexbet)", () => {
+  const cs = {
+    canonicalMarket: "CORRECT_SCORE",
+    rawName: "Correct Score",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:cs",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "3-2", odds: 10, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "4-1", odds: 10, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(makeHockeyEvent("Home", "Away", [cs]));
+  assert.deepEqual(override.correctScore, [
+    { label: "3-2", odds: 10 },
+    { label: "4-1", odds: 10 },
+  ]);
+});
+
+// Confirmed real (same sample): "Next Goal" under canonicalMarket
+// FIRST_TEAM_TO_SCORE (clean HOME/AWAY/NEITHER, no `line`) — a different,
+// simpler shape than the numbered-goal "OTHER"/"Next Goal" market that
+// shares the same rawName but isn't extracted (out of scope).
+test("extractHockeyOverride: extracts FIRST_TEAM_TO_SCORE Next Goal (onexbet)", () => {
+  const nextGoal = {
+    canonicalMarket: "FIRST_TEAM_TO_SCORE",
+    rawName: "Next Goal",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:next-goal",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "Team 1 To Score Goal (1)", odds: 1.59, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "Team 2 To Score Goal (1)", odds: 2.02, isActive: true },
+      { canonicalOutcome: "NEITHER", rawName: "No Goal (1)", odds: 9, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(makeHockeyEvent("Home", "Away", [nextGoal]));
+  assert.deepEqual(override.nextGoal, { home: 1.59, away: 2.02, none: 9 });
+});
+
+// Confirmed real (same sample): 2nd/3rd-period Match Result and Total —
+// same canonicalMarkets as FULL_TIME, period SECOND_HALF/THIRD_PERIOD
+// (hockey periods 1/2 reuse football's FIRST_HALF/SECOND_HALF enum, period
+// 3 gets its own THIRD_PERIOD).
+test("extractHockeyOverride: extracts 2nd/3rd period Match Result and Total (onexbet)", () => {
+  const period2Result = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "2nd period 1X2",
+    period: "SECOND_HALF",
+    isActive: true,
+    marketId: "test:p2-result",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "W1", odds: 2.1, isActive: true },
+      { canonicalOutcome: "DRAW", rawName: "X", odds: 3.4, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "W2", odds: 3.9, isActive: true },
+    ],
+  };
+  const period3Total = {
+    canonicalMarket: "OVER_UNDER",
+    rawName: "3rd period Total",
+    period: "THIRD_PERIOD",
+    isActive: true,
+    marketId: "test:p3-total",
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over (2.5)", odds: 1.9, isActive: true, line: 2.5 },
+      { canonicalOutcome: "UNDER", rawName: "Under (2.5)", odds: 1.85, isActive: true, line: 2.5 },
+    ],
+  };
+  const override = extractHockeyOverride(
+    makeHockeyEvent("Home", "Away", [period2Result, period3Total]),
+  );
+  assert.deepEqual(override.period2, { home: 2.1, draw: 3.4, away: 3.9 });
+  assert.deepEqual(override.period3Total, { line: 2.5, over: 1.9, under: 1.85 });
+});
+
 function makeVolleyballEvent(markets: unknown[]) {
   return {
     eventId: "5:1102893",

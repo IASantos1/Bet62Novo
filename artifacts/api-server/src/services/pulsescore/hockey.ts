@@ -75,6 +75,44 @@ export type PulseScoreHockeyOverride = {
   // correct to grade it, so left out deliberately pending that check.
   doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   oddEven?: { odd: number; even: number };
+  // "Handicap" under canonicalMarket DRAW_NO_BET (not ASIAN_HANDICAP) — the
+  // dominant FULL_TIME handicap-like shape in the confirmed 2026-08-28
+  // onexbet sample (4 of 6 events; only 2 used a genuine signed-line
+  // ASIAN_HANDICAP). A real "draw voids the bet" 2-way, not a spread — kept
+  // as its own field rather than folded into `spread` above, which assumes
+  // a signed magnitude this market doesn't have. Only one side is
+  // guaranteed present in a given real sample (the away leg was simply
+  // absent/unpriced in the one checked directly) — extractDrawNoBet below
+  // still requires both before returning anything, same conservative rule
+  // every other 2-way extractor in this file already follows.
+  drawNoBet?: { home: number; away: number };
+  // "Correct Score" (canonicalMarket CORRECT_SCORE, FULL_TIME) — confirmed
+  // real, rawName is the score text "H-A" (hyphen, home-away — e.g. "3-2"),
+  // covering many combinations (not a fixed 6-key shape like volleyball's
+  // 3-set correct score) — kept as a flat label/odds list, same convention
+  // as tennis's score1st/score2nd.
+  correctScore?: Array<{ label: string; odds: number }>;
+  // "Next Goal" (canonicalMarket FIRST_TEAM_TO_SCORE — NOT the differently-
+  // shaped canonicalMarket "OTHER"/rawName "Next Goal" that some events
+  // carry alongside it, which is actually "who scores goal N" for a
+  // specific numbered goal via `line` and is NOT extracted here, out of
+  // scope): clean HOME/AWAY/NEITHER canonicalOutcome, no `line` — literally
+  // "which team scores the match's first goal".
+  nextGoal?: { home: number; away: number; none: number };
+  // 2nd/3rd-period moneyline and totals — confirmed real (same sample):
+  // MATCH_RESULT/rawName "2nd period 1X2"/"3rd period 1X2" at period
+  // SECOND_HALF/THIRD_PERIOD respectively (hockey periods 1/2 reuse
+  // football's FIRST_HALF/SECOND_HALF period enum, period 3 gets its own
+  // THIRD_PERIOD), OVER_UNDER/rawName "2nd period Total"/"3rd period Total"
+  // same periods. period1 (FIRST_HALF, rawName "1st period 1X2"/"1st
+  // period Total") is real too and included for completeness even though
+  // not explicitly asked for — same cost to extract as period2/period3.
+  period1?: { home: number; draw: number; away: number };
+  period2?: { home: number; draw: number; away: number };
+  period3?: { home: number; draw: number; away: number };
+  period1Total?: { line: number; over: number; under: number };
+  period2Total?: { line: number; over: number; under: number };
+  period3Total?: { line: number; over: number; under: number };
 };
 
 function isFullTimeMarket(market: PulseScoreMarket): boolean {
@@ -87,6 +125,27 @@ function isThreeWayResultMarket(market: PulseScoreMarket): boolean {
     isFullTimeMarket(market) &&
     (market.rawName || "").trim().toLowerCase() === "3-way - result after regular time"
   );
+}
+
+// Real onexbet shape confirmed 2026-08-28 (fresh /ice-hockey/events sample,
+// 6 events across several leagues): the moneyline is canonicalMarket
+// "MATCH_RESULT"/rawName "1X2", period FULL_TIME, plain HOME/DRAW/AWAY —
+// NOT the bwin-era "OTHER"/"3-Way - Result After Regular Time" shape
+// isThreeWayResultMarket above was built against. That bwin shape never
+// once appeared in this onexbet sample, meaning isMoneylineMarket alone
+// was silently matching ZERO real markets since the 2026-08-27 bookmaker
+// switch — every hockey prematch match's real moneyline was falling
+// through to the synthetic fallback the whole time this bug existed. Kept
+// isThreeWayResultMarket too (additive, not a replacement) in case a
+// future bookmaker revert brings that shape back — same "don't regress the
+// old shape while fixing the new one" precedent as tennis.ts's header.
+function isMatchResultMarket(market: PulseScoreMarket): boolean {
+  return market.canonicalMarket === "MATCH_RESULT" && isFullTimeMarket(market);
+}
+
+function periodFilter(canonicalMarket: string, period: string) {
+  return (m: PulseScoreMarket) =>
+    m.canonicalMarket === canonicalMarket && (m.period || "").toUpperCase() === period;
 }
 
 function extractMoneyline(
@@ -182,6 +241,49 @@ function extractOddEven(market: PulseScoreMarket): { odd: number; even: number }
   return odd !== null && even !== null ? { odd, even } : null;
 }
 
+function extractDrawNoBet(market: PulseScoreMarket): { home: number; away: number } | null {
+  let home: number | null = null;
+  let away: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "HOME") home = val;
+    else if (sel.canonicalOutcome === "AWAY") away = val;
+  }
+  return home !== null && away !== null ? { home, away } : null;
+}
+
+function extractCorrectScore(market: PulseScoreMarket): Array<{ label: string; odds: number }> {
+  const out: Array<{ label: string; odds: number }> = [];
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim();
+    if (!/^\d+-\d+$/.test(raw)) continue;
+    out.push({ label: raw, odds: val });
+  }
+  return out;
+}
+
+function extractNextGoal(
+  market: PulseScoreMarket,
+): { home: number; away: number; none: number } | null {
+  let home: number | null = null;
+  let away: number | null = null;
+  let none: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "HOME") home = val;
+    else if (sel.canonicalOutcome === "AWAY") away = val;
+    else if (sel.canonicalOutcome === "NEITHER") none = val;
+  }
+  return home !== null && away !== null && none !== null ? { home, away, none } : null;
+}
+
 /** Builds a market override from one PulseScore hockey event's 3-Way Result
  * / Handicap / Totals markets. Returns an empty object (not null) when none
  * are recognised yet — callers should only apply fields present. */
@@ -189,7 +291,9 @@ export function extractHockeyOverride(ev: PulseScoreEvent): PulseScoreHockeyOver
   const out: PulseScoreHockeyOverride = {};
   const home = ev.home?.trim() ?? "";
   const away = ev.away?.trim() ?? "";
-  const moneylineMarkets = (ev.markets ?? []).filter(isThreeWayResultMarket);
+  const moneylineMarkets = (ev.markets ?? []).filter(
+    (m) => isThreeWayResultMarket(m) || isMatchResultMarket(m),
+  );
   const spreadMarkets = (ev.markets ?? []).filter(
     (m) => m.canonicalMarket === "ASIAN_HANDICAP" && isFullTimeMarket(m),
   );
@@ -234,12 +338,72 @@ export function extractHockeyOverride(ev: PulseScoreEvent): PulseScoreHockeyOver
     if (oe) out.oddEven = oe;
   }
 
+  const drawNoBetMarkets = (ev.markets ?? []).filter(
+    (m) => m.canonicalMarket === "DRAW_NO_BET" && isFullTimeMarket(m),
+  );
+  if (drawNoBetMarkets.length === 1) {
+    const dnb = extractDrawNoBet(drawNoBetMarkets[0]!);
+    if (dnb) out.drawNoBet = dnb;
+  }
+
+  const correctScoreMarkets = (ev.markets ?? []).filter(
+    (m) => m.canonicalMarket === "CORRECT_SCORE" && isFullTimeMarket(m),
+  );
+  if (correctScoreMarkets.length === 1) {
+    const cs = extractCorrectScore(correctScoreMarkets[0]!);
+    if (cs.length > 0) out.correctScore = cs;
+  }
+
+  const nextGoalMarkets = (ev.markets ?? []).filter(
+    (m) => m.canonicalMarket === "FIRST_TEAM_TO_SCORE" && isFullTimeMarket(m),
+  );
+  if (nextGoalMarkets.length === 1) {
+    const ng = extractNextGoal(nextGoalMarkets[0]!);
+    if (ng) out.nextGoal = ng;
+  }
+
+  const period1Markets = (ev.markets ?? []).filter(periodFilter("MATCH_RESULT", "FIRST_HALF"));
+  if (period1Markets.length === 1) {
+    const p1 = extractMoneyline(period1Markets[0]!, home, away);
+    if (p1) out.period1 = p1;
+  }
+  const period2Markets = (ev.markets ?? []).filter(periodFilter("MATCH_RESULT", "SECOND_HALF"));
+  if (period2Markets.length === 1) {
+    const p2 = extractMoneyline(period2Markets[0]!, home, away);
+    if (p2) out.period2 = p2;
+  }
+  const period3Markets = (ev.markets ?? []).filter(periodFilter("MATCH_RESULT", "THIRD_PERIOD"));
+  if (period3Markets.length === 1) {
+    const p3 = extractMoneyline(period3Markets[0]!, home, away);
+    if (p3) out.period3 = p3;
+  }
+
+  const period1TotalMarkets = (ev.markets ?? []).filter(periodFilter("OVER_UNDER", "FIRST_HALF"));
+  if (period1TotalMarkets.length === 1) {
+    const t1 = extractTotal(period1TotalMarkets[0]!);
+    if (t1) out.period1Total = t1;
+  }
+  const period2TotalMarkets = (ev.markets ?? []).filter(periodFilter("OVER_UNDER", "SECOND_HALF"));
+  if (period2TotalMarkets.length === 1) {
+    const t2 = extractTotal(period2TotalMarkets[0]!);
+    if (t2) out.period2Total = t2;
+  }
+  const period3TotalMarkets = (ev.markets ?? []).filter(periodFilter("OVER_UNDER", "THIRD_PERIOD"));
+  if (period3TotalMarkets.length === 1) {
+    const t3 = extractTotal(period3TotalMarkets[0]!);
+    if (t3) out.period3Total = t3;
+  }
+
   const known = new Set([
     "OTHER",
+    "MATCH_RESULT",
     "ASIAN_HANDICAP",
+    "DRAW_NO_BET",
     "OVER_UNDER",
     "DOUBLE_CHANCE",
     "TOTAL_GOALS_ODD_EVEN",
+    "CORRECT_SCORE",
+    "FIRST_TEAM_TO_SCORE",
   ]);
   for (const market of ev.markets ?? []) {
     if (!known.has(market.canonicalMarket)) recordUnknownCanonicalMarket(market.canonicalMarket, market.rawName);
