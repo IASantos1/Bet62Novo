@@ -650,6 +650,31 @@ export type PulseScoreTennisPrematchExtra = {
   // tennisExtra's existing homePlayerGames/awayPlayerGames fields.
   homePlayerGames?: { line: number; over: number; under: number };
   awayPlayerGames?: { line: number; over: number; under: number };
+  // 2nd-set versions of the three markets above — confirmed real against a
+  // fresh onexbet /tennis/events sample (2026-08-28): the SAME
+  // GAME_HANDICAP/HOME_OVER_UNDER/AWAY_OVER_UNDER canonicalMarkets, just
+  // period "SECOND_SET" instead of "FULL_TIME" (rawNames "2nd set
+  // Handicap"/"2nd set Total 1"/"2nd set Total 2") — same extraction
+  // functions (extractGameHandicap/collectOverUnderLines), just a different
+  // period filter. The GAME_HANDICAP catalog check that found gameHandicap
+  // above already confirmed a SECOND_SET period exists; this real sample
+  // confirms it's actually priced, not just cataloged.
+  gameHandicapSet2?: { line: number; home: number; away: number };
+  homePlayerGamesSet2?: { line: number; over: number; under: number };
+  awayPlayerGamesSet2?: { line: number; over: number; under: number };
+  // "1st/2nd set Correct Score" — canonicalMarket CORRECT_SCORE, period
+  // FIRST_SET/SECOND_SET, confirmed real in the same 2026-08-28 sample.
+  // Unlike findSetScore's live-only "Set N Score" market (OR-index
+  // cross-referencing against separate placeholder rows — see that
+  // function's comment below), this is a FLAT list of all 14 possible exact
+  // set scores, each already a single priced "OTHER" selection whose
+  // rawName IS the score text ("6-4", home-away) — no cross-referencing
+  // needed — and it's available PRE-MATCH. Same label/shape convention as
+  // AdvancedMarkets.tennisExtra's existing score1st/score2nd fields (so far
+  // only ever populated live), extracted via the shared
+  // extractSetCorrectScore helper near findSetScore below.
+  score1st?: Array<{ label: string; odds: number }>;
+  score2nd?: Array<{ label: string; odds: number }>;
   // The rest below are all confirmed real (2026-08-28), all canonicalMarket
   // "OTHER" (PulseScore has no dedicated type for them) with the actual
   // market identified by rawName instead — settleable using only the set
@@ -980,6 +1005,42 @@ export function extractTennisPrematchExtra(
   const awayGamesLines = collectOverUnderLines(awayGamesMarket);
   if (awayGamesLines.length > 0) out.awayPlayerGames = pickMostEvenLine(awayGamesLines);
 
+  const gameHandicapSet2Market = markets.find(
+    (m) => m.canonicalMarket === "GAME_HANDICAP" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  if (gameHandicapSet2Market) {
+    const gh2 = extractGameHandicap(gameHandicapSet2Market);
+    if (gh2) out.gameHandicapSet2 = gh2;
+  }
+
+  const homeGamesSet2Market = markets.filter(
+    (m) => m.canonicalMarket === "HOME_OVER_UNDER" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  const homeGamesSet2Lines = collectOverUnderLines(homeGamesSet2Market);
+  if (homeGamesSet2Lines.length > 0) out.homePlayerGamesSet2 = pickMostEvenLine(homeGamesSet2Lines);
+
+  const awayGamesSet2Market = markets.filter(
+    (m) => m.canonicalMarket === "AWAY_OVER_UNDER" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  const awayGamesSet2Lines = collectOverUnderLines(awayGamesSet2Market);
+  if (awayGamesSet2Lines.length > 0) out.awayPlayerGamesSet2 = pickMostEvenLine(awayGamesSet2Lines);
+
+  const correctScoreSet1Market = markets.find(
+    (m) => m.canonicalMarket === "CORRECT_SCORE" && (m.period || "").toUpperCase() === "FIRST_SET",
+  );
+  if (correctScoreSet1Market) {
+    const sc1 = extractSetCorrectScore(correctScoreSet1Market);
+    if (sc1) out.score1st = sc1;
+  }
+
+  const correctScoreSet2Market = markets.find(
+    (m) => m.canonicalMarket === "CORRECT_SCORE" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  if (correctScoreSet2Market) {
+    const sc2 = extractSetCorrectScore(correctScoreSet2Market);
+    if (sc2) out.score2nd = sc2;
+  }
+
   const oddEvenMarket = markets.find(
     (m) =>
       m.canonicalMarket === "TOTAL_GOALS_ODD_EVEN" &&
@@ -1199,6 +1260,32 @@ function reverseSetScoreLabel(label: string): string {
   const m = /^(\d+)-(\d+)$/.exec(label);
   if (!m) return label;
   return `${m[2]}-${m[1]}`;
+}
+
+/** "1st/2nd set Correct Score" — canonicalMarket CORRECT_SCORE, period
+ * FIRST_SET/SECOND_SET. Confirmed real (2026-08-28 onexbet /tennis/events
+ * sample): unlike findSetScore below (which needs OR-index
+ * cross-referencing against separate placeholder rows), this market is a
+ * FLAT list of all 14 possible exact set scores, each a single active
+ * canonicalOutcome "OTHER" selection whose rawName IS the score text
+ * ("6-4", home-away — same convention as findSetScore's output) with its
+ * own odds directly attached, no cross-referencing needed. */
+function extractSetCorrectScore(
+  market: PulseScoreMarket,
+): Array<{ label: string; odds: number }> | undefined {
+  const out: Array<{ label: string; odds: number }> = [];
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim();
+    if (!/^\d+-\d+$/.test(raw)) continue;
+    out.push({ label: raw, odds: val });
+  }
+  if (out.length === 0) return undefined;
+  return out.sort(
+    (a, b) => (TENNIS_SET_SCORE_ORDER.get(a.label) ?? 999) - (TENNIS_SET_SCORE_ORDER.get(b.label) ?? 999),
+  );
 }
 
 /** Exact set score for one set. PulseScore represents this as a set of
