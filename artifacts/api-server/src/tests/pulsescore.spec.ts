@@ -1252,6 +1252,30 @@ test("extractHockeyOverride: extracts the real onexbet moneyline shape (MATCH_RE
   assert.deepEqual(override.odds, { home: 1.22, draw: 8.4, away: 5.73 });
 });
 
+// A THIRD real moneyline shape, confirmed against a live onexbet sample
+// (2026-08-28, GET /live-events?sport=ice_hockey): some events carry the
+// real 3-way as canonicalMarket "OTHER"/rawName "1x2" instead of
+// MATCH_RESULT — isMatchResultMarket alone would miss it entirely for
+// those events (no MATCH_RESULT/FULL_TIME market present at all here).
+test("extractHockeyOverride: extracts the OTHER/1x2 moneyline shape seen in some live events", () => {
+  const oneXTwo = {
+    canonicalMarket: "OTHER",
+    rawName: "1X2",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:1x2-other",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "W1", odds: 2.344, isActive: true },
+      { canonicalOutcome: "DRAW", rawName: "X", odds: 4.06, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "W2", odds: 2.344, isActive: true },
+    ],
+  };
+  const override = extractHockeyOverride(
+    makeHockeyEvent("Zvezda Samara", "Medvedi Moscow", [oneXTwo]),
+  );
+  assert.deepEqual(override.odds, { home: 2.344, draw: 4.06, away: 2.344 });
+});
+
 // Confirmed real (same 2026-08-28 sample): FULL_TIME "Handicap" is
 // canonicalMarket DRAW_NO_BET (not ASIAN_HANDICAP) in most sampled events —
 // a real 2-way "draw voids" market, not a signed-line spread.
