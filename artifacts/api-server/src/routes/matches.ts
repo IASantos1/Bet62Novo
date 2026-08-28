@@ -292,6 +292,13 @@ type AdvancedMarkets = {
     set2Games?: { line: number; over: number; under: number };
     homePlayerGames?: { line: number; over: number; under: number };
     awayPlayerGames?: { line: number; over: number; under: number };
+    // 2nd-set versions of gameHandicap/homePlayerGames/awayPlayerGames —
+    // real onexbet data (extractTennisPrematchExtra in
+    // services/pulsescore/tennis.ts), same canonicalMarkets/shape, period
+    // SECOND_SET instead of FULL_TIME.
+    gameHandicapSet2?: { line: number; home: number; away: number };
+    homePlayerGamesSet2?: { line: number; over: number; under: number };
+    awayPlayerGamesSet2?: { line: number; over: number; under: number };
     oddEvenGames?: { odd: number; even: number };
     oddEven1st?: { odd: number; even: number };
     oddEven2nd?: { odd: number; even: number };
@@ -11606,6 +11613,11 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       gameHandicap: prematchExtra.gameHandicap ?? { line: 0, home: 0, away: 0 },
       homePlayerGames: prematchExtra.homePlayerGames,
       awayPlayerGames: prematchExtra.awayPlayerGames,
+      gameHandicapSet2: prematchExtra.gameHandicapSet2,
+      homePlayerGamesSet2: prematchExtra.homePlayerGamesSet2,
+      awayPlayerGamesSet2: prematchExtra.awayPlayerGamesSet2,
+      score1st: prematchExtra.score1st,
+      score2nd: prematchExtra.score2nd,
       oddEvenGames: prematchExtra.oddEvenGames ?? { odd: 0, even: 0 },
       setMatch: prematchExtra.setMatch,
       tieBreak: prematchExtra.tieBreak,

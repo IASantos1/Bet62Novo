@@ -365,6 +365,87 @@ const tennisCases: FinishedSettlementCase[] = [
     expected: "won",
   },
   {
+    name: "tennis 2nd set exact score 4-6 is settled as won",
+    selection: makeSelection("sc2-4-6"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [4, 6],
+            [6, 2],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis 2nd set game handicap home -2.5 is settled as won",
+    selection: makeSelection("gh2-home-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [4, 6],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis 2nd set game handicap does not settle off the 1st set's score",
+    selection: makeSelection("gh2-home-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 0],
+            [6, 4],
+          ],
+        },
+      },
+    },
+    expected: "lost",
+  },
+  {
+    name: "tennis 2nd set home player total games over is settled as won",
+    selection: makeSelection("hpg2-o", { marketLine: 5.5 }),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis 2nd set away player total games under is settled as won",
+    selection: makeSelection("apg2-u", { marketLine: 4.5 }),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
     name: "tennis away wins at least one set no is settled as won",
     selection: makeSelection("wal2-no"),
     ft: { home: 2, away: 0 },

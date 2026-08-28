@@ -2751,6 +2751,38 @@ export function scoreOutcomeForSel(
     );
     if (playerGames === line) voided = true;
     else winning = m[2] === "o" ? playerGames > line : playerGames < line;
+  }
+  // 2nd-set game handicap (GAME_HANDICAP, period SECOND_SET — confirmed
+  // real 2026-08-28 onexbet sample) — same signed-line convention as gh-
+  // above, but scoped to set index 1 (the 2nd set) instead of the whole
+  // match's completed-sets total.
+  else if (/^gh2-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^gh2-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
+    const side = m[1] as "home" | "away";
+    const setScore = getTennisSetsFromExtras(extra?.extras)[1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const [homeGames, awayGames] = setScore;
+    const magnitude = m[2] !== undefined ? Number(m[2]) : NaN;
+    const signedLine = readSelectionMarketLine(sel);
+    const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+    if (!Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(homeGames, awayGames, side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
+  // 2nd-set per-player total games (HOME_OVER_UNDER/AWAY_OVER_UNDER, period
+  // SECOND_SET — same real sample) — same bare-key convention as hpg-/apg-
+  // above, scoped to set index 1.
+  else if (/^(hpg2|apg2)-([ou])$/.test(s)) {
+    const m = s.match(/^(hpg2|apg2)-([ou])$/)!;
+    const isHome = m[1] === "hpg2";
+    const line = readSelectionMarketLine(sel);
+    if (line === null) return null;
+    const setScore = getTennisSetsFromExtras(extra?.extras)[1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const playerGames = isHome ? setScore[0] : setScore[1];
+    if (playerGames === line) voided = true;
+    else winning = m[2] === "o" ? playerGames > line : playerGames < line;
   } else if (/^tg-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^tg-([ou])-(\d+(?:\.\d+)?)$/)!;
     const line = Number(m[2]!);

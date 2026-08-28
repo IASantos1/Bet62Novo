@@ -17607,6 +17607,96 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {/* 2nd set game handicap */}
+                    {((m as any).tennisExtra as any).gameHandicapSet2?.home >
+                      0 && (
+                      <MarketGroup
+                        title={`Handicap de Games — 2º Set ${((m as any).tennisExtra as any).gameHandicapSet2.line < 0 ? `Casa −${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}` : `Casa +${((m as any).tennisExtra as any).gameHandicapSet2.line}`}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`gh2-home-${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          odd={
+                            ((m as any).tennisExtra as any).gameHandicapSet2
+                              .home
+                          }
+                          market="jogos"
+                          label={`${match.home} ${((m as any).tennisExtra as any).gameHandicapSet2.line < 0 ? "−" : "+"}${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          suspKey="gameHandicapSet2"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`gh2-away-${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          odd={
+                            ((m as any).tennisExtra as any).gameHandicapSet2
+                              .away
+                          }
+                          market="jogos"
+                          label={`${match.away} ${((m as any).tennisExtra as any).gameHandicapSet2.line < 0 ? "+" : "−"}${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          suspKey="gameHandicapSet2"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* 2nd set home player total games */}
+                    {((m as any).tennisExtra as any).homePlayerGamesSet2
+                      ?.over > 0 && (
+                      <MarketGroup
+                        title={`Total Games de ${match.home} — 2º Set O/U ${((m as any).tennisExtra as any).homePlayerGamesSet2.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel="hpg2-o"
+                          odd={
+                            ((m as any).tennisExtra as any).homePlayerGamesSet2
+                              .over
+                          }
+                          market="jogos"
+                          label={`Mais de ${((m as any).tennisExtra as any).homePlayerGamesSet2.line}`}
+                          suspKey="homePlayerGamesSet2"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="hpg2-u"
+                          odd={
+                            ((m as any).tennisExtra as any).homePlayerGamesSet2
+                              .under
+                          }
+                          market="jogos"
+                          label={`Menos de ${((m as any).tennisExtra as any).homePlayerGamesSet2.line}`}
+                          suspKey="homePlayerGamesSet2"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* 2nd set away player total games */}
+                    {((m as any).tennisExtra as any).awayPlayerGamesSet2
+                      ?.over > 0 && (
+                      <MarketGroup
+                        title={`Total Games de ${match.away} — 2º Set O/U ${((m as any).tennisExtra as any).awayPlayerGamesSet2.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel="apg2-o"
+                          odd={
+                            ((m as any).tennisExtra as any).awayPlayerGamesSet2
+                              .over
+                          }
+                          market="jogos"
+                          label={`Mais de ${((m as any).tennisExtra as any).awayPlayerGamesSet2.line}`}
+                          suspKey="awayPlayerGamesSet2"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="apg2-u"
+                          odd={
+                            ((m as any).tennisExtra as any).awayPlayerGamesSet2
+                              .under
+                          }
+                          market="jogos"
+                          label={`Menos de ${((m as any).tennisExtra as any).awayPlayerGamesSet2.line}`}
+                          suspKey="awayPlayerGamesSet2"
+                        />
+                      </MarketGroup>
+                    )}
                   </div>
                 )}
 
