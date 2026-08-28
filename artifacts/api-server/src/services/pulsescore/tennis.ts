@@ -1260,6 +1260,14 @@ export type PulseScoreTennisLiveExtra = {
   highestSetTotal?: { line: number; over: number; under: number };
   setsScoring?: { firstHigher: number; secondHigher: number; equal: number };
   setMatch?: { h11: number; h12: number; a21: number; a22: number };
+  // Confirmed real (2026-08-28 onexbet live sample) — plain Yes/No,
+  // canonicalOutcome "OTHER", settleable with only the final set scores
+  // already tracked (getTennisSetsFromExtras in settlement.ts). "Tie-Break
+  // Or Extra Games In The Final Set" = the LAST set played didn't end in a
+  // clean 6-0..6-4 (i.e. went 7-5 or to a 7-6 tie-break) — distinct from
+  // tieBreak above, which is "did ANY set" go to a breaker specifically,
+  // not "did the final set" go past 6 games either way.
+  finalSetTieBreakOrExtra?: { yes: number; no: number };
 };
 
 const TENNIS_SET_SCORE_ORDER = new Map([
@@ -1501,8 +1509,31 @@ export function extractTennisLiveExtra(ev: PulseScoreEvent): PulseScoreTennisLiv
     if (sm) out.setMatch = sm;
   }
 
-  const straightSets = findYesNoMarket(markets, "OTHER", "straight sets winner?");
+  // "straight sets winner?" was this field's original (bet365/bwin-era)
+  // rawName — never confirmed against real onexbet data. A real onexbet
+  // live sample (2026-08-28) shows the equivalent market is actually named
+  // "Any Player To Win All Sets" (same Yes/No concept: did the match end
+  // in a straight-sets sweep) — matched here too, additively, so this
+  // field finally gets real onexbet data instead of never firing.
+  const straightSets =
+    findYesNoMarket(markets, "OTHER", "straight sets winner?") ??
+    (() => {
+      const m = markets.find(
+        (mk) => (mk.rawName || "").trim() === "Any Player To Win All Sets" && (mk.period || "").toUpperCase() === "FULL_TIME",
+      );
+      return m ? extractYesNo(m) : null;
+    })();
   if (straightSets) out.straightSetsWinner = straightSets;
+
+  const finalSetTieBreakMarket = markets.find(
+    (m) =>
+      (m.rawName || "").trim() === "Tie-Break Or Extra Games In The Final Set" &&
+      (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (finalSetTieBreakMarket) {
+    const fs = extractYesNo(finalSetTieBreakMarket);
+    if (fs) out.finalSetTieBreakOrExtra = fs;
+  }
 
   const goDistance = findYesNoMarket(markets, "GO_THE_DISTANCE");
   if (goDistance) out.goTheDistance = goDistance;

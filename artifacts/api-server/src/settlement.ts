@@ -2664,6 +2664,34 @@ export function scoreOutcomeForSel(
     }
     winning = answer === "yes" ? hadTieBreak : !hadTieBreak;
   }
+  // Straight Sets Winner ("Vence sem perder Set?", ssw-yes/ssw-no) — this
+  // key had UI (home.tsx) but NO settlement at all before now, so any bet
+  // placed on it would never resolve automatically. Did the match end in a
+  // straight-sets sweep (2-0)? `home`/`away` are already sets-won for
+  // tennis (same convention dnb-home/away above relies on). Can only
+  // resolve once the match itself is decided (2 sets won by either side) —
+  // "No" is otherwise still possible right up until the very last set.
+  else if (/^ssw-(yes|no)$/.test(s)) {
+    const answer = s.endsWith("yes") ? "yes" : "no";
+    if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+    if (home < 2 && away < 2) return null;
+    const sweep = (home >= 2 && away === 0) || (away >= 2 && home === 0);
+    winning = answer === "yes" ? sweep : !sweep;
+  }
+  // "Tie-Break Or Extra Games In The Final Set" — did the LAST set played
+  // (the deciding one) go past a clean 6-0..6-4, i.e. end 7-5 or 7-6?
+  // Distinct from tb-/tb1- above, which ask about ANY set / the 1st set
+  // specifically, not the final one. Only resolvable once the match is
+  // decided (home !== away, both sets-won counts final).
+  else if (/^fstb-(yes|no)$/.test(s)) {
+    const answer = s.endsWith("yes") ? "yes" : "no";
+    if (!Number.isFinite(home) || !Number.isFinite(away) || home === away) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length === 0) return null;
+    const finalSet = sets[sets.length - 1]!;
+    const wentExtra = Math.max(finalSet[0], finalSet[1]) >= 7;
+    winning = answer === "yes" ? wentExtra : !wentExtra;
+  }
   // Total Tie-Breaks — Over/Under how many sets went to a tie-break.
   else if (/^ttb-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^ttb-([ou])-(\d+(?:\.\d+)?)$/)!;

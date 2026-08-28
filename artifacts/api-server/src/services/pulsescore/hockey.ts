@@ -120,11 +120,25 @@ function isFullTimeMarket(market: PulseScoreMarket): boolean {
 }
 
 function isThreeWayResultMarket(market: PulseScoreMarket): boolean {
-  return (
-    market.canonicalMarket === "OTHER" &&
-    isFullTimeMarket(market) &&
-    (market.rawName || "").trim().toLowerCase() === "3-way - result after regular time"
-  );
+  if (market.canonicalMarket !== "OTHER" || !isFullTimeMarket(market)) return false;
+  const raw = (market.rawName || "").trim().toLowerCase();
+  // "3-way - result after regular time" is the bwin-era shape (see
+  // isMatchResultMarket's comment below for why MATCH_RESULT/"1X2" is now
+  // the primary real shape). "1x2" under canonicalMarket OTHER (not
+  // MATCH_RESULT) is a THIRD real shape, confirmed against a live onexbet
+  // sample (2026-08-28, GET /live-events?sport=ice_hockey): some events
+  // carry the real 3-way 1X2 as canonicalMarket "OTHER" while ALSO
+  // carrying a separate canonicalMarket "MATCH_RESULT"/rawName "Team Wins"
+  // (a genuinely different, 2-way-only "decisive winner" market, no draw
+  // outcome at all) — isMatchResultMarket alone would grab "Team Wins" for
+  // these events and extractMoneyline would then correctly return null
+  // (no draw price to satisfy the home/draw/away requirement), silently
+  // losing the real 3-way price. Matched here too so the real 1X2 wins
+  // instead, additively (this "OTHER"/"1x2" shape was NOT seen in every
+  // event of the same live sample — some events use plain MATCH_RESULT/
+  // "1X2" only, matched by isMatchResultMarket below — so neither check
+  // alone covers every real event shape).
+  return raw === "3-way - result after regular time" || raw === "1x2";
 }
 
 // Real onexbet shape confirmed 2026-08-28 (fresh /ice-hockey/events sample,

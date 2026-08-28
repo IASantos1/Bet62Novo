@@ -18114,6 +18114,34 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {/* Tie-Break Or Extra Games In The Final Set */}
+                    {((m as any).tennisExtra as any).finalSetTieBreakOrExtra
+                      ?.yes > 0 && (
+                      <MarketGroup title="Tie-Break ou Extra Games no Set Decisivo?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="fstb-yes"
+                          odd={
+                            ((m as any).tennisExtra as any)
+                              .finalSetTieBreakOrExtra.yes
+                          }
+                          market="especiais"
+                          label="Sim"
+                          suspKey="finalSetTieBreakOrExtra"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="fstb-no"
+                          odd={
+                            ((m as any).tennisExtra as any)
+                              .finalSetTieBreakOrExtra.no
+                          }
+                          market="especiais"
+                          label="Não"
+                          suspKey="finalSetTieBreakOrExtra"
+                        />
+                      </MarketGroup>
+                    )}
                     {/* Go The Distance */}
                     {((m as any).tennisExtra as any).goTheDistance?.yes >
                       0 && (

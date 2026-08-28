@@ -323,6 +323,7 @@ type AdvancedMarkets = {
     totalSets?: { line: number; over: number; under: number };
     straightSetsWinner?: { yes: number; no: number };
     goTheDistance?: { yes: number; no: number };
+    finalSetTieBreakOrExtra?: { yes: number; no: number };
   };
   // Hockey extended markets
   hockeyExtra?: {
