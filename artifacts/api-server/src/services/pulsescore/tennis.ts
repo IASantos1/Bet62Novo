@@ -687,26 +687,41 @@ function collectOverUnderLines(
  * basketball's spread and hockey's puck line (extractSpread in
  * basketball.ts): HOME carries the signed line (home's own selection),
  * AWAY is the mirror side at the same market. */
+// GAME_HANDICAP carries MULTIPLE alternate lines per market (confirmed real,
+// both prematch and live samples, 2026-08-28 — e.g. a real live sample had
+// HOME priced at +3.5/+4/+4.5/+5/+5.5 games, AWAY mirrored at the exact
+// negated line each). HOME's own `sel.line` is genuinely signed (positive
+// when HOME is the underdog getting a games head start, negative when HOME
+// is favored) — confirmed against real moneyline data on every sample
+// (the HOME side with positive handicap lines always had the longer
+// moneyline odds). Pairs HOME/AWAY selections by matching |line| (same
+// pairing bwin/onexbet already uses elsewhere — a canonical two-way Asian
+// handicap always mirrors the magnitude) and picks the most-even-odds pair,
+// same idea as pickMostEvenLine for totals.
 function extractGameHandicap(
   market: PulseScoreMarket,
 ): { line: number; home: number; away: number } | null {
-  let homeOdds: number | null = null;
-  let homeLine: number | null = null;
-  let awayOdds: number | null = null;
+  const homeByAbsLine = new Map<number, { line: number; odds: number }>();
+  const awayByAbsLine = new Map<number, number>();
   for (const sel of market.selections ?? []) {
     if (!sel.isActive) continue;
     const val = oddsToNumber(sel.odds);
     if (val === null) continue;
-    if (sel.canonicalOutcome === "HOME") {
-      homeOdds = val;
-      homeLine = sel.line ?? market.line ?? null;
-    } else if (sel.canonicalOutcome === "AWAY") {
-      awayOdds = val;
-    }
+    const line = sel.line ?? market.line;
+    if (line === undefined) continue;
+    const absLine = Math.abs(line);
+    if (sel.canonicalOutcome === "HOME") homeByAbsLine.set(absLine, { line, odds: val });
+    else if (sel.canonicalOutcome === "AWAY") awayByAbsLine.set(absLine, val);
   }
-  return homeOdds !== null && awayOdds !== null && homeLine !== null
-    ? { line: homeLine, home: homeOdds, away: awayOdds }
-    : null;
+  const pairs: Array<{ line: number; home: number; away: number }> = [];
+  for (const [absLine, h] of homeByAbsLine) {
+    const away = awayByAbsLine.get(absLine);
+    if (away !== undefined) pairs.push({ line: h.line, home: h.odds, away });
+  }
+  if (pairs.length === 0) return null;
+  return pairs.reduce((best, cur) =>
+    Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
+  );
 }
 
 /** Picks the closest-to-even line (min |over - under| gap) as the "main"
@@ -822,39 +837,69 @@ export function extractTennisPrematchExtra(
     if (odd !== null && even !== null) out.oddEvenGames = { odd, even };
   }
 
+  // CORRECT_SCORE — confirmed real (2026-08-28 onexbet sample): a single
+  // combined market, canonicalOutcome "OTHER", rawName literally the score
+  // "2-0"/"2-1"/"0-2"/"1-2" (home sets - away sets, unambiguous, no
+  // moreInfo/subMarket needed — much simpler than the old bet365/bwin
+  // per-player SET_BETTING shape below, which never matched onexbet's
+  // naming and is kept only as a dead fallback for a bookmaker revert).
+  const correctScoreMarket = markets.find(
+    (m) => m.canonicalMarket === "CORRECT_SCORE" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (correctScoreMarket) {
+    let h20: number | null = null;
+    let h21: number | null = null;
+    let a02: number | null = null;
+    let a12: number | null = null;
+    for (const sel of correctScoreMarket.selections ?? []) {
+      if (!sel.isActive) continue;
+      const val = oddsToNumber(sel.odds);
+      if (val === null) continue;
+      const label = (sel.rawName || "").trim();
+      if (label === "2-0") h20 = val;
+      else if (label === "2-1") h21 = val;
+      else if (label === "0-2") a02 = val;
+      else if (label === "1-2") a12 = val;
+    }
+    if (h20 !== null && h21 !== null && a02 !== null && a12 !== null) {
+      out.exactSets = { h20, h21, a02, a12 };
+    }
+  }
+
   // SET_BETTING: bet365 shape was one market PER PLAYER (moreInfo.subMarket
   // names which), each listing that player's own winning-score odds
   // ("2-0"/"2-1"). bwin's real sample (2026-08-09) has zero moreInfo and a
   // single combined SET_BETTING market listing all four outcomes
   // ("2-0"/"2-1"/"1-2"/"0-2") with no player attribution at all — the
-  // subMarket check below now always finds "" and skips every bwin market,
-  // so out.exactSets never populates for bwin. Left as-is rather than
-  // guessing which side "2-0" refers to (same reasoning as the GAME_HANDICAP
-  // note above) — needs a disambiguating real sample before being rebuilt.
-  let h20: number | null = null;
-  let h21: number | null = null;
-  let a02: number | null = null;
-  let a12: number | null = null;
-  for (const m of markets) {
-    if (m.canonicalMarket !== "SET_BETTING") continue;
-    const subMarket = String(m.moreInfo?.["subMarket"] ?? "").trim();
-    if (!subMarket) continue;
-    const isHome = teamNamesMatch(subMarket, ev.home);
-    const isAway = !isHome && teamNamesMatch(subMarket, ev.away);
-    if (!isHome && !isAway) continue;
-    for (const sel of m.selections ?? []) {
-      if (!sel.isActive) continue;
-      const val = oddsToNumber(sel.odds);
-      if (val === null) continue;
-      const label = (sel.rawName || "").trim();
-      if (isHome && label === "2-0") h20 = val;
-      else if (isHome && label === "2-1") h21 = val;
-      else if (isAway && label === "2-0") a02 = val;
-      else if (isAway && label === "2-1") a12 = val;
+  // subMarket check below now always finds "" and skips every bwin market.
+  // Dead for onexbet (its market is CORRECT_SCORE, handled above); left as
+  // a fallback only in case of a future bookmaker revert.
+  if (!out.exactSets) {
+    let h20: number | null = null;
+    let h21: number | null = null;
+    let a02: number | null = null;
+    let a12: number | null = null;
+    for (const m of markets) {
+      if (m.canonicalMarket !== "SET_BETTING") continue;
+      const subMarket = String(m.moreInfo?.["subMarket"] ?? "").trim();
+      if (!subMarket) continue;
+      const isHome = teamNamesMatch(subMarket, ev.home);
+      const isAway = !isHome && teamNamesMatch(subMarket, ev.away);
+      if (!isHome && !isAway) continue;
+      for (const sel of m.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        const label = (sel.rawName || "").trim();
+        if (isHome && label === "2-0") h20 = val;
+        else if (isHome && label === "2-1") h21 = val;
+        else if (isAway && label === "2-0") a02 = val;
+        else if (isAway && label === "2-1") a12 = val;
+      }
     }
-  }
-  if (h20 !== null && h21 !== null && a02 !== null && a12 !== null) {
-    out.exactSets = { h20, h21, a02, a12 };
+    if (h20 !== null && h21 !== null && a02 !== null && a12 !== null) {
+      out.exactSets = { h20, h21, a02, a12 };
+    }
   }
 
   return out;
@@ -899,6 +944,15 @@ export type PulseScoreTennisLiveExtra = {
   score1st?: Array<{ label: string; odds: number }>;
   score2nd?: Array<{ label: string; odds: number }>;
   score3rd?: Array<{ label: string; odds: number }>;
+  // Confirmed real in a live sample too (2026-08-28) — same canonicalMarket/
+  // structured HOME/AWAY shape as prematch (extractGameHandicap/
+  // collectOverUnderLines above), NOT the free-text-label shape the header
+  // comment above warns "Set N Handicap"/"Match Handicap" carry — those are
+  // a different, separate market this extractor still correctly ignores.
+  gameHandicap?: { line: number; home: number; away: number };
+  homePlayerGames?: { line: number; over: number; under: number };
+  awayPlayerGames?: { line: number; over: number; under: number };
+  exactSets?: { h20: number; h21: number; a02: number; a12: number };
 };
 
 const TENNIS_SET_SCORE_ORDER = new Map([
@@ -1073,6 +1127,49 @@ export function extractTennisLiveExtra(ev: PulseScoreEvent): PulseScoreTennisLiv
   if (score2nd) out.score2nd = score2nd;
   const score3rd = findSetScore(markets, 3);
   if (score3rd) out.score3rd = score3rd;
+
+  const gameHandicapMarket = markets.find(
+    (m) => m.canonicalMarket === "GAME_HANDICAP" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (gameHandicapMarket) {
+    const gh = extractGameHandicap(gameHandicapMarket);
+    if (gh) out.gameHandicap = gh;
+  }
+
+  const homeGamesMarket = markets.filter(
+    (m) => m.canonicalMarket === "HOME_OVER_UNDER" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  const homeGamesLines = collectOverUnderLines(homeGamesMarket);
+  if (homeGamesLines.length > 0) out.homePlayerGames = pickMostEvenLine(homeGamesLines);
+
+  const awayGamesMarket = markets.filter(
+    (m) => m.canonicalMarket === "AWAY_OVER_UNDER" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  const awayGamesLines = collectOverUnderLines(awayGamesMarket);
+  if (awayGamesLines.length > 0) out.awayPlayerGames = pickMostEvenLine(awayGamesLines);
+
+  const correctScoreMarket = markets.find(
+    (m) => m.canonicalMarket === "CORRECT_SCORE" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (correctScoreMarket) {
+    let h20: number | null = null;
+    let h21: number | null = null;
+    let a02: number | null = null;
+    let a12: number | null = null;
+    for (const sel of correctScoreMarket.selections ?? []) {
+      if (!sel.isActive) continue;
+      const val = oddsToNumber(sel.odds);
+      if (val === null) continue;
+      const label = (sel.rawName || "").trim();
+      if (label === "2-0") h20 = val;
+      else if (label === "2-1") h21 = val;
+      else if (label === "0-2") a02 = val;
+      else if (label === "1-2") a12 = val;
+    }
+    if (h20 !== null && h21 !== null && a02 !== null && a12 !== null) {
+      out.exactSets = { h20, h21, a02, a12 };
+    }
+  }
 
   return out;
 }
