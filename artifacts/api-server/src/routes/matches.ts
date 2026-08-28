@@ -12573,6 +12573,21 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const override = pulseScoreBaseball.findOverride(home, away, events);
     const baseMarkets = makeBasketballMarketsFromTeams(home, away);
     const markets: AdvancedMarkets = { ...baseMarkets };
+    // Total / Double Chance / odd-even: settlement.ts grades these
+    // generically for any sport off the plain final score, and for
+    // baseball `ft` genuinely is runs — see genericSportLive.ts's
+    // GenericMoneylineOverride comment for why this needed no new
+    // settlement code and no sport-specific extraction file.
+    if (override?.total) {
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over25: override.total.over,
+        under25: override.total.under,
+      };
+      markets._total = override.total.line;
+    }
+    if (override?.doubleChance) markets.doubleChance = override.doubleChance;
+    if (override?.oddEven) markets.goalOddEven = override.oddEven;
     const odds = override?.odds
       ? { home: override.odds.home, draw: override.odds.draw ?? 0, away: override.odds.away }
       : { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
@@ -12593,6 +12608,8 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
         result: now + 8_000,
         handicap: now + 8_000,
         totalGoals: now + 8_000,
+        doubleChance: now + 8_000,
+        goalOddEven: now + 8_000,
       };
       suspensionReason = "RUN!";
     }

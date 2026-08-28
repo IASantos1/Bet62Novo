@@ -45,6 +45,25 @@ import { teamNamesMatch } from "./teamMatch.js";
 
 export type GenericMoneylineOverride = {
   odds?: { home: number; draw?: number; away: number };
+  // Total / Double Chance / odd-even — settlement.ts already grades these
+  // generically for any sport off the plain final score (ft.home+ft.away
+  // for total/odd-even, home/away/draw comparison for double chance — see
+  // scoreOutcomeForSel), and for hockey/baseball specifically `ft` genuinely
+  // IS the stat these markets are about (goals/runs), unlike tennis/
+  // volleyball where the "final score" is sets won — so no new settlement
+  // code needed and no sets-vs-points mismatch risk here. Confirmed real
+  // (2026-08-27, onexbet /live-events samples for both sports this module
+  // actually feeds live: hockey and baseball — see this file's header).
+  // Handicap/spread is deliberately NOT added here even though it's
+  // available on both sports' real feeds — see genericSportLive's header on
+  // hockey/baseball being the "product pipeline" for exactly this reason:
+  // the sign-convention bug already found and fixed in basketball's
+  // b-spread- and baseball's rl-home/away keys makes wiring a new handicap
+  // source risky without picking a specific, already-verified settlement
+  // key per sport, not a shared one.
+  total?: { line: number; over: number; under: number };
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  oddEven?: { odd: number; even: number };
 };
 
 function oddsToNumber(raw: number | undefined): number | null {
@@ -170,12 +189,73 @@ export function createPulseScoreRestSport(opts: {
       else if (teamNamesMatch(sel.rawName, ev.home)) home = val;
       else if (teamNamesMatch(sel.rawName, ev.away)) away = val;
     }
-    if (home === null || away === null) return {};
-    return { odds: draw !== null ? { home, draw, away } : { home, away } };
+    const out: GenericMoneylineOverride =
+      home !== null && away !== null
+        ? { odds: draw !== null ? { home, draw, away } : { home, away } }
+        : {};
+
+    const totalMarkets = (ev.markets ?? []).filter(
+      (m) => m.canonicalMarket === "OVER_UNDER" && isFulltime(m.period),
+    );
+    if (totalMarkets.length === 1) {
+      let over: number | null = null;
+      let under: number | null = null;
+      let line: number | null = null;
+      for (const sel of totalMarkets[0]!.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "OVER") {
+          over = val;
+          line = sel.line ?? totalMarkets[0]!.line ?? null;
+        } else if (sel.canonicalOutcome === "UNDER") {
+          under = val;
+        }
+      }
+      if (over !== null && under !== null && line !== null) out.total = { line, over, under };
+    }
+
+    const doubleChanceMarkets = (ev.markets ?? []).filter(
+      (m) => m.canonicalMarket === "DOUBLE_CHANCE" && isFulltime(m.period),
+    );
+    if (doubleChanceMarkets.length === 1) {
+      let hd: number | null = null;
+      let da: number | null = null;
+      let ha: number | null = null;
+      for (const sel of doubleChanceMarkets[0]!.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "HOME_DRAW") hd = val;
+        else if (sel.canonicalOutcome === "DRAW_AWAY") da = val;
+        else if (sel.canonicalOutcome === "HOME_AWAY") ha = val;
+      }
+      if (hd !== null && da !== null && ha !== null) {
+        out.doubleChance = { homeOrDraw: hd, awayOrDraw: da, homeOrAway: ha };
+      }
+    }
+
+    const oddEvenMarkets = (ev.markets ?? []).filter(
+      (m) => m.canonicalMarket === "TOTAL_GOALS_ODD_EVEN" && isFulltime(m.period),
+    );
+    if (oddEvenMarkets.length === 1) {
+      let odd: number | null = null;
+      let even: number | null = null;
+      for (const sel of oddEvenMarkets[0]!.selections ?? []) {
+        if (!sel.isActive) continue;
+        const val = oddsToNumber(sel.odds);
+        if (val === null) continue;
+        if (sel.canonicalOutcome === "ODD") odd = val;
+        else if (sel.canonicalOutcome === "EVEN") even = val;
+      }
+      if (odd !== null && even !== null) out.oddEven = { odd, even };
+    }
+
+    return out;
   }
 
   /** Finds the matching PulseScore event by team name and returns its
-   * moneyline override, if any. `events` should be one already-fetched
+   * market override, if any. `events` should be one already-fetched
    * getLive() batch — never call this per-match. */
   function findOverride(
     home: string,
@@ -187,7 +267,13 @@ export function createPulseScoreRestSport(opts: {
     );
     if (!ev) return null;
     const override = extractOverride(ev);
-    return override.odds ? override : null;
+    // Was `override.odds ? override : null` — missed real total/
+    // doubleChance/oddEven data on the rare event with no moneyline read.
+    // Return null only when NOTHING was extracted, not just when odds
+    // specifically is missing.
+    const hasAnything =
+      override.odds || override.total || override.doubleChance || override.oddEven;
+    return hasAnything ? override : null;
   }
 
   return { getLive, getUsage, findOverride };
