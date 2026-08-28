@@ -759,22 +759,32 @@ function collectOverUnderLines(
 function extractGameHandicap(
   market: PulseScoreMarket,
 ): { line: number; home: number; away: number } | null {
-  const homeByAbsLine = new Map<number, { line: number; odds: number }>();
-  const awayByAbsLine = new Map<number, number>();
+  // Pairs HOME's own line X with AWAY's line at exactly -X (the real
+  // complementary Asian handicap pair) rather than matching |line| — a
+  // later real onexbet baseball sample (2026-08-28, ASIAN_HANDICAP run
+  // line) confirmed a single market can list HOME at BOTH a negative
+  // (favorite) AND a positive (underdog) line simultaneously; pairing by
+  // |line| collides those two genuinely different pairs onto the same map
+  // key and silently drops one. Every tennis sample so far only ever
+  // showed HOME on one side, so this was latent here, not yet observed —
+  // fixed proactively rather than waiting for a real tennis sample to hit
+  // the same shape (see baseball.ts's extractHandicapLines for the
+  // original bug/fix writeup).
+  const homeByLine = new Map<number, number>();
+  const awayByLine = new Map<number, number>();
   for (const sel of market.selections ?? []) {
     if (!sel.isActive) continue;
     const val = oddsToNumber(sel.odds);
     if (val === null) continue;
     const line = sel.line ?? market.line;
     if (line === undefined) continue;
-    const absLine = Math.abs(line);
-    if (sel.canonicalOutcome === "HOME") homeByAbsLine.set(absLine, { line, odds: val });
-    else if (sel.canonicalOutcome === "AWAY") awayByAbsLine.set(absLine, val);
+    if (sel.canonicalOutcome === "HOME") homeByLine.set(line, val);
+    else if (sel.canonicalOutcome === "AWAY") awayByLine.set(line, val);
   }
   const pairs: Array<{ line: number; home: number; away: number }> = [];
-  for (const [absLine, h] of homeByAbsLine) {
-    const away = awayByAbsLine.get(absLine);
-    if (away !== undefined) pairs.push({ line: h.line, home: h.odds, away });
+  for (const [line, home] of homeByLine) {
+    const away = awayByLine.get(-line);
+    if (away !== undefined) pairs.push({ line, home, away });
   }
   if (pairs.length === 0) return null;
   return pairs.reduce((best, cur) =>
@@ -790,8 +800,10 @@ function extractGameHandicap(
 function extractSetHandicap(
   market: PulseScoreMarket,
 ): { line: number; home: number; away: number } | null {
-  const homeByAbsLine = new Map<number, { line: number; odds: number }>();
-  const awayByAbsLine = new Map<number, number>();
+  // Same negated-line pairing fix as extractGameHandicap above (a single
+  // market can list "1" at both a negative and positive line).
+  const homeByLine = new Map<number, number>();
+  const awayByLine = new Map<number, number>();
   for (const sel of market.selections ?? []) {
     if (!sel.isActive) continue;
     const val = oddsToNumber(sel.odds);
@@ -799,14 +811,13 @@ function extractSetHandicap(
     const line = sel.line ?? market.line;
     if (line === undefined) continue;
     const raw = (sel.rawName || "").trim();
-    const absLine = Math.abs(line);
-    if (raw.startsWith("1")) homeByAbsLine.set(absLine, { line, odds: val });
-    else if (raw.startsWith("2")) awayByAbsLine.set(absLine, val);
+    if (raw.startsWith("1")) homeByLine.set(line, val);
+    else if (raw.startsWith("2")) awayByLine.set(line, val);
   }
   const pairs: Array<{ line: number; home: number; away: number }> = [];
-  for (const [absLine, h] of homeByAbsLine) {
-    const away = awayByAbsLine.get(absLine);
-    if (away !== undefined) pairs.push({ line: h.line, home: h.odds, away });
+  for (const [line, home] of homeByLine) {
+    const away = awayByLine.get(-line);
+    if (away !== undefined) pairs.push({ line, home, away });
   }
   if (pairs.length === 0) return null;
   return pairs.reduce((best, cur) =>

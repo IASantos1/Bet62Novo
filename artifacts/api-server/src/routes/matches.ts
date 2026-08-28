@@ -55,6 +55,11 @@ import {
   getPulseScoreMmaUpcoming,
   extractMmaOverride,
 } from "../services/pulsescore/mma.js";
+import {
+  getPulseScoreBaseballUpcoming,
+  extractBaseballOverride,
+  type PulseScoreBaseballPrematchEvent,
+} from "../services/pulsescore/baseball.js";
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
@@ -321,11 +326,28 @@ type AdvancedMarkets = {
   };
   // Hockey extended markets
   hockeyExtra?: {
+    period1?: { home: number; draw: number; away: number };
     period2: { home: number; draw: number; away: number };
     period3: { home: number; draw: number; away: number };
     period1Total: { line: number; over: number; under: number };
+    period2Total?: { line: number; over: number; under: number };
+    period3Total?: { line: number; over: number; under: number };
     bothTeamsScoreGame: { yes: number; no: number };
     shotsOnGoal: { line: number; over: number; under: number };
+    // Real onexbet data (extractHockeyOverride in
+    // services/pulsescore/hockey.ts).
+    drawNoBet?: { home: number; away: number };
+    correctScore?: Array<{ label: string; odds: number }>;
+    nextGoal?: { home: number; away: number; none: number };
+  };
+  // Baseball extended markets (First 5 Innings) — was already produced by
+  // makeMLBMarketsFromTeams's synthetic model (`as unknown as
+  // AdvancedMarkets` cast, never formally typed) before this field existed
+  // here; now real onexbet data can override it the same way every other
+  // sport's Extra field does.
+  mlbExtra?: {
+    f5Result?: { home: number; away: number };
+    f5Total?: { line: number; over: number; under: number };
   };
   // Volleyball extended markets
   volleyballExtra?: {
@@ -343,6 +365,15 @@ type AdvancedMarkets = {
     setHandicap: { home: number; away: number };
     pointsLines: Array<{ line: number; over: number; under: number }>;
     handicapPoints: { line: number; home: number; away: number };
+    // Real onexbet data (extractVolleyballOverride in
+    // services/pulsescore/volleyball.ts) — per-set totals, per-set points
+    // handicap, and "Race To N Points" (2-way per line, not O/U).
+    set2PointsLines?: Array<{ line: number; over: number; under: number }>;
+    set3PointsLines?: Array<{ line: number; over: number; under: number }>;
+    set2HandicapPoints?: { line: number; home: number; away: number };
+    set3HandicapPoints?: { line: number; home: number; away: number };
+    raceToPointsSet2?: Array<{ line: number; home: number; away: number }>;
+    raceToPointsSet3?: Array<{ line: number; home: number; away: number }>;
   };
   // Second half result (who wins just the 2nd half period)
   secondHalf?: { home: number; draw: number; away: number };
@@ -671,6 +702,16 @@ export type F1ExtraData = {
 export type MmaExtraData = {
   toDistance?: { yes: number; no: number };
   totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
+  // Real onexbet data (extractMmaOverride in services/pulsescore/mma.ts) —
+  // see that file's header for the confirmed market shapes.
+  winInsideDistance?: { yes: number; no: number };
+  methodOfVictory?: {
+    homeDecision?: { yes: number; no: number };
+    homeInside?: { yes: number; no: number };
+    awayDecision?: { yes: number; no: number };
+    awayInside?: { yes: number; no: number };
+    draw?: number;
+  };
 };
 
 export type UpcomingMatch = {
@@ -12027,6 +12068,20 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     // real onexbet odds override the synthetic placeholders directly.
     if (override.doubleChance) markets.doubleChance = override.doubleChance;
     if (override.oddEven) markets.goalOddEven = override.oddEven;
+    if (markets.hockeyExtra) {
+      markets.hockeyExtra = {
+        ...markets.hockeyExtra,
+        ...(override.period1 ? { period1: override.period1 } : {}),
+        ...(override.period2 ? { period2: override.period2 } : {}),
+        ...(override.period3 ? { period3: override.period3 } : {}),
+        ...(override.period1Total ? { period1Total: override.period1Total } : {}),
+        ...(override.period2Total ? { period2Total: override.period2Total } : {}),
+        ...(override.period3Total ? { period3Total: override.period3Total } : {}),
+        ...(override.drawNoBet ? { drawNoBet: override.drawNoBet } : {}),
+        ...(override.correctScore ? { correctScore: override.correctScore } : {}),
+        ...(override.nextGoal ? { nextGoal: override.nextGoal } : {}),
+      };
+    }
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
     results.push({
@@ -12111,8 +12166,10 @@ async function buildMmaUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const markets = makeMmaMarketsFromTeams(home, away);
     if (override.doubleChance) markets.doubleChance = override.doubleChance;
     const mmaExtra: MmaExtraData = {
-      toDistance: { yes: 0, no: 0 },
+      toDistance: override.goTheDistance ?? { yes: 0, no: 0 },
       totalRoundsLines: override.total ? [override.total] : [],
+      winInsideDistance: override.winInsideDistance,
+      methodOfVictory: override.methodOfVictory,
     };
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
@@ -12168,8 +12225,8 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
       set1: override.set1 ?? { home: 0, away: 0 },
-      set2: { home: 0, away: 0 },
-      set3: { home: 0, away: 0 },
+      set2: override.set2 ?? { home: 0, away: 0 },
+      set3: override.set3 ?? { home: 0, away: 0 },
       exactScore: override.exactScore ?? {
         s30: 0,
         s31: 0,
@@ -12180,7 +12237,13 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
       },
       setHandicap: { home: 0, away: 0 },
       pointsLines: override.pointsLines ?? [],
-      handicapPoints: { line: 0, home: 0, away: 0 },
+      handicapPoints: override.handicapPoints ?? { line: 0, home: 0, away: 0 },
+      set2PointsLines: override.set2PointsLines,
+      set3PointsLines: override.set3PointsLines,
+      set2HandicapPoints: override.set2HandicapPoints,
+      set3HandicapPoints: override.set3HandicapPoints,
+      raceToPointsSet2: override.raceToPointsSet2,
+      raceToPointsSet3: override.raceToPointsSet3,
     };
     const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     // Flat neutral fallback, not makeAdvancedMarketsFromTeams's internal
@@ -12315,12 +12378,18 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const computedExtras = computeVolleyballExtras(sp);
     const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
       set1: override.set1 ?? computedExtras.set1,
-      set2: computedExtras.set2,
-      set3: computedExtras.set3,
+      set2: override.set2 ?? computedExtras.set2,
+      set3: override.set3 ?? computedExtras.set3,
       exactScore: override.exactScore ?? computedExtras.exactScore,
       setHandicap: computedExtras.setHandicap,
       pointsLines: override.pointsLines ?? computedExtras.pointsLines,
-      handicapPoints: computedExtras.handicapPoints,
+      handicapPoints: override.handicapPoints ?? computedExtras.handicapPoints,
+      set2PointsLines: override.set2PointsLines,
+      set3PointsLines: override.set3PointsLines,
+      set2HandicapPoints: override.set2HandicapPoints,
+      set3HandicapPoints: override.set3HandicapPoints,
+      raceToPointsSet2: override.raceToPointsSet2,
+      raceToPointsSet3: override.raceToPointsSet3,
     };
     const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     const odds = override.odds
@@ -12590,6 +12659,20 @@ async function buildHockeyLiveFromPulseScore(): Promise<LiveMatchState[]> {
     }
     if (override.doubleChance) markets.doubleChance = override.doubleChance;
     if (override.oddEven) markets.goalOddEven = override.oddEven;
+    if (markets.hockeyExtra) {
+      markets.hockeyExtra = {
+        ...markets.hockeyExtra,
+        ...(override.period1 ? { period1: override.period1 } : {}),
+        ...(override.period2 ? { period2: override.period2 } : {}),
+        ...(override.period3 ? { period3: override.period3 } : {}),
+        ...(override.period1Total ? { period1Total: override.period1Total } : {}),
+        ...(override.period2Total ? { period2Total: override.period2Total } : {}),
+        ...(override.period3Total ? { period3Total: override.period3Total } : {}),
+        ...(override.drawNoBet ? { drawNoBet: override.drawNoBet } : {}),
+        ...(override.correctScore ? { correctScore: override.correctScore } : {}),
+        ...(override.nextGoal ? { nextGoal: override.nextGoal } : {}),
+      };
+    }
     const odds = override.odds ?? makeHockeyMoneylineFromTeams(home, away);
 
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
@@ -23080,9 +23163,95 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   }
 }
 
+/** Merges real onexbet baseball odds (extractBaseballOverride, new
+ * 2026-08-28 — see pulsescore/baseball.ts's header for why baseball had no
+ * PulseScore prematch integration before this) onto getMLBOdds()'s existing
+ * Statpal/SportsAPI V2 list. Additive, not a replacement: the old pipeline
+ * still supplies the match list itself (identity/date/time/team-name
+ * conventions many other things already depend on) — this only overrides
+ * homeOdds/awayOdds/markets in place, per match, when a real PulseScore
+ * price is found for it (by team name, same teamNamesMatch cross-provider
+ * matching every other sport's real-odds merge already uses). Matches with
+ * no PulseScore price keep whatever getMLBOdds() already gave them. */
+async function getMergedMLBOdds(): Promise<MLBOddsEntry[]> {
+  const base = await getMLBOdds();
+  let pulseEvents: PulseScoreBaseballPrematchEvent[] = [];
+  try {
+    pulseEvents = await getPulseScoreBaseballUpcoming();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "[pulsescore] baseball upcoming fetch failed for /mlb-odds merge — serving unmerged list",
+    );
+    return base;
+  }
+  if (pulseEvents.length === 0) return base;
+
+  return base.map((entry) => {
+    const pev = pulseEvents.find(
+      (e) =>
+        teamNamesMatch(entry.homeTeam.name, e.home) &&
+        teamNamesMatch(entry.awayTeam.name, e.away),
+    );
+    if (!pev) return entry;
+    const override = extractBaseballOverride(pev);
+    if (!override.odds && !override.runLine && !override.totalLines && !override.f5) {
+      return entry;
+    }
+    const markets = makeMLBMarketsFromTeams(
+      entry.homeTeam.name,
+      entry.awayTeam.name,
+      override.odds?.home,
+      override.odds?.away,
+    );
+    if (override.totalLines && override.totalLines.length > 0) {
+      const mid = override.totalLines[Math.floor(override.totalLines.length / 2)]!;
+      const lo = override.totalLines.find((l) => l.line === mid.line - 0.5 || l.line === mid.line - 1);
+      const hi = override.totalLines.find((l) => l.line === mid.line + 0.5 || l.line === mid.line + 1);
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over35: mid.over,
+        under35: mid.under,
+        ...(lo ? { over25: lo.over, under25: lo.under } : {}),
+        ...(hi ? { over45: hi.over, under45: hi.under } : {}),
+      };
+      markets._total = mid.line;
+    }
+    // Standard MLB run line is a fixed ±1.5 split — prefer that exact line
+    // if onexbet priced it (matches the existing mlb-rl-home-1.5/rl-home
+    // settlement's default), otherwise fall back to whichever line was
+    // picked as most-even.
+    const rl =
+      override.runLineLines?.find((l) => Math.abs(l.line) === 1.5) ?? override.runLine;
+    if (rl) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: rl.home,
+        awayPlusOne: rl.away,
+      };
+      markets._spread = -rl.line;
+      markets._spreadLine = -rl.line;
+    }
+    if (override.f5 || override.f5Total) {
+      markets.mlbExtra = {
+        ...markets.mlbExtra,
+        ...(override.f5 ? { f5Result: override.f5 } : {}),
+        ...(override.f5Total ? { f5Total: override.f5Total } : {}),
+      };
+    }
+    return {
+      ...entry,
+      homeOdds: override.odds?.home ?? entry.homeOdds,
+      awayOdds: override.odds?.away ?? entry.awayOdds,
+      drawOdds: 0,
+      markets,
+    };
+  });
+}
+
 router.get("/mlb-odds", async (_req: Request, res: Response) => {
   try {
-    const odds = await getMLBOdds();
+    const odds = await getMergedMLBOdds();
     res.json({ odds });
   } catch {
     res.status(500).json({ error: "Odds de baseball indisponíveis" });

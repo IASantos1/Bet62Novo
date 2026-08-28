@@ -33,9 +33,25 @@
 //     in. See settlement.ts's mma-round- key for how this is graded (or,
 //     honestly, not yet gradeable — see that key's own comment).
 //
-// A fifth market, OTHER/"Will The Specified Round Start" (a per-round
+// A sixth market, OTHER/"Will The Specified Round Start" (a per-round
 // yes/no proposition, `line` = round number), is deliberately NOT
 // extracted — an exotic prop, out of scope for this first pass.
+//
+// Three more real, confirmed markets added 2026-08-28 (same onexbet
+// /mma/events sample, checked again against a real card): all canonicalMarket
+// "OTHER"/period FULL_TIME, same as Win(2Way):
+//   "Fight To Go The Distance" — plain Yes/No (rawName "Yes"/"No").
+//   "Win Inside The Distance" — plain Yes/No, same shape.
+//   "Method Of Victory" — a single combined market covering both fighters:
+//     "Decision W1 - Yes"/"- No", "Decision W2 - Yes"/"- No" (win by judges'
+//     scorecard), "1 Will Win By KO, TKO, Painful Lock, Chokehold, DQ or
+//     Refusal - Yes"/"- No", "2 Will Win By KO, TKO, ... - Yes"/"- No" (win
+//     by any finish), and an optional single-priced "Draw Or Technical
+//     Draw" (not every sample carried it — a draw-priced fight is rare).
+//     W1=home, W2=away, matching this file's existing Win(2Way) convention.
+// All three settle the same way this file's header already describes for
+// everything else here: manually via the admin panel, since MMA has no
+// live/results pipeline yet — not a new gap these three markets introduce.
 //
 // Also NOT built here: any live-odds or result-finalization pipeline.
 // Every other sport in this codebase had a real GET /live-events or
@@ -81,6 +97,15 @@ export type PulseScoreMmaOverride = {
   odds1x2?: { home: number; draw: number; away: number };
   doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   total?: { line: number; over: number; under: number };
+  goTheDistance?: { yes: number; no: number };
+  winInsideDistance?: { yes: number; no: number };
+  methodOfVictory?: {
+    homeDecision?: { yes: number; no: number };
+    homeInside?: { yes: number; no: number };
+    awayDecision?: { yes: number; no: number };
+    awayInside?: { yes: number; no: number };
+    draw?: number;
+  };
 };
 
 function isFullTimeMarket(market: PulseScoreMarket): boolean {
@@ -161,6 +186,64 @@ function extractTotal(market: PulseScoreMarket): { line: number; over: number; u
   return over !== null && under !== null && line !== null ? { line, over, under } : null;
 }
 
+/** Plain Yes/No market (canonicalOutcome "OTHER", rawName "Yes"/"No") —
+ * used by "Fight To Go The Distance" and "Win Inside The Distance". */
+function extractYesNo(market: PulseScoreMarket): { yes: number; no: number } | null {
+  let yes: number | null = null;
+  let no: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim().toLowerCase();
+    if (raw === "yes") yes = val;
+    else if (raw === "no") no = val;
+  }
+  return yes !== null && no !== null ? { yes, no } : null;
+}
+
+/** "Method Of Victory" — a single combined market listing Yes/No rows for
+ * each fighter's decision/inside-the-distance win, plus an optional
+ * single-priced draw row. See this file's header for the exact rawName
+ * shapes confirmed real. */
+function extractMethodOfVictory(
+  market: PulseScoreMarket,
+): PulseScoreMmaOverride["methodOfVictory"] | null {
+  const out: PulseScoreMmaOverride["methodOfVictory"] = {};
+  const pending: Record<string, { yes: number | null; no: number | null }> = {
+    homeDecision: { yes: null, no: null },
+    awayDecision: { yes: null, no: null },
+    homeInside: { yes: null, no: null },
+    awayInside: { yes: null, no: null },
+  };
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim();
+    if (/^draw or technical draw$/i.test(raw)) {
+      out.draw = val;
+      continue;
+    }
+    const m = /^(.*)-\s*(Yes|No)$/i.exec(raw);
+    if (!m) continue;
+    const prefix = m[1]!.trim().toLowerCase();
+    const answer = m[2]!.toLowerCase() as "yes" | "no";
+    let key: string | null = null;
+    if (prefix === "decision w1") key = "homeDecision";
+    else if (prefix === "decision w2") key = "awayDecision";
+    else if (/^1 will win by ko/i.test(prefix)) key = "homeInside";
+    else if (/^2 will win by ko/i.test(prefix)) key = "awayInside";
+    if (!key) continue;
+    pending[key]![answer] = val;
+  }
+  for (const key of ["homeDecision", "awayDecision", "homeInside", "awayInside"] as const) {
+    const { yes, no } = pending[key]!;
+    if (yes !== null && no !== null) out[key] = { yes, no };
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /** Builds a market override from one PulseScore MMA event's Win(2Way) / 1X2 /
  * Double Chance / Total(rounds) markets. Returns an empty object (not null)
  * when none are recognised yet — callers should only apply fields present. */
@@ -199,6 +282,39 @@ export function extractMmaOverride(ev: PulseScoreEvent): PulseScoreMmaOverride {
   if (totalMarkets.length === 1) {
     const tot = extractTotal(totalMarkets[0]!);
     if (tot) out.total = tot;
+  }
+
+  const goDistanceMarket = markets.find(
+    (m) =>
+      m.canonicalMarket === "OTHER" &&
+      isFullTimeMarket(m) &&
+      (m.rawName || "").trim().toLowerCase() === "fight to go the distance",
+  );
+  if (goDistanceMarket) {
+    const gd = extractYesNo(goDistanceMarket);
+    if (gd) out.goTheDistance = gd;
+  }
+
+  const winInsideMarket = markets.find(
+    (m) =>
+      m.canonicalMarket === "OTHER" &&
+      isFullTimeMarket(m) &&
+      (m.rawName || "").trim().toLowerCase() === "win inside the distance",
+  );
+  if (winInsideMarket) {
+    const wi = extractYesNo(winInsideMarket);
+    if (wi) out.winInsideDistance = wi;
+  }
+
+  const methodMarket = markets.find(
+    (m) =>
+      m.canonicalMarket === "OTHER" &&
+      isFullTimeMarket(m) &&
+      (m.rawName || "").trim().toLowerCase() === "method of victory",
+  );
+  if (methodMarket) {
+    const mov = extractMethodOfVictory(methodMarket);
+    if (mov) out.methodOfVictory = mov;
   }
 
   const known = new Set(["MATCH_RESULT", "OTHER", "DOUBLE_CHANCE", "OVER_UNDER"]);

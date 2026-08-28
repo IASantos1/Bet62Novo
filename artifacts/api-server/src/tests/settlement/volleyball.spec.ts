@@ -74,6 +74,41 @@ const volleyballCases: FinishedSettlementCase[] = [
     extra: volleyballSetExtras,
     expected: "won",
   },
+  {
+    name: "volleyball 2nd set total points over is settled as won",
+    selection: makeSelection("s2pt-o-45.5"),
+    ft: { home: 3, away: 1 },
+    extra: volleyballSetExtras,
+    expected: "won",
+  },
+  {
+    name: "volleyball 2nd set total points does not use the 3rd set's score",
+    selection: makeSelection("s2pt-o-60.5"),
+    ft: { home: 3, away: 1 },
+    extra: volleyballSetExtras,
+    expected: "lost",
+  },
+  {
+    name: "volleyball 2nd set points handicap home is settled as won",
+    selection: makeSelection("s2ph-home", { marketLine: 3.5 }),
+    ft: { home: 3, away: 1 },
+    extra: volleyballSetExtras,
+    expected: "won",
+  },
+  {
+    name: "volleyball 3rd set total points under is settled as won",
+    selection: makeSelection("s3pt-u-50.5"),
+    ft: { home: 3, away: 1 },
+    extra: volleyballSetExtras,
+    expected: "won",
+  },
+  {
+    name: "volleyball 3rd set points handicap away is settled as won",
+    selection: makeSelection("s3ph-away", { marketLine: 5.5 }),
+    ft: { home: 3, away: 1 },
+    extra: volleyballSetExtras,
+    expected: "won",
+  },
 ];
 
 for (const tc of volleyballCases) {

@@ -74,6 +74,34 @@ export type PulseScoreVolleyballOverride = {
     s13: number;
     s23: number;
   };
+  // Confirmed real (2026-08-28 onexbet /volleyball/events sample, beach
+  // volleyball 4x4): FULL_TIME ASIAN_HANDICAP ("Handicap") — same
+  // signed-line/multi-line HOME/AWAY shape already proven for tennis's
+  // GAME_HANDICAP (extractGameHandicap in tennis.ts) — maps onto
+  // AdvancedMarkets.volleyballExtra's existing handicapPoints field
+  // (synthetic-only until now).
+  handicapPoints?: { line: number; home: number; away: number };
+  // SECOND_SET/THIRD_SET winner — same MATCH_RESULT canonicalMarket as set1
+  // (isSet1WinnerMarket), just period SECOND_SET/THIRD_SET. Maps onto
+  // volleyballExtra's existing set2/set3 fields (synthetic-only until now).
+  set2?: { home: number; away: number };
+  set3?: { home: number; away: number };
+  // Per-set Total Points (OVER_UNDER, period SECOND_SET/THIRD_SET) — same
+  // shape as the whole-match pointsLines, just scoped to one set.
+  set2PointsLines?: Array<{ line: number; over: number; under: number }>;
+  set3PointsLines?: Array<{ line: number; over: number; under: number }>;
+  // Per-set points handicap (ASIAN_HANDICAP, period SECOND_SET/THIRD_SET) —
+  // same shape as handicapPoints above, scoped to one set.
+  set2HandicapPoints?: { line: number; home: number; away: number };
+  set3HandicapPoints?: { line: number; home: number; away: number };
+  // "Race To N Points" — a NEW canonicalMarket not seen for any other sport
+  // in this codebase: multiple lines (5/10/15/20 points in the real
+  // sample), each a HOME/AWAY 2-way ("which side reaches N points first in
+  // this set") rather than an Over/Under total — confirmed real for
+  // SECOND_SET/THIRD_SET only in the sample (no FULL_TIME/FIRST_SET
+  // equivalent seen).
+  raceToPointsSet2?: Array<{ line: number; home: number; away: number }>;
+  raceToPointsSet3?: Array<{ line: number; home: number; away: number }>;
 };
 
 function isFullTimeMarket(market: PulseScoreMarket): boolean {
@@ -124,6 +152,75 @@ function extractPointsLines(
   const out: Array<{ line: number; over: number; under: number }> = [];
   for (const [line, { over, under }] of byLine) {
     if (over !== null && under !== null) out.push({ line, over, under });
+  }
+  return out.sort((a, b) => a.line - b.line);
+}
+
+function isWinnerMarketForPeriod(market: PulseScoreMarket, period: string): boolean {
+  return (
+    market.canonicalMarket === "MATCH_RESULT" &&
+    (market.period || "").toUpperCase() === period
+  );
+}
+
+/** Signed-line handicap (ASIAN_HANDICAP, HOME/AWAY canonicalOutcome) — same
+ * pairing/most-even-pick approach as tennis.ts's extractGameHandicap: pairs
+ * HOME/AWAY selections by matching |line| and picks the closest-to-even
+ * pair as the "main" line when several are offered. */
+function extractHandicap(
+  market: PulseScoreMarket,
+): { line: number; home: number; away: number } | null {
+  // Pairs HOME's own line X with AWAY's line at exactly -X rather than
+  // matching |line| — a real onexbet baseball sample (2026-08-28,
+  // ASIAN_HANDICAP run line) confirmed a single market can list HOME at
+  // BOTH a negative AND a positive line simultaneously, which an |line|
+  // pairing collides onto the same map key and silently drops one; see
+  // baseball.ts's extractHandicapLines for the original bug/fix writeup.
+  const homeByLine = new Map<number, number>();
+  const awayByLine = new Map<number, number>();
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const line = sel.line ?? market.line;
+    if (line === undefined) continue;
+    if (sel.canonicalOutcome === "HOME") homeByLine.set(line, val);
+    else if (sel.canonicalOutcome === "AWAY") awayByLine.set(line, val);
+  }
+  const pairs: Array<{ line: number; home: number; away: number }> = [];
+  for (const [line, home] of homeByLine) {
+    const away = awayByLine.get(-line);
+    if (away !== undefined) pairs.push({ line, home, away });
+  }
+  if (pairs.length === 0) return null;
+  return pairs.reduce((best, cur) =>
+    Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
+  );
+}
+
+/** "Race To N Points" — multiple lines (5/10/15/20 in the real sample), each
+ * a HOME/AWAY 2-way ("which side reaches N points first"), not an
+ * Over/Under total. Collects every line rather than picking one "main"
+ * line — unlike a spread/total there's no natural "closest to even" pick,
+ * every N is a genuinely distinct bettable market. */
+function extractRaceToPoints(
+  market: PulseScoreMarket,
+): Array<{ line: number; home: number; away: number }> {
+  const byLine = new Map<number, { home: number | null; away: number | null }>();
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const line = sel.line ?? market.line;
+    if (line === undefined) continue;
+    const entry = byLine.get(line) ?? { home: null, away: null };
+    if (sel.canonicalOutcome === "HOME") entry.home = val;
+    else if (sel.canonicalOutcome === "AWAY") entry.away = val;
+    byLine.set(line, entry);
+  }
+  const out: Array<{ line: number; home: number; away: number }> = [];
+  for (const [line, { home, away }] of byLine) {
+    if (home !== null && away !== null) out.push({ line, home, away });
   }
   return out.sort((a, b) => a.line - b.line);
 }
@@ -184,6 +281,66 @@ export function extractVolleyballOverride(ev: PulseScoreEvent): PulseScoreVolley
   const pointsLines = extractPointsLines(totalPointsMarkets);
   if (pointsLines.length > 0) out.pointsLines = pointsLines;
 
+  const handicapMarket = markets.find(
+    (m) => m.canonicalMarket === "ASIAN_HANDICAP" && isFullTimeMarket(m),
+  );
+  if (handicapMarket) {
+    const h = extractHandicap(handicapMarket);
+    if (h) out.handicapPoints = h;
+  }
+
+  const set2Markets = markets.filter((m) => isWinnerMarketForPeriod(m, "SECOND_SET"));
+  if (set2Markets.length === 1) {
+    const s2 = extractTwoWay(set2Markets[0]!);
+    if (s2) out.set2 = s2;
+  }
+  const set3Markets = markets.filter((m) => isWinnerMarketForPeriod(m, "THIRD_SET"));
+  if (set3Markets.length === 1) {
+    const s3 = extractTwoWay(set3Markets[0]!);
+    if (s3) out.set3 = s3;
+  }
+
+  const set2PointsMarkets = markets.filter(
+    (m) => m.canonicalMarket === "OVER_UNDER" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  const set2PointsLines = extractPointsLines(set2PointsMarkets);
+  if (set2PointsLines.length > 0) out.set2PointsLines = set2PointsLines;
+  const set3PointsMarkets = markets.filter(
+    (m) => m.canonicalMarket === "OVER_UNDER" && (m.period || "").toUpperCase() === "THIRD_SET",
+  );
+  const set3PointsLines = extractPointsLines(set3PointsMarkets);
+  if (set3PointsLines.length > 0) out.set3PointsLines = set3PointsLines;
+
+  const set2HandicapMarket = markets.find(
+    (m) => m.canonicalMarket === "ASIAN_HANDICAP" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  if (set2HandicapMarket) {
+    const h2 = extractHandicap(set2HandicapMarket);
+    if (h2) out.set2HandicapPoints = h2;
+  }
+  const set3HandicapMarket = markets.find(
+    (m) => m.canonicalMarket === "ASIAN_HANDICAP" && (m.period || "").toUpperCase() === "THIRD_SET",
+  );
+  if (set3HandicapMarket) {
+    const h3 = extractHandicap(set3HandicapMarket);
+    if (h3) out.set3HandicapPoints = h3;
+  }
+
+  const raceToPointsSet2Market = markets.find(
+    (m) => m.canonicalMarket === "RACE_TO_POINTS" && (m.period || "").toUpperCase() === "SECOND_SET",
+  );
+  if (raceToPointsSet2Market) {
+    const r2 = extractRaceToPoints(raceToPointsSet2Market);
+    if (r2.length > 0) out.raceToPointsSet2 = r2;
+  }
+  const raceToPointsSet3Market = markets.find(
+    (m) => m.canonicalMarket === "RACE_TO_POINTS" && (m.period || "").toUpperCase() === "THIRD_SET",
+  );
+  if (raceToPointsSet3Market) {
+    const r3 = extractRaceToPoints(raceToPointsSet3Market);
+    if (r3.length > 0) out.raceToPointsSet3 = r3;
+  }
+
   // .find() here previously grabbed the FIRST CORRECT_SCORE market
   // unconditionally — every sibling extraction above instead uses
   // .filter().length===1 and skips on ambiguity rather than risk mixing up
@@ -200,7 +357,14 @@ export function extractVolleyballOverride(ev: PulseScoreEvent): PulseScoreVolley
     if (exactScore) out.exactScore = exactScore;
   }
 
-  const known = new Set(["MATCH_RESULT", "OVER_UNDER", "CORRECT_SCORE", "OTHER"]);
+  const known = new Set([
+    "MATCH_RESULT",
+    "OVER_UNDER",
+    "CORRECT_SCORE",
+    "OTHER",
+    "ASIAN_HANDICAP",
+    "RACE_TO_POINTS",
+  ]);
   for (const market of markets) {
     if (!known.has(market.canonicalMarket)) recordUnknownCanonicalMarket(market.canonicalMarket, market.rawName);
   }
