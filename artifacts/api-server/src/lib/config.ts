@@ -77,6 +77,20 @@ const API_FOOTBALL_KEY = process.env["API_FOOTBALL_KEY"] ?? "";
 const API_FOOTBALL_BASE_URL =
   process.env["API_FOOTBALL_BASE_URL"]?.trim() || "https://v3.football.api-sports.io";
 
+// SportMonks Football API v3 — replacing PulseScore/bwin as football's odds
+// provider (PulseScore's football feed was deliberately blocked 2026-08-28,
+// see pulsescore/football.ts's FOOTBALL_PULSESCORE_BLOCKED) and eventually
+// API-Football's live match-state feed too. Auth is a `api_token` query
+// param (not a header, unlike PulseScore's X-Secret) — confirmed against
+// real GET /v3/football/rounds/{id} and /v3/football/livescores/inplay
+// samples, 2026-08-28. Odds come pre-aggregated across bookmakers
+// (fixtures.odds.bookmaker) — the sample confirmed real so far is all
+// bookmaker_id 2 ("bet365"); which bookmaker(s) to standardize on is not
+// yet decided.
+const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
+const SPORTMONKS_BASE_URL =
+  process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
+
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
 // deterministic template when unset. Kept separate from the AI_AGENTS_*
@@ -155,6 +169,8 @@ export const CONFIG = {
   PULSESCORE_BOOKMAKER,
   API_FOOTBALL_KEY,
   API_FOOTBALL_BASE_URL,
+  SPORTMONKS_API_KEY,
+  SPORTMONKS_BASE_URL,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
