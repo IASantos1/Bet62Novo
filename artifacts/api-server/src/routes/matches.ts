@@ -11570,13 +11570,13 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const isWomens = leagueName.toLowerCase().includes("wta");
 
     // Real tennis-specific prematch markets beyond the moneyline (set
-    // winner, total games, exact set score) — see extractTennisPrematchExtra
-    // for exactly which markets these come from and why gameHandicap/
-    // setHandicap/set2/set3 stay zeroed (no safe HOME/AWAY attribution or no
-    // real data available at all). Zero is this codebase's existing
-    // "not priced" signal (same convention already used for football's
-    // Em Breve markets) — the frontend already hides/disables a market
-    // whose odds are 0.
+    // winner, total games, exact set score, game handicap, per-player game
+    // totals) — see extractTennisPrematchExtra for exactly which markets
+    // these come from and why setHandicap/set2/set3 stay zeroed (no safe
+    // HOME/AWAY attribution or no real data available at all). Zero is this
+    // codebase's existing "not priced" signal (same convention already used
+    // for football's Em Breve markets) — the frontend already hides/
+    // disables a market whose odds are 0.
     const prematchExtra = extractTennisPrematchExtra(ev);
     const tennisExtra: NonNullable<AdvancedMarkets["tennisExtra"]> = {
       firstSet: prematchExtra.firstSet ?? { home: 0, away: 0 },
@@ -11587,7 +11587,9 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       totalGames: prematchExtra.totalGames ?? { line: 0, over: 0, under: 0 },
       totalGamesLines: prematchExtra.totalGamesLines ?? [],
       set1Games: prematchExtra.set1Games ?? { line: 0, over: 0, under: 0 },
-      gameHandicap: { line: 0, home: 0, away: 0 },
+      gameHandicap: prematchExtra.gameHandicap ?? { line: 0, home: 0, away: 0 },
+      homePlayerGames: prematchExtra.homePlayerGames,
+      awayPlayerGames: prematchExtra.awayPlayerGames,
       oddEvenGames: prematchExtra.oddEvenGames ?? { odd: 0, even: 0 },
     };
     const markets: AdvancedMarkets = { ...baseMarkets, tennisExtra };

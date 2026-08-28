@@ -15553,22 +15553,22 @@ export default function Home({
                         )}
                         {tennisExtra?.gameHandicap?.home > 0 && (
                           <MarketGroup
-                            title={`Handicap de Games — Linha ${tennisExtra!.gameHandicap!.line > 0 ? `−${tennisExtra!.gameHandicap!.line}` : `+${Math.abs(tennisExtra!.gameHandicap!.line)}`}`}
+                            title={`Handicap de Games — Casa ${tennisExtra!.gameHandicap!.line < 0 ? `−${Math.abs(tennisExtra!.gameHandicap!.line)}` : `+${tennisExtra!.gameHandicap!.line}`}`}
                           >
                             <MarketOddsBtn
                               match={match}
-                              sel={`gh-home-${tennisExtra!.gameHandicap!.line}`}
+                              sel={`gh-home-${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               odd={tennisExtra!.gameHandicap!.home}
                               market="handicap"
-                              label={match.home}
+                              label={`${match.home} ${tennisExtra!.gameHandicap!.line < 0 ? "−" : "+"}${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               suspKey="gameHandicap"
                             />
                             <MarketOddsBtn
                               match={match}
-                              sel={`gh-away-${tennisExtra!.gameHandicap!.line}`}
+                              sel={`gh-away-${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               odd={tennisExtra!.gameHandicap!.away}
                               market="handicap"
-                              label={match.away}
+                              label={`${match.away} ${tennisExtra!.gameHandicap!.line < 0 ? "+" : "−"}${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               suspKey="gameHandicap"
                             />
                           </MarketGroup>
@@ -17506,26 +17506,26 @@ export default function Home({
                     {/* Game handicap */}
                     {((m as any).tennisExtra as any).gameHandicap?.home > 0 && (
                       <MarketGroup
-                        title={`Handicap de Games — ${((m as any).tennisExtra as any).gameHandicap.line > 0 ? `Casa −${((m as any).tennisExtra as any).gameHandicap.line}` : `Casa +${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}`}
+                        title={`Handicap de Games — ${((m as any).tennisExtra as any).gameHandicap.line < 0 ? `Casa −${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}` : `Casa +${((m as any).tennisExtra as any).gameHandicap.line}`}`}
                       >
                         <MarketOddsBtn
                           match={match}
-                          sel={`gh-home-${((m as any).tennisExtra as any).gameHandicap.line}`}
+                          sel={`gh-home-${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           odd={
                             ((m as any).tennisExtra as any).gameHandicap.home
                           }
                           market="jogos"
-                          label={match.home}
+                          label={`${match.home} ${((m as any).tennisExtra as any).gameHandicap.line < 0 ? "−" : "+"}${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           suspKey="gameHandicap"
                         />
                         <MarketOddsBtn
                           match={match}
-                          sel={`gh-away-${((m as any).tennisExtra as any).gameHandicap.line}`}
+                          sel={`gh-away-${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           odd={
                             ((m as any).tennisExtra as any).gameHandicap.away
                           }
                           market="jogos"
-                          label={match.away}
+                          label={`${match.away} ${((m as any).tennisExtra as any).gameHandicap.line < 0 ? "+" : "−"}${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           suspKey="gameHandicap"
                         />
                       </MarketGroup>

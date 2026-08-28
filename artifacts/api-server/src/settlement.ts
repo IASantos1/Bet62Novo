@@ -2613,21 +2613,51 @@ export function scoreOutcomeForSel(
     else winning = m[2] === "home" ? diff > line : diff < line;
   } else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
     const m = s.match(/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
-    // The line is normally embedded in the key ("gh-home-2.5"); some client
-    // aliases send a bare "gh-home" with the line only in the label instead.
-    const line = m[2] !== undefined
-      ? Number(m[2])
-      : Math.abs(readSelectionMarketLine(sel) ?? NaN);
-    if (!Number.isFinite(line)) return null;
+    const side = m[1] as "home" | "away";
     const sets = getTennisSetsFromExtras(extra?.extras);
     if (sets.length === 0) return null;
     const completedSets = sets.filter(tennisSetFinished);
     if (completedSets.length === 0) return null;
     const homeGames = completedSets.reduce((sum, [h]) => sum + h, 0);
     const awayGames = completedSets.reduce((sum, [, a]) => sum + a, 0);
-    const diff = homeGames - awayGames;
-    if (diff === line) voided = true;
-    else winning = m[1] === "home" ? diff > line : diff < line;
+    // The line is normally embedded in the key ("gh-home-2.5") as an
+    // UNSIGNED magnitude; some client aliases send a bare "gh-home" with
+    // the line only in the label/marketLine instead. A genuinely SIGNED
+    // line (from home's own perspective, e.g. +3.5 when home is the
+    // underdog) is preferred — same fix as basketball's b-spread-/
+    // baseball's rl- this session: the unsigned-magnitude fallback below
+    // silently assumes "home is always the favorite," which real onexbet
+    // data (away-favored matches included) now confirms is wrong for
+    // tennis's game handicap too. Falls back to that old assumption only
+    // when no signed source exists, so bets placed before a signed
+    // marketLine/label was captured still settle exactly as before.
+    const magnitude = m[2] !== undefined ? Number(m[2]) : NaN;
+    const signedLine = readSelectionMarketLine(sel);
+    const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+    if (!Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(homeGames, awayGames, side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
+  // Per-player total games (HOME_OVER_UNDER/AWAY_OVER_UNDER, confirmed real
+  // 2026-08-28 onexbet catalog) — frontend key is bare ("hpg-o"/"apg-u",
+  // no embedded line, home.tsx's MarketOddsBtn), so the line only ever
+  // comes from the bet's stored marketLine (readSelectionMarketLine).
+  else if (/^(hpg|apg)-([ou])$/.test(s)) {
+    const m = s.match(/^(hpg|apg)-([ou])$/)!;
+    const isHome = m[1] === "hpg";
+    const line = readSelectionMarketLine(sel);
+    if (line === null) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    const playerGames = completedSets.reduce(
+      (sum, [h, a]) => sum + (isHome ? h : a),
+      0,
+    );
+    if (playerGames === line) voided = true;
+    else winning = m[2] === "o" ? playerGames > line : playerGames < line;
   } else if (/^tg-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^tg-([ou])-(\d+(?:\.\d+)?)$/)!;
     const line = Number(m[2]!);

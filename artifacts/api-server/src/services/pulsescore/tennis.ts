@@ -638,6 +638,18 @@ export type PulseScoreTennisPrematchExtra = {
   // tennis, not games; using it here would silently grade the wrong stat).
   // Matches AdvancedMarkets.tennisExtra's existing oddEvenGames field.
   oddEvenGames?: { odd: number; even: number };
+  // GAME_HANDICAP — confirmed real (2026-08-28, onexbet /tennis/leagues
+  // catalog: canonicalMarket 'GAME_HANDICAP', periods FIRST_SET/FULL_TIME/
+  // SECOND_SET, outcomes HOME/AWAY, rawNames "Handicap"/"1st set Handicap"/
+  // "2nd set Handicap"). Same signed-line shape already proven for
+  // basketball's spread and hockey's puck line this session — matches.ts's
+  // tennisExtra.gameHandicap field already exists (synthetic-only so far).
+  gameHandicap?: { line: number; home: number; away: number };
+  // HOME_OVER_UNDER/AWAY_OVER_UNDER — confirmed real (same catalog,
+  // rawNames "Total 1"/"Total 2" — per-player game totals). Matches
+  // tennisExtra's existing homePlayerGames/awayPlayerGames fields.
+  homePlayerGames?: { line: number; over: number; under: number };
+  awayPlayerGames?: { line: number; over: number; under: number };
 };
 
 function collectOverUnderLines(
@@ -669,6 +681,32 @@ function collectOverUnderLines(
     if (over !== null && under !== null) out.push({ line, over, under });
   }
   return out.sort((a, b) => a.line - b.line);
+}
+
+/** GAME_HANDICAP extraction — same shape/convention already proven for
+ * basketball's spread and hockey's puck line (extractSpread in
+ * basketball.ts): HOME carries the signed line (home's own selection),
+ * AWAY is the mirror side at the same market. */
+function extractGameHandicap(
+  market: PulseScoreMarket,
+): { line: number; home: number; away: number } | null {
+  let homeOdds: number | null = null;
+  let homeLine: number | null = null;
+  let awayOdds: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    if (sel.canonicalOutcome === "HOME") {
+      homeOdds = val;
+      homeLine = sel.line ?? market.line ?? null;
+    } else if (sel.canonicalOutcome === "AWAY") {
+      awayOdds = val;
+    }
+  }
+  return homeOdds !== null && awayOdds !== null && homeLine !== null
+    ? { line: homeLine, home: homeOdds, away: awayOdds }
+    : null;
 }
 
 /** Picks the closest-to-even line (min |over - under| gap) as the "main"
@@ -745,6 +783,26 @@ export function extractTennisPrematchExtra(
   );
   const set1Lines = collectOverUnderLines(totalGamesSet1);
   if (set1Lines.length > 0) out.set1Games = pickMostEvenLine(set1Lines);
+
+  const gameHandicapMarket = markets.find(
+    (m) => m.canonicalMarket === "GAME_HANDICAP" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (gameHandicapMarket) {
+    const gh = extractGameHandicap(gameHandicapMarket);
+    if (gh) out.gameHandicap = gh;
+  }
+
+  const homeGamesMarket = markets.filter(
+    (m) => m.canonicalMarket === "HOME_OVER_UNDER" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  const homeGamesLines = collectOverUnderLines(homeGamesMarket);
+  if (homeGamesLines.length > 0) out.homePlayerGames = pickMostEvenLine(homeGamesLines);
+
+  const awayGamesMarket = markets.filter(
+    (m) => m.canonicalMarket === "AWAY_OVER_UNDER" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  const awayGamesLines = collectOverUnderLines(awayGamesMarket);
+  if (awayGamesLines.length > 0) out.awayPlayerGames = pickMostEvenLine(awayGamesLines);
 
   const oddEvenMarket = markets.find(
     (m) =>
