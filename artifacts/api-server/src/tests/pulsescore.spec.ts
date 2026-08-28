@@ -22,7 +22,7 @@ const {
 const { extractBasketballOverride, mergeBasketballWsFreshness } = await import(
   "../services/pulsescore/basketball.js"
 );
-const { extractTennisPrematchExtra, mergeTennisWsFreshness } = await import(
+const { extractTennisPrematchExtra, extractTennisLiveExtra, mergeTennisWsFreshness } = await import(
   "../services/pulsescore/tennis.js"
 );
 const { extractHockeyOverride } = await import(
@@ -1048,6 +1048,57 @@ test("extractTennisPrematchExtra: reads Total Games line from the market, not th
   assert.equal(extra.totalGames?.line, 22.5);
   assert.equal(extra.totalGames?.over, 1.9);
   assert.equal(extra.totalGames?.under, 1.78);
+});
+
+function makeTennisLiveEvent(markets: unknown[]) {
+  return {
+    eventId: "test-tennis-live-1",
+    sport: "tennis",
+    league: "ATP Test",
+    home: "Player A",
+    away: "Player B",
+    live: true,
+    markets,
+  } as Parameters<typeof extractTennisLiveExtra>[0];
+}
+
+// straightSetsWinner originally only matched bwin's "straight sets winner?"
+// rawName and never fired against real onexbet data. A real onexbet live
+// sample (2026-08-28) shows the equivalent market is named "Any Player To
+// Win All Sets" — confirming the additive match added to pick it up.
+test("extractTennisLiveExtra: matches onexbet's 'Any Player To Win All Sets' into straightSetsWinner", () => {
+  const anyPlayerAllSets = {
+    canonicalMarket: "OTHER",
+    rawName: "Any Player To Win All Sets",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:any-player-all-sets",
+    selections: [
+      { rawName: "Yes", odds: 1.65, isActive: true },
+      { rawName: "No", odds: 2.2, isActive: true },
+    ],
+  };
+  const extra = extractTennisLiveExtra(makeTennisLiveEvent([anyPlayerAllSets]));
+  assert.equal(extra.straightSetsWinner?.yes, 1.65);
+  assert.equal(extra.straightSetsWinner?.no, 2.2);
+});
+
+// Confirmed real (2026-08-28 onexbet live tennis sample) — plain Yes/No.
+test("extractTennisLiveExtra: extracts 'Tie-Break Or Extra Games In The Final Set' (onexbet)", () => {
+  const finalSetTb = {
+    canonicalMarket: "OTHER",
+    rawName: "Tie-Break Or Extra Games In The Final Set",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:final-set-tb-or-extra",
+    selections: [
+      { rawName: "Yes", odds: 3.4, isActive: true },
+      { rawName: "No", odds: 1.28, isActive: true },
+    ],
+  };
+  const extra = extractTennisLiveExtra(makeTennisLiveEvent([finalSetTb]));
+  assert.equal(extra.finalSetTieBreakOrExtra?.yes, 3.4);
+  assert.equal(extra.finalSetTieBreakOrExtra?.no, 1.28);
 });
 
 test("teamNamesMatch: nickname-suffix fallback matches bwin's short hockey team names", () => {
