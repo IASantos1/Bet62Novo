@@ -67,6 +67,13 @@ export function getPulseScoreFootballUsage(): {
 // matchers below for the concrete shape differences that required.
 const FOOTBALL_BOOKMAKER = "bwin";
 
+// 2026-08-28: football's PulseScore/bwin feed (prematch, live REST, and the
+// WS overlay in footballWs.ts) is intentionally disabled while we switch
+// football to a different odds provider. Every entry point below returns
+// empty instead of calling out — flip this back to false (and
+// startPulseScoreFootballWs in api/index.ts) to restore it.
+const FOOTBALL_PULSESCORE_BLOCKED = true;
+
 // Bug report 2026-08-14: a whole league (2. Bundesliga, but "several
 // leagues" per the report) showing only a handful of its real live matches
 // — e.g. 3 of 10. Root cause: this fetch only ever requested page 1
@@ -180,6 +187,7 @@ const FOOTBALL_WS_EVENT_FRESHNESS_MS = 4_000;
  * always the list, WS is checked per-event via getFootballWsEventIfFresh,
  * and staleness for one event never affects any other. */
 export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
+  if (FOOTBALL_PULSESCORE_BLOCKED) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
   const now = Date.now();
@@ -1305,6 +1313,7 @@ async function fetchFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
  * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
  * very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
+  if (FOOTBALL_PULSESCORE_BLOCKED) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (upcomingCache && now - upcomingCache.fetchedAt < FOOTBALL_UPCOMING_TTL_MS)

@@ -28,6 +28,12 @@ import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { pulseScoreWsUrl, type PulseScoreEvent } from "./client.js";
 
+// 2026-08-28: kept in sync with the same-named flag in football.ts (not
+// imported directly, to avoid a circular import — football.ts already
+// imports getFootballWsEventIfFresh from this file). Flip both back to
+// false together to restore football's PulseScore/bwin feed.
+const FOOTBALL_PULSESCORE_BLOCKED = true;
+
 let ws: WebSocket | null = null;
 let connected = false;
 let retryDelayMs = 2_000;
@@ -195,6 +201,10 @@ export const __testing = { applyFrame, liveByEventId, lastSeenAt };
 /** Call once at server startup. Safe to call even without an API key yet —
  * it's a no-op until PULSESCORE_API_KEY is set (nothing to retry-loop). */
 export function startPulseScoreFootballWs(): void {
+  // 2026-08-28: football's PulseScore/bwin feed is intentionally disabled
+  // while we switch football to a different odds provider — see the same
+  // flag in football.ts. Never opens the socket while blocked.
+  if (FOOTBALL_PULSESCORE_BLOCKED) return;
   if (startedOnce) return;
   startedOnce = true;
   connect();
