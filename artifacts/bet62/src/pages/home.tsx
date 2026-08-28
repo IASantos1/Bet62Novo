@@ -3308,7 +3308,10 @@ const OTHER_SPORTS: {
     key: "mma",
     label: "MMA",
     icon: "🥋",
-    leagues: ["UFC"],
+    // "UFC" kept as a shortcut even though it hasn't appeared in a real
+    // onexbet sample yet — the two leagues confirmed real (2026-08-28,
+    // GET /mma prematch sample) are "Combatsport. BFL" and "Road to UFC".
+    leagues: ["UFC", "Road to UFC", "Combatsport. BFL"],
   },
   {
     key: "cricket",

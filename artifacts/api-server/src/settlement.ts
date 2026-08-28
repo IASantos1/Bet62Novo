@@ -3272,6 +3272,31 @@ export function scoreOutcomeForSel(
   // ── Goal Odd / Even ────────────────────────────────────────────────────────
   else if (s === "goe-odd") winning = total % 2 === 1;
   else if (s === "goe-even") winning = total % 2 === 0;
+
+  // ── MMA round total (new sport, 2026-08-28) ─────────────────────────────
+  // A fight has no home/away score — `total` (ft.home+ft.away) is
+  // meaningless here — so this can't reuse the generic O/U key above.
+  // Grading needs to know which round the fight actually ended in, read
+  // from extra.extras.mma.endedInRound (mirroring the existing
+  // extras.basketball.quarters/extras.tennis.sets pattern for sport-
+  // specific supplementary stats). No PulseScore /results sample for MMA
+  // has been seen yet to confirm that field ever actually gets populated —
+  // deliberately returns null (stays pending) rather than guess when it's
+  // absent, same as every other "insufficient data" branch in this
+  // function; a pending MMA round-total bet settles via the admin panel's
+  // manual settlement path until a real sample lets this be wired up for
+  // real (see mma.ts's header for the full story).
+  else if (/^mma-round-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^mma-round-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const mmaExtras = ex["mma"] as { endedInRound?: number } | undefined;
+    const endedInRound = mmaExtras?.endedInRound;
+    if (typeof endedInRound === "number" && Number.isFinite(endedInRound)) {
+      const line = Number(m[2]);
+      if (endedInRound === line) voided = true;
+      else winning = m[1] === "o" ? endedInRound > line : endedInRound < line;
+    }
+    // else: winning stays null — no round data available yet, pending.
+  }
   // ── Win to Nil ─────────────────────────────────────────────────────────────
   else if (s === "wtn-h") winning = home > away && away === 0;
   else if (s === "wtn-a") winning = away > home && home === 0;
@@ -3528,6 +3553,7 @@ function normalizeSelectionSport(
   | "baseball"
   | "hockey"
   | "volleyball"
+  | "mma"
   | null {
   const value = String(raw ?? "")
     .trim()
@@ -3540,6 +3566,13 @@ function normalizeSelectionSport(
   if (value === "volleyball" || value === "volley") return "volleyball";
   if (value === "baseball" || value === "mlb") return "baseball";
   if (value === "hockey" || value === "nhl") return "hockey";
+  // Added 2026-08-28 alongside the new sport — without this, an MMA
+  // selection's explicit sport:"mma" field was silently discarded here,
+  // falling through to detectSportFromKey's default of "football" for
+  // MMA's plain home/away/draw keys (no sport-specific prefix exists for
+  // MMA, same as football) — every MMA bet would have looked up its
+  // result under football's provider-matchId prefixes and never resolved.
+  if (value === "mma") return "mma";
   return null;
 }
 
@@ -3552,6 +3585,7 @@ function readSelectionSport(
   | "baseball"
   | "hockey"
   | "volleyball"
+  | "mma"
   | null {
   return normalizeSelectionSport(sel.providerSport ?? sel.sport);
 }
@@ -3565,9 +3599,18 @@ function inferSelectionLookupSport(
   | "baseball"
   | "hockey"
   | "volleyball"
+  | "mma"
   | null {
   const explicitSport = readSelectionSport(sel);
   if (explicitSport) return explicitSport;
+  // detectSportFromKey has no MMA-specific key prefix to recognize (MMA's
+  // moneyline/double-chance keys are the same bare home/away/draw/dc-*
+  // shape football uses, on purpose — see mma.ts's header) — it can only
+  // ever return "football" here for an MMA selection missing its explicit
+  // sport field. Not fixable by adding a case to that function the way the
+  // other sports are, since there is no distinguishing text in the key
+  // itself; readSelectionSport's explicit sport:"mma" field above is the
+  // only reliable signal, which is why it's checked first.
   return normalizeSelectionSport(
     detectSportFromKey(normalizeSettlementSelectionKey(sel.selection)),
   );
@@ -3618,7 +3661,8 @@ function providerMatchIdPrefixesForSport(
     | "basketball"
     | "baseball"
     | "hockey"
-    | "volleyball",
+    | "volleyball"
+    | "mma",
 ): string[] {
   switch (sport) {
     case "football":
@@ -3651,9 +3695,23 @@ function providerMatchIdPrefixesForSport(
       // really finished" check for 100% of today's basketball bets.
       return ["pulsescore-basketball", "bball-v2"];
     case "baseball":
-      return ["baseball-v2", "mlb-v2"];
+      // Missing "pulsescore-baseball" until 2026-08-28 (found while wiring
+      // real onexbet markets into baseball this session) — same bug class
+      // already diagnosed and fixed for basketball/volleyball above (see
+      // basketball's comment): buildBaseballLiveFromPulseScore (matches.ts)
+      // has used `pulsescore-baseball-${eventId}` as baseball's live matchId
+      // since that pipeline shipped, but this list never had it, silently
+      // breaking the fuzzy team-name-lookup fallback for every current
+      // baseball bet — baseball-v2/mlb-v2 are the dead pre-migration prefixes.
+      return ["pulsescore-baseball", "baseball-v2", "mlb-v2"];
     case "hockey":
-      return ["hockey-v2"];
+      // Same gap as baseball above, same fix — hockey-v2 is the dead
+      // pre-migration prefix.
+      return ["pulsescore-hockey", "hockey-v2"];
+    case "mma":
+      // New sport (2026-08-28) — no pre-migration prefix exists, this is
+      // the only one buildMmaUpcomingFromPulseScore ever creates.
+      return ["pulsescore-mma"];
     case "volleyball":
       // pulsescore-volleyball is the current live AND prematch prefix
       // (buildVolleyballLiveFromPulseScore/buildVolleyballUpcomingFromPulseScore
@@ -3671,7 +3729,8 @@ function buildCanonicalMatchIds(
     | "basketball"
     | "baseball"
     | "hockey"
-    | "volleyball",
+    | "volleyball"
+    | "mma",
   providerId: string,
 ): string[] {
   const normalizedId = String(providerId ?? "").trim();
@@ -3754,7 +3813,11 @@ function isProviderManagedMatchId(matchId: string): boolean {
   // own disappearance-based GC — the active safety net football/tennis already had
   // was silently missing for these two sports since their PulseScore live pipelines
   // shipped (basketball 2026-08-08, volleyball 2026-08-09).
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(
+  // pulsescore-hockey/pulsescore-baseball added 2026-08-28 — same exact gap,
+  // found while wiring real onexbet markets into both sports this session
+  // (see providerMatchIdPrefixesForSport's matching comment above).
+  // pulsescore-mma added the same day — new sport, built from scratch.
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }

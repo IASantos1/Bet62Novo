@@ -51,6 +51,10 @@ import {
   getPulseScoreVolleyballLive,
   extractVolleyballOverride,
 } from "../services/pulsescore/volleyball.js";
+import {
+  getPulseScoreMmaUpcoming,
+  extractMmaOverride,
+} from "../services/pulsescore/mma.js";
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
@@ -12020,6 +12024,96 @@ async function buildHockeyUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+// MMA has no goals/points/quarters — a fight is decided by decision/KO/
+// submission, not a running score — so unlike every other makeXMarketsFromTeams
+// helper here, there's no Poisson goal model to build a synthetic price
+// from. A flat, seeded-per-matchup ~50/50 price (same probsToDecimalOdds
+// fair-price helper every other synthetic model uses) is the honest
+// placeholder until real onexbet odds arrive — no fight-specific stats
+// exist to weight it by. AdvancedMarkets' required generic fields
+// (bothTeamsScore/totalGoals/handicap/halfTime/firstGoal) don't apply to
+// MMA at all — zeroed, matching this codebase's "0 odds = not priced,
+// frontend hides it" convention already used for every other placeholder
+// market.
+function makeMmaMoneylineFromTeams(home: string, away: string): { home: number; away: number } {
+  const sr = seededRng(`mma-ml:${home}:${away}`);
+  const pHome = mc(0.5 + (sr(1) - 0.5) * 0.3, 0.15, 0.85);
+  const [oddsHome, oddsAway] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+  return { home: oddsHome!, away: oddsAway! };
+}
+
+function makeMmaMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+  const ml = makeMmaMoneylineFromTeams(home, away);
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals: {
+      over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+      over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
+      over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: ml.home, noGoal: 0, away: ml.away },
+  };
+}
+
+/**
+ * MMA prematch, sourced entirely from PulseScore (getPulseScoreMmaUpcoming).
+ * New sport (2026-08-28) — see mma.ts's header for the real market shapes
+ * confirmed against a real onexbet sample and exactly what isn't built yet
+ * (live odds, automatic result detection/settlement — no real live/results
+ * MMA sample exists to build either against safely). `odds` prefers the
+ * "Win (2Way)" 2-way price (no draw ambiguity); `mmaExtra.totalRoundsLines`
+ * carries the round total when priced. Same `pulsescore-mma-${eventId}` id
+ * scheme as every other PulseScore sport.
+ */
+async function buildMmaUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreMmaUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const leagueName = ev.league || "MMA";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractMmaOverride(ev);
+    const markets = makeMmaMarketsFromTeams(home, away);
+    if (override.doubleChance) markets.doubleChance = override.doubleChance;
+    const mmaExtra: MmaExtraData = {
+      toDistance: { yes: 0, no: 0 },
+      totalRoundsLines: override.total ? [override.total] : [],
+    };
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { ...makeMmaMoneylineFromTeams(home, away), draw: 0 };
+
+    results.push({
+      id: `pulsescore-mma-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "mma",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+      mmaExtra,
+    });
+  }
+  return results;
+}
+
 /** Upcoming volleyball fixtures from PulseScore (bwin), each carrying its
  * Match Result / Set 1 Winner / Total Points / Correct Score prematch odds
  * when bwin has priced it yet, merged into the existing (previously dead —
@@ -12316,6 +12410,7 @@ let _lastGoodTennisUpcoming: UpcomingMatch[] = [];
 let _lastGoodBasketballUpcoming: UpcomingMatch[] = [];
 let _lastGoodHockeyUpcoming: UpcomingMatch[] = [];
 let _lastGoodVolleyballUpcoming: UpcomingMatch[] = [];
+let _lastGoodMmaUpcoming: UpcomingMatch[] = [];
 
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
@@ -12384,7 +12479,18 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       volleyball = _lastGoodVolleyballUpcoming;
     }
-    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
+    let mma: UpcomingMatch[];
+    try {
+      mma = await buildMmaUpcomingFromPulseScore();
+      _lastGoodMmaUpcoming = mma;
+    } catch (err) {
+      logger.error(
+        { err },
+        "[pulsescore] buildMmaUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+      );
+      mma = _lastGoodMmaUpcoming;
+    }
+    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...mma];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
