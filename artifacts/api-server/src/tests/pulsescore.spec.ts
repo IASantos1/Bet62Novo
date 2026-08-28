@@ -32,6 +32,9 @@ const { extractVolleyballOverride } = await import(
   "../services/pulsescore/volleyball.js"
 );
 const { extractMmaOverride } = await import("../services/pulsescore/mma.js");
+const { extractBaseballOverride } = await import(
+  "../services/pulsescore/baseball.js"
+);
 const { __testing: footballWs, getFootballWsEventIfFresh } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -1625,4 +1628,122 @@ test("extractMmaOverride: extracts Method Of Victory for both fighters plus the 
     awayInside: { yes: 7, no: 1.07 },
     draw: 50,
   });
+});
+
+function makeBaseballEvent(markets: unknown[]) {
+  return {
+    eventId: "747990561",
+    sport: "baseball",
+    league: "Minor League Baseball",
+    home: "Charlotte Knights",
+    away: "Memphis Redbirds",
+    markets,
+  } as Parameters<typeof extractBaseballOverride>[0];
+}
+
+// Confirmed real (2026-08-28 onexbet /baseball/events sample, "Minor League
+// Baseball") — moneyline is MATCH_RESULT/"1X2", HOME/AWAY only (no draw at
+// the game level).
+test("extractBaseballOverride: extracts the moneyline (onexbet)", () => {
+  const matchResult = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "1X2",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:1x2",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "W1", odds: 1.879, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "W2", odds: 1.942, isActive: true },
+    ],
+  };
+  const override = extractBaseballOverride(makeBaseballEvent([matchResult]));
+  assert.deepEqual(override.odds, { home: 1.879, away: 1.942 });
+});
+
+// Confirmed real (same sample) — the run line is ASIAN_HANDICAP with
+// multiple alternate lines; picks the closest-to-even pair as `runLine`
+// but keeps every paired line in `runLineLines` too (the frontend/
+// settlement convention wants the fixed ±1.5 split specifically).
+test("extractBaseballOverride: collects every run line and picks the most-even one (onexbet)", () => {
+  const handicap = {
+    canonicalMarket: "ASIAN_HANDICAP",
+    rawName: "Handicap",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:handicap",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "1 (-1.5)", odds: 2.52, isActive: true, line: -1.5 },
+      { canonicalOutcome: "HOME", rawName: "1 (1.5)", odds: 1.616, isActive: true, line: 1.5 },
+      { canonicalOutcome: "AWAY", rawName: "2 (1.5)", odds: 1.41, isActive: true, line: 1.5 },
+      { canonicalOutcome: "AWAY", rawName: "2 (-1.5)", odds: 2.334, isActive: true, line: -1.5 },
+    ],
+  };
+  const override = extractBaseballOverride(makeBaseballEvent([handicap]));
+  // Home -1.5 (needs to win by 2+) pairs with away's own +1.5 entry (needs
+  // to not lose by 2+) — the complementary side of the SAME spread, not
+  // away's own -1.5 entry (a different, mirrored line where away is
+  // favored instead).
+  assert.deepEqual(override.runLineLines, [
+    { line: -1.5, home: 2.52, away: 1.41 },
+    { line: 1.5, home: 1.616, away: 2.334 },
+  ]);
+  assert.deepEqual(override.runLine, { line: 1.5, home: 1.616, away: 2.334 });
+});
+
+// Confirmed real (same sample) — Total carries multiple alternate lines,
+// all collected (not just one picked).
+test("extractBaseballOverride: collects every Total alternate line (onexbet)", () => {
+  const makeTotal = (line: number, over: number, under: number) => ({
+    canonicalMarket: "OVER_UNDER",
+    rawName: "Total",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: `test:total-${line}`,
+    selections: [
+      { canonicalOutcome: "OVER", rawName: `Over (${line})`, odds: over, isActive: true, line },
+      { canonicalOutcome: "UNDER", rawName: `Under (${line})`, odds: under, isActive: true, line },
+    ],
+  });
+  const override = extractBaseballOverride(
+    makeBaseballEvent([makeTotal(10, 1.42, 2.49), makeTotal(10.5, 1.51, 2.26), makeTotal(11, 1.61, 2.07)]),
+  );
+  assert.deepEqual(override.totalLines, [
+    { line: 10, over: 1.42, under: 2.49 },
+    { line: 10.5, over: 1.51, under: 2.26 },
+    { line: 11, over: 1.61, under: 2.07 },
+  ]);
+});
+
+// Confirmed real (same sample) — F5 ("1-5 Inning 1X2"/"1-5 Inning Total",
+// period FIRST_FIVE_INNINGS) is genuinely 3-way (a 5-inning tie is
+// possible) but extractMoneyline's HOME/AWAY-only read still works fine
+// for it — the existing mlb-f5-home/away UI/settlement only ever wanted a
+// 2-way home/away price with void-on-tie, which this satisfies.
+test("extractBaseballOverride: extracts F5 Match Result and Total (onexbet)", () => {
+  const f5Result = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "1-5 Inning 1X2",
+    period: "FIRST_FIVE_INNINGS",
+    isActive: true,
+    marketId: "test:f5-result",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "W1", odds: 2.01, isActive: true },
+      { canonicalOutcome: "DRAW", rawName: "X", odds: 6.85, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "W2", odds: 2.08, isActive: true },
+    ],
+  };
+  const f5Total = {
+    canonicalMarket: "OVER_UNDER",
+    rawName: "1-5 Inning Total",
+    period: "FIRST_FIVE_INNINGS",
+    isActive: true,
+    marketId: "test:f5-total",
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over (5.5)", odds: 1.576, isActive: true, line: 5.5 },
+      { canonicalOutcome: "UNDER", rawName: "Under (5.5)", odds: 2.181, isActive: true, line: 5.5 },
+    ],
+  };
+  const override = extractBaseballOverride(makeBaseballEvent([f5Result, f5Total]));
+  assert.deepEqual(override.f5, { home: 2.01, away: 2.08 });
+  assert.deepEqual(override.f5Total, { line: 5.5, over: 1.576, under: 2.181 });
 });

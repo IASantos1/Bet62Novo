@@ -55,6 +55,11 @@ import {
   getPulseScoreMmaUpcoming,
   extractMmaOverride,
 } from "../services/pulsescore/mma.js";
+import {
+  getPulseScoreBaseballUpcoming,
+  extractBaseballOverride,
+  type PulseScoreBaseballPrematchEvent,
+} from "../services/pulsescore/baseball.js";
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
@@ -334,6 +339,15 @@ type AdvancedMarkets = {
     drawNoBet?: { home: number; away: number };
     correctScore?: Array<{ label: string; odds: number }>;
     nextGoal?: { home: number; away: number; none: number };
+  };
+  // Baseball extended markets (First 5 Innings) — was already produced by
+  // makeMLBMarketsFromTeams's synthetic model (`as unknown as
+  // AdvancedMarkets` cast, never formally typed) before this field existed
+  // here; now real onexbet data can override it the same way every other
+  // sport's Extra field does.
+  mlbExtra?: {
+    f5Result?: { home: number; away: number };
+    f5Total?: { line: number; over: number; under: number };
   };
   // Volleyball extended markets
   volleyballExtra?: {
@@ -23149,9 +23163,95 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   }
 }
 
+/** Merges real onexbet baseball odds (extractBaseballOverride, new
+ * 2026-08-28 — see pulsescore/baseball.ts's header for why baseball had no
+ * PulseScore prematch integration before this) onto getMLBOdds()'s existing
+ * Statpal/SportsAPI V2 list. Additive, not a replacement: the old pipeline
+ * still supplies the match list itself (identity/date/time/team-name
+ * conventions many other things already depend on) — this only overrides
+ * homeOdds/awayOdds/markets in place, per match, when a real PulseScore
+ * price is found for it (by team name, same teamNamesMatch cross-provider
+ * matching every other sport's real-odds merge already uses). Matches with
+ * no PulseScore price keep whatever getMLBOdds() already gave them. */
+async function getMergedMLBOdds(): Promise<MLBOddsEntry[]> {
+  const base = await getMLBOdds();
+  let pulseEvents: PulseScoreBaseballPrematchEvent[] = [];
+  try {
+    pulseEvents = await getPulseScoreBaseballUpcoming();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "[pulsescore] baseball upcoming fetch failed for /mlb-odds merge — serving unmerged list",
+    );
+    return base;
+  }
+  if (pulseEvents.length === 0) return base;
+
+  return base.map((entry) => {
+    const pev = pulseEvents.find(
+      (e) =>
+        teamNamesMatch(entry.homeTeam.name, e.home) &&
+        teamNamesMatch(entry.awayTeam.name, e.away),
+    );
+    if (!pev) return entry;
+    const override = extractBaseballOverride(pev);
+    if (!override.odds && !override.runLine && !override.totalLines && !override.f5) {
+      return entry;
+    }
+    const markets = makeMLBMarketsFromTeams(
+      entry.homeTeam.name,
+      entry.awayTeam.name,
+      override.odds?.home,
+      override.odds?.away,
+    );
+    if (override.totalLines && override.totalLines.length > 0) {
+      const mid = override.totalLines[Math.floor(override.totalLines.length / 2)]!;
+      const lo = override.totalLines.find((l) => l.line === mid.line - 0.5 || l.line === mid.line - 1);
+      const hi = override.totalLines.find((l) => l.line === mid.line + 0.5 || l.line === mid.line + 1);
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over35: mid.over,
+        under35: mid.under,
+        ...(lo ? { over25: lo.over, under25: lo.under } : {}),
+        ...(hi ? { over45: hi.over, under45: hi.under } : {}),
+      };
+      markets._total = mid.line;
+    }
+    // Standard MLB run line is a fixed ±1.5 split — prefer that exact line
+    // if onexbet priced it (matches the existing mlb-rl-home-1.5/rl-home
+    // settlement's default), otherwise fall back to whichever line was
+    // picked as most-even.
+    const rl =
+      override.runLineLines?.find((l) => Math.abs(l.line) === 1.5) ?? override.runLine;
+    if (rl) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: rl.home,
+        awayPlusOne: rl.away,
+      };
+      markets._spread = -rl.line;
+      markets._spreadLine = -rl.line;
+    }
+    if (override.f5 || override.f5Total) {
+      markets.mlbExtra = {
+        ...markets.mlbExtra,
+        ...(override.f5 ? { f5Result: override.f5 } : {}),
+        ...(override.f5Total ? { f5Total: override.f5Total } : {}),
+      };
+    }
+    return {
+      ...entry,
+      homeOdds: override.odds?.home ?? entry.homeOdds,
+      awayOdds: override.odds?.away ?? entry.awayOdds,
+      drawOdds: 0,
+      markets,
+    };
+  });
+}
+
 router.get("/mlb-odds", async (_req: Request, res: Response) => {
   try {
-    const odds = await getMLBOdds();
+    const odds = await getMergedMLBOdds();
     res.json({ odds });
   } catch {
     res.status(500).json({ error: "Odds de baseball indisponíveis" });
