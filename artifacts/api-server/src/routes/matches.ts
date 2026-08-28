@@ -4607,11 +4607,22 @@ function computeLiveTennisExtras(
       over: over25Sets!,
       under: under25Sets!,
     }),
-    setHandicap: capTennisLiveHomeAwayOdds(
-      liveSetHandicap,
-      pointCtx.homeTrailing,
-      pointCtx.awayTrailing,
-    ),
+    setHandicap: {
+      // liveSetHandicap is priced off exactSetsProbs.h20 (probability home
+      // sweeps 2-0) — the exact probability a -1.5 sets line needs, so that
+      // fixed line is the correct synthetic default (real data overrides
+      // this whenever PulseScore actually prices Sets Handicap for this
+      // match — see extractSetHandicap). Missing this field entirely
+      // silently rendered "Casa +undefined" in the UI (TS would have
+      // caught it — esbuild's build step doesn't type-check, only tsc
+      // does; confirmed via `pnpm typecheck`).
+      line: -1.5,
+      ...capTennisLiveHomeAwayOdds(
+        liveSetHandicap,
+        pointCtx.homeTrailing,
+        pointCtx.awayTrailing,
+      ),
+    },
     totalGames: capTennisLiveOverUnderOdds(totalGames),
     totalGamesLines,
     set1Games: capTennisLiveOverUnderOdds({
