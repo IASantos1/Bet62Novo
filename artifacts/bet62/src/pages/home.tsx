@@ -2453,7 +2453,7 @@ function normalizeTicketSelectionKey(selection: string): string {
 
 function inferSelectionSport(selection: string): "football" | "tennis" | "basketball" | "baseball" | "hockey" | "volleyball" {
   const s = String(selection ?? "").toLowerCase();
-  if (/^vs[123][ha]$/.test(s) || /^vs-s(30|31|32|03|13|23)$/.test(s) || /^pt-[ou]-\d+(?:\.\d+)?$/.test(s) || s === "hcap-vb-home" || s === "hcap-vb-away" || s === "opts" || s === "upts" || s === "pth" || s === "pta" || s === "pth2" || s === "pta2")
+  if (/^vs[123][ha]$/.test(s) || /^vs-s(30|31|32|03|13|23)$/.test(s) || /^pt-[ou]-\d+(?:\.\d+)?$/.test(s) || s === "hcap-vb-home" || s === "hcap-vb-away" || s === "opts" || s === "upts" || s === "pth" || s === "pta" || s === "pth2" || s === "pta2" || /^s[23]pt-[ou]-\d+(?:\.\d+)?$/.test(s) || /^s[23]ph-(home|away)$/.test(s))
     return "volleyball";
   if (s.startsWith("set") || s.startsWith("es-") || s.startsWith("sh") || s.startsWith("gh-") || s.startsWith("ses-") || s.startsWith("oe-") || s.startsWith("oe1-") || s.startsWith("oe2-") || s.startsWith("wal1-") || s.startsWith("wal2-") || s.startsWith("sm2-") || s.startsWith("sc1-") || s.startsWith("sc2-") || s.startsWith("tg-") || s.startsWith("s1g-") || s.startsWith("s2g-") || s.includes("sets"))
     return "tennis";
@@ -3836,6 +3836,14 @@ type Match = {
   mmaExtra?: {
     toDistance?: { yes: number; no: number };
     totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
+    winInsideDistance?: { yes: number; no: number };
+    methodOfVictory?: {
+      homeDecision?: { yes: number; no: number };
+      homeInside?: { yes: number; no: number };
+      awayDecision?: { yes: number; no: number };
+      awayInside?: { yes: number; no: number };
+      draw?: number;
+    };
   };
 };
 
@@ -11619,6 +11627,63 @@ export default function Home({
                     </div>
                   );
                 })()}
+              {sport === "mma" && match.mmaExtra?.winInsideDistance && (
+                <div className="flex gap-1 w-full mt-1">
+                  <OddsButton
+                    match={match}
+                    selection="yes"
+                    odd={match.mmaExtra.winInsideDistance.yes}
+                    market="mma_win_inside"
+                    label="Vence Antes do Limite"
+                    grow
+                    variant="worldcup"
+                  />
+                  <OddsButton
+                    match={match}
+                    selection="no"
+                    odd={match.mmaExtra.winInsideDistance.no}
+                    market="mma_win_inside"
+                    label="Não Vence Antes do Limite"
+                    grow
+                    variant="worldcup"
+                  />
+                </div>
+              )}
+              {sport === "mma" &&
+                match.mmaExtra?.methodOfVictory &&
+                (
+                  [
+                    ["homeDecision", "mma_method_home_decision", `${match.home} vence por decisão`],
+                    ["homeInside", "mma_method_home_inside", `${match.home} vence por KO/Finalização`],
+                    ["awayDecision", "mma_method_away_decision", `${match.away} vence por decisão`],
+                    ["awayInside", "mma_method_away_inside", `${match.away} vence por KO/Finalização`],
+                  ] as const
+                ).map(([key, market, label]) => {
+                  const prop = match.mmaExtra!.methodOfVictory![key];
+                  if (!prop) return null;
+                  return (
+                    <div key={market} className="flex gap-1 w-full mt-1">
+                      <OddsButton
+                        match={match}
+                        selection="yes"
+                        odd={prop.yes}
+                        market={market}
+                        label={label}
+                        grow
+                        variant="worldcup"
+                      />
+                      <OddsButton
+                        match={match}
+                        selection="no"
+                        odd={prop.no}
+                        market={market}
+                        label={`Não — ${label}`}
+                        grow
+                        variant="worldcup"
+                      />
+                    </div>
+                  );
+                })}
             </>
           )}
         </div>
@@ -17101,6 +17166,65 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {([2, 3] as const).map((setNum) => {
+                      const ve = (m as any).volleyballExtra as any;
+                      const lines = ve?.[`set${setNum}PointsLines`] as
+                        | Array<{ line: number; over: number; under: number }>
+                        | undefined;
+                      const hcap = ve?.[`set${setNum}HandicapPoints`] as
+                        | { line: number; home: number; away: number }
+                        | undefined;
+                      return (
+                        <div key={`set${setNum}-points`}>
+                          {Array.isArray(lines) &&
+                            lines.map((pl) => (
+                              <MarketGroup
+                                key={`s${setNum}pt-${pl.line}`}
+                                title={`Total de Pontos — ${setNum}º Set O/U ${pl.line}`}
+                              >
+                                <MarketOddsBtn
+                                  match={match}
+                                  sel={`s${setNum}pt-o-${pl.line}`}
+                                  odd={pl.over}
+                                  market="pontos"
+                                  label={`Mais de ${pl.line} pts`}
+                                  suspKey={`set${setNum}Points`}
+                                />
+                                <MarketOddsBtn
+                                  match={match}
+                                  sel={`s${setNum}pt-u-${pl.line}`}
+                                  odd={pl.under}
+                                  market="pontos"
+                                  label={`Menos de ${pl.line} pts`}
+                                  suspKey={`set${setNum}Points`}
+                                />
+                              </MarketGroup>
+                            ))}
+                          {hcap && hcap.home > 0 && (
+                            <MarketGroup
+                              title={`Handicap de Pontos — ${setNum}º Set ${hcap.line > 0 ? `Casa −${hcap.line}` : `Casa +${Math.abs(hcap.line)}`}`}
+                            >
+                              <MarketOddsBtn
+                                match={match}
+                                sel={`s${setNum}ph-home`}
+                                odd={hcap.home}
+                                market="pontos"
+                                label={`${match.home} ${hcap.line > 0 ? `-${hcap.line}` : `+${Math.abs(hcap.line)}`}`}
+                                suspKey={`set${setNum}HandicapPoints`}
+                              />
+                              <MarketOddsBtn
+                                match={match}
+                                sel={`s${setNum}ph-away`}
+                                odd={hcap.away}
+                                market="pontos"
+                                label={`${match.away} ${hcap.line > 0 ? `+${hcap.line}` : `-${Math.abs(hcap.line)}`}`}
+                                suspKey={`set${setNum}HandicapPoints`}
+                              />
+                            </MarketGroup>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 

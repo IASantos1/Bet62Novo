@@ -343,6 +343,15 @@ type AdvancedMarkets = {
     setHandicap: { home: number; away: number };
     pointsLines: Array<{ line: number; over: number; under: number }>;
     handicapPoints: { line: number; home: number; away: number };
+    // Real onexbet data (extractVolleyballOverride in
+    // services/pulsescore/volleyball.ts) — per-set totals, per-set points
+    // handicap, and "Race To N Points" (2-way per line, not O/U).
+    set2PointsLines?: Array<{ line: number; over: number; under: number }>;
+    set3PointsLines?: Array<{ line: number; over: number; under: number }>;
+    set2HandicapPoints?: { line: number; home: number; away: number };
+    set3HandicapPoints?: { line: number; home: number; away: number };
+    raceToPointsSet2?: Array<{ line: number; home: number; away: number }>;
+    raceToPointsSet3?: Array<{ line: number; home: number; away: number }>;
   };
   // Second half result (who wins just the 2nd half period)
   secondHalf?: { home: number; draw: number; away: number };
@@ -671,6 +680,16 @@ export type F1ExtraData = {
 export type MmaExtraData = {
   toDistance?: { yes: number; no: number };
   totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
+  // Real onexbet data (extractMmaOverride in services/pulsescore/mma.ts) —
+  // see that file's header for the confirmed market shapes.
+  winInsideDistance?: { yes: number; no: number };
+  methodOfVictory?: {
+    homeDecision?: { yes: number; no: number };
+    homeInside?: { yes: number; no: number };
+    awayDecision?: { yes: number; no: number };
+    awayInside?: { yes: number; no: number };
+    draw?: number;
+  };
 };
 
 export type UpcomingMatch = {
@@ -12111,8 +12130,10 @@ async function buildMmaUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
     const markets = makeMmaMarketsFromTeams(home, away);
     if (override.doubleChance) markets.doubleChance = override.doubleChance;
     const mmaExtra: MmaExtraData = {
-      toDistance: { yes: 0, no: 0 },
+      toDistance: override.goTheDistance ?? { yes: 0, no: 0 },
       totalRoundsLines: override.total ? [override.total] : [],
+      winInsideDistance: override.winInsideDistance,
+      methodOfVictory: override.methodOfVictory,
     };
     const odds = override.odds
       ? { home: override.odds.home, draw: 0, away: override.odds.away }
@@ -12168,8 +12189,8 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
       set1: override.set1 ?? { home: 0, away: 0 },
-      set2: { home: 0, away: 0 },
-      set3: { home: 0, away: 0 },
+      set2: override.set2 ?? { home: 0, away: 0 },
+      set3: override.set3 ?? { home: 0, away: 0 },
       exactScore: override.exactScore ?? {
         s30: 0,
         s31: 0,
@@ -12180,7 +12201,13 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
       },
       setHandicap: { home: 0, away: 0 },
       pointsLines: override.pointsLines ?? [],
-      handicapPoints: { line: 0, home: 0, away: 0 },
+      handicapPoints: override.handicapPoints ?? { line: 0, home: 0, away: 0 },
+      set2PointsLines: override.set2PointsLines,
+      set3PointsLines: override.set3PointsLines,
+      set2HandicapPoints: override.set2HandicapPoints,
+      set3HandicapPoints: override.set3HandicapPoints,
+      raceToPointsSet2: override.raceToPointsSet2,
+      raceToPointsSet3: override.raceToPointsSet3,
     };
     const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     // Flat neutral fallback, not makeAdvancedMarketsFromTeams's internal
@@ -12315,12 +12342,18 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
     const computedExtras = computeVolleyballExtras(sp);
     const volleyballExtra: NonNullable<AdvancedMarkets["volleyballExtra"]> = {
       set1: override.set1 ?? computedExtras.set1,
-      set2: computedExtras.set2,
-      set3: computedExtras.set3,
+      set2: override.set2 ?? computedExtras.set2,
+      set3: override.set3 ?? computedExtras.set3,
       exactScore: override.exactScore ?? computedExtras.exactScore,
       setHandicap: computedExtras.setHandicap,
       pointsLines: override.pointsLines ?? computedExtras.pointsLines,
-      handicapPoints: computedExtras.handicapPoints,
+      handicapPoints: override.handicapPoints ?? computedExtras.handicapPoints,
+      set2PointsLines: override.set2PointsLines,
+      set3PointsLines: override.set3PointsLines,
+      set2HandicapPoints: override.set2HandicapPoints,
+      set3HandicapPoints: override.set3HandicapPoints,
+      raceToPointsSet2: override.raceToPointsSet2,
+      raceToPointsSet3: override.raceToPointsSet3,
     };
     const markets: AdvancedMarkets = { ...baseMarkets, volleyballExtra };
     const odds = override.odds

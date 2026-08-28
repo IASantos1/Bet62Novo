@@ -31,6 +31,7 @@ const { extractHockeyOverride } = await import(
 const { extractVolleyballOverride } = await import(
   "../services/pulsescore/volleyball.js"
 );
+const { extractMmaOverride } = await import("../services/pulsescore/mma.js");
 const { __testing: footballWs, getFootballWsEventIfFresh } = await import(
   "../services/pulsescore/footballWs.js"
 );
@@ -1320,5 +1321,182 @@ test("extractVolleyballOverride: maps Correct Score selections to exactScore key
     s03: 31,
     s13: 18.5,
     s23: 16,
+  });
+});
+
+// Confirmed real (2026-08-28 onexbet /volleyball/events sample, beach
+// volleyball 4x4): FULL_TIME ASIAN_HANDICAP ("Handicap"), and SECOND_SET
+// versions of Match Result/Total/Handicap ("2nd set 1X2"/"2nd set Total"/
+// "2nd set Handicap") — same shapes as tennis's GAME_HANDICAP/per-set
+// extraction, just under volleyball's own canonicalMarket names.
+test("extractVolleyballOverride: extracts FULL_TIME Handicap and 2nd set Match Result/Total/Handicap (onexbet)", () => {
+  const handicap = {
+    canonicalMarket: "ASIAN_HANDICAP",
+    rawName: "Handicap",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:handicap",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "1 (-3.5)", odds: 1.98, isActive: true, line: -3.5 },
+      { canonicalOutcome: "AWAY", rawName: "2 (3.5)", odds: 1.77, isActive: true, line: 3.5 },
+    ],
+  };
+  const set2 = {
+    canonicalMarket: "MATCH_RESULT",
+    rawName: "2nd set 1X2",
+    period: "SECOND_SET",
+    isActive: true,
+    marketId: "test:set2",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "W1", odds: 1.77, isActive: true },
+      { canonicalOutcome: "AWAY", rawName: "W2", odds: 1.98, isActive: true },
+    ],
+  };
+  const set2Total = {
+    canonicalMarket: "OVER_UNDER",
+    rawName: "2nd set Total",
+    period: "SECOND_SET",
+    isActive: true,
+    marketId: "test:set2-total",
+    selections: [
+      { canonicalOutcome: "OVER", rawName: "Over (44.5)", odds: 1.58, isActive: true, line: 44.5 },
+      { canonicalOutcome: "UNDER", rawName: "Under (44.5)", odds: 2.28, isActive: true, line: 44.5 },
+    ],
+  };
+  const set2Handicap = {
+    canonicalMarket: "ASIAN_HANDICAP",
+    rawName: "2nd set Handicap",
+    period: "SECOND_SET",
+    isActive: true,
+    marketId: "test:set2-handicap",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "1 (-4.5)", odds: 3.2, isActive: true, line: -4.5 },
+      { canonicalOutcome: "AWAY", rawName: "2 (4.5)", odds: 1.29, isActive: true, line: 4.5 },
+    ],
+  };
+  const override = extractVolleyballOverride(
+    makeVolleyballEvent([handicap, set2, set2Total, set2Handicap]),
+  );
+  assert.deepEqual(override.handicapPoints, { line: -3.5, home: 1.98, away: 1.77 });
+  assert.deepEqual(override.set2, { home: 1.77, away: 1.98 });
+  assert.deepEqual(override.set2PointsLines, [{ line: 44.5, over: 1.58, under: 2.28 }]);
+  assert.deepEqual(override.set2HandicapPoints, { line: -4.5, home: 3.2, away: 1.29 });
+});
+
+// Confirmed real (same sample): "Race To N Points" — multiple lines
+// (5/10/15/20), each a HOME/AWAY 2-way rather than an Over/Under total.
+test("extractVolleyballOverride: collects every Race To N Points line (onexbet)", () => {
+  const race = {
+    canonicalMarket: "RACE_TO_POINTS",
+    rawName: "2nd set Race To N Points",
+    period: "SECOND_SET",
+    isActive: true,
+    marketId: "test:race",
+    selections: [
+      { canonicalOutcome: "HOME", rawName: "(5) - W1", odds: 1.82, isActive: true, line: 5 },
+      { canonicalOutcome: "HOME", rawName: "(10) - W1", odds: 1.81, isActive: true, line: 10 },
+      { canonicalOutcome: "AWAY", rawName: "(5) - W2", odds: 1.92, isActive: true, line: 5 },
+      { canonicalOutcome: "AWAY", rawName: "(10) - W2", odds: 1.94, isActive: true, line: 10 },
+    ],
+  };
+  const override = extractVolleyballOverride(makeVolleyballEvent([race]));
+  assert.deepEqual(override.raceToPointsSet2, [
+    { line: 5, home: 1.82, away: 1.92 },
+    { line: 10, home: 1.81, away: 1.94 },
+  ]);
+});
+
+function makeMmaEvent(markets: unknown[]) {
+  return {
+    eventId: "747647085",
+    sport: "mma",
+    league: "Combatsport. Legacy FA",
+    home: "Austin Miller",
+    away: "Quadarrius McGinnis",
+    markets,
+  } as Parameters<typeof extractMmaOverride>[0];
+}
+
+// Confirmed real (2026-08-28 onexbet /mma/events sample) — plain Yes/No,
+// same shape for both "Fight To Go The Distance" and "Win Inside The
+// Distance".
+test("extractMmaOverride: extracts Fight To Go The Distance and Win Inside The Distance (onexbet)", () => {
+  const goDistance = {
+    canonicalMarket: "OTHER",
+    rawName: "Fight To Go The Distance",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:distance",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "Yes", odds: 2.55, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "No", odds: 1.45, isActive: true },
+    ],
+  };
+  const winInside = {
+    canonicalMarket: "OTHER",
+    rawName: "Win Inside The Distance",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:inside",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "Yes", odds: 1.45, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "No", odds: 2.55, isActive: true },
+    ],
+  };
+  const override = extractMmaOverride(makeMmaEvent([goDistance, winInside]));
+  assert.deepEqual(override.goTheDistance, { yes: 2.55, no: 1.45 });
+  assert.deepEqual(override.winInsideDistance, { yes: 1.45, no: 2.55 });
+});
+
+// Confirmed real (same sample) — a single combined market listing Yes/No
+// rows for both fighters' decision/inside-the-distance win, plus an
+// optional single-priced draw row (W1=home, W2=away, matching this file's
+// Win(2Way) convention).
+test("extractMmaOverride: extracts Method Of Victory for both fighters plus the draw price (onexbet)", () => {
+  const method = {
+    canonicalMarket: "OTHER",
+    rawName: "Method Of Victory",
+    period: "FULL_TIME",
+    isActive: true,
+    marketId: "test:method",
+    selections: [
+      { canonicalOutcome: "OTHER", rawName: "Decision W1 - Yes", odds: 7, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "Decision W1 - No", odds: 1.07, isActive: true },
+      {
+        canonicalOutcome: "OTHER",
+        rawName: "1 Will Win By KO, TKO, Painful Lock, Chokehold, DQ or Refusal - Yes",
+        odds: 1.25,
+        isActive: true,
+      },
+      {
+        canonicalOutcome: "OTHER",
+        rawName: "1 Will Win By KO, TKO, Painful Lock, Chokehold, DQ or Refusal - No",
+        odds: 3.56,
+        isActive: true,
+      },
+      { canonicalOutcome: "OTHER", rawName: "Decision W2 - Yes", odds: 14, isActive: true },
+      { canonicalOutcome: "OTHER", rawName: "Decision W2 - No", odds: 1.01, isActive: true },
+      {
+        canonicalOutcome: "OTHER",
+        rawName: "2 Will Win By KO, TKO, Painful Lock, Chokehold, DQ or Refusal - Yes",
+        odds: 7,
+        isActive: true,
+      },
+      {
+        canonicalOutcome: "OTHER",
+        rawName: "2 Will Win By KO, TKO, Painful Lock, Chokehold, DQ or Refusal - No",
+        odds: 1.07,
+        isActive: true,
+      },
+      { canonicalOutcome: "OTHER", rawName: "Draw Or Technical Draw", odds: 50, isActive: true },
+    ],
+  };
+  const override = extractMmaOverride(makeMmaEvent([method]));
+  assert.deepEqual(override.methodOfVictory, {
+    homeDecision: { yes: 7, no: 1.07 },
+    homeInside: { yes: 1.25, no: 3.56 },
+    awayDecision: { yes: 14, no: 1.01 },
+    awayInside: { yes: 7, no: 1.07 },
+    draw: 50,
   });
 });

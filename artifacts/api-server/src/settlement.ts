@@ -2978,6 +2978,37 @@ export function scoreOutcomeForSel(
     if (adjusted === 0) voided = true;
     else winning = adjusted > 0;
   }
+  // Per-set total points (OVER_UNDER, period SECOND_SET/THIRD_SET —
+  // confirmed real 2026-08-28 onexbet sample) — same bare-line-in-key
+  // convention as the whole-match "pt-o-line" above, scoped to ONE set's
+  // final score (getVolleyballSetPointsFromExtras[setIndex]) instead of the
+  // sum across all sets.
+  else if (/^s([23])pt-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^s([23])pt-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const line = Number(m[3]!);
+    if (!Number.isFinite(line)) return null;
+    const setScore = getVolleyballSetPointsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !volleyballSetFinished(setScore)) return null;
+    const totalPoints = setScore[0] + setScore[1];
+    if (totalPoints === line) voided = true;
+    else winning = m[2] === "o" ? totalPoints > line : totalPoints < line;
+  }
+  // Per-set points handicap (ASIAN_HANDICAP, period SECOND_SET/THIRD_SET) —
+  // same signed-line convention as tennis's gh2- (readSelectionMarketLine),
+  // scoped to ONE set's final score rather than the whole match's.
+  else if (/^s([23])ph-(home|away)$/.test(s)) {
+    const m = s.match(/^s([23])ph-(home|away)$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const side = m[2] as "home" | "away";
+    const setScore = getVolleyballSetPointsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !volleyballSetFinished(setScore)) return null;
+    const line = readSelectionMarketLine(sel);
+    if (line === null) return null;
+    const outcome = settleAsianSideHandicapOutcome(setScore[0], setScore[1], side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
 
   // ── Basketball (totals / spread / team totals / halves / quarters) ─────────
   else if (
