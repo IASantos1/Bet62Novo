@@ -79,7 +79,6 @@ import {
   getCachedTeamId,
   resolveTeamIdInBackground,
 } from "../services/sportsApiTeamLookup.js";
-import { tryManualTeamStatscoreId } from "../services/betbyTracker/proxy.js";
 
 const router: IRouter = Router();
 
@@ -436,13 +435,6 @@ export type LiveMatchState = {
   league: string;
   country: string;
   sport: string;
-  // Explicit Statscore event ID (native numeric Statscore ID, e.g. 6479574
-  // for New York City FC vs Club Necaxa). When present, BetbyTrackerIframe
-  // in the frontend bypasses BetBY-side statscoreEventId resolution (which
-  // requires cookies) and injects it into the widget directly — the only
-  // way to guarantee the actual green field tracker renders instead of a
-  // "Tracker indisponível" fallback.
-  statscoreEventId?: string;
   // Football only — market-depth/staking tier (1 = full, 4 = minimal). See
   // footballMarketTier()/filterFootballMarketsByTier() further down.
   matchTier?: FootballMarketTier;
@@ -708,13 +700,6 @@ export type UpcomingMatch = {
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
-  // Explicit Statscore event ID (native numeric Statscore ID, e.g. 6479574
-  // for New York City FC vs Club Necaxa). When present, BetbyTrackerIframe
-  // in the frontend bypasses BetBY-side statscoreEventId resolution (which
-  // requires cookies) and injects it into the widget directly — the only
-  // way to guarantee the actual green field tracker renders instead of a
-  // "Tracker indisponível" fallback.
-  statscoreEventId?: string;
 };
 
 type SAPIMatchEvent = {
@@ -14569,9 +14554,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       ),
   );
 
-  const enrichedLiveMatches = [...dedupedLive, ...dedupedPrematch].map((m) => enrichMatchWithStatscoreId(m));
   const result = {
-    matches: enrichedLiveMatches,
+    matches: [...dedupedLive, ...dedupedPrematch],
   };
   if (result.matches.length > 0) {
     livePayloadFallbackCache = { payload: result, builtAt: Date.now() };
@@ -17868,19 +17852,6 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function enrichMatchWithStatscoreId<T extends { id: string; home: string; away: string; sport: string; statscoreEventId?: string }>(m: T): T {
-  if (m.statscoreEventId != null && String(m.statscoreEventId).trim().length >= 4) return m;
-  let resolved: string | null = null;
-  const manual = tryManualTeamStatscoreId(m.home, m.away);
-  if (manual) resolved = manual;
-  if (!resolved) {
-    const sId = String(m.id ?? "").trim();
-    if (/^\d{5,10}$/.test(sId)) resolved = sId;
-  }
-  if (resolved) return { ...m, statscoreEventId: resolved };
-  return m;
-}
-
 const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
 
 router.get("/upcoming", async (req: Request, res: Response) => {
@@ -17987,8 +17958,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
         return daysAhead <= UPCOMING_DEFAULT_PRIORITY_DAYS;
       })(),
   );
-  const enrichedUpcoming = filtered.map((m) => enrichMatchWithStatscoreId(m));
-  res.json({ matches: enrichedUpcoming });
+  res.json({ matches: filtered });
 });
 
 router.get("/", async (_req: Request, res: Response) => {

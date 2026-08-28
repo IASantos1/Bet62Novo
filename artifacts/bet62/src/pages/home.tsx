@@ -40,7 +40,6 @@ import {
   RefreshCw,
   Ticket,
   Search,
-  ArrowLeft,
   ExternalLink,
   Radio,
   Star,
@@ -489,42 +488,6 @@ type CasinoGame = {
 // ilike specifically so this doesn't have to be byte-perfect (see
 // routes/casino.ts's provider filter comment).
 const CASINO_DEFAULT_PROVIDER = "Pragmatic";
-// BET62 Live + Match Tracker + Streaming (BetBY live list + StatScore/
-// Statpal tracker + SMYTDRYT stream) — separate pipeline/ID scheme from the
-// existing Statpal/SportsAPI-backed live matches above. GET /api/live is a
-// single "LiveAggregator" feed with tracker + stream embedded inline (no
-// separate polling needed to see score/incidents); only rendered when a
-// BetBY event has a stream ready.
-type MatchTracker = {
-  provider: "statscore" | "pulsescore" | "statpal" | "sportscore";
-  eventId: string;
-  status: string;
-  minute: string;
-  homeScore: number;
-  awayScore: number;
-  incidents: Array<{ type: string; team: string; minute: number; player: string }>;
-  homeFormation?: string | null;
-  awayFormation?: string | null;
-  homeHalfTimeScore?: number | null;
-  awayHalfTimeScore?: number | null;
-  lineupConfirmed?: boolean | null;
-};
-type LiveTrackerEvent = {
-  eventId?: string;
-  // Our own match id (Statpal-sourced) — used to poll the Tracker directly
-  // (StatScore/SportScore/Statpal/PulseScore).
-  matchId?: string;
-  sport: string;
-  league: string;
-  country: string;
-  home: string;
-  away: string;
-  status: "LIVE" | "PREMATCH" | "FINISHED";
-  minute?: string;
-  score: { home: number; away: number };
-  tracker?: MatchTracker;
-  statscoreEventId?: string;
-};
 type CasinoBanner = {
   id: number;
   title: string;
@@ -3755,13 +3718,6 @@ type Match = {
   sport?: string;
   // Football only — market-depth/staking tier (1 = full, 4 = minimal).
   matchTier?: 1 | 2 | 3 | 4;
-  // Explicit Statscore event ID (native Statscore numeric ID, e.g. 6479574
-  // for New York City FC vs Club Necaxa). When set, bypasses BetBY-side
-  // statscoreEventId resolution (which requires cookies) and is injected
-  // directly into the tracker widget — the ONLY way to guarantee the
-  // actual green field tracker renders instead of a "Tracker indisponível"
-  // fallback.  See proxy.ts resolveStatscoreEventIdFromBetby for details.
-  statscoreEventId?: string;
   hasRealOdds?: boolean;
   isWomens?: boolean;
   odds: Odds;
@@ -3881,11 +3837,6 @@ type Match = {
     toDistance?: { yes: number; no: number };
     totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
   };
-  // Match Tracker resolved server-side directly against this match by team
-  // name (see matches.ts's attachDirectTracker). Drives the inline Tracker
-  // button on the match card, replacing the old separate "Transmissões ao
-  // vivo" list that showed the same match twice.
-  tracker?: MatchTracker;
 };
 
 type BetSelection = {
@@ -4587,312 +4538,6 @@ function isWCMatch(league: string | null | undefined): boolean {
 
 function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
-class TrackerErrorBoundary extends Component<
-  { children: ReactNode; home?: string; away?: string; className?: string; aspectRatio?: string },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError(_e: unknown) { return { hasError: true }; }
-  componentDidCatch(error: unknown) { try { console.error("[tracker-error-boundary]", error); } catch {} }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div
-          className={this.props.className}
-          style={{ aspectRatio: this.props.aspectRatio ?? "16 / 9", position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
-        >
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none text-zinc-400 text-xs px-6 text-center">
-            {this.props.home || this.props.away ? (
-              <div>
-                <div className="font-bold text-zinc-200 mb-1">{this.props.home ?? "?"} vs {this.props.away ?? "?"}</div>
-                Tracker indisponível neste momento.
-              </div>
-            ) : ("Tracker indisponível.")}
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
-// self-contained so its lifecycle (start/stop polling) doesn't entangle
-// with the rest of the page's state.
-// Bug report 2026-08-13 (3 rounds — 470 to 420 to 260 still "grande",
-// user asked to cut it further): "Mini Tracker" muito grande no PWA/mobile
-// — this is the shared ceiling for both the CSS clamp() (loading state) and
-// the JS resize handler's cap (once the widget reports its real, much
-// taller, native size). A single source of truth so the two can never drift
-// apart and visibly "jump" between a loading-state size and a different
-// loaded-state size.
-const MINI_TRACKER_MAX_HEIGHT = 180;
-
-function SportscoreTrackerIframe({
-  home,
-  away,
-  sport = "football",
-  aspectRatio = "16 / 9",
-  className,
-  matchId,
-}: {
-  home: string;
-  away: string;
-  sport?: string;
-  aspectRatio?: string;
-  className?: string;
-  matchId?: string;
-}) {
-  // BetBY removed (2026-08-17): its real widget needed our own Playwright
-  // session-capture pipeline just to work at all, which proved unreliable
-  // in production (Chromium launch failures, a Safari tab crash on
-  // unmount). SportScore is a plain CORS-open iframe with real fixture
-  // coverage and no session/proxy/bridge machinery to break — this
-  // component now does nothing but resolve and render that iframe.
-  const [sportscoreUrl, setSportscoreUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const triedKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!matchId || !home || !away) {
-      setFailed(true);
-      return;
-    }
-    const key = `${matchId}:${home}:${away}:${sport}`;
-    if (triedKey.current === key) return;
-    triedKey.current = key;
-    setFailed(false);
-    setSportscoreUrl(null);
-    let cancelled = false;
-    const params = new URLSearchParams({ sport, home, away, matchId });
-    fetch(`/api/sportscore-tracker/url?${params.toString()}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { ok?: boolean; embedUrl?: string | null } | null) => {
-        if (cancelled) return;
-        if (d?.ok && d.embedUrl) setSportscoreUrl(d.embedUrl);
-        else setFailed(true);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [matchId, home, away, sport]);
-
-  // Bug report 2026-08-17 (Safari): "Um problema ocorreu repetidamente"
-  // (WebKit tab crash) when tapping "Voltar aos eventos" right after the
-  // Tracker iframe had loaded live third-party content (sportscore.com,
-  // which keeps a WebSocket/canvas connection running). React unmounting
-  // the <iframe> yanks the DOM node out from under that live connection
-  // with no chance for the frame's own unload/teardown to run first,
-  // which iOS Safari can crash on. Blanking src on unmount lets the frame
-  // tear itself down cleanly before removal.
-  useEffect(() => {
-    return () => {
-      try {
-        if (iframeRef.current) iframeRef.current.src = "about:blank";
-      } catch { /* no-op */ }
-    };
-  }, []);
-
-  const showLoading = !sportscoreUrl && !failed;
-
-  return (
-    <div
-      className={className}
-      style={{
-        aspectRatio,
-        position: "relative",
-        display: "block",
-        width: "100%",
-        minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
-        maxHeight: MINI_TRACKER_MAX_HEIGHT,
-        overflow: "hidden",
-        borderRadius: 8,
-        isolation: "isolate",
-        // #09090b (zinc-950) is indistinguishable from pure black on OLED
-        // screens, so an empty/loading tracker reads as "broken" — use
-        // #18181b (zinc-900), a dark gray visibly distinct from pure black.
-        backgroundColor: "#18181b",
-      }}
-    >
-        <div
-          aria-hidden
-          className="absolute inset-0 pointer-events-none"
-          style={{ backgroundColor: "#18181b", zIndex: 0 }}
-        />
-        {showLoading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
-            <RefreshCw className="animate-spin text-green-500/80" size={24} />
-          </div>
-        )}
-        {sportscoreUrl ? (
-          // Matches SportScore's own official embed snippet (loading="lazy",
-          // referrerpolicy="no-referrer-when-downgrade") — deviating from it
-          // risks the widget refusing to render, since this is exactly what
-          // sportscore.com's own embed generator outputs for a match page.
-          //
-          // Bug report 2026-08-18: their tracker page has its own white
-          // "SportScore.com" watermark header bar and a score bar at the
-          // bottom, which showed up as an ugly white border inside our dark
-          // card. We can't reach into a cross-origin iframe's DOM to hide
-          // them, so instead the iframe is rendered TALLER than the visible
-          // box and shifted up (position:absolute, negative top) so the
-          // parent's overflow:hidden crops those bars off the top/bottom,
-          // leaving just the field. The exact crop amounts are estimated
-          // from screenshots, not measured — may need retuning.
-          <iframe
-            ref={iframeRef}
-            key={sportscoreUrl}
-            src={sportscoreUrl}
-            title={`SportScore Live Tracker · ${home} vs ${away}`}
-            className="w-full border-0 block"
-            style={{
-              backgroundColor: "#18181b",
-              zIndex: 1,
-              position: "absolute",
-              top: -48,
-              left: 0,
-              width: "100%",
-              height: "calc(100% + 88px)",
-            }}
-            loading="lazy"
-            allow="autoplay; fullscreen"
-            // SportScore's own tracker page renders taller than our small
-            // card (their own default snippet uses height=420) — without
-            // this, the browser shows the iframe's native scrollbar for the
-            // hidden overflow. scrolling="no" is a deprecated HTML
-            // attribute but still universally honored, and is the only way
-            // to suppress that scrollbar for a cross-origin iframe we have
-            // no other control over (no bridge/postMessage from SportScore
-            // the way the removed BetBY proxy had).
-            scrolling="no"
-            onError={() => setFailed(true)}
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        ) : failed ? (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 p-4 text-center bg-zinc-900/95 text-zinc-200 pointer-events-none">
-            <div className="text-[13px] font-semibold text-zinc-100">Tracker indisponível neste momento.</div>
-            <div className="text-[11px] text-zinc-400 max-w-[80%] leading-tight">
-              {home} vs {away}
-            </div>
-          </div>
-        ) : null}
-      </div>
-  );
-}
-
-function TrackerModal({
-  event,
-  onClose,
-}: {
-  event: LiveTrackerEvent;
-  onClose: () => void;
-}) {
-  const [tracker, setTracker] = useState<MatchTracker | null>(event.tracker ?? null);
-
-  useEffect(() => {
-    // Always poll, even if this event had no tracker yet at the moment the
-    // modal opened (event.tracker is a one-time snapshot from when the user
-    // tapped the card, not kept in sync with the parent's ongoing /api/live
-    // poll) — gating on it meant the tracker could get stuck on "A carregar
-    // tracker..." forever if it simply wasn't ready yet at open time, even
-    // once the backend resolved one moments later.
-    if (!event.matchId) return;
-    let cancelled = false;
-    const url = `/api/matches/tracker/${encodeURIComponent(event.matchId)}`;
-    const poll = () => {
-      fetch(url)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!cancelled && data) setTracker(data);
-        })
-        .catch(() => {});
-    };
-    poll();
-    const id = setInterval(poll, 2500);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [event.matchId]);
-
-  return (
-    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-      <div
-        className="flex items-center justify-between px-3 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0 gap-2"
-        style={{ paddingTop: "env(safe-area-inset-top, 0px)", height: "calc(3.5rem + env(safe-area-inset-top, 0px))" }}
-      >
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-white truncate">
-            {event.home} vs {event.away}
-          </div>
-          <div className="text-[11px] text-zinc-500 truncate">{event.league}</div>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
-          aria-label="Fechar tracker"
-        >
-          <X size={22} />
-        </button>
-      </div>
-
-      <div className="flex-1 min-h-0 bg-zinc-950 overflow-y-auto p-4">
-        {!tracker ? (
-          <div className="text-center text-zinc-600 text-sm py-8">
-            <RefreshCw className="animate-spin mx-auto mb-2 opacity-60" size={22} />
-            A carregar tracker…
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-2xl font-black text-white">
-                {tracker.homeScore} - {tracker.awayScore}
-              </div>
-              <div className="text-xs font-bold text-red-400 uppercase">
-                {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
-              </div>
-            </div>
-            <div className="mb-4 rounded-[24px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] overflow-hidden">
-              <TrackerErrorBoundary home={event.home} away={event.away} aspectRatio="16 / 9">
-                <SportscoreTrackerIframe
-                  home={event.home}
-                  away={event.away}
-                  sport={event.sport}
-                  aspectRatio="16 / 9"
-                  matchId={event.matchId}
-                />
-              </TrackerErrorBoundary>
-            </div>
-            <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
-              Incidentes
-            </div>
-            {tracker.incidents.length === 0 ? (
-              <div className="text-xs text-zinc-600">Sem incidentes ainda.</div>
-            ) : (
-              <div className="space-y-2">
-                {tracker.incidents.map((inc, i) => (
-                  <div
-                    key={i}
-                    className="text-xs text-zinc-300 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2"
-                  >
-                    <span className="text-zinc-500 font-mono shrink-0">{inc.minute}'</span>
-                    <span className="font-medium capitalize">{inc.type}</span>
-                    <span className="text-zinc-500 truncate">{inc.player}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function Home({
   initialTab = "sports",
 }: {
@@ -5069,7 +4714,6 @@ export default function Home({
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
   const casinoCarouselRef = useRef<HTMLDivElement>(null);
-  const [trackerModalEvent, setTrackerModalEvent] = useState<LiveTrackerEvent | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -6306,7 +5950,6 @@ export default function Home({
   >("markets");
   // Match header ↔ mini field toggle — 2D SVG (MiniFieldView), sport-correct
   // for all of football/tennis/basketball/hockey/volleyball/baseball.
-  const [showFieldView, setShowFieldView] = useState(false);
   useEffect(() => {
     setShowFieldView(false);
   }, [expandedMatch?.id]);
@@ -7479,13 +7122,6 @@ export default function Home({
               }
             : anyPrev.markets,
           events: anyUpdated.events ?? anyPrev.events,
-          // The direct-tracker poller resolves on its own 20s interval —
-          // any single /live poll tick can transiently land between
-          // resolutions and simply not have this match's tracker yet, even
-          // though a good one already showed a moment ago. Without this
-          // fallback the mini campo flickered (visible, then gone, then
-          // back) every time that happened instead of just holding steady.
-          tracker: anyUpdated.tracker ?? anyPrev.tracker,
         };
       });
     }
@@ -7541,20 +7177,7 @@ export default function Home({
           writeSnapshot(matchSnapshotKey(id), m as any);
           setExpandedMatch((prev) => {
             if (!prev || String(prev.id) !== id) return prev;
-            // This full-detail fetch can race the backend's own direct-
-            // tracker poller (which resolves the SportScore/Statpal tracker
-            // asynchronously, on its own interval) — if this fetch lands
-            // before that resolution finishes, m.tracker can be empty
-            // even though `prev` already had a good one from the periodic
-            // /live list sync. Never let a fetch that's simply "too early"
-            // permanently erase a tracker (formations/HT score/incidents)
-            // that's already showing on this expanded card.
-            const mm = m as any;
-            const pv = prev as any;
-            return {
-              ...mm,
-              tracker: mm.tracker ?? pv.tracker,
-            };
+            return { ...(m as any) };
           });
           return isTennisMatch
             ? !!(m as any).markets?.tennisExtra
@@ -11614,32 +11237,6 @@ export default function Home({
             </div>
             <div className="shrink-0">{liveBadge}</div>
           </div>
-          {/* Tracker access (audit finding, 2026-08-10): matchToTrackerEvent/
-              setTrackerModalEvent were only ever wired into renderMatchCard
-              (prematch/"Em Destaque" listings) — the Ao Vivo tab itself,
-              where users actually are, had no way to open the incidents
-              Tracker at all. Same pattern as renderMatchCard's own button:
-              resolved directly onto this match by team name (see
-              attachDirectTracker in matches.ts). */}
-          {match.tracker && (
-            <div
-              className="flex gap-1.5 mb-2"
-              onClick={stopCardOpen}
-              onTouchStart={stopCardOpen}
-              onTouchMove={stopCardOpen}
-              onTouchEnd={stopCardOpen}
-              onPointerDown={stopCardOpen}
-              onPointerMove={stopCardOpen}
-              onPointerUp={stopCardOpen}
-            >
-              <button
-                onClick={() => setTrackerModalEvent(matchToTrackerEvent(match))}
-                className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              >
-                <Activity size={10} /> Tracker
-              </button>
-            </div>
-          )}
           {rivalry && (
             <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
               {rivalry}
@@ -11849,55 +11446,6 @@ export default function Home({
       )}
     </div>
   );
-
-  // Builds the LiveTrackerEvent shape TrackerModal expects, from the
-  // Tracker data resolved directly against this match by team name (see
-  // matches.ts's attachDirectTracker). Only called when match.tracker is
-  // present.
-  const matchToTrackerEvent = (match: Match): LiveTrackerEvent => ({
-    matchId: String(match.id),
-    eventId: match.tracker?.eventId,
-    sport: match.sport ?? "football",
-    league: match.league,
-    country: match.country ?? "",
-    home: match.home,
-    away: match.away,
-    status: match.isLive ? "LIVE" : "PREMATCH",
-    minute: match.tracker?.minute,
-    score: { home: match.homeScore ?? 0, away: match.awayScore ?? 0 },
-    tracker: match.tracker,
-    statscoreEventId: match.statscoreEventId,
-  });
-
-  // Goal/card markers for the Momentum chart, from the Match Tracker's
-  // incident list (attachDirectTracker: StatScore → SportScore → Statpal →
-  // PulseScore) rather than _liveExtra.football — the tracker is the one
-  // source that's actually populated for PulseScore-only football matches,
-  // where _liveExtra doesn't exist at all. Moved out of the mini-campo's own
-  // timeline strip per explicit request: goals/cards should show on the
-  // Momentum graph, not duplicated below the field.
-  const trackerFootballExtra = (
-    match: Pick<Match, "home" | "tracker">,
-  ): { goals: any[]; cards: any[] } => {
-    const goals: any[] = [];
-    const cards: any[] = [];
-    for (const inc of match.tracker?.incidents ?? []) {
-      const isHome =
-        inc.team.toLowerCase() === "home" ||
-        teamNamePt(inc.team) === teamNamePt(match.home);
-      const team = isHome ? "home" : "away";
-      if (inc.type === "goal" || inc.type === "penalty") {
-        goals.push({ team, minute: inc.minute, playerName: inc.player, penalty: inc.type === "penalty" });
-      } else if (inc.type === "own_goal") {
-        goals.push({ team, minute: inc.minute, playerName: inc.player, ownGoal: true });
-      } else if (inc.type === "yellow") {
-        cards.push({ team, minute: inc.minute, playerName: inc.player, cardType: "yellow" });
-      } else if (inc.type === "red_card" || inc.type === "yellow_red") {
-        cards.push({ team, minute: inc.minute, playerName: inc.player, cardType: "red" });
-      }
-    }
-    return { goals, cards };
-  };
 
   const renderMatchCard = (match: Match) => {
     const matchKey = String(match.id);
@@ -12129,27 +11677,6 @@ export default function Home({
               {dateStr}{match.time ? ` · ${match.time}` : ""}
             </span>
           </div>
-          {/* Tracker, resolved directly onto this exact match by team name
-              (see attachDirectTracker in matches.ts). */}
-          {match.tracker && (
-            <div
-              className="flex gap-1.5 mb-2"
-              onClick={stopCardOpen}
-              onTouchStart={stopCardOpen}
-              onTouchMove={stopCardOpen}
-              onTouchEnd={stopCardOpen}
-              onPointerDown={stopCardOpen}
-              onPointerMove={stopCardOpen}
-              onPointerUp={stopCardOpen}
-            >
-              <button
-                onClick={() => setTrackerModalEvent(matchToTrackerEvent(match))}
-                className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              >
-                <Activity size={10} /> Tracker
-              </button>
-            </div>
-          )}
           {/* Teams + odds — side by side on sm+, stacked on mobile */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex-1 min-w-0">
@@ -19532,20 +19059,6 @@ export default function Home({
                 <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
-                    {showFieldView ? (
-                      <div className="mb-3">
-                        <TrackerErrorBoundary home={expandedMatch.home} away={expandedMatch.away} aspectRatio="16 / 9">
-                          <SportscoreTrackerIframe
-                            home={expandedMatch.home}
-                            away={expandedMatch.away}
-                            sport={expandedMatch.sport ?? "football"}
-                            aspectRatio="16 / 9"
-                            matchId={expandedMatch.id}
-                          />
-                        </TrackerErrorBoundary>
-                      </div>
-                    ) : (
-                      <>
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="min-w-0 flex items-center gap-2">
                         <span className="text-sm leading-none shrink-0">
@@ -19681,25 +19194,6 @@ export default function Home({
                         );
                       })()}
                     </div>
-                      </>
-                    )}
-
-                    {["football", "tennis", "basketball", "hockey", "volleyball", "baseball", "cricket"].includes(expandedMatch.sport ?? "football") && (
-                      <div className="flex items-center">
-                        <button
-                          onClick={() => setShowFieldView((v) => !v)}
-                          className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md active:scale-95 transition-transform"
-                          aria-label={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
-                          title={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
-                        >
-                          {showFieldView ? (
-                            <ArrowLeft size={14} className="text-white" />
-                          ) : (
-                            <ChevronUp size={14} className="text-white" />
-                          )}
-                        </button>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -19729,17 +19223,7 @@ export default function Home({
                       toggleBet(expandedMatch, market, odds, "insight", market);
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
-                    liveExtra={(() => {
-                      const base = (expandedMatch as any)._liveExtra;
-                      const tracked = trackerFootballExtra(expandedMatch);
-                      return {
-                        ...base,
-                        football: {
-                          goals: tracked.goals.length > 0 ? tracked.goals : base?.football?.goals,
-                          cards: tracked.cards.length > 0 ? tracked.cards : base?.football?.cards,
-                        },
-                      };
-                    })()}
+                    liveExtra={(expandedMatch as any)._liveExtra}
                     homeScore={expandedMatch.homeScore}
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
@@ -28090,13 +27574,6 @@ export default function Home({
             allow="autoplay; fullscreen"
           />
         </div>
-      )}
-
-      {trackerModalEvent && (
-        <TrackerModal
-          event={trackerModalEvent}
-          onClose={() => setTrackerModalEvent(null)}
-        />
       )}
 
       {/* MOBILE APP DOWNLOAD BANNER */}

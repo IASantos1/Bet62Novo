@@ -109,7 +109,7 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
-// ── BET62 Live + Match Tracker + Streaming ──
+// ── BET62 Live + Streaming ──
 //
 //  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
 //    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
@@ -117,12 +117,6 @@ const AI_AGENTS_MODEL =
 //      mas ainda não consumido no payload ao vivo (só observação — ver
 //      footballWs.ts).
 //    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
-//
-//  TRACKER LIVE: StatScore — placar/minuto/incidentes AO VIVO.
-//    • Endpoint: /get_pushes/{eventId}. Auth: header X-Auth (OBRIGATÓRIO) + query ?auth= fallback compat.
-//    • Requer Referer: https://widgets.statscore.com/. Payload mais rico (minute, status, incidents[]).
-//    • Requer mapeamento MANUAL do admin (live_stream_mappings.statscore_event_id).
-//    • Fallback automático: SportScore -> Statpal -> PulseScore (por nome de time, zero trabalho manual).
 //
 //  STATS/EVENTOS: StatPal — dados estatísticos, play-by-play, metadados.
 //    • RESPONSABILIDADES: Estatísticas de jogo, play-by-play, H2H, rankings/standings, logos, ligas detalhadas.

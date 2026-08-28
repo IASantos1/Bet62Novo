@@ -38,7 +38,6 @@ export * from "./eventAdminOverrides.js";
 export * from "./settlementIdempotency.js";
 export * from "./manualReviewQueue.js";
 export * from "./settlementReplayLog.js";
-export * from "./sportscoreMatchMap.js";
 export * from "./casinoGames.js";
 export * from "./casinoBanners.js";
 export * from "./liveStreamMappings.js";

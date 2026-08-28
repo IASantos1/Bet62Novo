@@ -10,7 +10,7 @@ declare module "@workspace/db" {
   export const competitionConfigsTable: any; export const competitionAliasesTable: any;
   export const eventRuntimeStatesTable: any; export const eventAdminOverridesTable: any;
   export const settlementIdempotencyTable: any; export const manualReviewQueueTable: any;
-  export const settlementReplayLogTable: any; export const sportscoreMatchMapTable: any;
+  export const settlementReplayLogTable: any;
   export const casinoGamesTable: any; export const casinoBannersTable: any;
   export const liveStreamMappingsTable: any;
 }
@@ -25,7 +25,7 @@ declare module "@workspace/db/schema" {
   export const competitionConfigsTable: any; export const competitionAliasesTable: any;
   export const eventRuntimeStatesTable: any; export const eventAdminOverridesTable: any;
   export const settlementIdempotencyTable: any; export const manualReviewQueueTable: any;
-  export const settlementReplayLogTable: any; export const sportscoreMatchMapTable: any;
+  export const settlementReplayLogTable: any;
   export const casinoGamesTable: any; export const casinoBannersTable: any;
   export const liveStreamMappingsTable: any;
 }

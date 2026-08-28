@@ -13,7 +13,6 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
     "check": "pnpm run typecheck && pnpm run build && pnpm run test",
-    "betby:debug-feed": "tsx artifacts/api-server/src/scripts/betbyDebugFeed.ts",
     "settlement:coverage": "pnpm --filter @workspace/scripts settlement:coverage"
   },
   "private": true,

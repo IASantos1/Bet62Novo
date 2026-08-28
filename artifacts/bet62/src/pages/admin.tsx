@@ -246,7 +246,6 @@ type AdminLiveMapping = {
   home: string;
   away: string;
   league: string | null;
-  statscoreEventId: number | null;
   videoMatchId: number | null;
   videoSportId: number | null;
   videoTournamentId: number | null;
@@ -855,56 +854,6 @@ export default function AdminPage() {
     [],
   );
   const [competitionsLoading, setCompetitionsLoading] = useState(false);
-  const [sportscoreMappings, setSportscoreMappings] = useState<
-    Array<{
-      id: number;
-      sport: string;
-      statpalMatchId: string;
-      sportscoreId: string;
-      trackerId: string | null;
-      homeTeam: string | null;
-      awayTeam: string | null;
-      matchDate: string | null;
-      source: string;
-      updatedAt: string;
-    }>
-  >([]);
-  const [sportscoreDeletingId, setSportscoreDeletingId] = useState<
-    number | null
-  >(null);
-  const [sportscoreMappingsLoading, setSportscoreMappingsLoading] =
-    useState(false);
-  const [sportscoreForm, setSportscoreForm] = useState({
-    sport: "football",
-    statpalMatchId: "",
-    sportscoreId: "",
-    homeTeam: "",
-    awayTeam: "",
-    matchDate: "",
-  });
-  const [sportscoreSaving, setSportscoreSaving] = useState(false);
-  const [sportscoreTesting, setSportscoreTesting] = useState(false);
-  const [sportscoreTestResult, setSportscoreTestResult] = useState<{
-    result?: { id: string; slug: string } | null;
-    steps?: Array<{
-      step: string;
-      url: string;
-      ok: boolean;
-      status?: number;
-      detail: string;
-    }>;
-    tracker?: { ok: boolean; status?: number; raw?: unknown; error?: string };
-    mappedTracker?: {
-      provider: string;
-      status: string;
-      minute: string;
-      homeScore: number;
-      awayScore: number;
-      incidents: Array<{ type: string; team: string; minute: number; player: string }>;
-    } | null;
-    error?: string;
-    detail?: string;
-  } | null>(null);
   const [competitionSportFilter, setCompetitionSportFilter] = useState("all");
   const [competitionLiveFilter, setCompetitionLiveFilter] = useState("all");
   const [competitionSearch, setCompetitionSearch] = useState("");
@@ -1027,11 +976,10 @@ export default function AdminPage() {
   const [casinoGamePage, setCasinoGamePage] = useState(1);
   const [casinoTxPage, setCasinoTxPage] = useState(1);
 
-  // Ao Vivo (StatScore + SMYTDRYT) mapping tab — per-row edit buffer keyed
-  // by betbyEventId, only touched fields are sent on save.
+  // Ao Vivo (SMYTDRYT) mapping tab — per-row edit buffer keyed by
+  // betbyEventId, only touched fields are sent on save.
   const [liveMappingEdits, setLiveMappingEdits] = useState<
     Record<string, Partial<{
-      statscoreEventId: string;
       videoMatchId: string;
       videoSportId: string;
       videoTournamentId: string;
@@ -1053,7 +1001,6 @@ export default function AdminPage() {
   const [newMappingHome, setNewMappingHome] = useState("");
   const [newMappingAway, setNewMappingAway] = useState("");
   const [newMappingLeague, setNewMappingLeague] = useState("");
-  const [newMappingStatscoreId, setNewMappingStatscoreId] = useState("");
   const [newMappingSaving, setNewMappingSaving] = useState(false);
 
   const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
@@ -1617,8 +1564,7 @@ export default function AdminPage() {
         m.home.toLowerCase().includes(q) ||
         m.away.toLowerCase().includes(q) ||
         (m.league ?? "").toLowerCase().includes(q) ||
-        m.betbyEventId.toLowerCase().includes(q) ||
-        String(m.statscoreEventId ?? "").includes(q)
+        m.betbyEventId.toLowerCase().includes(q)
       );
     });
 
@@ -1630,7 +1576,6 @@ export default function AdminPage() {
       try {
         const body: Record<string, number | string | null> = {};
         for (const key of [
-          "statscoreEventId",
           "videoMatchId",
           "videoSportId",
           "videoTournamentId",
@@ -1689,7 +1634,6 @@ export default function AdminPage() {
           home,
           away,
           league: newMappingLeague.trim() || undefined,
-          statscoreEventId: newMappingStatscoreId.trim() || undefined,
         }),
       });
       if (!res.ok) throw new Error();
@@ -1697,7 +1641,6 @@ export default function AdminPage() {
       setNewMappingHome("");
       setNewMappingAway("");
       setNewMappingLeague("");
-      setNewMappingStatscoreId("");
       refetchLiveMappings();
     } catch {
       toast.error("Erro ao criar mapeamento");
@@ -1705,7 +1648,7 @@ export default function AdminPage() {
       setNewMappingSaving(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [newMappingHome, newMappingAway, newMappingLeague, newMappingStatscoreId, token]);
+  }, [newMappingHome, newMappingAway, newMappingLeague, token]);
 
   const openBannerModal = (banner: "new" | AdminCasinoBanner) => {
     if (banner === "new") {
@@ -1938,124 +1881,6 @@ export default function AdminPage() {
     }
   }, [token, competitionSportFilter, competitionLiveFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchSportscoreMappings = useCallback(async () => {
-    if (!token) return;
-    setSportscoreMappingsLoading(true);
-    try {
-      const res = await fetch("/api/admin/sportscore-map", {
-        headers: authHeader,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSportscoreMappings(
-          Array.isArray(data.mappings) ? data.mappings : [],
-        );
-      }
-    } catch {
-      /* ignore */
-    } finally {
-      setSportscoreMappingsLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleSaveSportscoreMapping = async () => {
-    const sport = sportscoreForm.sport.trim().toLowerCase();
-    const statpalMatchId = sportscoreForm.statpalMatchId.trim();
-    const sportscoreId = sportscoreForm.sportscoreId.trim();
-    if (!sport || !statpalMatchId || !sportscoreId) {
-      toast.error("Esporte, ID Statpal e slug SportScore são obrigatórios");
-      return;
-    }
-    setSportscoreSaving(true);
-    try {
-      const res = await fetch("/api/admin/sportscore-map", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({
-          sport,
-          statpalMatchId,
-          sportscoreId,
-          homeTeam: sportscoreForm.homeTeam.trim() || undefined,
-          awayTeam: sportscoreForm.awayTeam.trim() || undefined,
-          matchDate: sportscoreForm.matchDate.trim() || undefined,
-        }),
-      });
-      if (res.ok) {
-        toast.success("Mapeamento salvo");
-        setSportscoreForm({
-          sport: "football",
-          statpalMatchId: "",
-          sportscoreId: "",
-          homeTeam: "",
-          awayTeam: "",
-          matchDate: "",
-        });
-        await fetchSportscoreMappings();
-      } else {
-        const data = await res.json().catch(() => null);
-        toast.error(data?.error || "Erro ao salvar mapeamento");
-      }
-    } catch {
-      toast.error("Erro ao salvar mapeamento");
-    } finally {
-      setSportscoreSaving(false);
-    }
-  };
-
-  const handleTestSportscoreMatch = async () => {
-    const sport = sportscoreForm.sport.trim().toLowerCase();
-    const homeTeam = sportscoreForm.homeTeam.trim();
-    const awayTeam = sportscoreForm.awayTeam.trim();
-    if (!homeTeam || !awayTeam) {
-      toast.error("Preencha Casa e Fora pra testar o casamento automático");
-      return;
-    }
-    setSportscoreTesting(true);
-    setSportscoreTestResult(null);
-    try {
-      const res = await fetch("/api/admin/sportscore-test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ sport, homeTeam, awayTeam }),
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok) {
-        setSportscoreTestResult(data);
-      } else {
-        toast.error(data?.error || "Erro ao testar");
-        setSportscoreTestResult(data ?? { error: "Erro ao testar" });
-      }
-    } catch (err) {
-      toast.error("Erro ao testar — verifique a conexão com o servidor");
-      setSportscoreTestResult({
-        error: err instanceof Error ? err.message : "Erro desconhecido",
-      });
-    } finally {
-      setSportscoreTesting(false);
-    }
-  };
-
-  const handleDeleteSportscoreMapping = async (id: number) => {
-    setSportscoreDeletingId(id);
-    try {
-      const res = await fetch(`/api/admin/sportscore-map/${id}`, {
-        method: "DELETE",
-        headers: authHeader,
-      });
-      if (res.ok) {
-        toast.success("Mapeamento removido");
-        await fetchSportscoreMappings();
-      } else {
-        const data = await res.json().catch(() => null);
-        toast.error(data?.error || "Erro ao remover mapeamento");
-      }
-    } catch {
-      toast.error("Erro ao remover mapeamento");
-    } finally {
-      setSportscoreDeletingId(null);
-    }
-  };
-
   const fetchEventRuntime = useCallback(async () => {
     if (!token) return;
     setRuntimeLoading(true);
@@ -2112,9 +1937,8 @@ export default function AdminPage() {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
-      fetchSportscoreMappings();
     }
-  }, [token, activeTab, fetchEventRuntime, fetchCompetitions, fetchSportscoreMappings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, activeTab, fetchEventRuntime, fetchCompetitions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openUserDetail = async (user: AdminUser) => {
     setDetailLoading(true);
@@ -2847,7 +2671,6 @@ export default function AdminPage() {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
-      fetchSportscoreMappings();
     }
   };
 
@@ -3021,7 +2844,7 @@ export default function AdminPage() {
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
-    live: "Ao Vivo · Match Tracker",
+    live: "Ao Vivo · Streaming",
     settings: "Configurações",
   };
 
@@ -6879,7 +6702,7 @@ export default function AdminPage() {
               </motion.div>
             )}
 
-            {/* ── AO VIVO (StatScore + SMYTDRYT) ── */}
+            {/* ── AO VIVO (SMYTDRYT) ── */}
             {activeTab === "live" && (
               <motion.div
                 key="live"
@@ -6889,13 +6712,8 @@ export default function AdminPage() {
                 className="space-y-4"
               >
                 <div className="text-xs text-zinc-500 -mt-2">
-                  O Tracker tenta resolver automaticamente pelo catálogo ao
-                  vivo da BetBY, mas isso só funciona por coincidência (nomes
-                  batendo com o que a BetBY tiver ao vivo naquele momento).
-                  Adiciona o StatScore Event ID de um jogo aqui para garantir
-                  que o Tracker dele funciona sempre; a transmissão SMYTDRYT
-                  só aparece depois de preencheres os campos de vídeo, por
-                  evento.
+                  A transmissão SMYTDRYT só aparece depois de preencheres os
+                  campos de vídeo, por evento.
                 </div>
 
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
@@ -6927,15 +6745,6 @@ export default function AdminPage() {
                         value={newMappingLeague}
                         onChange={(e) => setNewMappingLeague(e.target.value)}
                         placeholder="ex: Brasileirão"
-                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-zinc-500">StatScore Event ID</Label>
-                      <Input
-                        value={newMappingStatscoreId}
-                        onChange={(e) => setNewMappingStatscoreId(e.target.value)}
-                        placeholder="ex: 6309926"
                         className="h-8 text-xs bg-zinc-950 border-zinc-700"
                       />
                     </div>
@@ -6996,7 +6805,6 @@ export default function AdminPage() {
                       const edits = liveMappingEdits[m.betbyEventId] ?? {};
                       const val = (
                         key:
-                          | "statscoreEventId"
                           | "videoMatchId"
                           | "videoSportId"
                           | "videoTournamentId"
@@ -7010,7 +6818,6 @@ export default function AdminPage() {
                           : (m[key] != null ? String(m[key]) : "");
                       const setVal = (
                         key:
-                          | "statscoreEventId"
                           | "videoMatchId"
                           | "videoSportId"
                           | "videoTournamentId"
@@ -7061,15 +6868,6 @@ export default function AdminPage() {
                             </button>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">StatScore Event ID</Label>
-                              <Input
-                                value={val("statscoreEventId")}
-                                onChange={(e) => setVal("statscoreEventId", e.target.value)}
-                                placeholder="ex: 6309926"
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
                             <div>
                               <Label className="text-[10px] text-zinc-500">SMYTDRYT matchId</Label>
                               <Input
@@ -7573,279 +7371,6 @@ export default function AdminPage() {
                   )}
                 </div>
 
-                {/* SportScore Match Tracker — mapeamento de IDs */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
-                    <Activity size={16} className="text-blue-400" />
-                    <span className="font-bold text-sm text-zinc-300">
-                      Match Tracker (SportScore)
-                    </span>
-                    <span className="text-xs text-zinc-600">
-                      liga o ID da partida da Statpal ao slug do jogo na SportScore (ex: time-casa-vs-time-fora) para exibir o widget do tracker
-                    </span>
-                    <Button
-                      onClick={fetchSportscoreMappings}
-                      variant="outline"
-                      size="sm"
-                      className="ml-auto h-8 border-zinc-700 text-zinc-300"
-                    >
-                      <RefreshCw
-                        size={13}
-                        className={sportscoreMappingsLoading ? "animate-spin" : ""}
-                      />
-                    </Button>
-                  </div>
-
-                  <div className="p-5 border-b border-zinc-800 grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <select
-                      value={sportscoreForm.sport}
-                      onChange={(e) =>
-                        setSportscoreForm((f) => ({ ...f, sport: e.target.value }))
-                      }
-                      className="h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
-                    >
-                      {Object.entries(SPORT_LABEL).map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                    <Input
-                      placeholder="ID Statpal da partida"
-                      value={sportscoreForm.statpalMatchId}
-                      onChange={(e) =>
-                        setSportscoreForm((f) => ({
-                          ...f,
-                          statpalMatchId: e.target.value,
-                        }))
-                      }
-                      className="bg-zinc-800 border-zinc-700 text-white h-9"
-                    />
-                    <Input
-                      placeholder="Slug SportScore (ex: toronto-fc-ii-vs-inter-miami-b)"
-                      value={sportscoreForm.sportscoreId}
-                      onChange={(e) =>
-                        setSportscoreForm((f) => ({
-                          ...f,
-                          sportscoreId: e.target.value,
-                        }))
-                      }
-                      className="bg-zinc-800 border-zinc-700 text-white h-9"
-                    />
-                    <Input
-                      placeholder="Casa (opcional, só referência)"
-                      value={sportscoreForm.homeTeam}
-                      onChange={(e) =>
-                        setSportscoreForm((f) => ({
-                          ...f,
-                          homeTeam: e.target.value,
-                        }))
-                      }
-                      className="bg-zinc-800 border-zinc-700 text-white h-9"
-                    />
-                    <Input
-                      placeholder="Fora (opcional, só referência)"
-                      value={sportscoreForm.awayTeam}
-                      onChange={(e) =>
-                        setSportscoreForm((f) => ({
-                          ...f,
-                          awayTeam: e.target.value,
-                        }))
-                      }
-                      className="bg-zinc-800 border-zinc-700 text-white h-9"
-                    />
-                    <Button
-                      onClick={handleSaveSportscoreMapping}
-                      disabled={sportscoreSaving}
-                      className="h-9 bg-blue-600 hover:bg-blue-500"
-                    >
-                      {sportscoreSaving ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        "Salvar mapeamento"
-                      )}
-                    </Button>
-                    <Button
-                      onClick={handleTestSportscoreMatch}
-                      disabled={sportscoreTesting}
-                      className="h-9 bg-zinc-700 hover:bg-zinc-600 text-white"
-                    >
-                      {sportscoreTesting ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        "Testar casamento automático"
-                      )}
-                    </Button>
-                  </div>
-
-                  {sportscoreTestResult && (
-                    <div
-                      className="px-5 py-4"
-                      style={{ background: "#18181b", borderBottom: "1px solid #27272a" }}
-                    >
-                      <div className="flex items-center gap-2 mb-3">
-                        {sportscoreTestResult.result ? (
-                          <>
-                            <CheckCircle size={15} style={{ color: "#34d399" }} />
-                            <span className="text-sm font-bold" style={{ color: "#34d399" }}>
-                              Encontrado: slug "{sportscoreTestResult.result.slug}"
-                              {sportscoreTestResult.result.id
-                                ? ` · trackerId ${sportscoreTestResult.result.id}`
-                                : ""}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle size={15} style={{ color: "#f87171" }} />
-                            <span className="text-sm font-bold" style={{ color: "#f87171" }}>
-                              {sportscoreTestResult.error || "Não encontrado"}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {sportscoreTestResult.detail && (
-                        <div className="text-xs mb-2 font-mono" style={{ color: "#a1a1aa" }}>
-                          {sportscoreTestResult.detail}
-                        </div>
-                      )}
-                      {sportscoreTestResult.steps && sportscoreTestResult.steps.length > 0 && (
-                        <div className="space-y-1.5">
-                          {sportscoreTestResult.steps.map((s, i) => (
-                            <div
-                              key={i}
-                              className="text-xs px-2.5 py-1.5 rounded"
-                              style={{
-                                background: s.ok ? "#052e21" : "#27272a",
-                                color: s.ok ? "#6ee7b7" : "#d4d4d8",
-                                border: `1px solid ${s.ok ? "#065f46" : "#3f3f46"}`,
-                              }}
-                            >
-                              <span className="font-bold uppercase mr-2">{s.step}</span>
-                              {s.status != null && (
-                                <span className="font-mono mr-2">HTTP {s.status}</span>
-                              )}
-                              {s.detail}
-                              <div className="font-mono mt-0.5 break-all" style={{ color: "#71717a" }}>
-                                {s.url}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {sportscoreTestResult.tracker && (
-                        <div className="mt-3 pt-3" style={{ borderTop: "1px solid #27272a" }}>
-                          <div className="flex items-center gap-2 mb-2">
-                            {sportscoreTestResult.tracker.ok ? (
-                              <CheckCircle size={14} style={{ color: "#34d399" }} />
-                            ) : (
-                              <XCircle size={14} style={{ color: "#f87171" }} />
-                            )}
-                            <span
-                              className="text-xs font-bold"
-                              style={{ color: sportscoreTestResult.tracker.ok ? "#34d399" : "#f87171" }}
-                            >
-                              Tracker (/api/widget/match/):{" "}
-                              {sportscoreTestResult.tracker.ok
-                                ? "resposta recebida"
-                                : sportscoreTestResult.tracker.error}
-                            </span>
-                          </div>
-
-                          {sportscoreTestResult.mappedTracker && (
-                            <div className="mb-3 p-3 rounded" style={{ background: "#052e21", border: "1px solid #065f46" }}>
-                              <div className="text-sm font-black mb-2" style={{ color: "#6ee7b7" }}>
-                                {sportscoreTestResult.mappedTracker.homeScore} - {sportscoreTestResult.mappedTracker.awayScore}
-                                {" · "}
-                                {sportscoreTestResult.mappedTracker.minute || sportscoreTestResult.mappedTracker.status}
-                              </div>
-                              {sportscoreTestResult.mappedTracker.incidents.length > 0 ? (
-                                <div className="space-y-1">
-                                  {sportscoreTestResult.mappedTracker.incidents.map((inc, i) => (
-                                    <div key={i} className="text-xs" style={{ color: "#a7f3d0" }}>
-                                      {inc.minute}' — {inc.type} ({inc.team}) — {inc.player}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="text-xs" style={{ color: "#71717a" }}>
-                                  Nenhum incidente ainda
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {sportscoreTestResult.tracker.raw != null && (
-                            <pre
-                              className="text-[10px] whitespace-pre-wrap break-all max-h-64 overflow-y-auto p-2 rounded"
-                              style={{ background: "#09090b", color: "#a1a1aa" }}
-                            >
-                              {JSON.stringify(sportscoreTestResult.tracker.raw, null, 2)}
-                            </pre>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {sportscoreMappingsLoading ? (
-                    <div className="p-8 flex justify-center">
-                      <Loader2 size={20} className="animate-spin text-zinc-500" />
-                    </div>
-                  ) : sportscoreMappings.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-zinc-600">
-                      Nenhum mapeamento cadastrado ainda.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-zinc-800">
-                      {sportscoreMappings.map((m) => (
-                        <div
-                          key={m.id}
-                          className="px-5 py-3 flex items-center gap-3 flex-wrap"
-                        >
-                          <span
-                            className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${m.source === "manual" ? "bg-blue-900/50 text-blue-300" : "bg-emerald-900/50 text-emerald-300"}`}
-                          >
-                            {m.source === "manual" ? "manual" : "auto"}
-                          </span>
-                          <span className="text-xs font-bold text-zinc-400 uppercase">
-                            {SPORT_LABEL[m.sport] || m.sport}
-                          </span>
-                          <span className="text-sm text-zinc-300">
-                            {m.homeTeam && m.awayTeam
-                              ? `${m.homeTeam} vs ${m.awayTeam}`
-                              : "—"}
-                          </span>
-                          <span className="text-xs text-zinc-600 font-mono">
-                            statpal:{m.statpalMatchId}
-                          </span>
-                          <span className="text-xs text-blue-400 font-mono">
-                            slug:{m.sportscoreId}
-                          </span>
-                          {m.trackerId && (
-                            <span className="text-xs text-purple-400 font-mono">
-                              trackerId:{m.trackerId}
-                            </span>
-                          )}
-                          <span className="text-xs text-zinc-700">
-                            {fmtDate(m.updatedAt)}
-                          </span>
-                          <Button
-                            onClick={() => handleDeleteSportscoreMapping(m.id)}
-                            disabled={sportscoreDeletingId === m.id}
-                            size="sm"
-                            className="ml-auto h-7 bg-red-900/60 hover:bg-red-800 text-red-200"
-                          >
-                            {sportscoreDeletingId === m.id ? (
-                              <Loader2 size={12} className="animate-spin" />
-                            ) : (
-                              <Trash2 size={12} />
-                            )}
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </motion.div>
             )}
           </AnimatePresence>
