@@ -278,7 +278,7 @@ type AdvancedMarkets = {
     set2: { home: number; away: number };
     set3: { home: number; away: number };
     exactSets: { h20: number; h21: number; a02: number; a12: number };
-    setHandicap: { home: number; away: number };
+    setHandicap: { line: number; home: number; away: number };
     totalGames: { line: number; over: number; under: number };
     totalGamesLines: Array<{ line: number; over: number; under: number }>;
     set1Games: { line: number; over: number; under: number };
@@ -298,6 +298,11 @@ type AdvancedMarkets = {
     winAtLeast1P1?: { yes: number; no: number };
     winAtLeast1P2?: { yes: number; no: number };
     setMatch?: { h11: number; h12: number; a21: number; a22: number };
+    tieBreak?: { yes: number; no: number };
+    tieBreak1st?: { yes: number; no: number };
+    totalTieBreaks?: { line: number; over: number; under: number };
+    highestSetTotal?: { line: number; over: number; under: number };
+    setsScoring?: { firstHigher: number; secondHigher: number; equal: number };
     score1st?: Array<{ label: string; odds: number }>;
     score2nd?: Array<{ label: string; odds: number }>;
     score3rd?: Array<{ label: string; odds: number }>;
@@ -11583,7 +11588,7 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       set2: { home: 0, away: 0 },
       set3: { home: 0, away: 0 },
       exactSets: prematchExtra.exactSets ?? { h20: 0, h21: 0, a02: 0, a12: 0 },
-      setHandicap: { home: 0, away: 0 },
+      setHandicap: prematchExtra.setHandicap ?? { line: 0, home: 0, away: 0 },
       totalGames: prematchExtra.totalGames ?? { line: 0, over: 0, under: 0 },
       totalGamesLines: prematchExtra.totalGamesLines ?? [],
       set1Games: prematchExtra.set1Games ?? { line: 0, over: 0, under: 0 },
@@ -11591,6 +11596,13 @@ async function buildTennisUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
       homePlayerGames: prematchExtra.homePlayerGames,
       awayPlayerGames: prematchExtra.awayPlayerGames,
       oddEvenGames: prematchExtra.oddEvenGames ?? { odd: 0, even: 0 },
+      setMatch: prematchExtra.setMatch,
+      tieBreak: prematchExtra.tieBreak,
+      tieBreak1st: prematchExtra.tieBreak1st,
+      totalTieBreaks: prematchExtra.totalTieBreaks,
+      totalSets: prematchExtra.totalSets,
+      highestSetTotal: prematchExtra.highestSetTotal,
+      setsScoring: prematchExtra.setsScoring,
     };
     const markets: AdvancedMarkets = { ...baseMarkets, tennisExtra };
 

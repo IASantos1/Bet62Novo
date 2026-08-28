@@ -650,6 +650,39 @@ export type PulseScoreTennisPrematchExtra = {
   // tennisExtra's existing homePlayerGames/awayPlayerGames fields.
   homePlayerGames?: { line: number; over: number; under: number };
   awayPlayerGames?: { line: number; over: number; under: number };
+  // The rest below are all confirmed real (2026-08-28), all canonicalMarket
+  // "OTHER" (PulseScore has no dedicated type for them) with the actual
+  // market identified by rawName instead — settleable using only the set
+  // scores already tracked (getTennisSetsFromExtras in settlement.ts), no
+  // new stat feed needed. rawName "Sets Handicap": same two-selections-
+  // per-side, multi-line, real-signed-line shape as GAME_HANDICAP (rawName
+  // "1 (-1.5)"/"1 (1.5)" for home, "2 (...)" for away — "1"/"2" here are
+  // 1xBet's own player-slot numbering, not literal text to match against
+  // team names). Previously wired in matches.ts/home.tsx as a HARDCODED
+  // "home -1.5 sets" assumption regardless of who was actually favored —
+  // real signed line fixes that the same way gameHandicap was fixed.
+  setHandicap?: { line: number; home: number; away: number };
+  // rawName "Tie-Break" (FULL_TIME) / "1st set Tie-Break" (FIRST_SET) —
+  // plain Yes/No, canonicalOutcome "OTHER" with rawName "Yes"/"No".
+  tieBreak?: { yes: number; no: number };
+  tieBreak1st?: { yes: number; no: number };
+  // rawName "Total Tie-Breaks" — Over/Under how many sets went to a
+  // tie-break, multi-line like totalGames (collectOverUnderLines below
+  // reads market.canonicalMarket-agnostic, so it's reused here too).
+  totalTieBreaks?: { line: number; over: number; under: number };
+  // rawName "Total Sets" — Over/Under 2.5 (best-of-3 went 2 or 3 sets).
+  totalSets?: { line: number; over: number; under: number };
+  // rawName "Highest Scoring Set Total" — TWO sub-markets share this one
+  // rawName in the real sample: an Over/Under total-games line (the
+  // single highest-scoring set's total games) AND a 3-way "1st Set >/</=
+  // 2nd" comparison (rawNames literally "1st Set > 2nd" etc, no line).
+  // "Sets Scoring" is the exact same 3-way comparison under a different
+  // rawName in some samples — both map to the same field.
+  highestSetTotal?: { line: number; over: number; under: number };
+  setsScoring?: { firstHigher: number; secondHigher: number; equal: number };
+  // rawName "Set / Match" — combined "who won set 1 / who won the match"
+  // (rawNames "W1/W1"/"W1/W2"/"W2/W1"/"W2/W2", W1=home won, W2=away won).
+  setMatch?: { h11: number; h12: number; a21: number; a22: number };
 };
 
 function collectOverUnderLines(
@@ -722,6 +755,134 @@ function extractGameHandicap(
   return pairs.reduce((best, cur) =>
     Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
   );
+}
+
+/** "Sets Handicap" — same real signed-line/multi-line shape as
+ * extractGameHandicap above, but canonicalOutcome is "OTHER" (not HOME/
+ * AWAY) and the side is instead a "1 "/"2 " prefix on rawName (1xBet's own
+ * player-slot numbering: "1" = home, "2" = away — confirmed against real
+ * moneyline data the same way extractGameHandicap's sign was). */
+function extractSetHandicap(
+  market: PulseScoreMarket,
+): { line: number; home: number; away: number } | null {
+  const homeByAbsLine = new Map<number, { line: number; odds: number }>();
+  const awayByAbsLine = new Map<number, number>();
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const line = sel.line ?? market.line;
+    if (line === undefined) continue;
+    const raw = (sel.rawName || "").trim();
+    const absLine = Math.abs(line);
+    if (raw.startsWith("1")) homeByAbsLine.set(absLine, { line, odds: val });
+    else if (raw.startsWith("2")) awayByAbsLine.set(absLine, val);
+  }
+  const pairs: Array<{ line: number; home: number; away: number }> = [];
+  for (const [absLine, h] of homeByAbsLine) {
+    const away = awayByAbsLine.get(absLine);
+    if (away !== undefined) pairs.push({ line: h.line, home: h.odds, away });
+  }
+  if (pairs.length === 0) return null;
+  return pairs.reduce((best, cur) =>
+    Math.abs(cur.home - cur.away) < Math.abs(best.home - best.away) ? cur : best,
+  );
+}
+
+/** Plain Yes/No market (canonicalOutcome "OTHER", rawName "Yes"/"No") —
+ * used by Tie-Break and 1st set Tie-Break. */
+function extractYesNo(market: PulseScoreMarket): { yes: number; no: number } | null {
+  let yes: number | null = null;
+  let no: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim().toLowerCase();
+    if (raw === "yes") yes = val;
+    else if (raw === "no") no = val;
+  }
+  return yes !== null && no !== null ? { yes, no } : null;
+}
+
+/** "Sets Scoring" / the 3-way half of "Highest Scoring Set Total" — rawNames
+ * literally "1st Set > 2nd" / "1st Set < 2nd" / "1st Set = 2nd" (total games
+ * per set compared, not who won it). */
+function extractSetsScoring(
+  market: PulseScoreMarket,
+): { firstHigher: number; secondHigher: number; equal: number } | null {
+  let firstHigher: number | null = null;
+  let secondHigher: number | null = null;
+  let equal: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim();
+    if (raw === "1st Set > 2nd") firstHigher = val;
+    else if (raw === "1st Set < 2nd") secondHigher = val;
+    else if (raw === "1st Set = 2nd") equal = val;
+  }
+  return firstHigher !== null && secondHigher !== null && equal !== null
+    ? { firstHigher, secondHigher, equal }
+    : null;
+}
+
+/** Over/Under sub-selections found in several "OTHER"-bucketed markets
+ * (Total Sets, Total Tie-Breaks, and the O/U half of "Highest Scoring Set
+ * Total" alongside its 3-way "1st Set > 2nd" half — extractSetsScoring
+ * above) — these carry canonicalOutcome "OTHER" too (not "OVER"/"UNDER"
+ * like the properly-typed TOTAL_GAMES markets), so collectOverUnderLines'
+ * canonicalOutcome check doesn't see them; parses the line and direction
+ * out of rawName instead ("(2.5) Over"/"(0.5) Under"), same multi-line
+ * collection + most-even-pick as collectOverUnderLines/pickMostEvenLine. */
+function collectOtherTaggedOverUnderLines(
+  market: PulseScoreMarket,
+): Array<{ line: number; over: number; under: number }> {
+  const byLine = new Map<number, { over: number | null; under: number | null }>();
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim();
+    const m = raw.match(/^\((\d+(?:\.\d+)?)\)\s*(Over|Under)$/i);
+    if (!m) continue;
+    const line = Number(m[1]!);
+    if (!Number.isFinite(line)) continue;
+    const entry = byLine.get(line) ?? { over: null, under: null };
+    if (/over/i.test(m[2]!)) entry.over = val;
+    else entry.under = val;
+    byLine.set(line, entry);
+  }
+  const out: Array<{ line: number; over: number; under: number }> = [];
+  for (const [line, { over, under }] of byLine) {
+    if (over !== null && under !== null) out.push({ line, over, under });
+  }
+  return out.sort((a, b) => a.line - b.line);
+}
+
+/** "Set / Match" — rawNames "W1/W1"/"W1/W2"/"W2/W1"/"W2/W2" (who won set 1 /
+ * who won the match; W1 = home, W2 = away). */
+function extractSetMatch(
+  market: PulseScoreMarket,
+): { h11: number; h12: number; a21: number; a22: number } | null {
+  let h11: number | null = null;
+  let h12: number | null = null;
+  let a21: number | null = null;
+  let a22: number | null = null;
+  for (const sel of market.selections ?? []) {
+    if (!sel.isActive) continue;
+    const val = oddsToNumber(sel.odds);
+    if (val === null) continue;
+    const raw = (sel.rawName || "").trim();
+    if (raw === "W1/W1") h11 = val;
+    else if (raw === "W1/W2") h12 = val;
+    else if (raw === "W2/W1") a21 = val;
+    else if (raw === "W2/W2") a22 = val;
+  }
+  return h11 !== null && h12 !== null && a21 !== null && a22 !== null
+    ? { h11, h12, a21, a22 }
+    : null;
 }
 
 /** Picks the closest-to-even line (min |over - under| gap) as the "main"
@@ -902,6 +1063,73 @@ export function extractTennisPrematchExtra(
     }
   }
 
+  const setHandicapMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Sets Handicap" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (setHandicapMarket) {
+    const sh = extractSetHandicap(setHandicapMarket);
+    if (sh) out.setHandicap = sh;
+  }
+
+  const tieBreakMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Tie-Break" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (tieBreakMarket) {
+    const tb = extractYesNo(tieBreakMarket);
+    if (tb) out.tieBreak = tb;
+  }
+
+  const tieBreak1stMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "1st set Tie-Break" && (m.period || "").toUpperCase() === "FIRST_SET",
+  );
+  if (tieBreak1stMarket) {
+    const tb1 = extractYesNo(tieBreak1stMarket);
+    if (tb1) out.tieBreak1st = tb1;
+  }
+
+  const totalTieBreaksMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Total Tie-Breaks" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (totalTieBreaksMarket) {
+    const lines = collectOtherTaggedOverUnderLines(totalTieBreaksMarket);
+    if (lines.length > 0) out.totalTieBreaks = pickMostEvenLine(lines);
+  }
+
+  const totalSetsMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Total Sets" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (totalSetsMarket) {
+    const lines = collectOtherTaggedOverUnderLines(totalSetsMarket);
+    if (lines.length > 0) out.totalSets = pickMostEvenLine(lines);
+  }
+
+  const highestSetMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Highest Scoring Set Total" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (highestSetMarket) {
+    const lines = collectOtherTaggedOverUnderLines(highestSetMarket);
+    if (lines.length > 0) out.highestSetTotal = pickMostEvenLine(lines);
+    const scoring = extractSetsScoring(highestSetMarket);
+    if (scoring) out.setsScoring = scoring;
+  }
+  if (!out.setsScoring) {
+    const setsScoringMarket = markets.find(
+      (m) => (m.rawName || "").trim() === "Sets Scoring" && (m.period || "").toUpperCase() === "FULL_TIME",
+    );
+    if (setsScoringMarket) {
+      const scoring = extractSetsScoring(setsScoringMarket);
+      if (scoring) out.setsScoring = scoring;
+    }
+  }
+
+  const setMatchMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Set / Match" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (setMatchMarket) {
+    const sm = extractSetMatch(setMatchMarket);
+    if (sm) out.setMatch = sm;
+  }
+
   return out;
 }
 
@@ -953,6 +1181,13 @@ export type PulseScoreTennisLiveExtra = {
   homePlayerGames?: { line: number; over: number; under: number };
   awayPlayerGames?: { line: number; over: number; under: number };
   exactSets?: { h20: number; h21: number; a02: number; a12: number };
+  setHandicap?: { line: number; home: number; away: number };
+  tieBreak?: { yes: number; no: number };
+  tieBreak1st?: { yes: number; no: number };
+  totalTieBreaks?: { line: number; over: number; under: number };
+  highestSetTotal?: { line: number; over: number; under: number };
+  setsScoring?: { firstHigher: number; secondHigher: number; equal: number };
+  setMatch?: { h11: number; h12: number; a21: number; a22: number };
 };
 
 const TENNIS_SET_SCORE_ORDER = new Map([
@@ -1094,6 +1329,78 @@ export function extractTennisLiveExtra(ev: PulseScoreEvent): PulseScoreTennisLiv
     if (twoSets !== null && threeSets !== null) {
       out.totalSets = { line: 2.5, under: twoSets, over: threeSets };
     }
+  }
+  // Fallback: confirmed real onexbet shape (2026-08-28) is actually rawName
+  // "Total Sets" under canonicalMarket "OTHER" ("(2.5) Over"/"(2.5) Under"),
+  // not the canonicalMarket "TOTAL_SETS"/"2 sets"/"3 sets" shape above (kept
+  // for whichever bookmaker era that was confirmed against).
+  if (!out.totalSets) {
+    const altTotalSetsMarket = markets.find(
+      (m) => (m.rawName || "").trim() === "Total Sets" && (m.period || "").toUpperCase() === "FULL_TIME",
+    );
+    if (altTotalSetsMarket) {
+      const lines = collectOtherTaggedOverUnderLines(altTotalSetsMarket);
+      if (lines.length > 0) out.totalSets = pickMostEvenLine(lines);
+    }
+  }
+
+  const setHandicapMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Sets Handicap" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (setHandicapMarket) {
+    const sh = extractSetHandicap(setHandicapMarket);
+    if (sh) out.setHandicap = sh;
+  }
+
+  const tieBreakMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Tie-Break" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (tieBreakMarket) {
+    const tb = extractYesNo(tieBreakMarket);
+    if (tb) out.tieBreak = tb;
+  }
+
+  const tieBreak1stMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "1st set Tie-Break" && (m.period || "").toUpperCase() === "FIRST_SET",
+  );
+  if (tieBreak1stMarket) {
+    const tb1 = extractYesNo(tieBreak1stMarket);
+    if (tb1) out.tieBreak1st = tb1;
+  }
+
+  const totalTieBreaksMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Total Tie-Breaks" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (totalTieBreaksMarket) {
+    const lines = collectOtherTaggedOverUnderLines(totalTieBreaksMarket);
+    if (lines.length > 0) out.totalTieBreaks = pickMostEvenLine(lines);
+  }
+
+  const highestSetMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Highest Scoring Set Total" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (highestSetMarket) {
+    const lines = collectOtherTaggedOverUnderLines(highestSetMarket);
+    if (lines.length > 0) out.highestSetTotal = pickMostEvenLine(lines);
+    const scoring = extractSetsScoring(highestSetMarket);
+    if (scoring) out.setsScoring = scoring;
+  }
+  if (!out.setsScoring) {
+    const setsScoringMarket = markets.find(
+      (m) => (m.rawName || "").trim() === "Sets Scoring" && (m.period || "").toUpperCase() === "FULL_TIME",
+    );
+    if (setsScoringMarket) {
+      const scoring = extractSetsScoring(setsScoringMarket);
+      if (scoring) out.setsScoring = scoring;
+    }
+  }
+
+  const setMatchMarket = markets.find(
+    (m) => (m.rawName || "").trim() === "Set / Match" && (m.period || "").toUpperCase() === "FULL_TIME",
+  );
+  if (setMatchMarket) {
+    const sm = extractSetMatch(setMatchMarket);
+    if (sm) out.setMatch = sm;
   }
 
   const straightSets = findYesNoMarket(markets, "OTHER", "straight sets winner?");

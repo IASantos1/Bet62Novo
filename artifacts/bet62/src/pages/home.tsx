@@ -3689,7 +3689,7 @@ type AdvancedMarkets = {
   // Tennis-specific live markets (injected server-side)
   tennisExtra?: {
     firstSet?: { home: number; away: number };
-    setHandicap?: { home: number; away: number };
+    setHandicap?: { line: number; home: number; away: number };
     gameHandicap?: { line: number; home: number; away: number };
     setExactScore?: Record<string, number>;
     set1ExactScore?: Record<string, number>;
@@ -15531,22 +15531,22 @@ export default function Home({
                       <>
                         {tennisExtra?.setHandicap?.home > 0 && (
                           <MarketGroup
-                            title={`Handicap de Sets — ${match.home} −1.5`}
+                            title={`Handicap de Sets — Casa ${tennisExtra!.setHandicap!.line < 0 ? `−${Math.abs(tennisExtra!.setHandicap!.line)}` : `+${tennisExtra!.setHandicap!.line}`}`}
                           >
                             <MarketOddsBtn
                               match={match}
-                              sel="sh15-home2"
+                              sel={`sh-home-${Math.abs(tennisExtra!.setHandicap!.line)}`}
                               odd={tennisExtra!.setHandicap!.home}
                               market="handicap"
-                              label={`${match.home} −1.5 sets`}
+                              label={`${match.home} ${tennisExtra!.setHandicap!.line < 0 ? "−" : "+"}${Math.abs(tennisExtra!.setHandicap!.line)} sets`}
                               suspKey="setHandicap"
                             />
                             <MarketOddsBtn
                               match={match}
-                              sel="sh15-away2"
+                              sel={`sh-away-${Math.abs(tennisExtra!.setHandicap!.line)}`}
                               odd={tennisExtra!.setHandicap!.away}
                               market="handicap"
-                              label={`${match.away} +1.5 sets`}
+                              label={`${match.away} ${tennisExtra!.setHandicap!.line < 0 ? "+" : "−"}${Math.abs(tennisExtra!.setHandicap!.line)} sets`}
                               suspKey="setHandicap"
                             />
                           </MarketGroup>
@@ -17750,6 +17750,123 @@ export default function Home({
                           market="especiais"
                           label="Menos de 2.5 Sets"
                           suspKey="totalSets"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Tie-Break (full match) */}
+                    {((m as any).tennisExtra as any).tieBreak?.yes > 0 && (
+                      <MarketGroup title="Vai a Tie-Break?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb-yes"
+                          odd={((m as any).tennisExtra as any).tieBreak.yes}
+                          market="especiais"
+                          label="Sim"
+                          suspKey="tieBreak"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb-no"
+                          odd={((m as any).tennisExtra as any).tieBreak.no}
+                          market="especiais"
+                          label="Não"
+                          suspKey="tieBreak"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Tie-Break (1st set) */}
+                    {((m as any).tennisExtra as any).tieBreak1st?.yes > 0 && (
+                      <MarketGroup title="1º Set vai a Tie-Break?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb1-yes"
+                          odd={((m as any).tennisExtra as any).tieBreak1st.yes}
+                          market="especiais"
+                          label="Sim"
+                          suspKey="tieBreak1st"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb1-no"
+                          odd={((m as any).tennisExtra as any).tieBreak1st.no}
+                          market="especiais"
+                          label="Não"
+                          suspKey="tieBreak1st"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Total Tie-Breaks */}
+                    {((m as any).tennisExtra as any).totalTieBreaks?.over > 0 && (
+                      <MarketGroup
+                        title={`Total de Tie-Breaks — O/U ${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`ttb-o-${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          odd={((m as any).tennisExtra as any).totalTieBreaks.over}
+                          market="especiais"
+                          label={`Mais de ${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          suspKey="totalTieBreaks"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`ttb-u-${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          odd={((m as any).tennisExtra as any).totalTieBreaks.under}
+                          market="especiais"
+                          label={`Menos de ${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          suspKey="totalTieBreaks"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Highest Scoring Set Total */}
+                    {((m as any).tennisExtra as any).highestSetTotal?.over > 0 && (
+                      <MarketGroup
+                        title={`Maior Set (Total de Games) — O/U ${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`hst-o-${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          odd={((m as any).tennisExtra as any).highestSetTotal.over}
+                          market="especiais"
+                          label={`Mais de ${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          suspKey="highestSetTotal"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`hst-u-${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          odd={((m as any).tennisExtra as any).highestSetTotal.under}
+                          market="especiais"
+                          label={`Menos de ${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          suspKey="highestSetTotal"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Sets Scoring — 1º set vs 2º set (total de games) */}
+                    {((m as any).tennisExtra as any).setsScoring?.firstHigher > 0 && (
+                      <MarketGroup title="1º Set vs 2º Set — Mais Games">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ss-1h"
+                          odd={((m as any).tennisExtra as any).setsScoring.firstHigher}
+                          market="especiais"
+                          label="1º Set tem mais games"
+                          suspKey="setsScoring"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ss-2h"
+                          odd={((m as any).tennisExtra as any).setsScoring.secondHigher}
+                          market="especiais"
+                          label="2º Set tem mais games"
+                          suspKey="setsScoring"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ss-eq"
+                          odd={((m as any).tennisExtra as any).setsScoring.equal}
+                          market="especiais"
+                          label="Empate"
+                          suspKey="setsScoring"
                         />
                       </MarketGroup>
                     )}

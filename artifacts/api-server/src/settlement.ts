@@ -2596,10 +2596,19 @@ export function scoreOutcomeForSel(
     winning = score === want;
   }
   // ── Tennis set handicap / game handicap / game totals / correct set score ──
-  else if (/^sh(\d+)-(home|away)$/.test(s)) {
-    const m = s.match(/^sh(\d+)-(home|away)$/)!;
-    const line = decodeCompactLine(m[1]!);
-    if (!Number.isFinite(line)) return null;
+  // Sets Handicap: confirmed real (2026-08-28 onexbet sample) with the exact
+  // same genuinely-signed-line convention as GAME_HANDICAP (positive on
+  // home's own side = home underdog getting a sets head start) — same fix
+  // as gh- below: readSelectionMarketLine preferred over the unsigned
+  // compact-digit magnitude, which otherwise silently assumed home is
+  // always favorite (this key was previously dead — setHandicap was always
+  // a hardcoded synthetic {home:0,away:0}, so the bug never fired in
+  // production — now that it's wired to real data it would have).
+  else if (/^sh(\d+)-(home|away)\d*$/.test(s) || /^sh-(home|away)-(\d+(?:\.\d+)?)$/.test(s)) {
+    const compact = s.match(/^sh(\d+)-(home|away)\d*$/);
+    const decimal = s.match(/^sh-(home|away)-(\d+(?:\.\d+)?)$/);
+    const side = (compact ? compact[2] : decimal![1]) as "home" | "away";
+    const magnitude = compact ? decodeCompactLine(compact[1]!) : Number(decimal![2]);
     const sets = getTennisSetsFromExtras(extra?.extras);
     if (sets.length === 0) return null;
     const homeSets = sets.filter(
@@ -2608,10 +2617,94 @@ export function scoreOutcomeForSel(
     const awaySets = sets.filter(
       ([h, a]) => tennisSetFinished([h, a]) && a > h,
     ).length;
-    const diff = homeSets - awaySets;
-    if (diff === line) voided = true;
-    else winning = m[2] === "home" ? diff > line : diff < line;
-  } else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const signedLine = readSelectionMarketLine(sel);
+    const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+    if (!Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(homeSets, awaySets, side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
+  // Total Sets — confirmed real, frontend key is fixed "ts-o-2.5"/"ts-u-2.5"
+  // (2.5 is the only real line for a best-of-3 match). Previously dead: the
+  // normalizeSettlementSelectionKey alias table rewrote "ts-o-2.5" into
+  // "osets25", a form nothing downstream ever scored — bets on it would
+  // have stayed pending forever. Scored directly here instead.
+  else if (/^ts-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^ts-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    // A match ends the moment one side reaches 2 sets won — so "how many
+    // sets were played" is just how many completed sets exist, no need to
+    // separately check who's leading.
+    const totalSetsPlayed = completedSets.length;
+    if (totalSetsPlayed === line) voided = true;
+    else winning = m[1] === "o" ? totalSetsPlayed > line : totalSetsPlayed < line;
+  }
+  // Tie-Break Yes/No (full match) / 1st set Tie-Break Yes/No — a tie-break
+  // happened in a given set iff its final score is 7-6 or 6-7 (tennis's
+  // only way to reach 7 games without a 2-game-clear margin).
+  else if (/^tb-(yes|no)$/.test(s) || /^tb1-(yes|no)$/.test(s)) {
+    const scoped1st = /^tb1-/.test(s);
+    const answer = s.endsWith("yes") ? "yes" : "no";
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length === 0) return null;
+    const relevantSets = scoped1st ? sets.slice(0, 1) : sets;
+    if (scoped1st && relevantSets.length === 0) return null;
+    const hadTieBreak = relevantSets.some(
+      ([h, a]) => (h === 7 && a === 6) || (h === 6 && a === 7),
+    );
+    // 1st-set-only can resolve as soon as set 1 finishes; full-match "No"
+    // can only be confirmed once the match itself is over (any remaining
+    // set could still go to a tie-break) — "Yes" resolves early either way.
+    if (!scoped1st && !hadTieBreak) {
+      if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    }
+    winning = answer === "yes" ? hadTieBreak : !hadTieBreak;
+  }
+  // Total Tie-Breaks — Over/Under how many sets went to a tie-break.
+  else if (/^ttb-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^ttb-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const tieBreakCount = sets.filter(
+      ([h, a]) => (h === 7 && a === 6) || (h === 6 && a === 7),
+    ).length;
+    if (tieBreakCount === line) voided = true;
+    else winning = m[1] === "o" ? tieBreakCount > line : tieBreakCount < line;
+  }
+  // Highest Scoring Set Total — Over/Under the single highest-games set.
+  else if (/^hst-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^hst-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length === 0) return null;
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const highest = Math.max(...sets.map(([h, a]) => h + a));
+    if (highest === line) voided = true;
+    else winning = m[1] === "o" ? highest > line : highest < line;
+  }
+  // Sets Scoring — 1st set total games vs 2nd set total games.
+  else if (/^ss-(1h|2h|eq)$/.test(s)) {
+    const m = s.match(/^ss-(1h|2h|eq)$/)!;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length < 2) return null;
+    const set1Total = sets[0]![0] + sets[0]![1];
+    const set2Total = sets[1]![0] + sets[1]![1];
+    if (m[1] === "eq") {
+      winning = set1Total === set2Total;
+    } else if (set1Total === set2Total) {
+      voided = true;
+    } else {
+      winning = m[1] === "1h" ? set1Total > set2Total : set1Total < set2Total;
+    }
+  }
+  else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
     const m = s.match(/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
     const side = m[1] as "home" | "away";
     const sets = getTennisSetsFromExtras(extra?.extras);
