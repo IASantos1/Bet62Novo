@@ -5948,12 +5948,6 @@ export default function Home({
     | "lineups"
     | "confrontos"
   >("markets");
-  // Match header ↔ mini field toggle — 2D SVG (MiniFieldView), sport-correct
-  // for all of football/tennis/basketball/hockey/volleyball/baseball.
-  useEffect(() => {
-    setShowFieldView(false);
-  }, [expandedMatch?.id]);
-
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);
