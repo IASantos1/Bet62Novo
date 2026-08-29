@@ -157,6 +157,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import PlayerProfileModal from "@/components/PlayerProfileModal";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -3732,6 +3733,7 @@ type Match = {
     team: string;
     minute: number;
     player: string;
+    playerId?: number;
     detail?: string;
   }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
@@ -6319,6 +6321,7 @@ export default function Home({
   };
   const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
+  const [playerProfileId, setPlayerProfileId] = useState<number | null>(null);
 
   const extractV2StatsGroups = (payload: any): V2StatsGroup[] => {
     const root = payload?.data ?? payload;
@@ -22429,6 +22432,39 @@ export default function Home({
                             )}
                           </div>
                         )}
+
+                        {/* Eventos ao vivo — nomes de jogadores clicáveis abrem o perfil */}
+                        {(expandedMatch.events?.length ?? 0) > 0 && (
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
+                              Eventos
+                            </div>
+                            <div className="space-y-1.5">
+                              {expandedMatch.events!.map((ev, i) => (
+                                <div key={i} className="flex items-center gap-2 text-[11px]">
+                                  <span className="text-zinc-600 shrink-0 w-8 tabular-nums">
+                                    {ev.minute}'
+                                  </span>
+                                  <span className="text-zinc-500 shrink-0 w-24 truncate">
+                                    {ev.type}
+                                  </span>
+                                  {ev.playerId ? (
+                                    <button
+                                      onClick={() => setPlayerProfileId(ev.playerId!)}
+                                      className="flex-1 text-left text-zinc-200 font-semibold truncate hover:text-red-400 hover:underline"
+                                    >
+                                      {ev.player}
+                                    </button>
+                                  ) : (
+                                    <span className="flex-1 text-zinc-200 font-semibold truncate">
+                                      {ev.player}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -28155,6 +28191,11 @@ export default function Home({
           </div>
         </div>
       </footer>
+
+      <PlayerProfileModal
+        playerId={playerProfileId}
+        onClose={() => setPlayerProfileId(null)}
+      />
 
       {/* AUTH MODAL */}
       {authModalOpen && (

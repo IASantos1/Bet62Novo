@@ -12,6 +12,8 @@ const {
   filterUpcomingFixtures,
   filterHeadToHeadFixtures,
   isFootballLiveDisplayEvent,
+  getPlayerCurrentSeasonStatTotal,
+  getPlayerRecentMatches,
 } = await import("../services/sportmonks/football.js");
 
 function makeFixture(odds: unknown[]) {
@@ -641,4 +643,97 @@ test("isFootballLiveDisplayEvent: an unconfirmed/unknown developer_name (or none
   assert.equal(isFootballLiveDisplayEvent("VAR"), false);
   assert.equal(isFootballLiveDisplayEvent(undefined), false);
   assert.equal(isFootballLiveDisplayEvent(null), false);
+});
+
+// Real GET /v3/football/players/4700 sample (2026-08-29) — Jonathan Calleri
+// (São Paulo). The current-season row (season_id 26763, is_current: true)
+// real details: CAPTAIN 20, GOALS {total:7, goals:6, penalties:1},
+// YELLOWCARDS {total:4, home:1, away:3}, APPEARANCES 21, MINUTES_PLAYED
+// 1704 — no REDCARDS or ASSISTS entries in this real row (a real absence,
+// not zero). A second, non-current season row (season_id 23265) has its
+// own real GOALS total (5) — used to confirm only the current-season row
+// is read.
+const calleriProfile = {
+  id: 4700,
+  display_name: "Jonathan Calleri ",
+  statistics: [
+    {
+      id: 1008798424, team_id: 3496, season_id: 23265,
+      season: { id: 23265, name: "2024", is_current: false, league: { id: 648, name: "Serie A" } },
+      details: [
+        { type_id: 52, value: { total: 5, goals: 5, penalties: 0 }, type: { id: 52, name: "Goals", code: "goals", developer_name: "GOALS" } },
+      ],
+    },
+    {
+      id: 1868964264, team_id: 3496, season_id: 26763,
+      season: { id: 26763, name: "2026", is_current: true, league: { id: 648, name: "Serie A" } },
+      team: { id: 3496, name: "São Paulo", image_path: "https://cdn.sportmonks.com/images/soccer/teams/8/3496.png" },
+      details: [
+        { type_id: 40, value: { total: 20 }, type: { id: 40, name: "Captain", code: "captain", developer_name: "CAPTAIN" } },
+        { type_id: 52, value: { total: 7, goals: 6, penalties: 1 }, type: { id: 52, name: "Goals", code: "goals", developer_name: "GOALS" } },
+        { type_id: 84, value: { total: 4, home: 1, away: 3 }, type: { id: 84, name: "Yellowcards", code: "yellowcards", developer_name: "YELLOWCARDS" } },
+        { type_id: 321, value: { total: 21 }, type: { id: 321, name: "Appearances", code: "appearances", developer_name: "APPEARANCES" } },
+        { type_id: 119, value: { total: 1704 }, type: { id: 119, name: "Minutes Played", code: "minutes-played", developer_name: "MINUTES_PLAYED" } },
+      ],
+    },
+  ],
+  latest: [
+    {
+      fixture_id: 19621840,
+      team_id: 3496,
+      fixture: {
+        id: 19621840, name: "Chapecoense vs São Paulo", starting_at: "2026-08-23 21:30:00",
+        starting_at_timestamp: 1787520600, state_id: 5,
+        league: { id: 648, name: "Serie A" },
+        participants: [
+          { id: 710, name: "Chapecoense", meta: { location: "home" } },
+          { id: 3496, name: "São Paulo", meta: { location: "away" } },
+        ],
+        scores: [
+          { description: "CURRENT", participant_id: 710, score: { goals: 1, participant: "home" } },
+          { description: "CURRENT", participant_id: 3496, score: { goals: 0, participant: "away" } },
+        ],
+      },
+      details: [
+        { type_id: 118, data: { value: 6.58 }, type: { id: 118, name: "Rating", code: "rating", developer_name: "RATING" } },
+        { type_id: 119, data: { value: 31 }, type: { id: 119, name: "Minutes Played", code: "minutes-played", developer_name: "MINUTES_PLAYED" } },
+      ],
+    },
+    {
+      // Real confirmed shape: `fixture: null` for a match SportMonks hasn't
+      // backfilled fixture data for yet (real fixture_id 19694867).
+      fixture_id: 19694867,
+      team_id: 3496,
+      fixture: null,
+      details: [],
+    },
+  ],
+} as unknown as Parameters<typeof getPlayerCurrentSeasonStatTotal>[0];
+
+test("getPlayerCurrentSeasonStatTotal: reads GOALS total from the real current-season row, not the older one", () => {
+  assert.equal(getPlayerCurrentSeasonStatTotal(calleriProfile, 52), 7);
+});
+
+test("getPlayerCurrentSeasonStatTotal: real absence (no REDCARDS/ASSISTS in the current row) is null, not zero", () => {
+  assert.equal(getPlayerCurrentSeasonStatTotal(calleriProfile, 83), null);
+  assert.equal(getPlayerCurrentSeasonStatTotal(calleriProfile, 79), null);
+});
+
+test("getPlayerCurrentSeasonStatTotal: reads a plain-object total field (APPEARANCES, MINUTES_PLAYED)", () => {
+  assert.equal(getPlayerCurrentSeasonStatTotal(calleriProfile, 321), 21);
+  assert.equal(getPlayerCurrentSeasonStatTotal(calleriProfile, 119), 1704);
+});
+
+test("getPlayerRecentMatches: skips a real latest[] entry with fixture:null and fills in opponent/scores by team_id side", () => {
+  const matches = getPlayerRecentMatches(calleriProfile, 10);
+  assert.equal(matches.length, 1);
+  const m = matches[0]!;
+  assert.equal(m.fixtureId, 19621840);
+  assert.equal(m.opponent, "Chapecoense");
+  assert.equal(m.isHome, false);
+  assert.equal(m.teamScore, 0);
+  assert.equal(m.opponentScore, 1);
+  assert.equal(m.rating, 6.58);
+  assert.equal(m.minutesPlayed, 31);
+  assert.equal(m.goals, 0);
 });
