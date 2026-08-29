@@ -29,7 +29,15 @@ import {
 } from "../services/pulsescore/football.js";
 import {
   getSportMonksFootballUpcoming,
+  getSportMonksFootballLive,
   extractSportMonksFootballOverride,
+  getSportMonksFixtureScore,
+  getSportMonksFixtureMinute,
+  isSportMonksFixtureLive,
+  isSportMonksFixtureFinished,
+  countSportMonksRedCards,
+  SPORTMONKS_FOOTBALL_LEAGUE_IDS,
+  type SportMonksFixture,
 } from "../services/sportmonks/football.js";
 import {
   getPulseScoreTennisLive,
@@ -11589,19 +11597,6 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
-// Confirmed real (2026-08-29, GET /v3/football/leagues) — every league this
-// account's SportMonks plan covers. Explicit user decision (2026-08-29):
-// show all of them, no additional allow-list filtering the way
-// buildFootballUpcomingFromPulseScore needs (isVirtualFootballLeague/
-// isAllowedFootballLeague/footballLeagueAllowedStrict) — those exist to cut
-// PulseScore's much larger raw catalog down to a curated set, but this list
-// is already curated by the subscription itself.
-const SPORTMONKS_FOOTBALL_LEAGUE_IDS = [
-  2, 5, 8, 9, 24, 27, 72, 82, 85, 181, 208, 271, 301, 304, 384, 387, 390, 444,
-  453, 462, 501, 564, 567, 570, 573, 591, 600, 603, 636, 648, 779, 944, 968,
-  1034, 1116, 1122, 1328, 1371, 2286,
-];
-
 /** Strips null/undefined values out of a partial nullable numeric object —
  * SportMonksFootballOverride's fields (odds, doubleChance, drawNoBet) allow
  * a side to be null when that specific selection didn't resolve to a
@@ -14072,6 +14067,213 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   return ranked.map((r) => r.state);
 }
 
+/**
+ * Football live, sourced from SportMonks (getSportMonksFootballLive) —
+ * replacing PulseScore/bwin's live pipeline the same way
+ * buildFootballUpcomingFromSportMonks already replaced its prematch one.
+ *
+ * The PulseScore+API-Football version above needs its elaborate
+ * cross-referencing (fuzzy team-name matching, a persisted fixture-id
+ * mapping, confidence-tick gating, a goal-confirmation hold with a hard
+ * cap...) because PulseScore's own odds feed carries NO signal at all for
+ * red cards/VAR/missed penalties — that whole apparatus exists purely to
+ * infer "something happened" from a SEPARATE provider (API-Football) and
+ * approximate a suspension window with fixed timers. SportMonks needs none
+ * of it: the SAME fixture object carries odds, real events (goals/cards/
+ * subs — confirmed real developer_names GOAL/OWNGOAL/SUBSTITUTION/
+ * YELLOWCARD/REDCARD), state, and score together, and every odd already
+ * carries its OWN live `suspended` flag straight from the bookmaker — a
+ * direct signal, not an inferred one. Suspension here is driven by three
+ * real, independent triggers instead: a new goal (score increased since
+ * the last tick), a new red card (REDCARD event count increased), or the
+ * bookmaker itself marking the main result market suspended. All three
+ * reuse the SAME footballSuspensionDelayMs/FOOTBALL_SUSP_KEYS tiering the
+ * PulseScore builder already uses, so both providers suspend for
+ * comparable windows.
+ *
+ * VAR: SportMonks' own events did carry a REDCARD type (confirmed real,
+ * 2026-08-29) but no VAR-review type occurred in the sample checked — so
+ * unlike the PulseScore+API-Football version, there is no VAR-specific
+ * trigger here yet. Not a silent gap: a VAR review typically also produces
+ * either a goal (reviewed and given) or nothing at all (reviewed and
+ * waved away with no score change) — the former already triggers the goal
+ * suspension above; the latter is the one real case this doesn't yet
+ * cover, pending a confirmed real sample of that event type.
+ */
+async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
+  const fixtures = await getSportMonksFootballLive();
+  const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
+  const currentIds = new Set<string>();
+
+  for (const fx of fixtures) {
+    if (isSportMonksFixtureFinished(fx)) {
+      const idDone = `sportmonks-football-${fx.id}`;
+      currentIds.add(idDone);
+      const existingDone = liveMatchState.get(idDone);
+      if (existingDone) {
+        try {
+          await finalizeStaleLiveMatch(existingDone);
+        } catch (err) {
+          logger.error(
+            { err, id: idDone },
+            "[sportmonks] football finalize on FT failed",
+          );
+        }
+        liveMatchState.delete(idDone);
+      }
+      continue;
+    }
+    if (!isSportMonksFixtureLive(fx)) continue; // NS or an unconfirmed/unknown state
+
+    const homeP = fx.participants?.find((p) => p.meta?.location === "home");
+    const awayP = fx.participants?.find((p) => p.meta?.location === "away");
+    if (!homeP || !awayP) continue;
+    const home = stripGenderTeamSuffix(homeP.name);
+    const away = stripGenderTeamSuffix(awayP.name);
+    if (!home || !away) continue;
+
+    const score = getSportMonksFixtureScore(fx);
+    if (!score) continue; // no CURRENT score row yet — nothing safe to show
+
+    const id = `sportmonks-football-${fx.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const leagueName = fx.league?.name || "";
+    const countryName = fx.league?.country?.name || "";
+    const isIntl = isIntlTournamentName(leagueName);
+    const countryKey = countryName ? countryName.toLowerCase() : null;
+    const country = countryName || "Internacional";
+    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
+    const prio = leaguePriority(prioKey, countryKey ?? undefined);
+    const tier = footballMarketTier(leagueName, country);
+
+    const override = extractSportMonksFootballOverride(fx);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const markets: AdvancedMarkets = {
+      ...baseMarkets,
+      doubleChance: { ...baseMarkets.doubleChance, ...nonNullPatch(override.doubleChance) },
+      totalGoals: override.totalGoals
+        ? { ...baseMarkets.totalGoals, ...override.totalGoals }
+        : baseMarkets.totalGoals,
+      corners: override.corners ? { ...baseMarkets.corners, ...override.corners } : baseMarkets.corners,
+      cards: override.cards ? { ...baseMarkets.cards, ...override.cards } : baseMarkets.cards,
+    };
+    if (override.bothTeamsScore) markets.bothTeamsScore = override.bothTeamsScore;
+    if (override.drawNoBet?.home != null && override.drawNoBet?.away != null) {
+      markets.drawNoBet = { home: override.drawNoBet.home, away: override.drawNoBet.away };
+    }
+    const baseOdds = makeOddsFromTeams(home, away);
+    const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
+    const hasRealOddsNow = !!override.odds;
+
+    const redCardsHome = countSportMonksRedCards(fx, "home");
+    const redCardsAway = countSportMonksRedCards(fx, "away");
+    const newGoal =
+      !!existing && (score.home > existing.homeScore || score.away > existing.awayScore);
+    const newRedCard =
+      !!existing &&
+      redCardsHome + redCardsAway > (existing.redCardsHome ?? 0) + (existing.redCardsAway ?? 0);
+    const resultOdds = (fx.odds ?? []).filter(
+      (o) => o.market?.developer_name === "FULLTIME_RESULT" && o.bookmaker_id === 35,
+    );
+    const bookmakerSuspended =
+      resultOdds.length > 0 && resultOdds.every((o) => o.suspended);
+
+    let marketSuspension = existing?.marketSuspension;
+    let suspensionReason = existing?._suspensionReason;
+    if (newGoal) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
+      );
+      suspensionReason = "GOLO!";
+    } else if (newRedCard) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+      );
+      suspensionReason = "CARTÃO VERMELHO";
+    } else if (bookmakerSuspended) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + 5_000]));
+      suspensionReason = "SUSPENSO PELA CASA";
+    }
+
+    const events: LiveMatchState["events"] = (fx.events ?? [])
+      .filter((e) =>
+        ["GOAL", "OWNGOAL", "SUBSTITUTION", "YELLOWCARD", "REDCARD"].includes(
+          e.type?.developer_name,
+        ),
+      )
+      .map((e) => {
+        const participant = fx.participants?.find((p) => p.id === e.participant_id);
+        return {
+          type: e.type.name,
+          team: participant?.id === homeP.id ? home : away,
+          minute: e.minute,
+          player: e.player_name ?? "",
+          detail: e.info ?? e.addition ?? undefined,
+        };
+      });
+
+    ranked.push({
+      prio,
+      state: {
+        id,
+        home,
+        away,
+        homeLogoUrl: homeP.image_path,
+        awayLogoUrl: awayP.image_path,
+        league: leagueName,
+        country,
+        sport: "football",
+        matchTier: tier,
+        homeScore: score.home,
+        awayScore: score.away,
+        minute: getSportMonksFixtureMinute(fx),
+        status: fx.state?.developer_name ?? "",
+        hasRealOdds: hasRealOddsNow,
+        odds,
+        markets,
+        events,
+        redCardsHome,
+        redCardsAway,
+        marketSuspension,
+        _suspensionReason: suspensionReason,
+      },
+    });
+  }
+
+  // GC: a match that stops appearing in the live feed at all (network hiccup
+  // aside — LIVE_TTL_MS's own stale-cache fallback already covers that)
+  // without ever showing state FT — same disappearance-grace pattern the
+  // PulseScore builder above uses, as a safety net for whatever real state
+  // this hasn't seen confirmed yet (postponed, abandoned, ...).
+  const now = Date.now();
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("sportmonks-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? now;
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (now - missingSince > 60_000) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[sportmonks] football finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  ranked.sort((a, b) => a.prio - b.prio);
+  for (const r of ranked) liveMatchState.set(r.state.id, r.state);
+  return ranked.map((r) => r.state);
+}
+
 // Shortened from 3 minutes (2026-08-09, user request: finished matches
 // should leave "Ao Vivo" immediately, for every sport, not just football).
 // Football gets a real, immediate "Finished" signal from bwin's
@@ -14439,11 +14641,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // shows zero matches in Ao Vivo until it gets the same treatment.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    footballLiveRaw = await buildFootballLiveFromPulseScore();
+    footballLiveRaw = await buildFootballLiveFromSportMonks();
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildFootballLiveFromPulseScore failed this tick",
+      "[sportmonks] buildFootballLiveFromSportMonks failed this tick",
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);

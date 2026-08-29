@@ -70,9 +70,67 @@ export type SportMonksParticipant = {
   meta?: { location?: "home" | "away"; position?: number };
 };
 
-// state_id 1 = not started (confirmed real, 2026-08-29, round 396698 — the
-// current, not-yet-finished round) / 5 = finished (confirmed real, round
-// 396699). Live in-progress values not confirmed yet.
+// Confirmed real (2026-08-29, GET /v3/football/livescores/inplay):
+// state_id 1 = NS (not started), 2 = INPLAY_1ST_HALF, 3 = HT, 22 =
+// INPLAY_2ND_HALF, 5 = FT (finished). `state.developer_name` is the
+// stable, human-readable key — used in preference to the raw numeric
+// state_id, which has no full documented mapping. Other real states (ET,
+// penalties, postponed, etc.) not yet confirmed — treated as "unknown,
+// not live" by isSportMonksFixtureLive below rather than guessed.
+export type SportMonksFixtureState = {
+  id: number;
+  state: string;
+  name: string;
+  short_name: string;
+  developer_name: string;
+};
+
+// Confirmed real: `description` values seen are "CURRENT" (running total),
+// "1ST_HALF", "2ND_HALF", "2ND_HALF_ONLY" — "CURRENT" is what's used for
+// the live score everywhere in this file.
+export type SportMonksScore = {
+  description: string;
+  participant_id: number;
+  score: { goals: number; participant: "home" | "away" };
+};
+
+// Confirmed real: type_id 1 = 1st-half, type_id 2 = 2nd-half.
+// `ticking: true` marks whichever period is actively running right now.
+export type SportMonksPeriod = {
+  id: number;
+  type_id: number;
+  description: string;
+  ticking: boolean;
+  minutes: number;
+  seconds: number;
+  counts_from: number;
+  time_added: number | null;
+};
+
+// Confirmed real developer_name values (2026-08-29, a real in-play sample):
+// GOAL, OWNGOAL, SUBSTITUTION, YELLOWCARD, REDCARD. A VAR-review event type
+// was NOT observed in that sample (no VAR incident happened to occur in it)
+// — its type_id/developer_name is NOT confirmed, so nothing in this codebase
+// keys off "VAR" yet; only real, seen event types are handled.
+export type SportMonksEvent = {
+  id: number;
+  fixture_id: number;
+  period_id: number;
+  participant_id: number;
+  type_id: number;
+  player_id: number | null;
+  related_player_id: number | null;
+  player_name: string | null;
+  related_player_name: string | null;
+  result: string | null;
+  info: string | null;
+  addition: string | null;
+  minute: number;
+  extra_minute: number | null;
+  rescinded: boolean | null;
+  type: { id: number; name: string; code: string; developer_name: string };
+};
+
 export type SportMonksFixture = {
   id: number;
   name: string;
@@ -82,6 +140,16 @@ export type SportMonksFixture = {
   has_odds?: boolean;
   odds?: SportMonksOdd[];
   participants?: SportMonksParticipant[];
+  state?: SportMonksFixtureState;
+  scores?: SportMonksScore[];
+  periods?: SportMonksPeriod[];
+  events?: SportMonksEvent[];
+  // Present per-fixture on /livescores/inplay (confirmed real, 2026-08-29)
+  // when `league.country` is included — unlike the rounds/{id} endpoint,
+  // where league sits at the ROUND level instead (see
+  // SportMonksLeagueUpcoming.league in the fetch layer below).
+  league_id?: number;
+  league?: SportMonksLeagueRef;
 };
 
 export type SportMonksLeagueRef = {
@@ -427,4 +495,136 @@ export async function getSportMonksFootballUpcoming(
       ),
     ),
   );
+}
+
+// Confirmed real (2026-08-29, GET /v3/football/leagues) — every league this
+// account's SportMonks plan covers. Explicit user decision (2026-08-29):
+// show all of them, no additional allow-list filtering the way football's
+// PulseScore builders needed — this list is already curated by the
+// subscription itself.
+export const SPORTMONKS_FOOTBALL_LEAGUE_IDS = [
+  2, 5, 8, 9, 24, 27, 72, 82, 85, 181, 208, 271, 301, 304, 384, 387, 390, 444,
+  453, 462, 501, 564, 567, 570, 573, 591, 600, 603, 636, 648, 779, 944, 968,
+  1034, 1116, 1122, 1328, 1371, 2286,
+];
+
+// ── Live fixtures ───────────────────────────────────────────────────────────
+// Deliberately a SEPARATE, single global call — /livescores/inplay returns
+// every fixture currently in play across every league in one request,
+// confirmed real (2026-08-29) to accept the same combined include this file
+// already uses for odds (fixtures.odds.market/bookmaker-equivalent, just
+// without the "fixtures." prefix since this endpoint's fixtures ARE the top
+// level) plus state/events/periods/scores. Polling this ONE endpoint every
+// ~20s is drastically cheaper than re-polling all 39 leagues' round
+// endpoints that often would be (39 leagues x 3 polls/min x 1440 min/day
+// would blow well past the 50k/day plan budget on its own) — most of those
+// 39 leagues have no live match at any given moment, so a single
+// globally-scoped call is the only way to get near-real-time live data
+// within budget.
+const LIVE_TTL_MS = 20 * 1000;
+let liveCache: { fixtures: SportMonksFixture[]; fetchedAt: number } | null = null;
+let liveInFlight: Promise<SportMonksFixture[]> | null = null;
+
+type SportMonksInplayFixture = SportMonksFixture & { league_id: number };
+
+async function fetchLive(): Promise<SportMonksFixture[]> {
+  const resp = await sportMonksGetWithRetry<{ data: SportMonksInplayFixture[] }>(
+    "/livescores/inplay",
+    {
+      include:
+        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker",
+    },
+  );
+  const allowed = new Set(SPORTMONKS_FOOTBALL_LEAGUE_IDS);
+  return (resp?.data ?? []).filter((fx) => allowed.has(fx.league_id));
+}
+
+/** Every fixture currently in play, across every SportMonks league this plan
+ * covers, cached ~20s. Real odds only for fixtures where the requested
+ * bookmaker (1xbet, id 35) actually has live odds — extractSportMonksFootballOverride
+ * already handles that gracefully (empty override, not an error). */
+export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> {
+  if (liveCache && Date.now() - liveCache.fetchedAt < LIVE_TTL_MS) return liveCache.fixtures;
+  if (liveInFlight) return liveInFlight;
+
+  const promise = fetchLive()
+    .then((fixtures) => {
+      liveCache = { fixtures, fetchedAt: Date.now() };
+      return fixtures;
+    })
+    .catch(() => liveCache?.fixtures ?? [])
+    .finally(() => {
+      liveInFlight = null;
+    });
+  liveInFlight = promise;
+  return promise;
+}
+
+/** Live score from a fixture's `scores` array — the "CURRENT" running
+ * total (confirmed real, 2026-08-29: description "CURRENT" per participant,
+ * distinct from "1ST_HALF"/"2ND_HALF"/"2ND_HALF_ONLY" period breakdowns).
+ * Returns null (not 0-0) when no CURRENT score row exists yet — a genuine
+ * 0-0 is a real, common football score and must not be confused with "no
+ * data yet". */
+export function getSportMonksFixtureScore(
+  fixture: SportMonksFixture,
+): { home: number; away: number } | null {
+  let home: number | null = null;
+  let away: number | null = null;
+  for (const s of fixture.scores ?? []) {
+    if (s.description !== "CURRENT") continue;
+    if (s.score.participant === "home") home = s.score.goals;
+    else if (s.score.participant === "away") away = s.score.goals;
+  }
+  return home !== null && away !== null ? { home, away } : null;
+}
+
+/** Live clock in whole minutes, from the currently-ticking period
+ * (confirmed real: `periods[].ticking` marks exactly one period as
+ * actively running; `.minutes` already accounts for stoppage time added
+ * to earlier periods — e.g. a 2nd-half period starting at minute 46+ after
+ * a 1st half that ran into injury time). Falls back to the last period in
+ * the list (not ticking — half-time or full-time) when none is actively
+ * ticking, so the clock still shows a sensible "45" during HT rather than 0. */
+export function getSportMonksFixtureMinute(fixture: SportMonksFixture): number {
+  const periods = fixture.periods ?? [];
+  const ticking = periods.find((p) => p.ticking);
+  const period = ticking ?? periods[periods.length - 1];
+  return period && Number.isFinite(period.minutes) && period.minutes >= 0 ? period.minutes : 0;
+}
+
+/** True for a fixture that's actually being played right now (not
+ * not-started, half-time, finished, or an unconfirmed/unknown state) —
+ * confirmed real developer_name values: INPLAY_1ST_HALF, INPLAY_2ND_HALF.
+ * Half-time (HT) is deliberately excluded — the clock isn't running and
+ * nothing new can happen, but the match is still live for suspension
+ * purposes (see isSportMonksFixtureFinished for the separate FT check). */
+export function isSportMonksFixtureLive(fixture: SportMonksFixture): boolean {
+  const dn = fixture.state?.developer_name;
+  return dn === "INPLAY_1ST_HALF" || dn === "INPLAY_2ND_HALF" || dn === "HT";
+}
+
+/** True once a fixture is confirmed over (state.developer_name "FT",
+ * confirmed real) — the signal this codebase's football settlement trigger
+ * needs (see buildFootballLiveFromSportMonks in matches.ts). Deliberately
+ * narrow: an unconfirmed/unknown state is never treated as finished, so an
+ * unrecognized real state this hasn't seen yet fails safe (stays "not
+ * finished, not live either") rather than risking a false settlement. */
+export function isSportMonksFixtureFinished(fixture: SportMonksFixture): boolean {
+  return fixture.state?.developer_name === "FT";
+}
+
+/** Count of real REDCARD events for one side (confirmed real developer_name,
+ * 2026-08-29) — used to detect a NEW red card tick-to-tick the same way
+ * this codebase's PulseScore+API-Football live builder does, just off
+ * SportMonks' own events instead of a second cross-referenced provider. */
+export function countSportMonksRedCards(
+  fixture: SportMonksFixture,
+  side: "home" | "away",
+): number {
+  const participant = fixture.participants?.find((p) => p.meta?.location === side);
+  if (!participant) return 0;
+  return (fixture.events ?? []).filter(
+    (e) => e.type?.developer_name === "REDCARD" && e.participant_id === participant.id,
+  ).length;
 }
