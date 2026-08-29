@@ -107,11 +107,15 @@ export type SportMonksPeriod = {
   time_added: number | null;
 };
 
-// Confirmed real developer_name values (2026-08-29, a real in-play sample):
-// GOAL, OWNGOAL, SUBSTITUTION, YELLOWCARD, REDCARD. A VAR-review event type
-// was NOT observed in that sample (no VAR incident happened to occur in it)
-// — its type_id/developer_name is NOT confirmed, so nothing in this codebase
-// keys off "VAR" yet; only real, seen event types are handled.
+// Confirmed real developer_name values (2026-08-29, real in-play samples):
+// GOAL (14), PENALTY (16, a goal scored from the spot — confirmed real via
+// a genuine "1st Penalty" event that moved the scoreboard, same as a GOAL,
+// so it's included alongside GOAL in matches.ts's live events filter),
+// OWNGOAL (15), SUBSTITUTION (18), YELLOWCARD (19), REDCARD (20). A
+// VAR-review event type and a missed-penalty event type were NOT observed
+// in any sample seen so far — their type_id/developer_name are NOT
+// confirmed, so nothing in this codebase keys off them yet; only real,
+// seen event types are handled.
 export type SportMonksEvent = {
   id: number;
   fixture_id: number;
@@ -130,6 +134,26 @@ export type SportMonksEvent = {
   rescinded: boolean | null;
   type: { id: number; name: string; code: string; developer_name: string };
 };
+
+// The confirmed-real event developer_name values (see SportMonksEvent's own
+// comment above) worth showing in the live "Eventos" feed — goals (regular
+// and penalty), own goals, substitutions, and cards. Centralized here so
+// matches.ts's buildFootballLiveFromSportMonks doesn't inline this list
+// (previously missed PENALTY entirely — audit finding, 2026-08-29: a real
+// penalty goal moved the scoreboard but never appeared in the events feed
+// shown to users, since the filter only knew about GOAL).
+const FOOTBALL_LIVE_DISPLAY_EVENT_TYPES = new Set([
+  "GOAL",
+  "PENALTY",
+  "OWNGOAL",
+  "SUBSTITUTION",
+  "YELLOWCARD",
+  "REDCARD",
+]);
+
+export function isFootballLiveDisplayEvent(developerName: string | undefined | null): boolean {
+  return !!developerName && FOOTBALL_LIVE_DISPLAY_EVENT_TYPES.has(developerName);
+}
 
 // Confirmed real (2026-08-29, /fixtures/{id}?include=statistics.type, a
 // finished match sample): `location` is "home"/"away", `data.value` is the

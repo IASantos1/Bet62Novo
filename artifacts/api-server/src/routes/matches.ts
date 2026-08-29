@@ -40,6 +40,7 @@ import {
   getSportMonksFixtureById,
   getSportMonksTeamUpcoming,
   getSportMonksTeamHeadToHead,
+  isFootballLiveDisplayEvent,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -14277,11 +14278,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     }
 
     const events: LiveMatchState["events"] = (fx.events ?? [])
-      .filter((e) =>
-        ["GOAL", "OWNGOAL", "SUBSTITUTION", "YELLOWCARD", "REDCARD"].includes(
-          e.type?.developer_name,
-        ),
-      )
+      .filter((e) => isFootballLiveDisplayEvent(e.type?.developer_name))
       .map((e) => {
         const participant = fx.participants?.find((p) => p.id === e.participant_id);
         return {
