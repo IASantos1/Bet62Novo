@@ -698,6 +698,146 @@ export const SPORTMONKS_FOOTBALL_LEAGUE_IDS = [
   1034, 1116, 1122, 1328, 1371, 2286,
 ];
 
+// ── Team schedule (upcoming fixtures + head-to-head) ────────────────────────
+// Confirmed real (2026-08-29), GET /v3/football/schedules/teams/{id}: an
+// array of "stages" (e.g. domestic league regular season, a continental
+// cup's group stage, its knockout rounds), each with `rounds[].fixtures`
+// AND, for two-legged knockout ties, a parallel `aggregates[].fixtures` —
+// a single leg can appear in BOTH (confirmed real: a Copa Libertadores
+// group-stage leg showed up under both its round and its aggregate), so
+// flattening dedupes by fixture id. Each fixture here carries the same
+// `participants`/`scores` shape already confirmed and used throughout this
+// file for live/upcoming odds fixtures — just without odds (this endpoint
+// doesn't return them). No `league` object is included on these fixtures
+// (only `league_id`), so head-to-head/upcoming entries built from this
+// endpoint leave the league name blank rather than guess one — a real
+// absence, same tolerant pattern used elsewhere in this file.
+type SportMonksScheduleFixtureGroup = { fixtures?: SportMonksFixture[] };
+type SportMonksScheduleStage = {
+  rounds?: SportMonksScheduleFixtureGroup[];
+  aggregates?: SportMonksScheduleFixtureGroup[];
+};
+type SportMonksScheduleResponse = { data?: SportMonksScheduleStage[] };
+
+const TEAM_SCHEDULE_TTL_MS = 15 * 60 * 1000;
+const teamScheduleCache = new Map<number, { fixtures: SportMonksFixture[]; fetchedAt: number }>();
+const teamScheduleInFlight = new Map<number, Promise<SportMonksFixture[]>>();
+
+async function fetchTeamSchedule(teamId: number): Promise<SportMonksFixture[]> {
+  const resp = await sportMonksGetWithRetry<SportMonksScheduleResponse>(
+    `/schedules/teams/${teamId}`,
+  );
+  const byId = new Map<number, SportMonksFixture>();
+  for (const stage of resp?.data ?? []) {
+    for (const group of [...(stage.rounds ?? []), ...(stage.aggregates ?? [])]) {
+      for (const fx of group.fixtures ?? []) byId.set(fx.id, fx);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+/** Every fixture (past and future, across every competition) for one
+ * SportMonks team id, cached ~15 minutes — the flattened, deduped raw
+ * material for both getSportMonksTeamUpcoming and
+ * getSportMonksTeamHeadToHead below. */
+export async function getSportMonksTeamSchedule(teamId: number): Promise<SportMonksFixture[]> {
+  const cached = teamScheduleCache.get(teamId);
+  if (cached && Date.now() - cached.fetchedAt < TEAM_SCHEDULE_TTL_MS) return cached.fixtures;
+
+  const inFlight = teamScheduleInFlight.get(teamId);
+  if (inFlight) return inFlight;
+
+  const promise = fetchTeamSchedule(teamId)
+    .then((fixtures) => {
+      teamScheduleCache.set(teamId, { fixtures, fetchedAt: Date.now() });
+      return fixtures;
+    })
+    .catch(() => teamScheduleCache.get(teamId)?.fixtures ?? [])
+    .finally(() => {
+      teamScheduleInFlight.delete(teamId);
+    });
+  teamScheduleInFlight.set(teamId, promise);
+  return promise;
+}
+
+/** Pure filter/sort step behind getSportMonksTeamUpcoming — split out so it
+ * can be unit tested against a real schedule sample without mocking the
+ * network fetch. */
+export function filterUpcomingFixtures(
+  fixtures: SportMonksFixture[],
+  nowSeconds: number,
+  limit: number,
+): SportMonksFixture[] {
+  return fixtures
+    .filter((fx) => fx.state_id === 1 && fx.starting_at_timestamp > nowSeconds)
+    .sort((a, b) => a.starting_at_timestamp - b.starting_at_timestamp)
+    .slice(0, limit);
+}
+
+/** A team's next `limit` not-yet-started fixtures (state_id 1, confirmed
+ * real "NS"), earliest first — "Próximos Jogos". */
+export async function getSportMonksTeamUpcoming(
+  teamId: number,
+  limit = 5,
+): Promise<SportMonksFixture[]> {
+  const schedule = await getSportMonksTeamSchedule(teamId);
+  return filterUpcomingFixtures(schedule, Date.now() / 1000, limit);
+}
+
+/** Pure filter/sort step behind getSportMonksTeamHeadToHead — split out so
+ * it can be unit tested against a real schedule sample without mocking the
+ * network fetch. */
+export function filterHeadToHeadFixtures(
+  fixtures: SportMonksFixture[],
+  opponentId: number,
+  limit: number,
+): SportMonksFixture[] {
+  return fixtures
+    .filter(
+      (fx) =>
+        fx.state_id === 5 &&
+        (fx.participants ?? []).some((p) => p.id === opponentId),
+    )
+    .sort((a, b) => b.starting_at_timestamp - a.starting_at_timestamp)
+    .slice(0, limit);
+}
+
+/** Real past meetings between two SportMonks team ids (state_id 5,
+ * confirmed real "FT"), most recent first — sourced from `teamId`'s own
+ * schedule filtered to fixtures where `opponentId` is the other
+ * participant. Only covers the seasons/competitions this endpoint returns
+ * for `teamId` (confirmed real: the current season across every
+ * competition the team is in) — not a multi-year archive. */
+export async function getSportMonksTeamHeadToHead(
+  teamId: number,
+  opponentId: number,
+  limit = 10,
+): Promise<SportMonksFixture[]> {
+  const schedule = await getSportMonksTeamSchedule(teamId);
+  return filterHeadToHeadFixtures(schedule, opponentId, limit);
+}
+
+const FIXTURE_LOOKUP_TTL_MS = 15 * 60 * 1000;
+const fixtureLookupCache = new Map<number, { fixture: SportMonksFixture | null; fetchedAt: number }>();
+
+/** A single fixture by its SportMonks id, with participants (confirmed real
+ * shape, used throughout this file already) — the resolve step for turning
+ * a `sportmonks-football-{id}` matchId back into real home/away team ids
+ * for getSportMonksTeamUpcoming/getSportMonksTeamHeadToHead. Cached ~15
+ * minutes since participants/team ids never change after a fixture is
+ * scheduled. */
+export async function getSportMonksFixtureById(id: number): Promise<SportMonksFixture | null> {
+  const cached = fixtureLookupCache.get(id);
+  if (cached && Date.now() - cached.fetchedAt < FIXTURE_LOOKUP_TTL_MS) return cached.fixture;
+
+  const resp = await sportMonksGetWithRetry<{ data: SportMonksFixture }>(`/fixtures/${id}`, {
+    include: "participants",
+  });
+  const fixture = resp?.data ?? null;
+  fixtureLookupCache.set(id, { fixture, fetchedAt: Date.now() });
+  return fixture;
+}
+
 // ── Live fixtures ───────────────────────────────────────────────────────────
 // Deliberately a SEPARATE, single global call — /livescores/inplay returns
 // every fixture currently in play across every league in one request,

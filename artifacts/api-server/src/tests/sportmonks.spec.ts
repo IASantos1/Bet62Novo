@@ -9,6 +9,8 @@ const {
   isSportMonksFixtureFinished,
   countSportMonksRedCards,
   getSportMonksFixtureCornersCards,
+  filterUpcomingFixtures,
+  filterHeadToHeadFixtures,
 } = await import("../services/sportmonks/football.js");
 
 function makeFixture(odds: unknown[]) {
@@ -526,4 +528,95 @@ test("getSportMonksFixtureCornersCards: null (not 0) fields when no statistics a
     yellowCardsAway: null,
     cardsTotal: null,
   });
+});
+
+// Real GET /v3/football/schedules/teams/3496 sample (2026-08-29) — a subset
+// of São Paulo's (team_id 3496) real schedule fixtures, covering both an
+// upcoming (state_id 1) and a finished (state_id 5) meeting against
+// Mirassol (team_id 11126, same real fixture id 19621957 used in the
+// corners/cards tests above), plus other real opponents for filtering.
+const saoPauloScheduleSample = [
+  {
+    id: 19621816, name: "Palmeiras vs São Paulo", starting_at: "2026-09-12 00:00:00",
+    starting_at_timestamp: 1789171200, state_id: 1,
+    participants: [
+      { id: 3422, name: "Palmeiras", meta: { location: "home" } },
+      { id: 3496, name: "São Paulo", meta: { location: "away" } },
+    ],
+  },
+  {
+    id: 19621765, name: "Mirassol vs São Paulo", starting_at: "2026-10-24 00:00:00",
+    starting_at_timestamp: 1792800000, state_id: 1,
+    participants: [
+      { id: 11126, name: "Mirassol", meta: { location: "home" } },
+      { id: 3496, name: "São Paulo", meta: { location: "away" } },
+    ],
+  },
+  {
+    id: 19621807, name: "São Paulo vs Internacional", starting_at: "2026-09-19 00:00:00",
+    starting_at_timestamp: 1789776000, state_id: 1,
+    participants: [
+      { id: 3496, name: "São Paulo", meta: { location: "home" } },
+      { id: 2696, name: "Internacional", meta: { location: "away" } },
+    ],
+  },
+  {
+    id: 19621957, name: "São Paulo vs Mirassol", starting_at: "2026-04-26 00:00:00",
+    starting_at_timestamp: 1777161600, state_id: 5,
+    participants: [
+      { id: 3496, name: "São Paulo", meta: { location: "home" } },
+      { id: 11126, name: "Mirassol", meta: { location: "away" } },
+    ],
+  },
+  {
+    id: 19621840, name: "Chapecoense vs São Paulo", starting_at: "2026-08-23 21:30:00",
+    starting_at_timestamp: 1787520600, state_id: 5,
+    participants: [
+      { id: 710, name: "Chapecoense", meta: { location: "home" } },
+      { id: 3496, name: "São Paulo", meta: { location: "away" } },
+    ],
+  },
+] as unknown as Parameters<typeof filterUpcomingFixtures>[0];
+
+test("filterUpcomingFixtures: keeps only state_id 1 fixtures in the future, earliest first, limited", () => {
+  // 2026-09-01 00:00:00 UTC — after 19621840 (already finished) but before
+  // every real state_id-1 fixture in the sample.
+  const now = 1788307200;
+  const result = filterUpcomingFixtures(saoPauloScheduleSample, now, 2);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map((fx) => fx.id), [19621816, 19621807]);
+});
+
+test("filterUpcomingFixtures: excludes a real fixture already in the past even if state_id is still 1", () => {
+  // Same fixtures, but "now" is after 19621816's kickoff too — only the two
+  // later ones remain.
+  const now = 1789200000;
+  const result = filterUpcomingFixtures(saoPauloScheduleSample, now, 10);
+  assert.deepEqual(result.map((fx) => fx.id), [19621807, 19621765]);
+});
+
+test("filterHeadToHeadFixtures: only the real finished meeting against Mirassol, not the upcoming one or other opponents", () => {
+  const result = filterHeadToHeadFixtures(saoPauloScheduleSample, 11126, 10);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]!.id, 19621957);
+});
+
+test("filterHeadToHeadFixtures: most recent finished meeting first, respects limit", () => {
+  const withOlderMeeting = [
+    ...saoPauloScheduleSample,
+    {
+      id: 1,
+      name: "Mirassol vs São Paulo (older)",
+      starting_at: "2025-01-01 00:00:00",
+      starting_at_timestamp: 1735689600,
+      state_id: 5,
+      participants: [
+        { id: 11126, name: "Mirassol", meta: { location: "home" } },
+        { id: 3496, name: "São Paulo", meta: { location: "away" } },
+      ],
+    },
+  ] as unknown as Parameters<typeof filterHeadToHeadFixtures>[0];
+  const result = filterHeadToHeadFixtures(withOlderMeeting, 11126, 1);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]!.id, 19621957);
 });

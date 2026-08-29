@@ -6311,6 +6311,14 @@ export default function Home({
     null,
   );
   const [confrontosLoading, setConfrontosLoading] = useState(false);
+  type TeamUpcomingEntry = {
+    date: string;
+    opponent: string;
+    competition: string;
+    isHome: boolean;
+  };
+  const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
+  const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
 
   const extractV2StatsGroups = (payload: any): V2StatsGroup[] => {
     const root = payload?.data ?? payload;
@@ -7685,6 +7693,26 @@ export default function Home({
       .then((d) => setConfrontosData(d as ConfrontosData))
       .catch(() => setConfrontosData(null))
       .finally(() => setConfrontosLoading(false));
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Próximos Jogos — each team's next fixtures, real SportMonks data
+  // (football only, sportmonks-football-* matchIds — see /team-upcoming).
+  useEffect(() => {
+    setHomeUpcoming([]);
+    setAwayUpcoming([]);
+    if (!expandedMatch) return;
+    const rawId = getProviderMatchId(expandedMatch.id);
+    if (!rawId.startsWith("sportmonks-football-")) return;
+    for (const [side, setter] of [
+      ["home", setHomeUpcoming],
+      ["away", setAwayUpcoming],
+    ] as const) {
+      const p = new URLSearchParams({ matchId: rawId, side, limit: "5" });
+      fetch(`/api/matches/team-upcoming?${p}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => setter(Array.isArray(d?.fixtures) ? d.fixtures : []))
+        .catch(() => setter([]));
+    }
   }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
@@ -19624,6 +19652,8 @@ export default function Home({
                     v2StatsGroups={v2StatsGroups}
                     v2StatsLoading={v2StatsLoading}
                     confrontosData={confrontosData}
+                    homeUpcoming={homeUpcoming}
+                    awayUpcoming={awayUpcoming}
                     onGoH2H={() => setMatchViewTab("confrontos")}
                     onGoLive={() => setMatchViewTab("live")}
                     standings={standings}
@@ -22360,6 +22390,43 @@ export default function Home({
                               O historial directo entre as equipas não está
                               disponível
                             </div>
+                          </div>
+                        )}
+
+                        {/* Próximos Jogos — real SportMonks team schedule */}
+                        {(homeUpcoming.length > 0 || awayUpcoming.length > 0) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { team: expandedMatch.home, list: homeUpcoming },
+                              { team: expandedMatch.away, list: awayUpcoming },
+                            ].map(({ team, list }) =>
+                              list.length > 0 ? (
+                                <div
+                                  key={team}
+                                  className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4"
+                                >
+                                  <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3 truncate">
+                                    Próximos Jogos · {team}
+                                  </div>
+                                  <div className="space-y-2">
+                                    {list.map((f, i) => (
+                                      <div
+                                        key={i}
+                                        className="flex items-center gap-2 text-[11px]"
+                                      >
+                                        <span className="text-zinc-600 shrink-0 w-16 tabular-nums">
+                                          {f.date}
+                                        </span>
+                                        <span className="flex-1 text-zinc-300 truncate">
+                                          {f.isHome ? "vs " : "@ "}
+                                          {f.opponent}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null,
+                            )}
                           </div>
                         )}
                       </div>
