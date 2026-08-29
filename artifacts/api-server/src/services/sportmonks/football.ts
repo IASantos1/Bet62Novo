@@ -131,6 +131,25 @@ export type SportMonksEvent = {
   type: { id: number; name: string; code: string; developer_name: string };
 };
 
+// Confirmed real (2026-08-29, /fixtures/{id}?include=statistics.type, a
+// finished match sample): `location` is "home"/"away", `data.value` is the
+// stat's numeric total for that side. type_id 34 = CORNERS, type_id 84 =
+// YELLOWCARDS — both confirmed present and, per a separate real /livescores/
+// inplay?include=statistics.type sample, updating live during in-progress
+// matches (not just post-match). No REDCARDS stat type has been observed in
+// any real sample (the one finished match checked had no red cards) — red
+// card counts are deliberately NOT read from here; countSportMonksRedCards's
+// own REDCARD event count (confirmed real) is used instead.
+export type SportMonksStatistic = {
+  id: number;
+  fixture_id: number;
+  type_id: number;
+  participant_id: number;
+  location: "home" | "away";
+  data: { value: number };
+  type: { id: number; name: string; code: string; developer_name: string };
+};
+
 export type SportMonksFixture = {
   id: number;
   name: string;
@@ -144,6 +163,7 @@ export type SportMonksFixture = {
   scores?: SportMonksScore[];
   periods?: SportMonksPeriod[];
   events?: SportMonksEvent[];
+  statistics?: SportMonksStatistic[];
   // Present per-fixture on /livescores/inplay (confirmed real, 2026-08-29)
   // when `league.country` is included — unlike the rounds/{id} endpoint,
   // where league sits at the ROUND level instead (see
@@ -702,7 +722,7 @@ async function fetchLive(): Promise<SportMonksFixture[]> {
     "/livescores/inplay",
     {
       include:
-        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker",
+        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker;statistics.type",
     },
   );
   const allowed = new Set(SPORTMONKS_FOOTBALL_LEAGUE_IDS);
@@ -797,4 +817,62 @@ export function countSportMonksRedCards(
   return (fixture.events ?? []).filter(
     (e) => e.type?.developer_name === "REDCARD" && e.participant_id === participant.id,
   ).length;
+}
+
+/** Sum of a statistics entry's `data.value` for one side, by confirmed real
+ * `type.developer_name` (e.g. "CORNERS", "YELLOWCARDS"). Returns null (not
+ * 0) when the fixture carries no statistics for this type yet — early in a
+ * match, before any corner/card has happened, SportMonks may omit the
+ * type entirely rather than send an explicit 0, and treating "no data" as
+ * "confirmed zero" would let a corners/cards total settle on a stale/absent
+ * read instead of waiting for real data. */
+function sumSportMonksStat(
+  fixture: SportMonksFixture,
+  developerName: string,
+  side: "home" | "away",
+): number | null {
+  const participant = fixture.participants?.find((p) => p.meta?.location === side);
+  if (!participant) return null;
+  const entries = (fixture.statistics ?? []).filter(
+    (s) => s.type?.developer_name === developerName && s.participant_id === participant.id,
+  );
+  if (entries.length === 0) return null;
+  return entries.reduce((sum, e) => sum + (Number.isFinite(e.data?.value) ? e.data.value : 0), 0);
+}
+
+/** Real corners/cards totals for a live or just-finished fixture — corners
+ * from confirmed real CORNERS (type_id 34) statistics, cards from confirmed
+ * real YELLOWCARDS (type_id 84) statistics plus this file's own confirmed
+ * REDCARD event count (no REDCARDS statistic type has been observed in any
+ * real sample, see SportMonksStatistic's own comment). `cardsTotal` counts
+ * yellow+red combined, matching this codebase's existing
+ * LiveMatchState._liveExtra.cardsTotal convention (see matches.ts). Each
+ * field is null (not 0) when the underlying statistic is absent — see
+ * sumSportMonksStat — so a fixture with no stats yet correctly stays
+ * "unknown", not "confirmed zero corners". */
+export function getSportMonksFixtureCornersCards(fixture: SportMonksFixture): {
+  cornersHome: number | null;
+  cornersAway: number | null;
+  cornersTotal: number | null;
+  yellowCardsHome: number | null;
+  yellowCardsAway: number | null;
+  cardsTotal: number | null;
+} {
+  const cornersHome = sumSportMonksStat(fixture, "CORNERS", "home");
+  const cornersAway = sumSportMonksStat(fixture, "CORNERS", "away");
+  const yellowCardsHome = sumSportMonksStat(fixture, "YELLOWCARDS", "home");
+  const yellowCardsAway = sumSportMonksStat(fixture, "YELLOWCARDS", "away");
+  const redCardsHome = countSportMonksRedCards(fixture, "home");
+  const redCardsAway = countSportMonksRedCards(fixture, "away");
+  return {
+    cornersHome,
+    cornersAway,
+    cornersTotal: cornersHome != null && cornersAway != null ? cornersHome + cornersAway : null,
+    yellowCardsHome,
+    yellowCardsAway,
+    cardsTotal:
+      yellowCardsHome != null && yellowCardsAway != null
+        ? yellowCardsHome + redCardsHome + yellowCardsAway + redCardsAway
+        : null,
+  };
 }
