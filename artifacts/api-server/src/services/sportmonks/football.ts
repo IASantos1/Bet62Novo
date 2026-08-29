@@ -1044,24 +1044,27 @@ let liveInFlight: Promise<SportMonksFixture[]> | null = null;
 type SportMonksInplayFixture = SportMonksFixture & { league_id: number };
 
 async function fetchLive(): Promise<SportMonksFixture[]> {
-  // `statistics.type` was added here for the corners/cards settlement fix
-  // (2026-08-29) and immediately preceded a user report that NO live
-  // football matches were showing at all. Never confirmed whether this
-  // 10-relation combined include (vs. the 9-relation combo confirmed
-  // working before it) crosses some undocumented total-include limit on
-  // this endpoint — no way to test against the real API from this
-  // environment. Reverted to the last confirmed-working combination as the
-  // safe move: an empty live feed is a much worse failure than corners/
-  // cards settlement staying dormant a while longer (it was already
-  // dormant before today). Re-add `statistics.type` only once confirmed
-  // safe (e.g. by hitting this exact URL with a real token and confirming
-  // it 200s) — see getSportMonksFixtureCornersCards's own null-safe design,
-  // which already tolerates `fx.statistics` being entirely absent.
+  // CONFIRMED REAL (2026-08-29, user-reported real error response):
+  // /livescores/inplay REJECTS the `odds` relation outright —
+  // {"message":"The odds include is not allowed on this endpoint","link":
+  // "https://docs.sportmonks.com/football/api/response-codes/include-exceptions"}.
+  // odds.market;odds.bookmaker had been in this include since this file's
+  // live layer was first written, so EVERY call ever made here failed
+  // outright and silently returned zero live fixtures — not a regression
+  // from the statistics.type change tried and reverted just before this
+  // (that hypothesis was wrong and is now ruled out); a real, standing bug
+  // since day one of the live build. Odds are dropped from this include
+  // entirely — live match state (score/events/periods/clock) now loads,
+  // but fixtures from this endpoint carry no `odds` field, so
+  // extractSportMonksFootballOverride(fx).odds is always null here and live
+  // football odds fall back to synthetic (see buildFootballLiveFromSportMonks
+  // in matches.ts) — a real, separate, still-open gap: the real source for
+  // live odds on this endpoint is unconfirmed and needs its own real sample
+  // before being wired in, same discipline as everything else in this file.
   const resp = await sportMonksGetWithRetry<{ data: SportMonksInplayFixture[] }>(
     "/livescores/inplay",
     {
-      include:
-        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker",
+      include: "state;events.type;events.player;periods;participants;scores;league.country",
     },
   );
   if (!resp) {
