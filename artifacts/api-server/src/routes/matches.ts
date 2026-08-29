@@ -38,6 +38,7 @@ import {
   countSportMonksRedCards,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
+  type SportMonksFootballOverride,
 } from "../services/sportmonks/football.js";
 import {
   getPulseScoreTennisLive,
@@ -11617,6 +11618,55 @@ function nonNullPatch<T extends Record<string, number | null | undefined>>(
   return out;
 }
 
+/** Merges a SportMonksFootballOverride onto an already-synthetic
+ * AdvancedMarkets object (mutates and returns `markets`) — shared between
+ * the prematch and live SportMonks builders so the two never drift. Real
+ * data only ever patches the specific sub-fields it actually priced,
+ * leaving the Poisson-model baseline in place everywhere else (same
+ * "real data patches synthetic" pattern buildFootballUpcomingFromPulseScore
+ * already used with bwin's broader market set). */
+function applySportMonksFootballOverride(
+  markets: AdvancedMarkets,
+  baseMarkets: AdvancedMarkets,
+  override: SportMonksFootballOverride,
+): AdvancedMarkets {
+  markets.doubleChance = { ...baseMarkets.doubleChance, ...nonNullPatch(override.doubleChance) };
+  markets.totalGoals = override.totalGoals
+    ? { ...baseMarkets.totalGoals, ...override.totalGoals }
+    : baseMarkets.totalGoals;
+  markets.corners = override.corners ? { ...baseMarkets.corners, ...override.corners } : baseMarkets.corners;
+  markets.cards = override.cards ? { ...baseMarkets.cards, ...override.cards } : baseMarkets.cards;
+  if (override.bothTeamsScore) markets.bothTeamsScore = override.bothTeamsScore;
+  if (override.drawNoBet?.home != null && override.drawNoBet?.away != null) {
+    markets.drawNoBet = { home: override.drawNoBet.home, away: override.drawNoBet.away };
+  }
+  if (override.halfTime) {
+    markets.halfTime = { ...baseMarkets.halfTime, ...nonNullPatch(override.halfTime) };
+  }
+  if (override.secondHalf) {
+    markets.secondHalf = { ...(baseMarkets.secondHalf ?? { home: 0, draw: 0, away: 0 }), ...nonNullPatch(override.secondHalf) };
+  }
+  if (override.correctScore) {
+    markets.correctScore = { ...(markets.correctScore ?? {}), ...override.correctScore };
+  }
+  if (override.htft) {
+    markets.htft = { ...(baseMarkets.htft ?? {}), ...override.htft } as AdvancedMarkets["htft"];
+  }
+  if (override.goalOddEven) markets.goalOddEven = override.goalOddEven;
+  if (override.teamGoals) {
+    markets.teamGoals = { ...(markets.teamGoals ?? {}), ...override.teamGoals } as AdvancedMarkets["teamGoals"];
+  }
+  if (override.btts1H) markets.btts1H = override.btts1H;
+  if (override.btts2H) markets.btts2H = override.btts2H;
+  if (override.highestScoringHalf) {
+    markets.highestScoringHalf = {
+      ...(baseMarkets.highestScoringHalf ?? { first: 0, second: 0, equal: 0 }),
+      ...nonNullPatch(override.highestScoringHalf),
+    };
+  }
+  return markets;
+}
+
 /**
  * Football prematch, sourced from SportMonks (getSportMonksFootballUpcoming)
  * — replacing PulseScore/bwin (blocked 2026-08-28, see
@@ -11662,19 +11712,11 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
       const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
-      const markets: AdvancedMarkets = {
-        ...baseMarkets,
-        doubleChance: { ...baseMarkets.doubleChance, ...nonNullPatch(override.doubleChance) },
-        totalGoals: override.totalGoals
-          ? { ...baseMarkets.totalGoals, ...override.totalGoals }
-          : baseMarkets.totalGoals,
-        corners: override.corners ? { ...baseMarkets.corners, ...override.corners } : baseMarkets.corners,
-        cards: override.cards ? { ...baseMarkets.cards, ...override.cards } : baseMarkets.cards,
-      };
-      if (override.bothTeamsScore) markets.bothTeamsScore = override.bothTeamsScore;
-      if (override.drawNoBet?.home != null && override.drawNoBet?.away != null) {
-        markets.drawNoBet = { home: override.drawNoBet.home, away: override.drawNoBet.away };
-      }
+      const markets: AdvancedMarkets = applySportMonksFootballOverride(
+        { ...baseMarkets },
+        baseMarkets,
+        override,
+      );
 
       const { date, time } = pulseScoreEventDateTime(
         new Date(fx.starting_at_timestamp * 1000).toISOString(),
@@ -14150,19 +14192,11 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
 
     const override = extractSportMonksFootballOverride(fx);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const markets: AdvancedMarkets = {
-      ...baseMarkets,
-      doubleChance: { ...baseMarkets.doubleChance, ...nonNullPatch(override.doubleChance) },
-      totalGoals: override.totalGoals
-        ? { ...baseMarkets.totalGoals, ...override.totalGoals }
-        : baseMarkets.totalGoals,
-      corners: override.corners ? { ...baseMarkets.corners, ...override.corners } : baseMarkets.corners,
-      cards: override.cards ? { ...baseMarkets.cards, ...override.cards } : baseMarkets.cards,
-    };
-    if (override.bothTeamsScore) markets.bothTeamsScore = override.bothTeamsScore;
-    if (override.drawNoBet?.home != null && override.drawNoBet?.away != null) {
-      markets.drawNoBet = { home: override.drawNoBet.home, away: override.drawNoBet.away };
-    }
+    const markets: AdvancedMarkets = applySportMonksFootballOverride(
+      { ...baseMarkets },
+      baseMarkets,
+      override,
+    );
     const baseOdds = makeOddsFromTeams(home, away);
     const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
     const hasRealOddsNow = !!override.odds;
