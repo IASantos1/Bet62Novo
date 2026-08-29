@@ -1,9 +1,12 @@
-// SportMonks Football API v3 — odds extraction. Confirmed against two real
-// samples (2026-08-28): (1) a finished Brazilian Série A round, GET
+// SportMonks Football API v3 — odds extraction. Confirmed against three real
+// samples (2026-08-28/29): (1) a finished Brazilian Série A round, GET
 // /v3/football/rounds/{id}?include=fixtures.odds.market;fixtures.odds.bookmaker;league.country
-// and (2) a single live fixture's full odds (Bodø/Glimt v NEC), same include
-// shape. Both bookmaker_id 2 ("bet365") — the only bookmaker confirmed real
-// so far; which bookmaker(s) to standardize on is not yet decided.
+// (2) a single live fixture's full odds (Bodø/Glimt v NEC), same include
+// shape, and (3) the same Brazilian round unfiltered (all 130 markets ×
+// 22 bookmakers) — confirmed the aggregator carries onexbet (1xbet,
+// bookmaker_id 35) alongside bet365, bwin, Pinnacle, etc. Bookmaker chosen
+// (2026-08-29, explicit user decision): 1xbet — same brand the rest of the
+// platform already standardized on for every other sport.
 //
 // Markets are matched by `market.developer_name` (SportMonks' stable English
 // canonical name) rather than `market_id`, since market_id collisions are
@@ -16,20 +19,32 @@
 // same way it already merges extractFootballOverride's result — no new UI
 // needed for these seven, just a new real data source.
 //
-// Real-world quirk found comparing the two samples: the SAME market
-// (developer_name FULLTIME_RESULT) uses TWO different label vocabularies
-// depending on the fixture/league — "1"/"X"/"2" (Bodø/Glimt sample, `name`
-// carries the team name/"Draw") vs "Home"/"Draw"/"Away" (Brazilian sample,
-// `name` is null). `original_label` (present on the Brazilian sample's rows,
-// absent on the Bodø/Glimt one) is the one field seen so far consistently
-// normalized to "1"/"Draw"/"2" regardless — used here as the primary key,
-// falling back to normalizing `label` when original_label is absent.
+// Real-world quirks found comparing bookmakers/leagues within SportMonks:
+// - Fulltime Result: "1"/"X"/"2" labels with the team name in `name`
+//   (bet365, Bodø/Glimt sample) vs "Home"/"Draw"/"Away" labels with `name`
+//   null (both bet365-Brazilian-league AND 1xbet use this style).
+//   `original_label` (present on some rows, absent on others) is the one
+//   field seen so far consistently normalized to "1"/"Draw"/"2" — used as
+//   the primary key, falling back to normalizing `label` otherwise.
+// - Double Chance: bet365 uses "1X"/"X2"/"12"; 1xbet uses
+//   "Home/Draw"/"Draw/Away"/"Home/Away" instead — same market, different
+//   vocabulary.
+// - Total goals: bet365 splits MATCH_GOALS (standard line) +
+//   ALTERNATIVE_MATCH_GOALS (extra lines); 1xbet uses a single
+//   GOALS_OVER_UNDER market instead — same Over/Under + `total` shape,
+//   just a different developer_name, merged in here.
+// - Total corners: bet365 uses TOTAL_CORNERS; 1xbet uses CORNER_MARKET —
+//   same shape, different developer_name, merged in here too.
+// - Draw No Bet: not offered by 1xbet at all for this (lower-coverage)
+//   competition in the confirmed sample — stays unset, same tolerant
+//   "real absence, not a bug" behavior used throughout this codebase.
 //
-// NOT yet implemented (real data confirmed to exist, e.g. Half Time/Full
-// Time market_id 29, Final Score market_id 8, Goalscorers market_id 90 —
-// but out of scope for this first pass; see htft/correctScore/exactGoals/
-// firstGoal/secondHalf/goalOddEven/cleanSheet/teamGoals/anytimeGoalscorer
-// etc. in PulseScoreFootballOverride for the full target list still open).
+// NOT yet implemented (real data confirmed to exist — e.g. Half Time/Full
+// Time, Correct Score, Goalscorers, Asian Handicap, Odd/Even, and 100+ more
+// markets seen in the unfiltered sample — but out of scope for this first
+// pass; see htft/correctScore/exactGoals/firstGoal/secondHalf/goalOddEven/
+// cleanSheet/teamGoals/anytimeGoalscorer etc. in PulseScoreFootballOverride
+// for the full target list still open).
 
 export type SportMonksOdd = {
   market_id: number;
@@ -156,7 +171,7 @@ export type SportMonksFootballOverride = {
 
 export function extractSportMonksFootballOverride(
   fixture: SportMonksFixture,
-  bookmakerId = 2,
+  bookmakerId = 35,
 ): SportMonksFootballOverride {
   const out: SportMonksFootballOverride = {};
 
@@ -177,7 +192,10 @@ export function extractSportMonksFootballOverride(
     if (home !== null || draw !== null || away !== null) out.odds = { home, draw, away };
   }
 
-  // Double Chance -> "1X"/"X2"/"12"
+  // Double Chance -> bet365 uses "1X"/"X2"/"12"; 1xbet (confirmed real,
+  // 2026-08-29) uses "Home/Draw"/"Draw/Away"/"Home/Away" instead — same
+  // market, different label vocabulary, same quirk already seen on
+  // Fulltime Result.
   const dc = oddsByDeveloperName(fixture, "DOUBLE_CHANCE", bookmakerId);
   if (dc.length > 0) {
     let homeOrDraw: number | null = null;
@@ -187,9 +205,9 @@ export function extractSportMonksFootballOverride(
       const key = (o.label || "").trim().toUpperCase();
       const val = oddsToNumber(o.value);
       if (val === null) continue;
-      if (key === "1X") homeOrDraw = val;
-      else if (key === "X2") awayOrDraw = val;
-      else if (key === "12") homeOrAway = val;
+      if (key === "1X" || key === "HOME/DRAW") homeOrDraw = val;
+      else if (key === "X2" || key === "DRAW/AWAY") awayOrDraw = val;
+      else if (key === "12" || key === "HOME/AWAY") homeOrAway = val;
     }
     if (homeOrDraw !== null || awayOrDraw !== null || homeOrAway !== null)
       out.doubleChance = { homeOrDraw, awayOrDraw, homeOrAway };
@@ -225,18 +243,27 @@ export function extractSportMonksFootballOverride(
     if (home !== null || away !== null) out.drawNoBet = { home, away };
   }
 
-  // Match Goals + Alternative Match Goals -> totalGoals ladder (0.5..6.5)
+  // Total goals -> totalGoals ladder (0.5..6.5). bet365 splits this across
+  // MATCH_GOALS (standard line) + ALTERNATIVE_MATCH_GOALS (extra lines);
+  // 1xbet (confirmed real, 2026-08-29) uses a single GOALS_OVER_UNDER
+  // market instead, same Over/Under + `total` shape — merged in here too.
   const totalGoalsOdds = [
     ...oddsByDeveloperName(fixture, "MATCH_GOALS", bookmakerId),
     ...oddsByDeveloperName(fixture, "ALTERNATIVE_MATCH_GOALS", bookmakerId),
+    ...oddsByDeveloperName(fixture, "GOALS_OVER_UNDER", bookmakerId),
   ];
   if (totalGoalsOdds.length > 0) {
     const patch = fillLadder(totalGoalsOdds, TOTAL_GOALS_LINE_KEYS);
     if (Object.keys(patch).length > 0) out.totalGoals = patch;
   }
 
-  // Total Corners -> corners ladder (8.5/9.5/10.5)
-  const cornersOdds = oddsByDeveloperName(fixture, "TOTAL_CORNERS", bookmakerId);
+  // Total Corners -> corners ladder (8.5/9.5/10.5). 1xbet (confirmed real)
+  // uses developer_name CORNER_MARKET instead of bet365's TOTAL_CORNERS,
+  // same Over/Under + `total` shape.
+  const cornersOdds = [
+    ...oddsByDeveloperName(fixture, "TOTAL_CORNERS", bookmakerId),
+    ...oddsByDeveloperName(fixture, "CORNER_MARKET", bookmakerId),
+  ];
   if (cornersOdds.length > 0) {
     const patch = fillLadder(cornersOdds, CORNERS_LINE_KEYS);
     if (Object.keys(patch).length > 0) out.corners = patch;
