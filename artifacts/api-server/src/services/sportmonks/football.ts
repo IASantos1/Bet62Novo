@@ -47,6 +47,7 @@
 // for the full target list still open).
 
 import { sportMonksGetWithRetry } from "./client.js";
+import { logger } from "../../lib/logger.js";
 
 export type SportMonksOdd = {
   market_id: number;
@@ -1043,13 +1044,29 @@ let liveInFlight: Promise<SportMonksFixture[]> | null = null;
 type SportMonksInplayFixture = SportMonksFixture & { league_id: number };
 
 async function fetchLive(): Promise<SportMonksFixture[]> {
+  // `statistics.type` was added here for the corners/cards settlement fix
+  // (2026-08-29) and immediately preceded a user report that NO live
+  // football matches were showing at all. Never confirmed whether this
+  // 10-relation combined include (vs. the 9-relation combo confirmed
+  // working before it) crosses some undocumented total-include limit on
+  // this endpoint — no way to test against the real API from this
+  // environment. Reverted to the last confirmed-working combination as the
+  // safe move: an empty live feed is a much worse failure than corners/
+  // cards settlement staying dormant a while longer (it was already
+  // dormant before today). Re-add `statistics.type` only once confirmed
+  // safe (e.g. by hitting this exact URL with a real token and confirming
+  // it 200s) — see getSportMonksFixtureCornersCards's own null-safe design,
+  // which already tolerates `fx.statistics` being entirely absent.
   const resp = await sportMonksGetWithRetry<{ data: SportMonksInplayFixture[] }>(
     "/livescores/inplay",
     {
       include:
-        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker;statistics.type",
+        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker",
     },
   );
+  if (!resp) {
+    logger.warn("[sportmonks] /livescores/inplay returned no data (request failed after retries)");
+  }
   const allowed = new Set(SPORTMONKS_FOOTBALL_LEAGUE_IDS);
   return (resp?.data ?? []).filter((fx) => allowed.has(fx.league_id));
 }
