@@ -46,6 +46,8 @@
 // cleanSheet/teamGoals/anytimeGoalscorer etc. in PulseScoreFootballOverride
 // for the full target list still open).
 
+import { sportMonksGetWithRetry } from "./client.js";
+
 export type SportMonksOdd = {
   market_id: number;
   bookmaker_id: number;
@@ -64,9 +66,13 @@ export type SportMonksOdd = {
 export type SportMonksParticipant = {
   id: number;
   name: string;
-  meta?: { location?: "home" | "away" };
+  image_path?: string;
+  meta?: { location?: "home" | "away"; position?: number };
 };
 
+// state_id 1 = not started (confirmed real, 2026-08-29, round 396698 — the
+// current, not-yet-finished round) / 5 = finished (confirmed real, round
+// 396699). Live in-progress values not confirmed yet.
 export type SportMonksFixture = {
   id: number;
   name: string;
@@ -76,6 +82,13 @@ export type SportMonksFixture = {
   has_odds?: boolean;
   odds?: SportMonksOdd[];
   participants?: SportMonksParticipant[];
+};
+
+export type SportMonksLeagueRef = {
+  id: number;
+  name: string;
+  image_path?: string;
+  country?: { id: number; name: string; image_path?: string };
 };
 
 function oddsToNumber(v: string | undefined | null): number | null {
@@ -277,4 +290,141 @@ export function extractSportMonksFootballOverride(
   }
 
   return out;
+}
+
+// ── Fetching: current round discovery + upcoming fixtures ──────────────────
+// SportMonks has no single "list upcoming fixtures across leagues" endpoint
+// confirmed real yet — the real path found (2026-08-29, by trial against the
+// live API): a league only exposes its `currentSeason` (note: the response
+// key comes back lowercase, "currentseason", regardless of the include's
+// casing — confirmed real), and a season only exposes ALL its `rounds`
+// (each carrying its own `is_current` flag) — there's no direct
+// "currentRound" relation on either League or Season (both attempts 404'd
+// with "include ... does not exist"). So finding "what's the next round for
+// this league" is a two-step lookup, cached below since a league's current
+// round only changes roughly weekly.
+//
+// The include chain that then actually returns fixtures+odds
+// (fixtures.odds.market;fixtures.odds.bookmaker;fixtures.participants;
+// league.country) is confirmed real and within SportMonks' "max 2 nested
+// includes per chain" limit (each semicolon-separated chain is checked
+// independently — fixtures.odds.market is 2 levels deep, league.country is
+// 1, etc.); the earlier single-call attempt at
+// currentRound.fixtures.odds.market (3 levels in one chain) was rejected
+// with exactly that error, confirming the limit is per-chain.
+
+type SportMonksLeagueWithCurrentSeason = {
+  id: number;
+  currentseason?: { id: number };
+};
+
+type SportMonksSeasonWithRounds = {
+  id: number;
+  rounds?: Array<{ id: number; is_current: boolean; finished: boolean }>;
+};
+
+const CURRENT_ROUND_TTL_MS = 6 * 60 * 60 * 1000; // current round changes ~weekly at most
+const currentRoundCache = new Map<number, { roundId: number | null; fetchedAt: number }>();
+
+async function resolveCurrentRoundId(leagueId: number): Promise<number | null> {
+  const cached = currentRoundCache.get(leagueId);
+  if (cached && Date.now() - cached.fetchedAt < CURRENT_ROUND_TTL_MS) return cached.roundId;
+
+  const league = await sportMonksGetWithRetry<{ data: SportMonksLeagueWithCurrentSeason }>(
+    `/leagues/${leagueId}`,
+    { include: "currentSeason" },
+  );
+  const seasonId = league?.data?.currentseason?.id;
+  if (seasonId === undefined) {
+    currentRoundCache.set(leagueId, { roundId: null, fetchedAt: Date.now() });
+    return null;
+  }
+
+  const season = await sportMonksGetWithRetry<{ data: SportMonksSeasonWithRounds }>(
+    `/seasons/${seasonId}`,
+    { include: "rounds" },
+  );
+  const roundId = season?.data?.rounds?.find((r) => r.is_current)?.id ?? null;
+  currentRoundCache.set(leagueId, { roundId, fetchedAt: Date.now() });
+  return roundId;
+}
+
+type SportMonksRoundResponse = {
+  id: number;
+  league_id: number;
+  finished: boolean;
+  is_current: boolean;
+  fixtures: SportMonksFixture[];
+  league?: SportMonksLeagueRef;
+};
+
+export type SportMonksLeagueUpcoming = {
+  leagueId: number;
+  league?: SportMonksLeagueRef;
+  fixtures: SportMonksFixture[];
+};
+
+const UPCOMING_TTL_MS = 5 * 60 * 1000;
+const upcomingCache = new Map<number, { result: SportMonksLeagueUpcoming; fetchedAt: number }>();
+const upcomingInFlight = new Map<number, Promise<SportMonksLeagueUpcoming>>();
+
+async function fetchUpcomingForLeague(leagueId: number, bookmakerId: number): Promise<SportMonksLeagueUpcoming> {
+  const roundId = await resolveCurrentRoundId(leagueId);
+  if (roundId === null) return { leagueId, fixtures: [] };
+
+  const round = await sportMonksGetWithRetry<{ data: SportMonksRoundResponse }>(
+    `/rounds/${roundId}`,
+    {
+      include: "fixtures.odds.market;fixtures.odds.bookmaker;fixtures.participants;league.country",
+      filters: `bookmakers:${bookmakerId}`,
+    },
+  );
+  return {
+    leagueId,
+    league: round?.data?.league,
+    fixtures: round?.data?.fixtures ?? [],
+  };
+}
+
+/** Upcoming (not-yet-started) fixtures with 1xbet odds for one SportMonks
+ * league, cached ~5 minutes. `leagueId` is SportMonks' own numeric id (see
+ * GET /v3/football/leagues for the confirmed real list this account's plan
+ * covers — Brazilian Série A is 648, Premier League 8, etc.). */
+export async function getSportMonksFootballUpcomingForLeague(
+  leagueId: number,
+  bookmakerId = 35,
+): Promise<SportMonksLeagueUpcoming> {
+  const cached = upcomingCache.get(leagueId);
+  if (cached && Date.now() - cached.fetchedAt < UPCOMING_TTL_MS) return cached.result;
+
+  const inFlight = upcomingInFlight.get(leagueId);
+  if (inFlight) return inFlight;
+
+  const promise = fetchUpcomingForLeague(leagueId, bookmakerId)
+    .then((result) => {
+      upcomingCache.set(leagueId, { result, fetchedAt: Date.now() });
+      return result;
+    })
+    .finally(() => {
+      upcomingInFlight.delete(leagueId);
+    });
+  upcomingInFlight.set(leagueId, promise);
+  return promise;
+}
+
+/** Same as getSportMonksFootballUpcomingForLeague, fanned out across
+ * several leagues in parallel. A single league's fetch failure (network
+ * error, league not on this plan, etc.) doesn't take the others down with
+ * it — logged and just contributes an empty fixture list. */
+export async function getSportMonksFootballUpcoming(
+  leagueIds: number[],
+  bookmakerId = 35,
+): Promise<SportMonksLeagueUpcoming[]> {
+  return Promise.all(
+    leagueIds.map((leagueId) =>
+      getSportMonksFootballUpcomingForLeague(leagueId, bookmakerId).catch(
+        (): SportMonksLeagueUpcoming => ({ leagueId, fixtures: [] }),
+      ),
+    ),
+  );
 }
