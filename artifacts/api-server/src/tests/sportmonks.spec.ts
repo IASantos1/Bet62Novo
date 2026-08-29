@@ -11,6 +11,7 @@ const {
   getSportMonksFixtureCornersCards,
   filterUpcomingFixtures,
   filterHeadToHeadFixtures,
+  isFootballLiveDisplayEvent,
 } = await import("../services/sportmonks/football.js");
 
 function makeFixture(odds: unknown[]) {
@@ -619,4 +620,25 @@ test("filterHeadToHeadFixtures: most recent finished meeting first, respects lim
   const result = filterHeadToHeadFixtures(withOlderMeeting, 11126, 1);
   assert.equal(result.length, 1);
   assert.equal(result[0]!.id, 19621957);
+});
+
+// Real GET /v3/football/livescores/inplay?include=...events.type... sample
+// (2026-08-29, OH Leuven vs Standard Liège, fixture id 19726090) — a real
+// PENALTY (type_id 16) event that moved the scoreboard 0-0 -> 0-1 (Casper
+// Nielsen, minute 9), same real fixture also seen in a follow-up plain
+// `events` (no `.type`) sample of the same match.
+test("isFootballLiveDisplayEvent: real PENALTY developer_name counts as a display event (goal from the spot)", () => {
+  assert.equal(isFootballLiveDisplayEvent("PENALTY"), true);
+});
+
+test("isFootballLiveDisplayEvent: every other confirmed real event type also counts", () => {
+  for (const dn of ["GOAL", "OWNGOAL", "SUBSTITUTION", "YELLOWCARD", "REDCARD"]) {
+    assert.equal(isFootballLiveDisplayEvent(dn), true, dn);
+  }
+});
+
+test("isFootballLiveDisplayEvent: an unconfirmed/unknown developer_name (or none) is excluded, not guessed", () => {
+  assert.equal(isFootballLiveDisplayEvent("VAR"), false);
+  assert.equal(isFootballLiveDisplayEvent(undefined), false);
+  assert.equal(isFootballLiveDisplayEvent(null), false);
 });
