@@ -1,9 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractSportMonksFootballOverride } = await import(
-  "../services/sportmonks/football.js"
-);
+const {
+  extractSportMonksFootballOverride,
+  getSportMonksFixtureScore,
+  getSportMonksFixtureMinute,
+  isSportMonksFixtureLive,
+  isSportMonksFixtureFinished,
+  countSportMonksRedCards,
+} = await import("../services/sportmonks/football.js");
 
 function makeFixture(odds: unknown[]) {
   return {
@@ -210,4 +215,132 @@ test("extractSportMonksFootballOverride: a different bookmaker_id than requested
   ];
   const out = extractSportMonksFootballOverride(makeFixture(odds));
   assert.equal(out.odds, undefined);
+});
+
+// ── Live helpers ─────────────────────────────────────────────────────────
+// Real GET /v3/football/livescores/inplay sample (2026-08-29) — Fiorentina
+// (home, participant_id 109) v Frosinone (away, participant_id 4070), mid
+// 2nd half, Frosinone leading 3-0 (2 goals in the 1st half, 1 more in the
+// 2nd). No REDCARD event occurred in this particular real fixture — see
+// makeFinishedFixture below for the redcard test, which uses a different
+// real fixture that genuinely had one.
+function makeLiveFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 19713605,
+    name: "Fiorentina vs Frosinone",
+    starting_at: "2026-08-29 18:30:00",
+    starting_at_timestamp: 1788020200,
+    state_id: 22,
+    state: { id: 22, state: "INPLAY_2ND_HALF", name: "2nd Half", short_name: "2nd", developer_name: "INPLAY_2ND_HALF" },
+    scores: [
+      { description: "2ND_HALF_ONLY", participant_id: 4070, score: { goals: 1, participant: "away" } },
+      { description: "2ND_HALF_ONLY", participant_id: 109, score: { goals: 0, participant: "home" } },
+      { description: "2ND_HALF", participant_id: 4070, score: { goals: 3, participant: "away" } },
+      { description: "2ND_HALF", participant_id: 109, score: { goals: 0, participant: "home" } },
+      { description: "CURRENT", participant_id: 4070, score: { goals: 3, participant: "away" } },
+      { description: "1ST_HALF", participant_id: 109, score: { goals: 0, participant: "home" } },
+      { description: "1ST_HALF", participant_id: 4070, score: { goals: 2, participant: "away" } },
+      { description: "CURRENT", participant_id: 109, score: { goals: 0, participant: "home" } },
+    ],
+    periods: [
+      { id: 7064612, type_id: 1, description: "1st-half", ticking: false, minutes: 48, seconds: 32, counts_from: 0, time_added: 3 },
+      { id: 7065026, type_id: 2, description: "2nd-half", ticking: true, minutes: 92, seconds: 40, counts_from: 45, time_added: 5 },
+    ],
+    participants: [
+      { id: 109, name: "Fiorentina", meta: { location: "home", winner: null, position: 20 } },
+      { id: 4070, name: "Frosinone", meta: { location: "away", winner: null, position: 14 } },
+    ],
+    events: [],
+    ...overrides,
+  } as unknown as Parameters<typeof getSportMonksFixtureScore>[0];
+}
+
+test("getSportMonksFixtureScore: reads the CURRENT score row per side (real 2nd-half sample)", () => {
+  assert.deepEqual(getSportMonksFixtureScore(makeLiveFixture()), { home: 0, away: 3 });
+});
+
+test("getSportMonksFixtureScore: null (not 0-0) when no CURRENT row exists yet", () => {
+  assert.equal(getSportMonksFixtureScore(makeLiveFixture({ scores: [] })), null);
+});
+
+test("getSportMonksFixtureMinute: uses the ticking period's minute (2nd half, real sample)", () => {
+  assert.equal(getSportMonksFixtureMinute(makeLiveFixture()), 92);
+});
+
+test("getSportMonksFixtureMinute: falls back to the last period when none is ticking (half-time)", () => {
+  const fx = makeLiveFixture({
+    periods: [
+      { id: 1, type_id: 1, description: "1st-half", ticking: false, minutes: 45, seconds: 0, counts_from: 0, time_added: 0 },
+    ],
+  });
+  assert.equal(getSportMonksFixtureMinute(fx), 45);
+});
+
+test("isSportMonksFixtureLive: true for INPLAY_2ND_HALF, HT, and INPLAY_1ST_HALF; false for NS/FT", () => {
+  assert.equal(isSportMonksFixtureLive(makeLiveFixture()), true);
+  assert.equal(
+    isSportMonksFixtureLive(makeLiveFixture({ state: { id: 3, state: "HT", name: "Half Time", short_name: "HT", developer_name: "HT" } })),
+    true,
+  );
+  assert.equal(
+    isSportMonksFixtureLive(makeLiveFixture({ state: { id: 1, state: "NS", name: "Not Started", short_name: "NS", developer_name: "NS" } })),
+    false,
+  );
+  assert.equal(
+    isSportMonksFixtureLive(makeLiveFixture({ state: { id: 5, state: "FT", name: "Full Time", short_name: "FT", developer_name: "FT" } })),
+    false,
+  );
+});
+
+test("isSportMonksFixtureFinished: true only for FT (real confirmed value)", () => {
+  assert.equal(isSportMonksFixtureFinished(makeLiveFixture()), false);
+});
+
+// Real GET /v3/football/livescores/inplay sample (2026-08-29) — Borussia
+// Dortmund (home, participant_id 68) v Hamburger SV (away, participant_id
+// 2708), a genuinely finished match (state FT) that had a real REDCARD
+// event on the home side, minute 77.
+function makeFinishedFixtureWithRedCard() {
+  return {
+    id: 19735196,
+    name: "Borussia Dortmund vs Hamburger SV",
+    starting_at: "2026-08-29 18:30:00",
+    starting_at_timestamp: 1788020200,
+    state_id: 5,
+    state: { id: 5, state: "FT", name: "Full Time", short_name: "FT", developer_name: "FT" },
+    participants: [
+      { id: 68, name: "Borussia Dortmund", meta: { location: "home", winner: true, position: 9 } },
+      { id: 2708, name: "Hamburger SV", meta: { location: "away", winner: false, position: 7 } },
+    ],
+    events: [
+      {
+        id: 157695614,
+        fixture_id: 19735196,
+        period_id: 7065005,
+        participant_id: 68,
+        type_id: 20,
+        player_id: 37722654,
+        related_player_id: null,
+        player_name: "Samuele Inácio",
+        related_player_name: null,
+        result: null,
+        info: "Foul",
+        addition: "1st Redcard",
+        minute: 77,
+        extra_minute: null,
+        rescinded: false,
+        type: { id: 20, name: "Redcard", code: "redcard", developer_name: "REDCARD" },
+      },
+    ],
+  } as unknown as Parameters<typeof getSportMonksFixtureScore>[0];
+}
+
+test("isSportMonksFixtureFinished: true for a real FT fixture", () => {
+  assert.equal(isSportMonksFixtureFinished(makeFinishedFixtureWithRedCard()), true);
+});
+
+test("countSportMonksRedCards: counts a real REDCARD event for the home side, zero for away", () => {
+  const fx = makeFinishedFixtureWithRedCard();
+  assert.equal(countSportMonksRedCards(fx, "home"), 1);
+  assert.equal(countSportMonksRedCards(fx, "away"), 0);
 });
