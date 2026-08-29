@@ -37,6 +37,9 @@ import {
   isSportMonksFixtureFinished,
   countSportMonksRedCards,
   getSportMonksFixtureCornersCards,
+  getSportMonksFixtureById,
+  getSportMonksTeamUpcoming,
+  getSportMonksTeamHeadToHead,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -28516,8 +28519,61 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   let team1Name = home,
     team2Name = away;
 
+  // ── SportMonks H2H (football only, sportmonks-football-* matchIds) — tried
+  // first for these matchIds: both sides resolve to real SportMonks numeric
+  // team ids off the fixture itself, so there's no fuzzy team-name matching
+  // risk the Statpal/V1 fallbacks below carry. Those fallbacks only run if
+  // this finds nothing (e.g. a fixture SportMonks has no schedule history
+  // for yet) — see their own "recentMeetings.length === 0" guards below.
+  if (sport === "football" && matchId.startsWith("sportmonks-football-")) {
+    const fixtureId = Number(matchId.slice("sportmonks-football-".length));
+    if (Number.isFinite(fixtureId)) {
+      try {
+        const fixture = await getSportMonksFixtureById(fixtureId);
+        const homeP = fixture?.participants?.find((p) => p.meta?.location === "home");
+        const awayP = fixture?.participants?.find((p) => p.meta?.location === "away");
+        if (homeP && awayP) {
+          team1Name = homeP.name;
+          team2Name = awayP.name;
+          const meetings = await getSportMonksTeamHeadToHead(homeP.id, awayP.id);
+          for (const m of meetings) {
+            const mHomeP = m.participants?.find((p) => p.meta?.location === "home");
+            const mAwayP = m.participants?.find((p) => p.meta?.location === "away");
+            const score = getSportMonksFixtureScore(m);
+            if (!mHomeP || !mAwayP || !score) continue;
+            recentMeetings.push({
+              date: m.starting_at ? m.starting_at.slice(0, 10) : "",
+              team1: mHomeP.name,
+              team2: mAwayP.name,
+              score1: score.home,
+              score2: score.away,
+              // No `league` object on schedule-endpoint fixtures (confirmed
+              // real — only league_id) — left blank rather than guessed.
+              league: "",
+            });
+            // Tally from the CURRENT match's home/away perspective (homeP/
+            // awayP), not this historical fixture's own home/away — matches
+            // how the frontend renders homeWins/awayWins against today's match.
+            const ourScore = mHomeP.id === homeP.id ? score.home : score.away;
+            const theirScore = mHomeP.id === homeP.id ? score.away : score.home;
+            if (ourScore > theirScore) homeWins++;
+            else if (ourScore < theirScore) awayWins++;
+            else draws++;
+          }
+        }
+      } catch {
+        /* ignore — fall through to Statpal/V2/V1 */
+      }
+    }
+  }
+
   // ── Statpal H2H (football only) — most accurate since match IDs come from Statpal ──
-  if (sport === "football" && CONFIG.STATPAL_API_KEY && matchId) {
+  if (
+    sport === "football" &&
+    CONFIG.STATPAL_API_KEY &&
+    matchId &&
+    recentMeetings.length === 0
+  ) {
     const liveEntry = liveMatchState.get(matchId);
     const t1id = liveEntry?.homeTeamId;
     const t2id = liveEntry?.awayTeamId;
@@ -28677,6 +28733,63 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   };
   confrontosCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
   res.json(result);
+});
+
+// ─── Próximos Jogos (SportMonks team schedule, football only) ─────────────────
+// Real SportMonks data (GET /v3/football/schedules/teams/{id}), confirmed
+// 2026-08-29 — only wired for sportmonks-football-* matchIds since that's
+// the only football matchId scheme with a resolvable real SportMonks
+// fixture/team id behind it right now.
+
+type TeamUpcomingEntry = {
+  date: string;
+  opponent: string;
+  competition: string;
+  isHome: boolean;
+};
+
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "");
+  const side = String(req.query["side"] ?? "home");
+  const limit = Math.min(10, Math.max(1, Number(req.query["limit"]) || 5));
+
+  if (!matchId.startsWith("sportmonks-football-")) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const fixtureId = Number(matchId.slice("sportmonks-football-".length));
+  if (!Number.isFinite(fixtureId)) {
+    res.json({ fixtures: [] });
+    return;
+  }
+
+  try {
+    const fixture = await getSportMonksFixtureById(fixtureId);
+    const team = fixture?.participants?.find((p) => p.meta?.location === side);
+    if (!team) {
+      res.json({ fixtures: [] });
+      return;
+    }
+    const upcoming = await getSportMonksTeamUpcoming(team.id, limit);
+    const fixtures: TeamUpcomingEntry[] = upcoming.map((fx) => {
+      const homeP = fx.participants?.find((p) => p.meta?.location === "home");
+      const awayP = fx.participants?.find((p) => p.meta?.location === "away");
+      const isHome = homeP?.id === team.id;
+      const opponent = (isHome ? awayP?.name : homeP?.name) ?? "";
+      return {
+        date: fx.starting_at ? fx.starting_at.slice(0, 10) : "",
+        opponent,
+        // No `league` object on schedule-endpoint fixtures (confirmed real
+        // — only league_id) — left blank rather than guessed, same as
+        // /confrontos's SportMonks H2H branch above.
+        competition: "",
+        isHome,
+      };
+    });
+    res.json({ fixtures });
+  } catch {
+    res.json({ fixtures: [] });
+  }
 });
 
 // ─── Statpal Live Storylines ──────────────────────────────────────────────────
