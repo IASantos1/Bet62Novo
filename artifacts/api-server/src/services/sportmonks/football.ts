@@ -209,6 +209,23 @@ const CARDS_LINE_KEYS: Record<string, { over: string; under: string }> = {
   "4.5": { over: "o45", under: "u45" },
 };
 
+function teamGoalsLineKeys(side: "home" | "away"): Record<string, { over: string; under: string }> {
+  return {
+    "0.5": { over: `${side}Over05`, under: `${side}Under05` },
+    "1.5": { over: `${side}Over15`, under: `${side}Under15` },
+    "2.5": { over: `${side}Over25`, under: `${side}Under25` },
+  };
+}
+
+// "Home"/"Draw"/"Away" -> "h"/"d"/"a", for building HT/FT-style combo keys.
+function threeWayLetter(raw: string): "h" | "d" | "a" | null {
+  const key = raw.trim().toLowerCase();
+  if (key === "home" || key === "1") return "h";
+  if (key === "draw" || key === "x") return "d";
+  if (key === "away" || key === "2") return "a";
+  return null;
+}
+
 // Shared by totalGoals/corners/cards: groups an Over/Under market's odds by
 // their `total` line, then fills in a fixed-line "ladder" (only the lines
 // SportMonks actually confirms — an unrecognized line, e.g. a live
@@ -248,6 +265,15 @@ export type SportMonksFootballOverride = {
   totalGoals?: Partial<Record<string, number>>;
   corners?: Partial<Record<string, number>>;
   cards?: Partial<Record<string, number>>;
+  halfTime?: { home: number | null; draw: number | null; away: number | null };
+  secondHalf?: { home: number | null; draw: number | null; away: number | null };
+  correctScore?: Record<string, number>;
+  htft?: Partial<Record<string, number>>;
+  goalOddEven?: { odd: number; even: number };
+  teamGoals?: Partial<Record<string, number>>;
+  btts1H?: { yes: number; no: number };
+  btts2H?: { yes: number; no: number };
+  highestScoringHalf?: { first: number | null; second: number | null; equal: number | null };
 };
 
 export function extractSportMonksFootballOverride(
@@ -355,6 +381,150 @@ export function extractSportMonksFootballOverride(
   if (cardsOdds.length > 0) {
     const patch = fillLadder(cardsOdds, CARDS_LINE_KEYS);
     if (Object.keys(patch).length > 0) out.cards = patch;
+  }
+
+  // Half Time Result -> 1X2 at HT, same "Home"/"Draw"/"Away" vocabulary as
+  // Fulltime Result (confirmed real, 2026-08-29).
+  const htr = oddsByDeveloperName(fixture, "HALF_TIME_RESULT", bookmakerId);
+  if (htr.length > 0) {
+    let home: number | null = null;
+    let draw: number | null = null;
+    let away: number | null = null;
+    for (const o of htr) {
+      const side = normalizeThreeWaySide(o);
+      const val = oddsToNumber(o.value);
+      if (val === null || !side) continue;
+      if (side === "home") home = val;
+      else if (side === "draw") draw = val;
+      else away = val;
+    }
+    if (home !== null || draw !== null || away !== null) out.halfTime = { home, draw, away };
+  }
+
+  // 2nd Half Result -> 1X2 for the 2nd half only, same vocabulary.
+  const shr = oddsByDeveloperName(fixture, "2ND_HALF_RESULT", bookmakerId);
+  if (shr.length > 0) {
+    let home: number | null = null;
+    let draw: number | null = null;
+    let away: number | null = null;
+    for (const o of shr) {
+      const side = normalizeThreeWaySide(o);
+      const val = oddsToNumber(o.value);
+      if (val === null || !side) continue;
+      if (side === "home") home = val;
+      else if (side === "draw") draw = val;
+      else away = val;
+    }
+    if (home !== null || draw !== null || away !== null) out.secondHalf = { home, draw, away };
+  }
+
+  // Correct Score (full match) -> "H:A" labels (confirmed real, colon —
+  // NOT bet365's "H-A" dash format), converted to the "H-A" key shape
+  // settlement.ts/home.tsx's cs-{k} selection keys already expect.
+  const csOdds = oddsByDeveloperName(fixture, "CORRECT_SCORE", bookmakerId);
+  if (csOdds.length > 0) {
+    const scores: Record<string, number> = {};
+    for (const o of csOdds) {
+      const label = (o.label || "").trim();
+      const val = oddsToNumber(o.value);
+      if (val === null || !/^\d+:\d+$/.test(label)) continue;
+      scores[label.replace(":", "-")] = val;
+    }
+    if (Object.keys(scores).length > 0) out.correctScore = scores;
+  }
+
+  // Half Time/Full Time double -> 9-combo labels like "Home/Home",
+  // "Draw/Away" (confirmed real) mapped to the htft-hh/htft-hd/... keys
+  // settlement.ts already grades.
+  const htftOdds = oddsByDeveloperName(fixture, "HT_FT_DOUBLE", bookmakerId);
+  if (htftOdds.length > 0) {
+    const patch: Record<string, number> = {};
+    for (const o of htftOdds) {
+      const val = oddsToNumber(o.value);
+      if (val === null) continue;
+      const parts = (o.label || "").split("/");
+      if (parts.length !== 2) continue;
+      const ht = threeWayLetter(parts[0]!);
+      const ft = threeWayLetter(parts[1]!);
+      if (!ht || !ft) continue;
+      patch[`${ht}${ft}`] = val;
+    }
+    if (Object.keys(patch).length > 0) out.htft = patch;
+  }
+
+  // Odd/Even (total match goals) -> "Odd"/"Even" labels.
+  const oddEven = oddsByDeveloperName(fixture, "ODD_EVEN", bookmakerId);
+  if (oddEven.length > 0) {
+    let odd: number | null = null;
+    let even: number | null = null;
+    for (const o of oddEven) {
+      const val = oddsToNumber(o.value);
+      if (val === null) continue;
+      const key = (o.label || "").trim().toLowerCase();
+      if (key === "odd") odd = val;
+      else if (key === "even") even = val;
+    }
+    if (odd !== null && even !== null) out.goalOddEven = { odd, even };
+  }
+
+  // Home/Away Team Goals -> per-team totalGoals-style ladder (0.5/1.5/2.5).
+  const homeTeamGoals = oddsByDeveloperName(fixture, "HOME_TEAM_GOALS", bookmakerId);
+  const awayTeamGoals = oddsByDeveloperName(fixture, "AWAY_TEAM_GOALS", bookmakerId);
+  const teamGoalsPatch: Record<string, number> = {};
+  if (homeTeamGoals.length > 0) Object.assign(teamGoalsPatch, fillLadder(homeTeamGoals, teamGoalsLineKeys("home")));
+  if (awayTeamGoals.length > 0) Object.assign(teamGoalsPatch, fillLadder(awayTeamGoals, teamGoalsLineKeys("away")));
+  if (Object.keys(teamGoalsPatch).length > 0) out.teamGoals = teamGoalsPatch;
+
+  // Both Teams To Score in 1st/2nd Half -> Yes/No, same shape as the
+  // full-match Both Teams To Score market.
+  const btts1H = oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE_IN_1ST_HALF", bookmakerId);
+  if (btts1H.length > 0) {
+    let yes: number | null = null;
+    let no: number | null = null;
+    for (const o of btts1H) {
+      const val = oddsToNumber(o.value);
+      if (val === null) continue;
+      const key = (o.label || "").trim().toLowerCase();
+      if (key === "yes") yes = val;
+      else if (key === "no") no = val;
+    }
+    if (yes !== null && no !== null) out.btts1H = { yes, no };
+  }
+  const btts2H = oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE_IN_2ND_HALF", bookmakerId);
+  if (btts2H.length > 0) {
+    let yes: number | null = null;
+    let no: number | null = null;
+    for (const o of btts2H) {
+      const val = oddsToNumber(o.value);
+      if (val === null) continue;
+      const key = (o.label || "").trim().toLowerCase();
+      if (key === "yes") yes = val;
+      else if (key === "no") no = val;
+    }
+    if (yes !== null && no !== null) out.btts2H = { yes, no };
+  }
+
+  // Half With Most Goals -> "1st Half"/"2nd Half"/"Draw" labels (confirmed
+  // real) mapped onto the first/second/equal shape settlement.ts's
+  // hsf-1/hsf-2/hsf-e keys already grade. Not present anywhere in the
+  // PulseScore/bwin extraction this replaces — genuinely new real coverage,
+  // not a port.
+  const hsm = oddsByDeveloperName(fixture, "HALF_WITH_MOST_GOALS", bookmakerId);
+  if (hsm.length > 0) {
+    let first: number | null = null;
+    let second: number | null = null;
+    let equal: number | null = null;
+    for (const o of hsm) {
+      const val = oddsToNumber(o.value);
+      if (val === null) continue;
+      const key = (o.label || "").trim().toLowerCase();
+      if (key === "1st half") first = val;
+      else if (key === "2nd half") second = val;
+      else if (key === "draw") equal = val;
+    }
+    if (first !== null || second !== null || equal !== null) {
+      out.highestScoringHalf = { first, second, equal };
+    }
   }
 
   return out;

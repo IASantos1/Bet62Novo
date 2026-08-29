@@ -209,6 +209,122 @@ test("extractSportMonksFootballOverride: a suspended odd is excluded", () => {
   assert.deepEqual(out.odds, { home: null, draw: 3.89, away: 8.18 });
 });
 
+// ── Phase 2 markets (2026-08-29) — all built from the SAME real fixture
+// (Fluminense v Remo, 1xbet, id 19621849) as the "Fulltime Result (1xbet,
+// default bookmaker)" test above, so every value here is internally
+// consistent with a single real match.
+const halfTimeResultMarket = {
+  id: 31, legacy_id: 37, name: "Half Time Result", developer_name: "HALF_TIME_RESULT", has_winning_calculations: false,
+};
+const secondHalfResultMarket = {
+  id: 97, legacy_id: null, name: "2nd Half Result", developer_name: "2ND_HALF_RESULT", has_winning_calculations: false,
+};
+const correctScoreMarket = {
+  id: 57, legacy_id: null, name: "Correct Score", developer_name: "CORRECT_SCORE", has_winning_calculations: false,
+};
+const htftDoubleMarket = {
+  id: 49, legacy_id: null, name: "HT/FT Double", developer_name: "HT_FT_DOUBLE", has_winning_calculations: false,
+};
+const oddEvenMarket = {
+  id: 44, legacy_id: null, name: "Odd/Even", developer_name: "ODD_EVEN", has_winning_calculations: false,
+};
+const homeTeamGoalsMarket = {
+  id: 20, legacy_id: 976198, name: "Home Team Goals", developer_name: "HOME_TEAM_GOALS", has_winning_calculations: false,
+};
+const awayTeamGoalsMarket = {
+  id: 21, legacy_id: 976204, name: "Away Team Goals", developer_name: "AWAY_TEAM_GOALS", has_winning_calculations: false,
+};
+const btts1HMarket = {
+  id: 15, legacy_id: 976226, name: "Both Teams to Score in 1st Half", developer_name: "BOTH_TEAMS_TO_SCORE_IN_1ST_HALF", has_winning_calculations: false,
+};
+const btts2HMarket = {
+  id: 16, legacy_id: 976230, name: "Both Teams to Score in 2nd Half", developer_name: "BOTH_TEAMS_TO_SCORE_IN_2ND_HALF", has_winning_calculations: false,
+};
+const halfWithMostGoalsMarket = {
+  id: 101, legacy_id: null, name: "Half With Most Goals", developer_name: "HALF_WITH_MOST_GOALS", has_winning_calculations: false,
+};
+
+test("extractSportMonksFootballOverride: Half Time Result (1xbet)", () => {
+  const odds = [
+    { market_id: 31, bookmaker_id: 35, label: "Away", value: "7.66", name: "Away", market: halfTimeResultMarket, bookmaker: onexbet },
+    { market_id: 31, bookmaker_id: 35, label: "Draw", value: "2.25", name: "Draw", market: halfTimeResultMarket, bookmaker: onexbet },
+    { market_id: 31, bookmaker_id: 35, label: "Home", value: "2.10", name: "Home", market: halfTimeResultMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.halfTime, { home: 2.1, draw: 2.25, away: 7.66 });
+});
+
+test("extractSportMonksFootballOverride: 2nd Half Result (1xbet)", () => {
+  const odds = [
+    { market_id: 97, bookmaker_id: 35, label: "Away", value: "6.40", name: "Away", market: secondHalfResultMarket, bookmaker: onexbet },
+    { market_id: 97, bookmaker_id: 35, label: "Home", value: "1.92", name: "Home", market: secondHalfResultMarket, bookmaker: onexbet },
+    { market_id: 97, bookmaker_id: 35, label: "Draw", value: "2.66", name: "Draw", market: secondHalfResultMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.secondHalf, { home: 1.92, draw: 2.66, away: 6.4 });
+});
+
+test("extractSportMonksFootballOverride: Correct Score converts 1xbet's 'H:A' labels to 'H-A' keys", () => {
+  const odds = [
+    { market_id: 57, bookmaker_id: 35, label: "10:4", value: "100.00", name: "10:4", market: correctScoreMarket, bookmaker: onexbet },
+    { market_id: 57, bookmaker_id: 35, label: "5:2", value: "101.00", name: "5:2", market: correctScoreMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.correctScore, { "10-4": 100, "5-2": 101 });
+});
+
+test("extractSportMonksFootballOverride: HT/FT Double maps 'Home/Away' style labels to htft-hd keys", () => {
+  const odds = [
+    { market_id: 49, bookmaker_id: 35, label: "Draw/Away", value: "15.00", name: "Draw/Away", market: htftDoubleMarket, bookmaker: onexbet },
+    { market_id: 49, bookmaker_id: 35, label: "Home/Home", value: "2.25", name: "Home/Home", market: htftDoubleMarket, bookmaker: onexbet },
+    { market_id: 49, bookmaker_id: 35, label: "Away/Home", value: "21.00", name: "Away/Home", market: htftDoubleMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.htft, { da: 15, hh: 2.25, ah: 21 });
+});
+
+test("extractSportMonksFootballOverride: Odd/Even total goals (1xbet)", () => {
+  const odds = [
+    { market_id: 44, bookmaker_id: 35, label: "Odd", value: "1.92", name: "Odd", market: oddEvenMarket, bookmaker: onexbet },
+    { market_id: 44, bookmaker_id: 35, label: "Even", value: "1.82", name: "Even", market: oddEvenMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.goalOddEven, { odd: 1.92, even: 1.82 });
+});
+
+test("extractSportMonksFootballOverride: Home/Away Team Goals merge into one teamGoals ladder at the 0.5 line", () => {
+  const odds = [
+    { market_id: 20, bookmaker_id: 35, label: "Over", value: "1.14", total: "0.5", market: homeTeamGoalsMarket, bookmaker: onexbet },
+    { market_id: 20, bookmaker_id: 35, label: "Under", value: "5.52", total: "0.5", market: homeTeamGoalsMarket, bookmaker: onexbet },
+    { market_id: 21, bookmaker_id: 35, label: "Over", value: "1.90", total: "0.5", market: awayTeamGoalsMarket, bookmaker: onexbet },
+    { market_id: 21, bookmaker_id: 35, label: "Under", value: "1.90", total: "0.5", market: awayTeamGoalsMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.teamGoals, { homeOver05: 1.14, homeUnder05: 5.52, awayOver05: 1.9, awayUnder05: 1.9 });
+});
+
+test("extractSportMonksFootballOverride: Both Teams To Score in 1st/2nd Half (1xbet)", () => {
+  const odds = [
+    { market_id: 15, bookmaker_id: 35, label: "No", value: "1.13", name: "No", market: btts1HMarket, bookmaker: onexbet },
+    { market_id: 15, bookmaker_id: 35, label: "Yes", value: "6.02", name: "Yes", market: btts1HMarket, bookmaker: onexbet },
+    { market_id: 16, bookmaker_id: 35, label: "Yes", value: "4.38", name: "Yes", market: btts2HMarket, bookmaker: onexbet },
+    { market_id: 16, bookmaker_id: 35, label: "No", value: "1.22", name: "No", market: btts2HMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.btts1H, { yes: 6.02, no: 1.13 });
+  assert.deepEqual(out.btts2H, { yes: 4.38, no: 1.22 });
+});
+
+test("extractSportMonksFootballOverride: Half With Most Goals maps '1st Half'/'2nd Half'/'Draw' to first/second/equal", () => {
+  const odds = [
+    { market_id: 101, bookmaker_id: 35, label: "Draw", value: "3.40", name: "Draw", market: halfWithMostGoalsMarket, bookmaker: onexbet },
+    { market_id: 101, bookmaker_id: 35, label: "2nd Half", value: "2.09", name: "2nd Half", market: halfWithMostGoalsMarket, bookmaker: onexbet },
+    { market_id: 101, bookmaker_id: 35, label: "1st Half", value: "3.04", name: "1st Half", market: halfWithMostGoalsMarket, bookmaker: onexbet },
+  ];
+  const out = extractSportMonksFootballOverride(makeFixture(odds));
+  assert.deepEqual(out.highestScoringHalf, { first: 3.04, second: 2.09, equal: 3.4 });
+});
+
 test("extractSportMonksFootballOverride: a different bookmaker_id than requested is ignored", () => {
   const odds = [
     { market_id: 1, bookmaker_id: 999, label: "Home", value: "1.54", name: "Home", market: fulltimeResultMarket, bookmaker: { id: 999, legacy_id: 999, name: "other" } },
