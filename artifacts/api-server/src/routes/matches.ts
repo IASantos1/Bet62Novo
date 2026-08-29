@@ -44,6 +44,8 @@ import {
   getSportMonksPlayerProfile,
   getPlayerCurrentSeasonStatTotal,
   getPlayerRecentMatches,
+  getSportMonksLiveOdds,
+  extractLiveFulltimeResult,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -14189,7 +14191,10 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
  * cover, pending a confirmed real sample of that event type.
  */
 async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
-  const fixtures = await getSportMonksFootballLive();
+  const [fixtures, liveOddsByFixture] = await Promise.all([
+    getSportMonksFootballLive(),
+    getSportMonksLiveOdds(),
+  ]);
   const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
   const currentIds = new Set<string>();
 
@@ -14243,9 +14248,18 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       baseMarkets,
       override,
     );
+    // Live 1X2 comes from the dedicated /odds/inplay endpoint (bet365,
+    // bookmaker_id 2 — explicit user decision, 2026-08-29), NOT from
+    // fx.odds/extractSportMonksFootballOverride: /livescores/inplay itself
+    // rejects the `odds` include outright (see getSportMonksFootballLive's
+    // fetchLive comment), so fx.odds/override.odds are always empty here —
+    // override still covers the other markets it can (all currently null
+    // for live fixtures, same real-absence fallback to synthetic odds).
+    const liveFixtureOdds = liveOddsByFixture.get(fx.id) ?? [];
+    const liveFtr = extractLiveFulltimeResult(liveFixtureOdds);
     const baseOdds = makeOddsFromTeams(home, away);
-    const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
-    const hasRealOddsNow = !!override.odds;
+    const odds = { ...baseOdds, ...nonNullPatch(liveFtr ?? override.odds) };
+    const hasRealOddsNow = !!liveFtr || !!override.odds;
 
     const redCardsHome = countSportMonksRedCards(fx, "home");
     const redCardsAway = countSportMonksRedCards(fx, "away");
@@ -14254,9 +14268,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const newRedCard =
       !!existing &&
       redCardsHome + redCardsAway > (existing.redCardsHome ?? 0) + (existing.redCardsAway ?? 0);
-    const resultOdds = (fx.odds ?? []).filter(
-      (o) => o.market?.developer_name === "FULLTIME_RESULT" && o.bookmaker_id === 35,
-    );
+    const resultOdds = liveFixtureOdds.filter((o) => o.market_id === 1);
     const bookmakerSuspended =
       resultOdds.length > 0 && resultOdds.every((o) => o.suspended);
 

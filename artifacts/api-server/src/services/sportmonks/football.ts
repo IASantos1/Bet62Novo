@@ -1098,6 +1098,149 @@ export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> 
   return promise;
 }
 
+// ── Live odds (1X2) ─────────────────────────────────────────────────────────
+// CONFIRMED REAL (2026-08-29): live match odds don't live on
+// /livescores/inplay fixtures at all (that endpoint rejects the `odds`
+// include outright — see fetchLive's comment above) — they're a SEPARATE
+// endpoint, GET /v3/football/odds/inplay, with a FLAT response shape (no
+// nested market{}/bookmaker{} objects like the prematch odds this file
+// otherwise uses — only a numeric `market_id` + human-readable
+// `market_description` string). Confirmed real per-row shape, bet365
+// sample (bookmaker_id 2), fixture 18531144: {id, fixture_id, market_id,
+// bookmaker_id, label, value, name, market_description, suspended,
+// stopped, total, handicap, ...}. market_id 1 = "Fulltime Result" is the
+// only market_id confirmed and understood so far (market_id 3 appeared
+// with BOTH "1st Goal" and "4th Goal" descriptions in the same real
+// sample — genuinely ambiguous, deliberately NOT wired here).
+//
+// Bookmaker choice for LIVE football odds specifically (explicit user
+// decision, 2026-08-29): bet365 (bookmaker_id 2), NOT 1xbet (id 35) used
+// for prematch odds elsewhere in this file — confirmed via a real
+// cross-check (filters=bookmakers:35 on this same endpoint returned a
+// real, well-formed empty result) that 1xbet simply has no live in-play
+// odds via this API; bet365 does.
+//
+// Pagination is cursor-based but `page` also works and is simpler to
+// drive (confirmed real: `pagination.current_page`/`next_page` both
+// present). This is the general, unfiltered-by-fixture paginated list
+// (explicit user direction, 2026-08-29: "Prefiro que você use a lista
+// geral paginada" over a per-fixture endpoint) — every live odds row
+// across every fixture SportMonks has bet365 live odds for, so we bound
+// how many pages we walk per refresh rather than fetching to exhaustion.
+//
+// Rate-limit math: InplayOdd is its own entity (confirmed real
+// `rate_limit.requested_entity: "InplayOdd"`), 3000 calls/hour, used by
+// nothing else in this file. At a 15s cache TTL that's 240 refresh
+// cycles/hour, so a 12-page cap per cycle averages ≤2880/hour — real
+// headroom kept by also bailing early once the response's own
+// `rate_limit.remaining` (present on every real response) drops below a
+// safety floor, so a slow hour never actually exhausts the budget.
+export type SportMonksLiveOdd = {
+  id: number;
+  fixture_id: number;
+  market_id: number;
+  bookmaker_id: number;
+  label: string;
+  value: string;
+  name: string | null;
+  market_description: string;
+  suspended?: boolean;
+  stopped?: boolean;
+  total?: string | null;
+  handicap?: string | null;
+};
+
+type SportMonksLiveOddsPage = {
+  data: SportMonksLiveOdd[];
+  pagination?: { has_more?: boolean };
+  rate_limit?: { remaining: number };
+};
+
+const LIVE_ODDS_TTL_MS = 15 * 1000;
+const LIVE_ODDS_MAX_PAGES = 12;
+const LIVE_ODDS_RATE_LIMIT_FLOOR = 200;
+
+let liveOddsCache: { byFixture: Map<number, SportMonksLiveOdd[]>; fetchedAt: number } | null =
+  null;
+let liveOddsInFlight: Promise<Map<number, SportMonksLiveOdd[]>> | null = null;
+
+async function fetchLiveOdds(bookmakerId: number): Promise<Map<number, SportMonksLiveOdd[]>> {
+  const byFixture = new Map<number, SportMonksLiveOdd[]>();
+  for (let page = 1; page <= LIVE_ODDS_MAX_PAGES; page++) {
+    const resp = await sportMonksGetWithRetry<SportMonksLiveOddsPage>("/odds/inplay", {
+      filters: `bookmakers:${bookmakerId}`,
+      page: String(page),
+    });
+    if (!resp) {
+      logger.warn("[sportmonks] /odds/inplay returned no data (request failed after retries)");
+      break;
+    }
+    for (const odd of resp.data ?? []) {
+      const list = byFixture.get(odd.fixture_id);
+      if (list) list.push(odd);
+      else byFixture.set(odd.fixture_id, [odd]);
+    }
+    if (!resp.pagination?.has_more) break;
+    if (
+      resp.rate_limit?.remaining !== undefined &&
+      resp.rate_limit.remaining < LIVE_ODDS_RATE_LIMIT_FLOOR
+    ) {
+      break;
+    }
+  }
+  return byFixture;
+}
+
+/** Live 1X2 odds for every fixture bet365 currently has in-play odds for,
+ * keyed by fixture_id, cached ~15s. Bounded pagination — see comment
+ * block above for the rate-limit reasoning. */
+export async function getSportMonksLiveOdds(
+  bookmakerId = 2,
+): Promise<Map<number, SportMonksLiveOdd[]>> {
+  if (liveOddsCache && Date.now() - liveOddsCache.fetchedAt < LIVE_ODDS_TTL_MS) {
+    return liveOddsCache.byFixture;
+  }
+  if (liveOddsInFlight) return liveOddsInFlight;
+
+  const promise = fetchLiveOdds(bookmakerId)
+    .then((byFixture) => {
+      liveOddsCache = { byFixture, fetchedAt: Date.now() };
+      return byFixture;
+    })
+    .catch(() => liveOddsCache?.byFixture ?? new Map<number, SportMonksLiveOdd[]>())
+    .finally(() => {
+      liveOddsInFlight = null;
+    });
+  liveOddsInFlight = promise;
+  return promise;
+}
+
+/** Pure extraction step: a fixture's live odds rows -> 1X2, market_id 1
+ * ("Fulltime Result", the only live market_id confirmed/understood so
+ * far). Suspended rows are excluded (consistent with the `!o.suspended`
+ * filtering already used for prematch odds elsewhere in this file) — a
+ * fixture where every row is suspended legitimately returns null here,
+ * same "real absence, not a bug" handling as the rest of this file. Label
+ * vocabulary ("1"/"X"/"2" vs "Home"/"Draw"/"Away") mirrors
+ * normalizeThreeWaySide's confirmed real bet365 vocabulary. */
+export function extractLiveFulltimeResult(
+  odds: SportMonksLiveOdd[],
+): { home: number | null; draw: number | null; away: number | null } | null {
+  let home: number | null = null;
+  let draw: number | null = null;
+  let away: number | null = null;
+  for (const o of odds) {
+    if (o.market_id !== 1 || o.suspended) continue;
+    const val = oddsToNumber(o.value);
+    if (val === null) continue;
+    const key = (o.label || "").trim().toLowerCase();
+    if (key === "1" || key === "home") home = val;
+    else if (key === "x" || key === "draw") draw = val;
+    else if (key === "2" || key === "away") away = val;
+  }
+  return home !== null || draw !== null || away !== null ? { home, draw, away } : null;
+}
+
 /** Live score from a fixture's `scores` array — the "CURRENT" running
  * total (confirmed real, 2026-08-29: description "CURRENT" per participant,
  * distinct from "1ST_HALF"/"2ND_HALF"/"2ND_HALF_ONLY" period breakdowns).
