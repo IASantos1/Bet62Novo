@@ -41,6 +41,9 @@ import {
   getSportMonksTeamUpcoming,
   getSportMonksTeamHeadToHead,
   isFootballLiveDisplayEvent,
+  getSportMonksPlayerProfile,
+  getPlayerCurrentSeasonStatTotal,
+  getPlayerRecentMatches,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -507,7 +510,7 @@ export type LiveMatchState = {
   hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
-  events: Array<{ type: string; team: string; minute: number; player: string; detail?: string }>;
+  events: Array<{ type: string; team: string; minute: number; player: string; playerId?: number; detail?: string }>;
   // Count of VAR-typed events seen so far (API-Football) — compared tick-to-
   // tick to detect a NEW VAR review vs. one already suspended for, same
   // reasoning as redCardsHome/Away being counts rather than a single flag.
@@ -14286,6 +14289,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
           team: participant?.id === homeP.id ? home : away,
           minute: e.minute,
           player: e.player_name ?? "",
+          playerId: e.player_id ?? undefined,
           detail: e.info ?? e.addition ?? undefined,
         };
       });
@@ -28786,6 +28790,50 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
     res.json({ fixtures });
   } catch {
     res.json({ fixtures: [] });
+  }
+});
+
+// ─── Player Profile (SportMonks, football only) ────────────────────────────────
+// Real GET /v3/football/players/{id} data, confirmed 2026-08-29.
+
+router.get("/player-profile/:id", async (req: Request, res: Response) => {
+  const playerId = Number(req.params.id);
+  if (!Number.isFinite(playerId) || playerId <= 0) {
+    res.status(400).json({ error: "invalid player id" });
+    return;
+  }
+  try {
+    const player = await getSportMonksPlayerProfile(playerId);
+    if (!player) {
+      res.status(404).json({ error: "player not found" });
+      return;
+    }
+    const currentSeasonRow = (player.statistics ?? []).find((s) => s.season?.is_current === true);
+    res.json({
+      id: player.id,
+      name: player.display_name?.trim() || player.common_name || player.name || "",
+      imageUrl: player.image_path ?? null,
+      nationality: player.nationality?.name ?? null,
+      nationalityFlagUrl: player.nationality?.image_path ?? null,
+      position: player.detailedposition?.name ?? null,
+      height: player.height ?? null,
+      weight: player.weight ?? null,
+      dateOfBirth: player.date_of_birth ?? null,
+      team: currentSeasonRow?.team?.name ?? null,
+      teamLogoUrl: currentSeasonRow?.team?.image_path ?? null,
+      competition: currentSeasonRow?.season?.league?.name ?? null,
+      seasonStats: {
+        appearances: getPlayerCurrentSeasonStatTotal(player, 321),
+        goals: getPlayerCurrentSeasonStatTotal(player, 52),
+        assists: getPlayerCurrentSeasonStatTotal(player, 79),
+        yellowCards: getPlayerCurrentSeasonStatTotal(player, 84),
+        redCards: getPlayerCurrentSeasonStatTotal(player, 83),
+        minutesPlayed: getPlayerCurrentSeasonStatTotal(player, 119),
+      },
+      recentMatches: getPlayerRecentMatches(player, 10),
+    });
+  } catch {
+    res.status(500).json({ error: "player profile unavailable" });
   }
 });
 

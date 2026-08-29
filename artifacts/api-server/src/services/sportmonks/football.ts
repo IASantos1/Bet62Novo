@@ -862,6 +862,167 @@ export async function getSportMonksFixtureById(id: number): Promise<SportMonksFi
   return fixture;
 }
 
+// ── Player profile ───────────────────────────────────────────────────────────
+// Confirmed real (2026-08-29), GET /v3/football/players/{id} — Jonathan
+// Calleri (São Paulo). Two DIFFERENT stat-value shapes exist in this one
+// response and must not be conflated:
+//   - `statistics[].details[]` (season/competition aggregates): `value` is
+//     an object whose shape varies per stat — most are `{total}`, but e.g.
+//     GOALS is `{total, goals, penalties}`, PENALTIES is
+//     `{total, won, scored, committed, saved, missed}`, YELLOWCARDS is
+//     `{total, home, away}`, RATING is `{average, highest, lowest}`.
+//   - `latest[].details[]` (per-match lineup stats): `data` is always
+//     `{value: number | boolean}` — a single flat value, no sub-fields.
+// Confirmed real stat type_ids used here: GOALS 52, ASSISTS 79,
+// YELLOWCARDS 84, REDCARDS 83, APPEARANCES 321, MINUTES_PLAYED 119,
+// RATING 118. `latest[]` entries can have `fixture: null` (a match
+// SportMonks hasn't backfilled fixture data for yet) — filtered out below,
+// not guessed at.
+export type SportMonksPlayerStatDetail = {
+  type_id: number;
+  value: Record<string, number> | number;
+  type: { id: number; name: string; code: string; developer_name: string };
+};
+
+export type SportMonksPlayerSeasonStats = {
+  id: number;
+  team_id: number;
+  season_id: number;
+  details?: SportMonksPlayerStatDetail[];
+  team?: { id: number; name: string; image_path?: string };
+  season?: { id: number; name: string; is_current?: boolean; league?: { id: number; name: string } };
+};
+
+export type SportMonksPlayerMatchDetail = {
+  type_id: number;
+  data: { value: number | boolean | string };
+  type: { id: number; name: string; code: string; developer_name: string };
+};
+
+export type SportMonksPlayerLatestMatch = {
+  fixture_id: number;
+  team_id: number;
+  fixture: SportMonksFixture | null;
+  details?: SportMonksPlayerMatchDetail[];
+};
+
+export type SportMonksPlayer = {
+  id: number;
+  common_name?: string;
+  display_name?: string;
+  name?: string;
+  image_path?: string;
+  height?: number;
+  weight?: number;
+  date_of_birth?: string;
+  nationality?: { id: number; name: string; image_path?: string };
+  detailedposition?: { id: number; name: string; developer_name: string };
+  statistics?: SportMonksPlayerSeasonStats[];
+  latest?: SportMonksPlayerLatestMatch[];
+};
+
+const PLAYER_PROFILE_TTL_MS = 30 * 60 * 1000;
+const playerProfileCache = new Map<number, { player: SportMonksPlayer | null; fetchedAt: number }>();
+
+/** A player's full profile — bio, per-season/competition career stats, and
+ * recent match-by-match performance. Uses the exact real confirmed include
+ * chain (verbatim from a real request, 2026-08-29) rather than a trimmed
+ * guess, since nested-include depth limits are endpoint-specific and this
+ * combination is the one actually confirmed to work. Cached ~30 minutes. */
+export async function getSportMonksPlayerProfile(playerId: number): Promise<SportMonksPlayer | null> {
+  const cached = playerProfileCache.get(playerId);
+  if (cached && Date.now() - cached.fetchedAt < PLAYER_PROFILE_TTL_MS) return cached.player;
+
+  const resp = await sportMonksGetWithRetry<{ data: SportMonksPlayer }>(`/players/${playerId}`, {
+    include:
+      "nationality;detailedPosition;statistics.details.type;metadata.type;trophies.trophy;trophies.team;teams.team;statistics.team;statistics.season.league;latest.fixture.participants;latest.fixture.league;latest.fixture.scores;latest.details.type;trophies.league;trophies.season",
+  });
+  const player = resp?.data ?? null;
+  playerProfileCache.set(playerId, { player, fetchedAt: Date.now() });
+  return player;
+}
+
+/** Pure extraction step behind the player-profile route — reads one stat's
+ * total from the CURRENT season's aggregate row (season.is_current), split
+ * out so it's unit testable against a real profile sample without mocking
+ * the network fetch. Returns null when there's no current-season row or
+ * the stat is simply absent for it (a real absence — e.g. a keeper with no
+ * GOALS entry — not guessed as zero). */
+export function getPlayerCurrentSeasonStatTotal(
+  player: SportMonksPlayer,
+  statTypeId: number,
+): number | null {
+  const row = (player.statistics ?? []).find((s) => s.season?.is_current === true);
+  if (!row) return null;
+  const detail = (row.details ?? []).find((d) => d.type_id === statTypeId);
+  if (!detail) return null;
+  if (typeof detail.value === "number") return detail.value;
+  const total = detail.value?.total;
+  return typeof total === "number" ? total : null;
+}
+
+export type PlayerRecentMatch = {
+  fixtureId: number;
+  date: string;
+  opponent: string;
+  competition: string;
+  isHome: boolean;
+  teamScore: number | null;
+  opponentScore: number | null;
+  goals: number;
+  assists: number;
+  yellowCards: number;
+  redCards: number;
+  minutesPlayed: number | null;
+  rating: number | null;
+};
+
+/** Pure extraction step behind the player-profile route — turns `latest[]`
+ * (real per-match lineup stats, `data.value` flat-number shape) into a
+ * clean recent-matches list, most recent first. Entries with `fixture: null`
+ * (confirmed real — SportMonks hasn't backfilled that match yet) are
+ * skipped rather than guessed at. */
+export function getPlayerRecentMatches(player: SportMonksPlayer, limit = 10): PlayerRecentMatch[] {
+  const withFixture = (player.latest ?? []).filter(
+    (m): m is SportMonksPlayerLatestMatch & { fixture: SportMonksFixture } => m.fixture !== null,
+  );
+  withFixture.sort((a, b) => b.fixture.starting_at_timestamp - a.fixture.starting_at_timestamp);
+
+  return withFixture.slice(0, limit).map((m) => {
+    const fx = m.fixture;
+    const homeP = fx.participants?.find((p) => p.meta?.location === "home");
+    const awayP = fx.participants?.find((p) => p.meta?.location === "away");
+    const isHome = homeP?.id === m.team_id;
+    const opponent = (isHome ? awayP?.name : homeP?.name) ?? "";
+    const score = getSportMonksFixtureScore(fx);
+    const teamScore = score ? (isHome ? score.home : score.away) : null;
+    const opponentScore = score ? (isHome ? score.away : score.home) : null;
+    const numFor = (typeId: number): number => {
+      const d = (m.details ?? []).find((x) => x.type_id === typeId);
+      return typeof d?.data.value === "number" ? d.data.value : 0;
+    };
+    const numOrNullFor = (typeId: number): number | null => {
+      const d = (m.details ?? []).find((x) => x.type_id === typeId);
+      return typeof d?.data.value === "number" ? d.data.value : null;
+    };
+    return {
+      fixtureId: fx.id,
+      date: fx.starting_at ? fx.starting_at.slice(0, 10) : "",
+      opponent,
+      competition: fx.league?.name ?? "",
+      isHome,
+      teamScore,
+      opponentScore,
+      goals: numFor(52),
+      assists: numFor(79),
+      yellowCards: numFor(84),
+      redCards: numFor(83),
+      minutesPlayed: numOrNullFor(119),
+      rating: numOrNullFor(118),
+    };
+  });
+}
+
 // ── Live fixtures ───────────────────────────────────────────────────────────
 // Deliberately a SEPARATE, single global call — /livescores/inplay returns
 // every fixture currently in play across every league in one request,
