@@ -1026,18 +1026,21 @@ export function getPlayerRecentMatches(player: SportMonksPlayer, limit = 10): Pl
 
 // ── Live fixtures ───────────────────────────────────────────────────────────
 // Deliberately a SEPARATE, single global call — /livescores/inplay returns
-// every fixture currently in play across every league in one request,
-// confirmed real (2026-08-29) to accept the same combined include this file
-// already uses for odds (fixtures.odds.market/bookmaker-equivalent, just
-// without the "fixtures." prefix since this endpoint's fixtures ARE the top
-// level) plus state/events/periods/scores. Polling this ONE endpoint every
-// ~20s is drastically cheaper than re-polling all 39 leagues' round
-// endpoints that often would be (39 leagues x 3 polls/min x 1440 min/day
-// would blow well past the 50k/day plan budget on its own) — most of those
-// 39 leagues have no live match at any given moment, so a single
-// globally-scoped call is the only way to get near-real-time live data
-// within budget.
-const LIVE_TTL_MS = 20 * 1000;
+// every fixture currently in play across every league in one request. A
+// single globally-scoped call (rather than re-polling all 39 leagues' round
+// endpoints individually) is the only way to get near-real-time live data
+// without moving the needle on API budget — most of those 39 leagues have
+// no live match at any given moment.
+// Poll cadence: SportMonks' own docs (confirmed real, user-supplied,
+// 2026-08-29) say livescores has no push/WebSocket mechanism — polling
+// every 1-2s is what they themselves recommend for an accurate ~2s max
+// delay. Their rate limiter is 3000 calls/hour PER ENTITY (Livescores is
+// its own entity, independent of the Fixtures/Odds/Players calls this file
+// also makes), so 2s intervals (1800/hour) stay safely under budget with
+// real headroom for retries — the previous 20s TTL was far more
+// conservative than needed and was contributing to the live page feeling
+// stuck between updates.
+const LIVE_TTL_MS = 2 * 1000;
 let liveCache: { fixtures: SportMonksFixture[]; fetchedAt: number } | null = null;
 let liveInFlight: Promise<SportMonksFixture[]> | null = null;
 
