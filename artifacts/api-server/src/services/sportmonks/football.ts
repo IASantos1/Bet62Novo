@@ -1166,16 +1166,29 @@ let liveOddsInFlight: Promise<Map<number, SportMonksLiveOdd[]>> | null = null;
 
 async function fetchLiveOdds(bookmakerId: number): Promise<Map<number, SportMonksLiveOdd[]>> {
   const byFixture = new Map<number, SportMonksLiveOdd[]>();
+  let pagesFetched = 0;
+  let rowsFetched = 0;
   for (let page = 1; page <= LIVE_ODDS_MAX_PAGES; page++) {
     const resp = await sportMonksGetWithRetry<SportMonksLiveOddsPage>("/odds/inplay", {
       filters: `bookmakers:${bookmakerId}`,
       page: String(page),
     });
+    pagesFetched++;
     if (!resp) {
       logger.warn("[sportmonks] /odds/inplay returned no data (request failed after retries)");
       break;
     }
+    if (page === 1 && (resp.data ?? []).length === 0) {
+      // Real, well-formed empty result (e.g. "No result(s) found...") is not
+      // an error — logged at info so a genuine no-live-odds-right-now moment
+      // is distinguishable in the logs from the request failing outright.
+      logger.info(
+        { bookmakerId },
+        "[sportmonks] /odds/inplay returned zero rows on page 1 — no live odds for this bookmaker right now",
+      );
+    }
     for (const odd of resp.data ?? []) {
+      rowsFetched++;
       const list = byFixture.get(odd.fixture_id);
       if (list) list.push(odd);
       else byFixture.set(odd.fixture_id, [odd]);
@@ -1185,9 +1198,29 @@ async function fetchLiveOdds(bookmakerId: number): Promise<Map<number, SportMonk
       resp.rate_limit?.remaining !== undefined &&
       resp.rate_limit.remaining < LIVE_ODDS_RATE_LIMIT_FLOOR
     ) {
+      logger.warn(
+        { remaining: resp.rate_limit.remaining, pagesFetched },
+        "[sportmonks] /odds/inplay pagination cut short — rate-limit floor reached",
+      );
       break;
     }
   }
+  let ftrRows = 0;
+  let ftrSuspended = 0;
+  for (const odds of byFixture.values()) {
+    for (const o of odds) {
+      if (o.market_id !== 1) continue;
+      ftrRows++;
+      if (o.suspended) ftrSuspended++;
+    }
+  }
+  // info, not debug: the logger's default level is "info" (LOG_LEVEL env
+  // var not set in most deployments), and this only fires once per ~15s
+  // cache cycle — not spammy enough to warrant debug-only visibility.
+  logger.info(
+    { bookmakerId, pagesFetched, rowsFetched, fixtures: byFixture.size, ftrRows, ftrSuspended },
+    "[sportmonks] /odds/inplay fetch summary",
+  );
   return byFixture;
 }
 
