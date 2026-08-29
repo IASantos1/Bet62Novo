@@ -44,8 +44,7 @@ import {
   getSportMonksPlayerProfile,
   getPlayerCurrentSeasonStatTotal,
   getPlayerRecentMatches,
-  getSportMonksLiveOdds,
-  extractLiveFulltimeResult,
+  getSportMonksLiveOddsByFixture,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -14191,10 +14190,12 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
  * cover, pending a confirmed real sample of that event type.
  */
 async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
-  const [fixtures, liveOddsByFixture] = await Promise.all([
-    getSportMonksFootballLive(),
-    getSportMonksLiveOdds(),
-  ]);
+  const fixtures = await getSportMonksFootballLive();
+  // Per-fixture odds (confirmed real, 2026-08-29 — see getSportMonksLiveOddsByFixture's
+  // header for how this replaced the dead-end /odds/inplay general list),
+  // fanned out across every fixture this tick regardless of live/NS/FT —
+  // cheap and cached per fixture_id, simpler than pre-filtering here.
+  const liveOddsByFixture = await getSportMonksLiveOddsByFixture(fixtures.map((fx) => fx.id));
   const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
   const currentIds = new Set<string>();
 
@@ -14241,25 +14242,25 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const prio = leaguePriority(prioKey, countryKey ?? undefined);
     const tier = footballMarketTier(leagueName, country);
 
-    const override = extractSportMonksFootballOverride(fx);
+    // Live odds (confirmed real, 2026-08-29): bet365 (bookmaker_id 2) via
+    // GET /fixtures/{id}?include=odds.market;odds.bookmaker — the same
+    // nested shape/extraction prematch already uses, just fetched
+    // per-fixture instead of via a round (see getSportMonksLiveOddsByFixture's
+    // header for why /odds/inplay's general list didn't work for this
+    // account). fx.odds itself stays empty (the /livescores/inplay fixture
+    // list this loop iterates rejects the odds include outright), so it's
+    // merged in here before extraction.
+    const liveFixtureOdds = liveOddsByFixture.get(fx.id) ?? [];
+    const override = extractSportMonksFootballOverride({ ...fx, odds: liveFixtureOdds }, 2);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const markets: AdvancedMarkets = applySportMonksFootballOverride(
       { ...baseMarkets },
       baseMarkets,
       override,
     );
-    // Live 1X2 comes from the dedicated /odds/inplay endpoint (bet365,
-    // bookmaker_id 2 — explicit user decision, 2026-08-29), NOT from
-    // fx.odds/extractSportMonksFootballOverride: /livescores/inplay itself
-    // rejects the `odds` include outright (see getSportMonksFootballLive's
-    // fetchLive comment), so fx.odds/override.odds are always empty here —
-    // override still covers the other markets it can (all currently null
-    // for live fixtures, same real-absence fallback to synthetic odds).
-    const liveFixtureOdds = liveOddsByFixture.get(fx.id) ?? [];
-    const liveFtr = extractLiveFulltimeResult(liveFixtureOdds);
     const baseOdds = makeOddsFromTeams(home, away);
-    const odds = { ...baseOdds, ...nonNullPatch(liveFtr ?? override.odds) };
-    const hasRealOddsNow = !!liveFtr || !!override.odds;
+    const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
+    const hasRealOddsNow = !!override.odds;
 
     const redCardsHome = countSportMonksRedCards(fx, "home");
     const redCardsAway = countSportMonksRedCards(fx, "away");
@@ -14268,9 +14269,11 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const newRedCard =
       !!existing &&
       redCardsHome + redCardsAway > (existing.redCardsHome ?? 0) + (existing.redCardsAway ?? 0);
-    const resultOdds = liveFixtureOdds.filter((o) => o.market_id === 1);
+    const resultOdds = liveFixtureOdds.filter(
+      (o) => o.market?.developer_name === "FULLTIME_RESULT" && o.bookmaker_id === 2,
+    );
     const bookmakerSuspended =
-      resultOdds.length > 0 && resultOdds.every((o) => o.suspended);
+      resultOdds.length > 0 && resultOdds.every((o) => o.suspended || o.stopped);
 
     let marketSuspension = existing?.marketSuspension;
     let suspensionReason = existing?._suspensionReason;
