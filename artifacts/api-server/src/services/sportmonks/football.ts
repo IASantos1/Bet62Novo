@@ -47,6 +47,7 @@
 // for the full target list still open).
 
 import { sportMonksGetWithRetry } from "./client.js";
+import { logger } from "../../lib/logger.js";
 
 export type SportMonksOdd = {
   market_id: number;
@@ -1043,13 +1044,32 @@ let liveInFlight: Promise<SportMonksFixture[]> | null = null;
 type SportMonksInplayFixture = SportMonksFixture & { league_id: number };
 
 async function fetchLive(): Promise<SportMonksFixture[]> {
+  // CONFIRMED REAL (2026-08-29, user-reported real error response):
+  // /livescores/inplay REJECTS the `odds` relation outright —
+  // {"message":"The odds include is not allowed on this endpoint","link":
+  // "https://docs.sportmonks.com/football/api/response-codes/include-exceptions"}.
+  // odds.market;odds.bookmaker had been in this include since this file's
+  // live layer was first written, so EVERY call ever made here failed
+  // outright and silently returned zero live fixtures — not a regression
+  // from the statistics.type change tried and reverted just before this
+  // (that hypothesis was wrong and is now ruled out); a real, standing bug
+  // since day one of the live build. Odds are dropped from this include
+  // entirely — live match state (score/events/periods/clock) now loads,
+  // but fixtures from this endpoint carry no `odds` field, so
+  // extractSportMonksFootballOverride(fx).odds is always null here and live
+  // football odds fall back to synthetic (see buildFootballLiveFromSportMonks
+  // in matches.ts) — a real, separate, still-open gap: the real source for
+  // live odds on this endpoint is unconfirmed and needs its own real sample
+  // before being wired in, same discipline as everything else in this file.
   const resp = await sportMonksGetWithRetry<{ data: SportMonksInplayFixture[] }>(
     "/livescores/inplay",
     {
-      include:
-        "state;events.type;events.player;periods;participants;scores;league.country;odds.market;odds.bookmaker;statistics.type",
+      include: "state;events.type;events.player;periods;participants;scores;league.country",
     },
   );
+  if (!resp) {
+    logger.warn("[sportmonks] /livescores/inplay returned no data (request failed after retries)");
+  }
   const allowed = new Set(SPORTMONKS_FOOTBALL_LEAGUE_IDS);
   return (resp?.data ?? []).filter((fx) => allowed.has(fx.league_id));
 }
