@@ -11,6 +11,7 @@
     "test:settlement": "tsx --test src/tests/settlement.spec.ts",
     "test:core": "tsx --test src/tests/core.spec.ts",
     "test:pulsescore": "tsx --test src/tests/pulsescore.spec.ts",
+    "test:sportmonks": "tsx --test src/tests/sportmonks.spec.ts",
     "seed:casino": "tsx src/scripts/seedCasinoGames.ts",
     "seed:palace-casino": "tsx src/scripts/seedPalaceCasinoGames.ts",
     "seed:featured-banners": "tsx src/scripts/seedFeaturedCasinoBanners.ts",

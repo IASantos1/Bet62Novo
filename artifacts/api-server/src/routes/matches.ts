@@ -28,6 +28,10 @@ import {
   getPulseScoreFootballUpcoming,
 } from "../services/pulsescore/football.js";
 import {
+  getSportMonksFootballUpcoming,
+  extractSportMonksFootballOverride,
+} from "../services/sportmonks/football.js";
+import {
   getPulseScoreTennisLive,
   extractTennisOverride,
   getPulseScoreTennisUpcoming,
@@ -11585,6 +11589,129 @@ async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+// Confirmed real (2026-08-29, GET /v3/football/leagues) — every league this
+// account's SportMonks plan covers. Explicit user decision (2026-08-29):
+// show all of them, no additional allow-list filtering the way
+// buildFootballUpcomingFromPulseScore needs (isVirtualFootballLeague/
+// isAllowedFootballLeague/footballLeagueAllowedStrict) — those exist to cut
+// PulseScore's much larger raw catalog down to a curated set, but this list
+// is already curated by the subscription itself.
+const SPORTMONKS_FOOTBALL_LEAGUE_IDS = [
+  2, 5, 8, 9, 24, 27, 72, 82, 85, 181, 208, 271, 301, 304, 384, 387, 390, 444,
+  453, 462, 501, 564, 567, 570, 573, 591, 600, 603, 636, 648, 779, 944, 968,
+  1034, 1116, 1122, 1328, 1371, 2286,
+];
+
+/** Strips null/undefined values out of a partial nullable numeric object —
+ * SportMonksFootballOverride's fields (odds, doubleChance, drawNoBet) allow
+ * a side to be null when that specific selection didn't resolve to a
+ * number, but AdvancedMarkets' fields are all non-nullable numbers. Spread
+ * this onto the synthetic baseline instead of the raw override so a
+ * partially-real market (e.g. home/draw real, away still null) still
+ * improves on the fully-synthetic default rather than falling back to it
+ * entirely. */
+function nonNullPatch<T extends Record<string, number | null | undefined>>(
+  obj: T | undefined,
+): Partial<Record<keyof T, number>> {
+  if (!obj) return {};
+  const out: Partial<Record<keyof T, number>> = {};
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    const v = obj[key];
+    if (v !== null && v !== undefined) out[key] = v;
+  }
+  return out;
+}
+
+/**
+ * Football prematch, sourced from SportMonks (getSportMonksFootballUpcoming)
+ * — replacing PulseScore/bwin (blocked 2026-08-28, see
+ * pulsescore/football.ts's FOOTBALL_PULSESCORE_BLOCKED) as football's odds
+ * provider. Bookmaker: 1xbet (explicit user decision, 2026-08-29), same
+ * brand every other sport already standardized on. Only the 7 markets
+ * extractSportMonksFootballOverride covers so far get real data — everything
+ * else in AdvancedMarkets stays the synthetic Poisson-model baseline, same
+ * "real data patches synthetic" pattern buildFootballUpcomingFromPulseScore
+ * already uses. Logos come straight from SportMonks' own participant
+ * image_path (confirmed present on every real sample) rather than the
+ * separate API-Football crest lookup the PulseScore builder needs.
+ */
+async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
+  const leagueResults = await getSportMonksFootballUpcoming(SPORTMONKS_FOOTBALL_LEAGUE_IDS);
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+
+  for (const { league, fixtures } of leagueResults) {
+    const leagueName = league?.name || "";
+    const countryName = league?.country?.name || "";
+    const isWomens = isWomensLeague(leagueName);
+
+    for (const fx of fixtures) {
+      // state_id 1 = not started (confirmed real, 2026-08-29) — prematch
+      // only; live/finished fixtures from this same round are picked up by
+      // the live builder instead.
+      if (fx.state_id !== 1) continue;
+
+      const homeP = fx.participants?.find((p) => p.meta?.location === "home");
+      const awayP = fx.participants?.find((p) => p.meta?.location === "away");
+      if (!homeP || !awayP) continue;
+      const home = stripGenderTeamSuffix(homeP.name);
+      const away = stripGenderTeamSuffix(awayP.name);
+      if (!home || !away) continue;
+
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const override = extractSportMonksFootballOverride(fx);
+      const baseOdds = makeOddsFromTeams(home, away);
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+      const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
+      const markets: AdvancedMarkets = {
+        ...baseMarkets,
+        doubleChance: { ...baseMarkets.doubleChance, ...nonNullPatch(override.doubleChance) },
+        totalGoals: override.totalGoals
+          ? { ...baseMarkets.totalGoals, ...override.totalGoals }
+          : baseMarkets.totalGoals,
+        corners: override.corners ? { ...baseMarkets.corners, ...override.corners } : baseMarkets.corners,
+        cards: override.cards ? { ...baseMarkets.cards, ...override.cards } : baseMarkets.cards,
+      };
+      if (override.bothTeamsScore) markets.bothTeamsScore = override.bothTeamsScore;
+      if (override.drawNoBet?.home != null && override.drawNoBet?.away != null) {
+        markets.drawNoBet = { home: override.drawNoBet.home, away: override.drawNoBet.away };
+      }
+
+      const { date, time } = pulseScoreEventDateTime(
+        new Date(fx.starting_at_timestamp * 1000).toISOString(),
+      );
+
+      results.push({
+        id: `sportmonks-football-${fx.id}`,
+        home,
+        away,
+        league: normalizeBrazilLeagueDisplayName(
+          leagueName,
+          countryName.toLowerCase() === "brazil" ? "brazil" : null,
+        ),
+        country: countryName || "Internacional",
+        time,
+        date,
+        sport: "football",
+        hasRealOdds: !!override.odds,
+        odds,
+        markets,
+        isWomens,
+        isPriorityLeague: true,
+        homeLogoUrl: homeP.image_path,
+        awayLogoUrl: awayP.image_path,
+      });
+    }
+  }
+
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
 /**
  * Tennis prematch, sourced entirely from PulseScore (getPulseScoreTennisUpcoming).
  * Confirmed against a real GET /api/v3/bet365/tennis/leagues sample (2026-08-07) —
@@ -12518,12 +12645,12 @@ async function rebuildUpcomingCache(): Promise<void> {
     // remains disconnected pending its own real confirmed sample.
     let football: UpcomingMatch[];
     try {
-      football = await buildFootballUpcomingFromPulseScore();
+      football = await buildFootballUpcomingFromSportMonks();
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+        "[sportmonks] buildFootballUpcomingFromSportMonks failed this cycle — keeping last good prematch list",
       );
       football = _lastGoodFootballUpcoming;
     }
@@ -15590,11 +15717,11 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // confirmed sample before being rebuilt the same way.
   let football: UpcomingMatch[] = [];
   try {
-    football = await buildFootballUpcomingFromPulseScore();
+    football = await buildFootballUpcomingFromSportMonks();
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildFootballUpcomingFromPulseScore failed this cycle",
+      "[sportmonks] buildFootballUpcomingFromSportMonks failed this cycle",
     );
   }
   let tennis: UpcomingMatch[] = [];
