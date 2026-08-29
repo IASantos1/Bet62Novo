@@ -1214,7 +1214,10 @@ async function fetchLiveOdds(bookmakerId: number): Promise<Map<number, SportMonk
       if (o.suspended) ftrSuspended++;
     }
   }
-  logger.debug(
+  // info, not debug: the logger's default level is "info" (LOG_LEVEL env
+  // var not set in most deployments), and this only fires once per ~15s
+  // cache cycle — not spammy enough to warrant debug-only visibility.
+  logger.info(
     { bookmakerId, pagesFetched, rowsFetched, fixtures: byFixture.size, ftrRows, ftrSuspended },
     "[sportmonks] /odds/inplay fetch summary",
   );
