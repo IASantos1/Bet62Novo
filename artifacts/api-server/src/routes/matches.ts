@@ -36,6 +36,7 @@ import {
   isSportMonksFixtureLive,
   isSportMonksFixtureFinished,
   countSportMonksRedCards,
+  getSportMonksFixtureCornersCards,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -7524,6 +7525,14 @@ async function persistFinishedMatchRecord(
     status?: string;
     homeTeam: string;
     awayTeam: string;
+    // Football only (see finalizeStaleLiveMatch) — real corner/card totals
+    // from SportMonks statistics, sourced via _liveExtra. Previously always
+    // hardcoded to null below regardless of what the caller passed, which
+    // silently discarded these values on the DB-recovery path even after
+    // finalizeStaleLiveMatch started setting them on the in-memory record
+    // (audit finding, 2026-08-29 — see finalizeStaleLiveMatch's own comment).
+    cornersTotal?: number | null;
+    cardsTotal?: number | null;
     extras?: unknown;
     finishedAt: number;
   },
@@ -7548,8 +7557,14 @@ async function persistFinishedMatchRecord(
         status: record.status ?? null,
         homeTeam: record.homeTeam,
         awayTeam: record.awayTeam,
-        cornersTotal: null,
-        cardsTotal: null,
+        cornersTotal:
+          typeof record.cornersTotal === "number" && Number.isFinite(record.cornersTotal)
+            ? record.cornersTotal
+            : null,
+        cardsTotal:
+          typeof record.cardsTotal === "number" && Number.isFinite(record.cardsTotal)
+            ? record.cardsTotal
+            : null,
         firstGoal: null,
         extras: (record.extras as Record<string, unknown> | undefined) ?? null,
         finishedAt: new Date(record.finishedAt),
@@ -7565,8 +7580,14 @@ async function persistFinishedMatchRecord(
           status: record.status ?? null,
           homeTeam: record.homeTeam,
           awayTeam: record.awayTeam,
-          cornersTotal: null,
-          cardsTotal: null,
+          cornersTotal:
+            typeof record.cornersTotal === "number" && Number.isFinite(record.cornersTotal)
+              ? record.cornersTotal
+              : null,
+          cardsTotal:
+            typeof record.cardsTotal === "number" && Number.isFinite(record.cardsTotal)
+              ? record.cardsTotal
+              : null,
           firstGoal: null,
           extras:
             (record.extras as Record<string, unknown> | undefined) ?? null,
@@ -7657,6 +7678,24 @@ async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
     typeof htScore[0] === "number" &&
     typeof htScore[1] === "number"
       ? { htHome: htScore[0], htAway: htScore[1] }
+      : {}),
+    // Football corners/cards O/U settlement (settlement.ts reads these two
+    // TOP-LEVEL fields, same shape as a match_results DB row) — sourced from
+    // state._liveExtra, populated tick-by-tick in buildFootballLiveFromSportMonks
+    // from real SportMonks CORNERS/YELLOWCARDS statistics + REDCARD events.
+    // Previously never set here at all (audit finding, 2026-08-29): these two
+    // markets were exposed to bettors but had no code path that could ever
+    // populate them, so a bet on either always stayed pending forever rather
+    // than settling. Reading the LAST live tick's total is correct, not an
+    // early/risky read: a corner/card count is final and can't change once
+    // the match reaches FT, unlike the "wrongly settled early" risk the
+    // deliberately-null mid-match live path in settlement.ts's early-settle
+    // helper guards against (see that function's own corners/cards comment).
+    ...(state.sport === "football" && typeof state._liveExtra?.cornersTotal === "number"
+      ? { cornersTotal: state._liveExtra.cornersTotal }
+      : {}),
+    ...(state.sport === "football" && typeof state._liveExtra?.cardsTotal === "number"
+      ? { cardsTotal: state._liveExtra.cardsTotal }
       : {}),
     status: looksLikeNeverTracked ? "abandoned" : "finished",
     homeTeam: state.home,
@@ -14251,6 +14290,14 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         };
       });
 
+    // Real corners/cards stats (CORNERS/YELLOWCARDS statistics + confirmed
+    // REDCARD events) — kept in _liveExtra the same way every other sport's
+    // live stats are, so finalizeStaleLiveMatch can copy the final tick's
+    // totals into the finished-match record settlement.ts reads
+    // extra.cornersTotal/cardsTotal from (see getSportMonksFixtureCornersCards's
+    // own comment: null, not 0, until SportMonks actually reports a stat).
+    const cornersCards = getSportMonksFixtureCornersCards(fx);
+
     ranked.push({
       prio,
       state: {
@@ -14275,6 +14322,21 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         redCardsAway,
         marketSuspension,
         _suspensionReason: suspensionReason,
+        _liveExtra: {
+          ...(existing?._liveExtra ?? {}),
+          ...(cornersCards.cornersTotal != null ? { cornersTotal: cornersCards.cornersTotal } : {}),
+          ...(cornersCards.cornersHome != null ? { cornersHome: cornersCards.cornersHome } : {}),
+          ...(cornersCards.cornersAway != null ? { cornersAway: cornersCards.cornersAway } : {}),
+          ...(cornersCards.cardsTotal != null ? { cardsTotal: cornersCards.cardsTotal } : {}),
+          ...(cornersCards.yellowCardsHome != null
+            ? { yellowCardsHome: cornersCards.yellowCardsHome }
+            : {}),
+          ...(cornersCards.yellowCardsAway != null
+            ? { yellowCardsAway: cornersCards.yellowCardsAway }
+            : {}),
+          redCardsHomeCount: redCardsHome,
+          redCardsAwayCount: redCardsAway,
+        },
       },
     });
   }

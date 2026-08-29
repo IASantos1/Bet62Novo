@@ -8,6 +8,7 @@ const {
   isSportMonksFixtureLive,
   isSportMonksFixtureFinished,
   countSportMonksRedCards,
+  getSportMonksFixtureCornersCards,
 } = await import("../services/sportmonks/football.js");
 
 function makeFixture(odds: unknown[]) {
@@ -459,4 +460,70 @@ test("countSportMonksRedCards: counts a real REDCARD event for the home side, ze
   const fx = makeFinishedFixtureWithRedCard();
   assert.equal(countSportMonksRedCards(fx, "home"), 1);
   assert.equal(countSportMonksRedCards(fx, "away"), 0);
+});
+
+// Real GET /v3/football/fixtures/19621957?include=statistics.type sample
+// (2026-08-29) — São Paulo (home, participant_id 3496) vs Mirassol (away,
+// participant_id 11126), a finished match with real CORNERS (type_id 34,
+// home 12/away 4) and YELLOWCARDS (type_id 84, home 1/away 2) statistics.
+// No red cards occurred in this real match, so cardsTotal here is purely
+// yellow (confirmed by countSportMonksRedCards returning 0 for both sides
+// with no REDCARD events present).
+function makeFixtureWithCornersCardsStats() {
+  return {
+    id: 19621957,
+    name: "São Paulo vs Mirassol",
+    starting_at: "2026-08-22 21:30:00",
+    starting_at_timestamp: 1787513400,
+    state_id: 5,
+    participants: [
+      { id: 3496, name: "São Paulo", meta: { location: "home", winner: null, position: 3 } },
+      { id: 11126, name: "Mirassol", meta: { location: "away", winner: null, position: 8 } },
+    ],
+    events: [],
+    statistics: [
+      { id: 1, fixture_id: 19621957, type_id: 34, participant_id: 3496, location: "home", data: { value: 12 }, type: { id: 34, name: "Corners", code: "corners", developer_name: "CORNERS" } },
+      { id: 2, fixture_id: 19621957, type_id: 34, participant_id: 11126, location: "away", data: { value: 4 }, type: { id: 34, name: "Corners", code: "corners", developer_name: "CORNERS" } },
+      { id: 3, fixture_id: 19621957, type_id: 84, participant_id: 3496, location: "home", data: { value: 1 }, type: { id: 84, name: "Yellowcards", code: "yellowcards", developer_name: "YELLOWCARDS" } },
+      { id: 4, fixture_id: 19621957, type_id: 84, participant_id: 11126, location: "away", data: { value: 2 }, type: { id: 84, name: "Yellowcards", code: "yellowcards", developer_name: "YELLOWCARDS" } },
+    ],
+  } as unknown as Parameters<typeof getSportMonksFixtureCornersCards>[0];
+}
+
+test("getSportMonksFixtureCornersCards: reads real CORNERS/YELLOWCARDS statistics per side and totals them", () => {
+  const fx = makeFixtureWithCornersCardsStats();
+  assert.deepEqual(getSportMonksFixtureCornersCards(fx), {
+    cornersHome: 12,
+    cornersAway: 4,
+    cornersTotal: 16,
+    yellowCardsHome: 1,
+    yellowCardsAway: 2,
+    cardsTotal: 3,
+  });
+});
+
+test("getSportMonksFixtureCornersCards: adds confirmed REDCARD events on top of yellow cards", () => {
+  const fx = makeFixtureWithCornersCardsStats();
+  (fx as any).events = [
+    {
+      id: 1, fixture_id: 19621957, period_id: 1, participant_id: 3496, type_id: 20,
+      player_id: null, related_player_id: null, player_name: "Test Player", related_player_name: null,
+      result: null, info: null, addition: null, minute: 80, extra_minute: null, rescinded: false,
+      type: { id: 20, name: "Redcard", code: "redcard", developer_name: "REDCARD" },
+    },
+  ];
+  assert.equal(getSportMonksFixtureCornersCards(fx).cardsTotal, 4);
+});
+
+test("getSportMonksFixtureCornersCards: null (not 0) fields when no statistics are present yet", () => {
+  const fx = makeFixtureWithCornersCardsStats();
+  (fx as any).statistics = [];
+  assert.deepEqual(getSportMonksFixtureCornersCards(fx), {
+    cornersHome: null,
+    cornersAway: null,
+    cornersTotal: null,
+    yellowCardsHome: null,
+    yellowCardsAway: null,
+    cardsTotal: null,
+  });
 });
