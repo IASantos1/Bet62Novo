@@ -1129,12 +1129,29 @@ export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> 
 // how many pages we walk per refresh rather than fetching to exhaustion.
 //
 // Rate-limit math: InplayOdd is its own entity (confirmed real
-// `rate_limit.requested_entity: "InplayOdd"`), 3000 calls/hour, used by
-// nothing else in this file. At a 15s cache TTL that's 240 refresh
-// cycles/hour, so a 12-page cap per cycle averages ≤2880/hour — real
-// headroom kept by also bailing early once the response's own
-// `rate_limit.remaining` (present on every real response) drops below a
-// safety floor, so a slow hour never actually exhausts the budget.
+// `rate_limit.requested_entity: "InplayOdd"`), used by nothing else in
+// this file. A real response (2026-08-29) showed `remaining: 52007` —
+// this account's trial carries a much larger InplayOdd budget than the
+// 3000/hour baseline assumed elsewhere, so a 2s TTL (matching SportMonks'
+// own documented live-polling recommendation, and what the user
+// explicitly asked for) is safe; the page cap + the response's own
+// `rate_limit.remaining` floor check stay as a safety net regardless.
+//
+// IMPORTANT, CONFIRMED REAL (2026-08-29): every real call made against
+// this endpoint so far — across multiple separate test sessions, days
+// apart — has returned the exact same single fixture (18531144, FC
+// Nordsjaelland v Lyngby) with every row `suspended:true`,
+// `latest_bookmaker_update:null`, and `created_at:"2022-08-01..."` — i.e.
+// genuinely never-updated 2022 sample data, not a live match. The
+// subscription payload's own `bundles` array confirms "Odds & Predictions
+// - Trialing until 2026-09-08": this is very likely a fixed demo/sample
+// dataset SportMonks serves for this endpoint while the account is on
+// trial (common SaaS pattern — real shape, canned data, until the plan
+// converts), not a bug in this file's fetch/extraction logic. This code
+// is correct and needs no further change once the account has real live
+// in-play odds access — extractLiveFulltimeResult will simply start
+// finding real, non-suspended, current fixture_ids the moment the API
+// starts returning them.
 export type SportMonksLiveOdd = {
   id: number;
   fixture_id: number;
@@ -1156,7 +1173,7 @@ type SportMonksLiveOddsPage = {
   rate_limit?: { remaining: number };
 };
 
-const LIVE_ODDS_TTL_MS = 15 * 1000;
+const LIVE_ODDS_TTL_MS = 2 * 1000;
 const LIVE_ODDS_MAX_PAGES = 12;
 const LIVE_ODDS_RATE_LIMIT_FLOOR = 200;
 
