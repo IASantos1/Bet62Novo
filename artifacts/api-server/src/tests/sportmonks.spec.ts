@@ -14,7 +14,6 @@ const {
   isFootballLiveDisplayEvent,
   getPlayerCurrentSeasonStatTotal,
   getPlayerRecentMatches,
-  extractLiveFulltimeResult,
 } = await import("../services/sportmonks/football.js");
 
 function makeFixture(odds: unknown[]) {
@@ -739,52 +738,34 @@ test("getPlayerRecentMatches: skips a real latest[] entry with fixture:null and 
   assert.equal(m.goals, 0);
 });
 
-// Real bet365 /odds/inplay sample values (2026-08-29), fixture_id 18531144,
-// FC Nordsjaelland vs Lyngby, market_id 1 = "Fulltime Result": label "1"
-// value "1.01", label "X" value "26.00", label "2" value "501.00" — the
-// snapshot itself had every row suspended:true (a real, legitimate live
-// state), so a non-suspended variant is used to prove the happy path.
-function makeLiveOdd(overrides: Record<string, unknown>) {
-  return {
-    id: 1,
-    fixture_id: 18531144,
-    market_id: 1,
-    bookmaker_id: 2,
-    label: "1",
-    value: "1.01",
-    name: null,
-    market_description: "Fulltime Result",
-    suspended: false,
-    stopped: false,
-    ...overrides,
-  };
-}
-
-test("extractLiveFulltimeResult: reads real bet365 1X2 values from a non-suspended snapshot", () => {
+// Real GET /fixtures/19621836?include=odds.market;odds.bookmaker sample
+// (2026-08-29) — fixture genuinely live at request time (state_id 22 =
+// INPLAY_2ND_HALF, Atlético Mineiro v Vitória). Proves live odds work via
+// this per-fixture endpoint (unlike the abandoned /odds/inplay general
+// list — see getSportMonksLiveOddsByFixture's header in football.ts):
+// bet365 FULLTIME_RESULT values 1.90/3.30/4.33, suspended:null,
+// stopped:false, latest_bookmaker_update minutes-old at test time.
+test("extractSportMonksFootballOverride: real live bet365 1X2 from a fixture genuinely in play", () => {
   const odds = [
-    makeLiveOdd({ label: "1", value: "1.01" }),
-    makeLiveOdd({ label: "X", value: "26.00" }),
-    makeLiveOdd({ label: "2", value: "501.00" }),
+    { market_id: 1, bookmaker_id: 2, label: "Home", value: "1.90", name: null, original_label: "1", suspended: null, stopped: false, market: fulltimeResultMarket, bookmaker: bet365 },
+    { market_id: 1, bookmaker_id: 2, label: "Draw", value: "3.30", name: null, original_label: "Draw", suspended: null, stopped: false, market: fulltimeResultMarket, bookmaker: bet365 },
+    { market_id: 1, bookmaker_id: 2, label: "Away", value: "4.33", name: null, original_label: "2", suspended: null, stopped: false, market: fulltimeResultMarket, bookmaker: bet365 },
   ];
-  assert.deepEqual(extractLiveFulltimeResult(odds), { home: 1.01, draw: 26, away: 501 });
+  const out = extractSportMonksFootballOverride(makeFixture(odds), 2);
+  assert.deepEqual(out.odds, { home: 1.9, draw: 3.3, away: 4.33 });
 });
 
-test("extractLiveFulltimeResult: a fully-suspended fixture (the real snapshot's actual state) is null, not stale odds", () => {
+// Same real sample: `suspended` stayed null on every one of that fixture's
+// 3798 odds rows, but `stopped` carried the real live-suspension signal
+// (539 rows had stopped:true) — oddsByDeveloperName excludes stopped rows
+// too now, so a fully-stopped live market falls back to synthetic instead
+// of showing a frozen price.
+test("extractSportMonksFootballOverride: a fully-stopped live market (real signal, suspended stays null) is excluded", () => {
   const odds = [
-    makeLiveOdd({ label: "1", value: "1.01", suspended: true }),
-    makeLiveOdd({ label: "X", value: "26.00", suspended: true }),
-    makeLiveOdd({ label: "2", value: "501.00", suspended: true }),
+    { market_id: 1, bookmaker_id: 2, label: "Home", value: "1.90", suspended: null, stopped: true, market: fulltimeResultMarket, bookmaker: bet365 },
+    { market_id: 1, bookmaker_id: 2, label: "Draw", value: "3.30", suspended: null, stopped: true, market: fulltimeResultMarket, bookmaker: bet365 },
+    { market_id: 1, bookmaker_id: 2, label: "Away", value: "4.33", suspended: null, stopped: true, market: fulltimeResultMarket, bookmaker: bet365 },
   ];
-  assert.equal(extractLiveFulltimeResult(odds), null);
-});
-
-test("extractLiveFulltimeResult: ignores market_id 3 (ambiguous 1st Goal/4th Goal, not understood, deliberately unwired)", () => {
-  const odds = [
-    makeLiveOdd({ market_id: 3, label: "1", value: "9.99" }),
-  ];
-  assert.equal(extractLiveFulltimeResult(odds), null);
-});
-
-test("extractLiveFulltimeResult: no odds at all returns null", () => {
-  assert.equal(extractLiveFulltimeResult([]), null);
+  const out = extractSportMonksFootballOverride(makeFixture(odds), 2);
+  assert.equal(out.odds, undefined);
 });

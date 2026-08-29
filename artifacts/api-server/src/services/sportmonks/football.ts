@@ -219,7 +219,14 @@ function oddsByDeveloperName(
     (o) =>
       o.market?.developer_name === developerName &&
       o.bookmaker_id === bookmakerId &&
-      !o.suspended,
+      !o.suspended &&
+      // Confirmed real (2026-08-29, live fixture 19621836's odds, bet365):
+      // `suspended` stayed null on every one of 3798 rows, but `stopped`
+      // carried the real live-suspension signal (539 rows genuinely
+      // paused mid-play) — excluded here the same tolerant way, so a
+      // fully-stopped market falls back to synthetic rather than showing
+      // a stale/frozen price.
+      !o.stopped,
   );
 }
 
@@ -1098,197 +1105,95 @@ export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> 
   return promise;
 }
 
-// ── Live odds (1X2) ─────────────────────────────────────────────────────────
-// CONFIRMED REAL (2026-08-29): live match odds don't live on
-// /livescores/inplay fixtures at all (that endpoint rejects the `odds`
-// include outright — see fetchLive's comment above) — they're a SEPARATE
-// endpoint, GET /v3/football/odds/inplay, with a FLAT response shape (no
-// nested market{}/bookmaker{} objects like the prematch odds this file
-// otherwise uses — only a numeric `market_id` + human-readable
-// `market_description` string). Confirmed real per-row shape, bet365
-// sample (bookmaker_id 2), fixture 18531144: {id, fixture_id, market_id,
-// bookmaker_id, label, value, name, market_description, suspended,
-// stopped, total, handicap, ...}. market_id 1 = "Fulltime Result" is the
-// only market_id confirmed and understood so far (market_id 3 appeared
-// with BOTH "1st Goal" and "4th Goal" descriptions in the same real
-// sample — genuinely ambiguous, deliberately NOT wired here).
+// ── Live odds ────────────────────────────────────────────────────────────
+// CONFIRMED REAL (2026-08-29): the general paginated GET /odds/inplay list
+// was the first thing tried here and turned out to be a dead end for this
+// account — every page, across multiple test sessions days apart, returned
+// only a single fixed demo fixture (18531144, FC Nordsjaelland v Lyngby,
+// created_at "2022-08-01...", every row suspended, latest_bookmaker_update
+// always null). That code was deleted, not kept — see git history
+// (commits d99c694/0dd5359/693e71f/b8ca34a) for the abandoned attempt.
 //
-// Bookmaker choice for LIVE football odds specifically (explicit user
-// decision, 2026-08-29): bet365 (bookmaker_id 2), NOT 1xbet (id 35) used
-// for prematch odds elsewhere in this file — confirmed via a real
-// cross-check (filters=bookmakers:35 on this same endpoint returned a
-// real, well-formed empty result) that 1xbet simply has no live in-play
-// odds via this API; bet365 does.
+// The real fix (confirmed real, 2026-08-29, user-tested against a fixture
+// that WAS genuinely live at the time — id 19621836, Atlético Mineiro v
+// Vitória, state_id 22 = INPLAY_2ND_HALF): GET /v3/football/fixtures/{id}
+// ?include=odds.market;odds.bookmaker — the SAME per-fixture endpoint/
+// include shape already used for prematch (see extractSportMonksFootballOverride's
+// header) — also carries real, actively-updating odds WHILE the match is
+// live. Confirmed real: bet365 FULLTIME_RESULT rows for that fixture had
+// latest_bookmaker_update "2026-08-29 21:28:09" (minutes-old at test time),
+// suspended: null (not true), values 1.90/3.30/4.33 — genuinely live
+// prices, not demo data. 3798 total odds rows on that one fixture across
+// 10 bookmakers, so this account's real odds access is fine — it was
+// specifically /odds/inplay that didn't work for this trial.
 //
-// Pagination is cursor-based but `page` also works and is simpler to
-// drive (confirmed real: `pagination.current_page`/`next_page` both
-// present). This is the general, unfiltered-by-fixture paginated list
-// (explicit user direction, 2026-08-29: "Prefiro que você use a lista
-// geral paginada" over a per-fixture endpoint) — every live odds row
-// across every fixture SportMonks has bet365 live odds for, so we bound
-// how many pages we walk per refresh rather than fetching to exhaustion.
-//
-// Rate-limit math: InplayOdd is its own entity (confirmed real
-// `rate_limit.requested_entity: "InplayOdd"`), used by nothing else in
-// this file. A real response (2026-08-29) showed `remaining: 52007` —
-// this account's trial carries a much larger InplayOdd budget than the
-// 3000/hour baseline assumed elsewhere, so a 2s TTL (matching SportMonks'
-// own documented live-polling recommendation, and what the user
-// explicitly asked for) is safe; the page cap + the response's own
-// `rate_limit.remaining` floor check stay as a safety net regardless.
-//
-// IMPORTANT, CONFIRMED REAL (2026-08-29): every real call made against
-// this endpoint so far — across multiple separate test sessions, days
-// apart — has returned the exact same single fixture (18531144, FC
-// Nordsjaelland v Lyngby) with every row `suspended:true`,
-// `latest_bookmaker_update:null`, and `created_at:"2022-08-01..."` — i.e.
-// genuinely never-updated 2022 sample data, not a live match. The
-// subscription payload's own `bundles` array confirms "Odds & Predictions
-// - Trialing until 2026-09-08": this is very likely a fixed demo/sample
-// dataset SportMonks serves for this endpoint while the account is on
-// trial (common SaaS pattern — real shape, canned data, until the plan
-// converts), not a bug in this file's fetch/extraction logic. This code
-// is correct and needs no further change once the account has real live
-// in-play odds access — extractLiveFulltimeResult will simply start
-// finding real, non-suspended, current fixture_ids the moment the API
-// starts returning them.
-export type SportMonksLiveOdd = {
-  id: number;
-  fixture_id: number;
-  market_id: number;
-  bookmaker_id: number;
-  label: string;
-  value: string;
-  name: string | null;
-  market_description: string;
-  suspended?: boolean;
-  stopped?: boolean;
-  total?: string | null;
-  handicap?: string | null;
-};
+// One real difference from prematch found in that same sample: `suspended`
+// stays null throughout (never populated on this endpoint), but `stopped`
+// carries the real live-suspension signal instead (539 of 3798 rows had
+// stopped:true — genuine markets paused mid-play) — oddsByDeveloperName
+// below now excludes stopped rows too, not just suspended ones.
+export type SportMonksFixtureWithOdds = SportMonksFixture & { odds?: SportMonksOdd[] };
 
-type SportMonksLiveOddsPage = {
-  data: SportMonksLiveOdd[];
-  pagination?: { has_more?: boolean };
-  rate_limit?: { remaining: number };
-};
+const LIVE_ODDS_TTL_MS = 2 * 1000; // matches SportMonks' own documented live-polling cadence
 
-const LIVE_ODDS_TTL_MS = 2 * 1000;
-const LIVE_ODDS_MAX_PAGES = 12;
-const LIVE_ODDS_RATE_LIMIT_FLOOR = 200;
+const liveOddsCache = new Map<number, { odds: SportMonksOdd[]; fetchedAt: number }>();
+const liveOddsInFlight = new Map<number, Promise<SportMonksOdd[]>>();
 
-let liveOddsCache: { byFixture: Map<number, SportMonksLiveOdd[]>; fetchedAt: number } | null =
-  null;
-let liveOddsInFlight: Promise<Map<number, SportMonksLiveOdd[]>> | null = null;
-
-async function fetchLiveOdds(bookmakerId: number): Promise<Map<number, SportMonksLiveOdd[]>> {
-  const byFixture = new Map<number, SportMonksLiveOdd[]>();
-  let pagesFetched = 0;
-  let rowsFetched = 0;
-  for (let page = 1; page <= LIVE_ODDS_MAX_PAGES; page++) {
-    const resp = await sportMonksGetWithRetry<SportMonksLiveOddsPage>("/odds/inplay", {
-      filters: `bookmakers:${bookmakerId}`,
-      page: String(page),
-    });
-    pagesFetched++;
-    if (!resp) {
-      logger.warn("[sportmonks] /odds/inplay returned no data (request failed after retries)");
-      break;
-    }
-    if (page === 1 && (resp.data ?? []).length === 0) {
-      // Real, well-formed empty result (e.g. "No result(s) found...") is not
-      // an error — logged at info so a genuine no-live-odds-right-now moment
-      // is distinguishable in the logs from the request failing outright.
-      logger.info(
-        { bookmakerId },
-        "[sportmonks] /odds/inplay returned zero rows on page 1 — no live odds for this bookmaker right now",
-      );
-    }
-    for (const odd of resp.data ?? []) {
-      rowsFetched++;
-      const list = byFixture.get(odd.fixture_id);
-      if (list) list.push(odd);
-      else byFixture.set(odd.fixture_id, [odd]);
-    }
-    if (!resp.pagination?.has_more) break;
-    if (
-      resp.rate_limit?.remaining !== undefined &&
-      resp.rate_limit.remaining < LIVE_ODDS_RATE_LIMIT_FLOOR
-    ) {
-      logger.warn(
-        { remaining: resp.rate_limit.remaining, pagesFetched },
-        "[sportmonks] /odds/inplay pagination cut short — rate-limit floor reached",
-      );
-      break;
-    }
-  }
-  let ftrRows = 0;
-  let ftrSuspended = 0;
-  for (const odds of byFixture.values()) {
-    for (const o of odds) {
-      if (o.market_id !== 1) continue;
-      ftrRows++;
-      if (o.suspended) ftrSuspended++;
-    }
-  }
-  // info, not debug: the logger's default level is "info" (LOG_LEVEL env
-  // var not set in most deployments), and this only fires once per ~15s
-  // cache cycle — not spammy enough to warrant debug-only visibility.
-  logger.info(
-    { bookmakerId, pagesFetched, rowsFetched, fixtures: byFixture.size, ftrRows, ftrSuspended },
-    "[sportmonks] /odds/inplay fetch summary",
+async function fetchFixtureOdds(fixtureId: number): Promise<SportMonksOdd[]> {
+  const resp = await sportMonksGetWithRetry<{ data: SportMonksFixtureWithOdds }>(
+    `/fixtures/${fixtureId}`,
+    { include: "odds.market;odds.bookmaker" },
   );
-  return byFixture;
+  if (!resp) {
+    logger.warn(
+      { fixtureId },
+      "[sportmonks] /fixtures/{id}?include=odds returned no data (request failed after retries)",
+    );
+  }
+  return resp?.data?.odds ?? [];
 }
 
-/** Live 1X2 odds for every fixture bet365 currently has in-play odds for,
- * keyed by fixture_id, cached ~15s. Bounded pagination — see comment
- * block above for the rate-limit reasoning. */
-export async function getSportMonksLiveOdds(
-  bookmakerId = 2,
-): Promise<Map<number, SportMonksLiveOdd[]>> {
-  if (liveOddsCache && Date.now() - liveOddsCache.fetchedAt < LIVE_ODDS_TTL_MS) {
-    return liveOddsCache.byFixture;
-  }
-  if (liveOddsInFlight) return liveOddsInFlight;
+/** One fixture's real odds (all bookmakers/markets), cached ~2s per
+ * fixture with in-flight dedup — same shape as prematch's SportMonksOdd,
+ * so extractSportMonksFootballOverride works unchanged on live fixtures
+ * too (see this section's header for how this replaced the dead-end
+ * /odds/inplay general list). */
+export async function getSportMonksFixtureOdds(fixtureId: number): Promise<SportMonksOdd[]> {
+  const cached = liveOddsCache.get(fixtureId);
+  if (cached && Date.now() - cached.fetchedAt < LIVE_ODDS_TTL_MS) return cached.odds;
+  const inFlight = liveOddsInFlight.get(fixtureId);
+  if (inFlight) return inFlight;
 
-  const promise = fetchLiveOdds(bookmakerId)
-    .then((byFixture) => {
-      liveOddsCache = { byFixture, fetchedAt: Date.now() };
-      return byFixture;
+  const promise = fetchFixtureOdds(fixtureId)
+    .then((odds) => {
+      liveOddsCache.set(fixtureId, { odds, fetchedAt: Date.now() });
+      return odds;
     })
-    .catch(() => liveOddsCache?.byFixture ?? new Map<number, SportMonksLiveOdd[]>())
+    .catch(() => liveOddsCache.get(fixtureId)?.odds ?? [])
     .finally(() => {
-      liveOddsInFlight = null;
+      liveOddsInFlight.delete(fixtureId);
     });
-  liveOddsInFlight = promise;
+  liveOddsInFlight.set(fixtureId, promise);
   return promise;
 }
 
-/** Pure extraction step: a fixture's live odds rows -> 1X2, market_id 1
- * ("Fulltime Result", the only live market_id confirmed/understood so
- * far). Suspended rows are excluded (consistent with the `!o.suspended`
- * filtering already used for prematch odds elsewhere in this file) — a
- * fixture where every row is suspended legitimately returns null here,
- * same "real absence, not a bug" handling as the rest of this file. Label
- * vocabulary ("1"/"X"/"2" vs "Home"/"Draw"/"Away") mirrors
- * normalizeThreeWaySide's confirmed real bet365 vocabulary. */
-export function extractLiveFulltimeResult(
-  odds: SportMonksLiveOdd[],
-): { home: number | null; draw: number | null; away: number | null } | null {
-  let home: number | null = null;
-  let draw: number | null = null;
-  let away: number | null = null;
-  for (const o of odds) {
-    if (o.market_id !== 1 || o.suspended) continue;
-    const val = oddsToNumber(o.value);
-    if (val === null) continue;
-    const key = (o.label || "").trim().toLowerCase();
-    if (key === "1" || key === "home") home = val;
-    else if (key === "x" || key === "draw") draw = val;
-    else if (key === "2" || key === "away") away = val;
-  }
-  return home !== null || draw !== null || away !== null ? { home, draw, away } : null;
+/** Fans out getSportMonksFixtureOdds across every currently-live fixture in
+ * parallel (same Promise.all fan-out pattern getSportMonksFootballUpcoming
+ * already uses across leagues) — one call per fixture, each independently
+ * cached/deduped, so repeat fixture ids across ticks cost nothing extra
+ * within the 2s TTL. The "Fixture" rate-limit entity (confirmed real,
+ * 2026-08-29) is separate from Livescores and had tens of thousands
+ * remaining in real testing — comfortable headroom for a live page
+ * typically tracking a few dozen fixtures at once. */
+export async function getSportMonksLiveOddsByFixture(
+  fixtureIds: number[],
+): Promise<Map<number, SportMonksOdd[]>> {
+  const entries = await Promise.all(
+    fixtureIds.map(
+      async (id): Promise<[number, SportMonksOdd[]]> => [id, await getSportMonksFixtureOdds(id)],
+    ),
+  );
+  return new Map(entries);
 }
 
 /** Live score from a fixture's `scores` array — the "CURRENT" running
