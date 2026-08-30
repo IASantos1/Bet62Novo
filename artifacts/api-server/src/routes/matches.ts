@@ -11787,7 +11787,32 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       const baseOdds = makeOddsFromTeams(home, away);
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
-      const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
+      // ── Real 1X2: NUNCA misturar odds reais com FAKE Poisson (baseOdds) ──
+      // User explicit decision 2026-08-30: odds 1x2 SPORTMONKS NAO pode
+      // duplicar com "odds facks" — lado que faltar nao preenche com
+      // makeOddsFromTeams computado (cairia em odds inventadas se um lado
+      // ficasse null num rebuild parcial do market). Se existir QUALQUER
+      // lado real no override.odds → preencher apenas o que é real,
+      // faltantes = 0 (frontend exibe "--" / desativa seleção, nunca falso).
+      // hasRealOdds é TRUE apenas quando os 3 lados estão presentes (1X2
+      // completo REAL). Zero lados reais → ainda usa baseOdds FAKE (não há
+      // outra opção — mas hasRealOdds=false para o frontend saber).
+      const hasAnyReal1x2 = !!(override.odds && (
+        override.odds.home != null ||
+        override.odds.draw != null ||
+        override.odds.away != null
+      ));
+      const hasFullReal1x2 = !!(override.odds &&
+        override.odds.home != null &&
+        override.odds.draw != null &&
+        override.odds.away != null);
+      const odds = hasAnyReal1x2
+        ? {
+            home: (override.odds!.home as number | undefined) ?? 0,
+            draw: (override.odds!.draw as number | undefined) ?? 0,
+            away: (override.odds!.away as number | undefined) ?? 0,
+          }
+        : baseOdds;
       const markets: AdvancedMarkets = applySportMonksFootballOverride(
         { ...baseMarkets },
         baseMarkets,
@@ -11810,7 +11835,7 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
         time,
         date,
         sport: "football",
-        hasRealOdds: !!override.odds,
+        hasRealOdds: hasFullReal1x2,
         odds,
         markets,
         isWomens,
@@ -14646,12 +14671,31 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // (or synthetic) when bwin doesn't cover this fixture.
     const pulseOverride = findPulseScoreFootballOverride(home, away, pulseScoreEvents);
     const baseOdds = makeOddsFromTeams(home, away);
-    const odds = {
-      ...baseOdds,
-      ...nonNullPatch(override.odds),
-      ...nonNullPatch(pulseOverride?.odds),
-    };
-    const hasRealOddsNow = !!override.odds || !!pulseOverride?.odds;
+
+    // ── Real 1X2 AO VIVO: NUNCA misturar odds reais com FAKE Poisson ──
+    // User explicit 2026-08-30: "1x2 NAO duplicado com odds facks".
+    // Resolve priority chain por LADO (cada lado é independente):
+    //   pulseOverride? (bwin 1s atualização) > override? SportMonks bet365
+    //   > existing?.odds[side] último valor REAL gravado em liveMatchState
+    //     (proteção para re-preço momentâneo durante golo — não deixar
+    //      cair para 0/"--" se um lado sumir por 300ms durante atualização)
+    //   > 0 (zero, sinal "não disponível" → frontend --).
+    // baseOdds (FAKE Poisson) NUNCA é utilizado aqui — cai no zero.
+    const prevOdds = existing?.odds ?? { home: 0, draw: 0, away: 0 };
+    const sm = override.odds ?? null;
+    const ps = pulseOverride?.odds ?? null;
+    const h = (ps?.home as number | undefined) ?? (sm?.home as number | undefined) ?? prevOdds.home ?? 0;
+    const d = (ps?.draw as number | undefined) ?? (sm?.draw as number | undefined) ?? prevOdds.draw ?? 0;
+    const a = (ps?.away as number | undefined) ?? (sm?.away as number | undefined) ?? prevOdds.away ?? 0;
+    const odds = { home: h, draw: d, away: a };
+    const smHasAny = !!(sm && (sm.home != null || sm.draw != null || sm.away != null));
+    const psHasAny = !!(ps && (ps.home != null || ps.draw != null || ps.away != null));
+    const prevAnyReal = prevOdds.home > 0 || prevOdds.draw > 0 || prevOdds.away > 0;
+    const hasAnyRealNow = smHasAny || psHasAny || prevAnyReal;
+    const hasFullNow = odds.home > 0 && odds.draw > 0 && odds.away > 0;
+    // hasRealOddsNow: true apenas se ODDS ATUAL contiver 3/3 lados válidos
+    // (não aceita parcial "verdadeiro" que engane a UI).
+    const hasRealOddsNow = hasAnyRealNow && hasFullNow;
 
     const redCardsHome = countSportMonksRedCards(fx, "home");
     const redCardsAway = countSportMonksRedCards(fx, "away");
