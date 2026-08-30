@@ -28859,6 +28859,18 @@ router.get("/debug/football-live-odds", async (_req: Request, res: Response) => 
         home: homeP?.name ?? null,
         away: awayP?.name ?? null,
         stateId: fx.state_id,
+        // Raw periods array from THIS tick's /livescores/inplay fetch, plus
+        // what getSportMonksFixtureMinute computes from it — added
+        // 2026-08-30 after real screenshots showed the displayed minute
+        // frozen identically across a full real minute for several
+        // fixtures (Incheon, Gwangju, Aberdeen), while a fixture's odds
+        // fetch (proven fresh via ourFetchAgeMs) stayed correct. Need to
+        // see whether `ticking`/`minutes` themselves are genuinely
+        // stalled in SportMonks' own response (upstream) or whether
+        // getSportMonksFixtureMinute's ticking/fallback logic is
+        // misreading fine source data (our bug).
+        periods: fx.periods ?? null,
+        computedMinute: getSportMonksFixtureMinute(fx),
         totalOddsRows: odds.length,
         // How long ago THIS SERVER last successfully fetched this
         // fixture's odds — separate from latest_bookmaker_update below
