@@ -45,6 +45,7 @@ import {
   getPlayerCurrentSeasonStatTotal,
   getPlayerRecentMatches,
   getSportMonksLiveOddsByFixture,
+  getSportMonksLiveOddsCacheAgeMs,
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
@@ -28859,6 +28860,13 @@ router.get("/debug/football-live-odds", async (_req: Request, res: Response) => 
         away: awayP?.name ?? null,
         stateId: fx.state_id,
         totalOddsRows: odds.length,
+        // How long ago THIS SERVER last successfully fetched this
+        // fixture's odds — separate from latest_bookmaker_update below
+        // (SportMonks/bet365's own upstream timestamp). If this stays
+        // under ~2-3s across repeated calls but latest_bookmaker_update
+        // never moves, our fetch loop is genuinely re-querying and the
+        // staleness is upstream (bet365/SportMonks), not our cache.
+        ourFetchAgeMs: getSportMonksLiveOddsCacheAgeMs(fx.id, 2),
         fulltimeResultRows: ftr.map((o) => ({
           label: o.label,
           value: o.value,
