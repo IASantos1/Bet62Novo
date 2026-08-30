@@ -28808,6 +28808,46 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
   }
 });
 
+// ─── Debug: live football odds pipeline state ──────────────────────────────
+// Added 2026-08-29 mid-debugging session — several rounds of "odds still
+// frozen" couldn't be diagnosed further without seeing exactly what the
+// live-odds fetch (getSportMonksLiveOddsByFixture) actually returns per
+// fixture in production, and log access wasn't available. Exposes the raw
+// state directly instead of guessing further. Not linked from the UI.
+router.get("/debug/football-live-odds", async (_req: Request, res: Response) => {
+  try {
+    const fixtures = await getSportMonksFootballLive();
+    const liveOnly = fixtures.filter(isSportMonksFixtureLive);
+    const liveOddsByFixture = await getSportMonksLiveOddsByFixture(liveOnly.map((fx) => fx.id));
+    const out = liveOnly.map((fx) => {
+      const homeP = fx.participants?.find((p) => p.meta?.location === "home");
+      const awayP = fx.participants?.find((p) => p.meta?.location === "away");
+      const odds = liveOddsByFixture.get(fx.id) ?? [];
+      const ftr = odds.filter(
+        (o) => o.market?.developer_name === "FULLTIME_RESULT" && o.bookmaker_id === 2,
+      );
+      return {
+        fixtureId: fx.id,
+        home: homeP?.name ?? null,
+        away: awayP?.name ?? null,
+        stateId: fx.state_id,
+        totalOddsRows: odds.length,
+        fulltimeResultRows: ftr.map((o) => ({
+          label: o.label,
+          value: o.value,
+          suspended: o.suspended ?? null,
+          stopped: o.stopped ?? null,
+          latest_bookmaker_update: (o as { latest_bookmaker_update?: string | null })
+            .latest_bookmaker_update ?? null,
+        })),
+      };
+    });
+    res.json({ liveFixtureCount: liveOnly.length, fixtures: out });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ─── Player Profile (SportMonks, football only) ────────────────────────────────
 // Real GET /v3/football/players/{id} data, confirmed 2026-08-29.
 
