@@ -289,6 +289,39 @@ function threeWayLetter(raw: string): "h" | "d" | "a" | null {
   return null;
 }
 
+// Real SportMonks v3 (confirmed live fixture per-fixture endpoint 19621836
+// and /rounds/396698 2026-08-30) exposes one or more distinct market.id
+// rows per (bookmaker, developer_name) pair — e.g. bet365 (id 2) sometimes
+// emits TWO parallel FULLTIME_RESULT markets (different market.id) that
+// update independently ~300ms out of sync during a re-price/goal flash.
+// Without dedup, the raw for-of loop in extractSportMonksFootballOverride
+// overwrites home/draw/away with whichever market row happened to land
+// last in the HTTP array this tick — causing exactly the user-reported
+// symptom "odds 1x2 DUPLICADAS, aparece umas e quando atualiza aparece
+// outras" (same side bouncing between two different prices, each one a
+// real odds number from a different parallel market).
+//
+// Fix: group odds by a stable per-outcome key, then keep ONLY the row with
+// the newest `latest_bookmaker_update` timestamp per group — the "latest
+// price only" rule, same behaviour a real bookie terminal shows. The
+// function is tolerant to missing dates (falls back to array order /
+// whichever row came last when timestamps are identical).
+function latestOddsByKey<T extends SportMonksOdd>(
+  odds: T[],
+  keyFn: (o: T) => string | null,
+): T[] {
+  const best = new Map<string, { odd: T; ts: number }>();
+  for (const o of odds) {
+    const k = keyFn(o);
+    if (k == null) continue;
+    const d = (o as unknown as { latest_bookmaker_update?: string }).latest_bookmaker_update;
+    const ts = d ? new Date(d).getTime() : 0;
+    const prev = best.get(k);
+    if (!prev || ts >= prev.ts) best.set(k, { odd: o, ts });
+  }
+  return Array.from(best.values()).map((x) => x.odd);
+}
+
 // Shared by totalGoals/corners/cards: groups an Over/Under market's odds by
 // their `total` line, then fills in a fixed-line "ladder" (only the lines
 // SportMonks actually confirms — an unrecognized line, e.g. a live
@@ -352,22 +385,95 @@ export function extractSportMonksFootballOverride(
   // any other bookmaker id inside extraction.
   const chosenBookmakerIds = [bookmakerId];
 
-  const ftrRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "FULLTIME_RESULT", bookmakerId);
-  const dcRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "DOUBLE_CHANCE", bookmakerId);
-  const btsRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "BOTH_TEAMS_SCORE", bookmakerId);
-  const dnbRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "DRAW_NO_BET", bookmakerId);
-  const tgRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_GOALS", bookmakerId);
-  const crRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_CORNERS", bookmakerId);
-  const cdRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_CARDS", bookmakerId);
-  const htRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "FIRST_HALF_RESULT", bookmakerId);
-  const shRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "SECOND_HALF_RESULT", bookmakerId);
-  const csRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "CORRECT_SCORE", bookmakerId);
-  const htftRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "HALF_TIME_FULL_TIME", bookmakerId);
-  const goeRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "GOALS_ODD_EVEN", bookmakerId);
-  const tg2Rows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TEAM_TOTAL_GOALS", bookmakerId);
-  const bts1hRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "FIRST_HALF_BOTH_TEAMS_SCORE", bookmakerId);
-  const bts2hRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "SECOND_HALF_BOTH_TEAMS_SCORE", bookmakerId);
-  const hshRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "HIGHEST_SCORING_HALF", bookmakerId);
+  const ftrRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "FULLTIME_RESULT", bookmakerId);
+  const ftrRows: SportMonksOdd[] = latestOddsByKey(ftrRowsRaw, (o) => normalizeThreeWaySide(o));
+  const dcRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "DOUBLE_CHANCE", bookmakerId);
+  const dcRows: SportMonksOdd[] = latestOddsByKey(dcRowsRaw, (o) => {
+    const k = (o.label || "").trim().toUpperCase().replace(/\s+/g, "");
+    if (k === "1X" || k === "HOME/DRAW") return "1x";
+    if (k === "X2" || k === "DRAW/AWAY") return "x2";
+    if (k === "12" || k === "HOME/AWAY") return "12";
+    return null;
+  });
+  const btsRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "BOTH_TEAMS_SCORE", bookmakerId);
+  const btsRows: SportMonksOdd[] = latestOddsByKey(btsRowsRaw, (o) => {
+    const k = (o.label || "").trim().toLowerCase();
+    if (k === "yes" || k === "y" || k === "sim") return "yes";
+    if (k === "no" || k === "n" || k === "nao" || k === "não") return "no";
+    return null;
+  });
+  const dnbRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "DRAW_NO_BET", bookmakerId);
+  const dnbRows: SportMonksOdd[] = latestOddsByKey(dnbRowsRaw, (o) => {
+    const side = normalizeThreeWaySide(o);
+    if (side === "home" || side === "away") return side;
+    return null;
+  });
+  const tgRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_GOALS", bookmakerId);
+  const tgRows: SportMonksOdd[] = latestOddsByKey(tgRowsRaw, (o) => {
+    const line = (o.total ?? "").trim();
+    const key = (o.label || "").trim().toLowerCase();
+    if (!line || (key !== "over" && key !== "under")) return null;
+    return `${line}:${key}`;
+  });
+  const crRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_CORNERS", bookmakerId);
+  const crRows: SportMonksOdd[] = latestOddsByKey(crRowsRaw, (o) => {
+    const line = (o.total ?? "").trim();
+    const key = (o.label || "").trim().toLowerCase();
+    if (!line || (key !== "over" && key !== "under")) return null;
+    return `${line}:${key}`;
+  });
+  const cdRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_CARDS", bookmakerId);
+  const cdRows: SportMonksOdd[] = latestOddsByKey(cdRowsRaw, (o) => {
+    const line = (o.total ?? "").trim();
+    const key = (o.label || "").trim().toLowerCase();
+    if (!line || (key !== "over" && key !== "under")) return null;
+    return `${line}:${key}`;
+  });
+  const htRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "FIRST_HALF_RESULT", bookmakerId);
+  const htRows: SportMonksOdd[] = latestOddsByKey(htRowsRaw, (o) => normalizeThreeWaySide(o));
+  const shRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "SECOND_HALF_RESULT", bookmakerId);
+  const shRows: SportMonksOdd[] = latestOddsByKey(shRowsRaw, (o) => normalizeThreeWaySide(o));
+  const csRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "CORRECT_SCORE", bookmakerId);
+  const csRows: SportMonksOdd[] = latestOddsByKey(csRowsRaw, (o) => (o.label || "").trim().toLowerCase());
+  const htftRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "HALF_TIME_FULL_TIME", bookmakerId);
+  const htftRows: SportMonksOdd[] = latestOddsByKey(htftRowsRaw, (o) => (o.label || "").trim().toUpperCase().replace(/\s+/g, ""));
+  const goeRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "GOALS_ODD_EVEN", bookmakerId);
+  const goeRows: SportMonksOdd[] = latestOddsByKey(goeRowsRaw, (o) => {
+    const k = (o.label || "").trim().toLowerCase();
+    if (k === "odd" || k === "impar" || k === "ímpar") return "odd";
+    if (k === "even" || k === "par") return "even";
+    return null;
+  });
+  const tg2RowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "TEAM_TOTAL_GOALS", bookmakerId);
+  const tg2Rows: SportMonksOdd[] = latestOddsByKey(tg2RowsRaw, (o) => {
+    const line = (o.total ?? "").trim();
+    const key = (o.label || "").trim().toLowerCase();
+    if (!line || (key !== "over" && key !== "under")) return null;
+    const pid = String(o.participant_id ?? "x");
+    return `${pid}:${line}:${key}`;
+  });
+  const bts1hRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "FIRST_HALF_BOTH_TEAMS_SCORE", bookmakerId);
+  const bts1hRows: SportMonksOdd[] = latestOddsByKey(bts1hRowsRaw, (o) => {
+    const k = (o.label || "").trim().toLowerCase();
+    if (k === "yes" || k === "y" || k === "sim") return "yes";
+    if (k === "no" || k === "n" || k === "nao" || k === "não") return "no";
+    return null;
+  });
+  const bts2hRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "SECOND_HALF_BOTH_TEAMS_SCORE", bookmakerId);
+  const bts2hRows: SportMonksOdd[] = latestOddsByKey(bts2hRowsRaw, (o) => {
+    const k = (o.label || "").trim().toLowerCase();
+    if (k === "yes" || k === "y" || k === "sim") return "yes";
+    if (k === "no" || k === "n" || k === "nao" || k === "não") return "no";
+    return null;
+  });
+  const hshRowsRaw: SportMonksOdd[] = oddsByDeveloperName(fixture, "HIGHEST_SCORING_HALF", bookmakerId);
+  const hshRows: SportMonksOdd[] = latestOddsByKey(hshRowsRaw, (o) => {
+    const k = (o.label || "").trim().toLowerCase();
+    if (k.includes("first") || k === "1h" || k.startsWith("1")) return "first";
+    if (k.includes("second") || k === "2h" || k.startsWith("2")) return "second";
+    if (k.includes("equal") || k.includes("draw") || k === "e" || k.includes("tie")) return "equal";
+    return null;
+  });
 
   // Fulltime Result -> 1X2
   const ftr = ftrRows;
@@ -1527,6 +1633,7 @@ export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonk
         return { status: "HT", clockRunning: false, inPlayHalf: false };
       case 2:
       case 4:
+      case 22:
         return { status: "LIVE", clockRunning: true, inPlayHalf: true };
       case 6:
         return { status: "ET", clockRunning: true, inPlayHalf: true };
@@ -1536,22 +1643,15 @@ export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonk
       case 10:
       case 12:
       case 14:
-        // ABANDONED / POSTPONED / CANCELLED / AWARDED → treat as settled FT
         return { status: "FT", clockRunning: false, inPlayHalf: false };
       case 11:
       case 13:
       case 15:
-        // INTERRUPTED / SUSPENDED / DELAYED → still in the match lifecycle
-        // but clock is stopped → LIVE with clockRunning=false
         return { status: "LIVE", clockRunning: false, inPlayHalf: false };
       case 0:
       case 1:
-        // 0=AWAITING construction, 1=NOT_STARTED/SCHEDULED → not live yet
         return { status: "NS", clockRunning: false, inPlayHalf: false };
       default:
-        // Unknown state_id number → fall through to TIER 3 below. No
-        // premature "NS" return here because a new SportMonks state id
-        // could legitimately be an in-play variant we haven't seen yet.
         break;
     }
   }
