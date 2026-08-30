@@ -1310,6 +1310,12 @@ export type SportMonksNormalizedStatus = {
   /** Frontend-compatible status label — matches the exact vocabulary the
    * existing getFootballPhaseTag / canLegitimatelyRephase / isHalftimeFreeze
    * logic in home.tsx already knows: "LIVE", "HT", "FT", "ET", "PEN".
+   * The extra "NS" value is internal-only (Not Started / unknown state
+   * with no ticking period) and both isSportMonksFixtureLive and
+   * isSportMonksFixtureFinished return false when status === "NS", so it
+   * never escapes this module into a LiveMatchState (buildFootballLive-
+   * FromSportMonks skips those fixtures on the `if (!isSportMonksFixture-
+   * Live) continue;` line before ever reading status).
    * SportMonks' raw developer_name values (INPLAY_1ST_HALF etc.) are NOT
    * understood by the frontend and were causing the period tag to stay
    * blank, injury-time labels (45+N') not to render, and
@@ -1317,7 +1323,7 @@ export type SportMonksNormalizedStatus = {
    * "minute going backwards" — which directly created the reported
    * oscillation because frontend's apiMinutesRef clamp and backend's
    * Math.max(existing.minute, raw) were fighting each other tick-to-tick. */
-  status: "LIVE" | "HT" | "FT" | "ET" | "PEN";
+  status: "LIVE" | "HT" | "FT" | "ET" | "PEN" | "NS";
   /** True only when a period is actually ticking right now and the
    * developer_name isn't a pause/break. The frontend extrapolates seconds
    * client-side only when clockRunning === true; setting this false during
@@ -1357,7 +1363,7 @@ export type SportMonksNormalizedStatus = {
  * substring match rather than guessed; the API-Football cross-reference
  * overlay in buildFootballLiveFromSportMonks overrides these anyway
  * whenever a match reaches extra time / penalties. */
-export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus & { status: "LIVE" | "HT" | "FT" | "ET" | "PEN" | "NS" } {
+export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus {
   const dn = (fixture.state?.developer_name ?? "").toUpperCase();
   if (dn === "FT" || dn === "FINISHED" || dn === "FULL_TIME") return { status: "FT", clockRunning: false, inPlayHalf: false };
   if (dn === "HT" || dn === "HALF_TIME") return { status: "HT", clockRunning: false, inPlayHalf: false };

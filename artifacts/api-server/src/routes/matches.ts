@@ -574,6 +574,7 @@ export type LiveMatchState = {
   // (do nothing). See reasoning on _apiFootballEverMatched /
   // _apiFootballPenaltyEventCount above for the same class of bug this
   // prevents.
+  _sportMonksVarEventCount?: number;
   _apiFootballPrevHomeRedCards?: number;
   _apiFootballPrevAwayRedCards?: number;
   _apiFootballPrevPenaltyCount?: number;
@@ -14333,6 +14334,15 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const norm = normalizeSportMonksStatus(fx);
     const period = norm.inPlayHalf;
 
+    // Market suspension bookkeeping — declared BEFORE the API-Football cross-
+    // reference block below because that block itself can trigger VAR / new
+    // red-card / penalty-kick suspensions for incidents SportMonks hasn't
+    // reported yet. Moving these to after the block (the initial bug) caused
+    // TS errors "Block-scoped variable used before its declaration" for every
+    // suspension triggered by the API-Football enrichment path.
+    let marketSuspension = existing?.marketSuspension;
+    let suspensionReason = existing?._suspensionReason;
+
     // Granular seconds-accurate clock anchor, parity with PulseScore's
     // pulseScoreEventClockSec. getSportMonksFixtureClockSec sums
     // (period.minutes * 60 + period.seconds) so the frontend's existing
@@ -14410,97 +14420,112 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     //     the API-Football feed reports an incident SportMonks hasn't yet
     //   - override status → ET / PEN / authoritative-FT when API-Football
     //     confirms it, fixing the "ET/PEN never render on SportMonks" gap
-    let mappedApiFid: number | undefined;
-    if (existing?._sportMonksMappedApiFid !== undefined) {
-      mappedApiFid = existing._sportMonksMappedApiFid;
-    } else {
-      const directId = getMappedApiFootballFixtureId(home, away, fx.league?.id ?? null, fx.id);
-      if (directId !== null) {
-        mappedApiFid = directId;
-        recordConfirmedFixtureMapping(home, away, fx.league?.id ?? null, fx.id, directId);
-      }
-    }
-    let apiFootballConfirmsEt = false;
-    let apiFootballConfirmsPen = false;
-    let apiFootballConfirmsFt = false;
-    let apiFootballFrozenStatus: string | undefined;
-    if (mappedApiFid !== undefined) {
-      const af = apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid);
-      if (af) {
-        const short = (af.fixture.status.short ?? "").toUpperCase();
-        if (API_FOOTBALL_ET_STATUSES.has(short)) {
-          apiFootballConfirmsEt = true;
-          apiFootballFrozenStatus = "ET";
-        } else if (short === "PEN" || short === "PSO") {
-          apiFootballConfirmsPen = true;
-          apiFootballFrozenStatus = "PEN";
-        } else if (API_FOOTBALL_FINISHED_STATUSES.has(short)) {
-          apiFootballConfirmsFt = true;
-          apiFootballFrozenStatus = "FT";
-        }
-        // Also pull incident-based suspensions the SportMonks events list
-        // may not yet contain (VAR review timings, penalty shootout
-        // kicks, etc.) — same per-incident logic the PulseScore builder
-        // uses, so the two football live paths behave identically.
-        if (existing?._sportMonksEverMatched) {
-          const afHomeRed = fixtureHasRedCard(af, "home");
-          const afAwayRed = fixtureHasRedCard(af, "away");
-          const prevHomeRc = existing._apiFootballPrevHomeRedCards ?? existing.redCardsHome ?? 0;
-          const prevAwayRc = existing._apiFootballPrevAwayRedCards ?? existing.redCardsAway ?? 0;
-          if (afHomeRed > prevHomeRc || afAwayRed > prevAwayRc) {
-            const now = Date.now();
-            marketSuspension = Object.fromEntries(
-              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-            );
-            suspensionReason = "CARTÃO VERMELHO (API-Football)";
-          }
-          if (fixtureHasVarReview(af)) {
-            const now = Date.now();
-            marketSuspension = Object.fromEntries(
-              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-            );
-            suspensionReason = "VAR";
-          }
-          const penEvents = fixturePenaltyEvents(af);
-          const prevPenCount = existing._apiFootballPrevPenaltyCount ?? 0;
-          if (penEvents > prevPenCount) {
-            const now = Date.now();
-            marketSuspension = Object.fromEntries(
-              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-            );
-            suspensionReason = "PENÂLTIS";
-          }
-        }
-      }
-    } else {
+    //
+    // Implementation note: getMappedApiFootballFixtureId / recordConfirmed-
+    // FixtureMapping are PulseScore-exclusive helpers (they key the cross-
+    // session mapping table on pulsescoreMatchId/pulsescoreEventId — see
+    // apiFootball.ts L326 and L336's object arg). Calling them with the
+    // wrong arg count / wrong arg type (the initial draft did exactly
+    // that) triggered 10+ TS errors. For SportMonks we instead persist
+    // the confirmed API-Football fixtureId directly onto this LiveMatch-
+    // State's own _sportMonksMappedApiFid field and use it for direct
+    // lookup next tick — identical outcome, just without touching the
+    // PulseScore-scoped mapping helpers.
+    let mappedApiFid: number | undefined = existing?._sportMonksMappedApiFid;
+    let apiFixture: ApiFootballFixture | undefined | null = mappedApiFid !== undefined
+      ? apiFootballFixtures.find((f) => f.fixtureId === mappedApiFid)
+      : undefined;
+    // Fuzzy match on first ever encounter (or if the persisted id no
+    // longer appears in this tick's live batch — API-Football hiccups, or
+    // the match has genuinely ended there). Signature of findApiFootball-
+    // Fixture confirmed against apiFootball.ts L509: (home, away,
+    // fixtures[], league?, country?, kickoff?) — the first draft passed
+    // apiFootballFixtures as arg #1 and got every call's arg order wrong,
+    // hence the batch of "Expected N args but got M" TS errors.
+    if (!apiFixture) {
       const guessed = findApiFootballFixture(
-        apiFootballFixtures,
         home,
         away,
+        apiFootballFixtures,
         fx.league?.name ?? null,
         fx.league?.country?.name ?? null,
         new Date(fx.starting_at ?? Date.now()),
       );
       if (guessed) {
-        mappedApiFid = guessed.fixture.id;
-        recordConfirmedFixtureMapping(
-          home,
-          away,
-          fx.league?.id ?? null,
-          fx.id,
-          guessed.fixture.id,
+        apiFixture = guessed;
+        mappedApiFid = guessed.fixtureId;
+      }
+    }
+    // Short status lives FLAT on the fixture (apiFixture.statusShort),
+    // not nested under apiFixture.fixture.status.short — the first draft
+    // treated ApiFootballFixture as if it were the raw REST envelope
+    // ({"fixture":{"id":..., "status":{...}}}) instead of the already-
+    // flattened type it actually is (see apiFootball.ts L43 type decl).
+    let apiFootballConfirmsEt = false;
+    let apiFootballConfirmsPen = false;
+    let apiFootballConfirmsFt = false;
+    // Count-based incident tracking (not boolean flags): fixtureHasRedCard/
+    // VarReview return a single boolean ("any EVER?"), which can only
+    // fire once per match. For re-suspension on NEW incidents we need
+    // counts compared tick-to-tick — same pattern PulseScore uses on
+    // L13455-13508 for this exact reason. Falls back to last-known values
+    // when apiFixture briefly disappears (same hold-on-mismatch fix the
+    // PulseScore builder added 2026-08-11 for the repeated-VAR bug).
+    const redCardEvents = apiFixture
+      ? apiFixture.events.filter(
+          (e) => e.type === "Card" && e.detail.toLowerCase().includes("red card"),
+        )
+      : [];
+    const apiHomeRedCards = apiFixture
+      ? redCardEvents.filter((e) => e.teamId === apiFixture.home.id).length
+      : (existing?._apiFootballPrevHomeRedCards ?? 0);
+    const apiAwayRedCards = apiFixture
+      ? redCardEvents.filter((e) => e.teamId === apiFixture.away.id).length
+      : (existing?._apiFootballPrevAwayRedCards ?? 0);
+    const varEventCount = apiFixture
+      ? apiFixture.events.filter((e) => e.type.toLowerCase() === "var").length
+      : (existing?._sportMonksVarEventCount ?? 0);
+    const penaltyEventCount = apiFixture
+      ? fixturePenaltyEvents(apiFixture).length
+      : (existing?._apiFootballPrevPenaltyCount ?? 0);
+    if (apiFixture) {
+      const short = (apiFixture.statusShort ?? "").toUpperCase();
+      if (API_FOOTBALL_ET_STATUSES.has(short)) apiFootballConfirmsEt = true;
+      else if (short === "PEN" || short === "PSO") apiFootballConfirmsPen = true;
+      else if (API_FOOTBALL_FINISHED_STATUSES.has(short)) apiFootballConfirmsFt = true;
+      // VAR / red-card / penalty suspensions — ONLY after the first-ever
+      // successful match (wasEverMatchedBefore). On the very first tick a
+      // fixture cross-references, apiHomeRedCards/varEventCount include
+      // everything that happened BEFORE we joined — treating those as NEW
+      // would trigger a spurious "CARTÃO VERMELHO/VAR" banner on a match
+      // that already has 2 red cards shown, same class of first-tick
+      // false-positive the PulseScore L13490-13508 "wasEverMatchedBefore"
+      // guard was added to prevent.
+      const wasEverMatchedBefore = !!existing?._sportMonksEverMatched;
+      const prevHomeRc = existing?._apiFootballPrevHomeRedCards ?? existing?.redCardsHome ?? 0;
+      const prevAwayRc = existing?._apiFootballPrevAwayRedCards ?? existing?.redCardsAway ?? 0;
+      const prevVar = existing?._sportMonksVarEventCount ?? 0;
+      const prevPen = existing?._apiFootballPrevPenaltyCount ?? 0;
+      if (wasEverMatchedBefore && (apiHomeRedCards > prevHomeRc || apiAwayRedCards > prevAwayRc)) {
+        const now = Date.now();
+        marketSuspension = Object.fromEntries(
+          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
         );
-        const short = (guessed.fixture.status.short ?? "").toUpperCase();
-        if (API_FOOTBALL_ET_STATUSES.has(short)) {
-          apiFootballConfirmsEt = true;
-          apiFootballFrozenStatus = "ET";
-        } else if (short === "PEN" || short === "PSO") {
-          apiFootballConfirmsPen = true;
-          apiFootballFrozenStatus = "PEN";
-        } else if (API_FOOTBALL_FINISHED_STATUSES.has(short)) {
-          apiFootballConfirmsFt = true;
-          apiFootballFrozenStatus = "FT";
-        }
+        suspensionReason = "CARTÃO VERMELHO (API-Football)";
+      }
+      if (wasEverMatchedBefore && varEventCount > prevVar && fixtureHasVarReview(apiFixture)) {
+        const now = Date.now();
+        marketSuspension = Object.fromEntries(
+          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+        );
+        suspensionReason = "VAR";
+      }
+      if (wasEverMatchedBefore && penaltyEventCount > prevPen) {
+        const now = Date.now();
+        marketSuspension = Object.fromEntries(
+          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+        );
+        suspensionReason = "PENÂLTIS";
       }
     }
 
@@ -14598,8 +14623,6 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const bookmakerSuspended =
       resultOdds.length > 0 && resultOdds.every((o) => o.suspended || o.stopped);
 
-    let marketSuspension = existing?.marketSuspension;
-    let suspensionReason = existing?._suspensionReason;
     if (newGoal) {
       const now = Date.now();
       marketSuspension = Object.fromEntries(
@@ -14647,21 +14670,16 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // API-Football match's existing incident counts (red cards, penalties
     // already awarded before we started watching) would incorrectly look
     // like NEW incidents this tick, spamming VAR suspensions.
-    const afHomeRedBase = mappedApiFid
-      ? fixtureHasRedCard(
-          apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid),
-          "home",
-        )
-      : 0;
-    const afAwayRedBase = mappedApiFid
-      ? fixtureHasRedCard(
-          apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid),
-          "away",
-        )
-      : 0;
-    const afPenBase = mappedApiFid
-      ? fixturePenaltyEvents(apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid))
-      : 0;
+    // Baseline snapshot persisted for next tick. Uses the already-counted values
+    // from the apiFixture block above instead of re-running fixtureHasRedCard /
+    // fixturePenaltyEvents a second time: those return boolean / array not counts,
+    // so re-running them with the wrong arg count and the wrong
+    // (non-flat .fixture.id access is what caused the original 14 "Expected
+    // 1/2/6 arg" / "Property 'fixture' does not exist" / "Operator '>'
+    // cannot be applied to boolean and number" TS errors.
+    const afHomeRedBase = apiHomeRedCards;
+    const afAwayRedBase = apiAwayRedCards;
+    const afPenBase = penaltyEventCount;
 
     ranked.push({
       prio,
@@ -14689,6 +14707,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         _suspensionReason: suspensionReason,
         _sportMonksMappedApiFid: mappedApiFid,
         _sportMonksEverMatched: true,
+        _sportMonksVarEventCount: varEventCount,
         _apiFootballPrevHomeRedCards: afHomeRedBase,
         _apiFootballPrevAwayRedCards: afAwayRedBase,
         _apiFootballPrevPenaltyCount: afPenBase,
