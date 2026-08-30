@@ -21,6 +21,7 @@ import * as net from "net";
 import {
   getPulseScoreFootballLive,
   extractFootballOverride,
+  findPulseScoreFootballOverride,
   pulseScoreEventScore,
   pulseScoreEventMinute,
   pulseScoreEventClockSec,
@@ -14191,7 +14192,17 @@ async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
  * cover, pending a confirmed real sample of that event type.
  */
 async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
-  const fixtures = await getSportMonksFootballLive();
+  // pulseScoreEvents: real-time bwin 1X2 overlay (RE-ENABLED 2026-08-30 —
+  // see FOOTBALL_PULSESCORE_BLOCKED's header in pulsescore/football.ts).
+  // ONE fetch per tick, matched per-fixture below via findPulseScoreFootballOverride
+  // (an O(n) scan per fixture — safe here since this loop's fixture count
+  // is the small SportMonks-covered live set, not PulseScore's own full
+  // live list, unlike the O(n²) incident that motivated the per-event
+  // design elsewhere in this file).
+  const [fixtures, pulseScoreEvents] = await Promise.all([
+    getSportMonksFootballLive(),
+    getPulseScoreFootballLive(),
+  ]);
   // Per-fixture odds (confirmed real, 2026-08-29 — see getSportMonksLiveOddsByFixture's
   // header for how this replaced the dead-end /odds/inplay general list),
   // fanned out across every fixture this tick regardless of live/NS/FT —
@@ -14274,9 +14285,25 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       baseMarkets,
       override,
     );
+    // Real-time 1X2 preference: bwin/PulseScore (confirmed ~1s live update
+    // cadence) over bet365/SportMonks (correct but confirmed slow to
+    // reprice several lower-tier leagues — explicit user report/decision,
+    // 2026-08-30: "estava a funcionar perfeitamente ontem", describing
+    // exactly this bwin-sourced live-odds behavior from before the
+    // SportMonks migration). SportMonks stays authoritative for
+    // score/clock/events/corners/cards/every other market regardless —
+    // this only swaps the primary 1X2 price when a real-time bwin quote
+    // for this exact fixture is found (team-name matched, see
+    // findPulseScoreFootballOverride). Falls back to bet365/SportMonks
+    // (or synthetic) when bwin doesn't cover this fixture.
+    const pulseOverride = findPulseScoreFootballOverride(home, away, pulseScoreEvents);
     const baseOdds = makeOddsFromTeams(home, away);
-    const odds = { ...baseOdds, ...nonNullPatch(override.odds) };
-    const hasRealOddsNow = !!override.odds;
+    const odds = {
+      ...baseOdds,
+      ...nonNullPatch(override.odds),
+      ...nonNullPatch(pulseOverride?.odds),
+    };
+    const hasRealOddsNow = !!override.odds || !!pulseOverride?.odds;
 
     const redCardsHome = countSportMonksRedCards(fx, "home");
     const redCardsAway = countSportMonksRedCards(fx, "away");

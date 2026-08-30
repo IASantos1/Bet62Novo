@@ -68,11 +68,18 @@ export function getPulseScoreFootballUsage(): {
 const FOOTBALL_BOOKMAKER = "bwin";
 
 // 2026-08-28: football's PulseScore/bwin feed (prematch, live REST, and the
-// WS overlay in footballWs.ts) is intentionally disabled while we switch
-// football to a different odds provider. Every entry point below returns
-// empty instead of calling out — flip this back to false (and
-// startPulseScoreFootballWs in api/index.ts) to restore it.
-const FOOTBALL_PULSESCORE_BLOCKED = true;
+// WS overlay in footballWs.ts) was disabled while switching football to
+// SportMonks. RE-ENABLED 2026-08-30 (explicit user report/decision): bet365
+// via SportMonks turned out correct but slow to reprice several live
+// leagues (confirmed via /api/matches/debug/football-live-odds — fetch
+// itself fresh every ~2s, but bet365's own price frozen for many minutes
+// on lower-tier fixtures), unlike bwin's confirmed ~1s live cadence used
+// here before the migration ("estava a funcionar perfeitamente ontem").
+// Prematch football STAYS on SportMonks/1xbet (unaffected, not blocked by
+// this flag's callers below) — only the LIVE REST fetch is consumed again,
+// by buildFootballLiveFromSportMonks in matches.ts, as a real-time 1X2
+// overlay on top of SportMonks' own score/clock/events/corners/cards data.
+const FOOTBALL_PULSESCORE_BLOCKED = false;
 
 // Bug report 2026-08-14: a whole league (2. Bundesliga, but "several
 // leagues" per the report) showing only a handful of its real live matches
