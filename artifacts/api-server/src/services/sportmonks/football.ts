@@ -1189,6 +1189,22 @@ export async function getSportMonksFixtureOdds(
   return promise;
 }
 
+/** Debug-only: how long ago THIS SERVER last successfully fetched a
+ * fixture's odds (not SportMonks' own latest_bookmaker_update — that's a
+ * separate, upstream timestamp). Lets the debug route tell apart "our own
+ * fetch loop is actively re-querying every ~2s but SportMonks/bet365
+ * keeps reporting the same stale price" from "our own cache/fetch is
+ * itself stuck" — added 2026-08-30 mid-debugging session after the same
+ * latest_bookmaker_update values kept appearing over an hour apart. */
+export function getSportMonksLiveOddsCacheAgeMs(
+  fixtureId: number,
+  bookmakerId = 2,
+): number | null {
+  const cacheKey = fixtureId * 1000 + bookmakerId;
+  const cached = liveOddsCache.get(cacheKey);
+  return cached ? Date.now() - cached.fetchedAt : null;
+}
+
 /** Fans out getSportMonksFixtureOdds across every currently-live fixture in
  * parallel (same Promise.all fan-out pattern getSportMonksFootballUpcoming
  * already uses across leagues) — one call per fixture, each independently
