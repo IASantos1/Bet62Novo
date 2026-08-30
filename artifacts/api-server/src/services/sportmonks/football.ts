@@ -219,13 +219,24 @@ function oddsByDeveloperName(
     (o) =>
       o.market?.developer_name === developerName &&
       o.bookmaker_id === bookmakerId &&
-      !o.suspended &&
-      // Confirmed real (2026-08-29, live fixture 19621836's odds, bet365):
-      // `suspended` stayed null on every one of 3798 rows, but `stopped`
-      // carried the real live-suspension signal (539 rows genuinely
-      // paused mid-play) — excluded here the same tolerant way, so a
-      // fully-stopped market falls back to synthetic rather than showing
-      // a stale/frozen price.
+      // Confirmed real (2026-08-30, Bundesliga live FC Augsburg v
+      // Schalke 04, bet365): when a goal or market re-price is in
+      // progress bet365 momentarily marks just ONE selection (usually
+      // the favorite HOME) with `suspended=true` while still carrying
+      // the real numeric odds in the `value` field and keeping DRAW/
+      // AWAY with `suspended=null`. The OLD filter required ALL sides
+      // to have `!suspended` → when just the HOME side flipped to
+      // `true` during the 72nd-minute goal flash, odds extraction
+      // returned only [Draw, Away] → `override.odds = { home:null,
+      // draw:8.25, away:41.00 }`. Then nonNullPatch skipped HOME,
+      // makeOddsFromTeams generated a synthetic HOME odd <1.15 from
+      // reverse head-to-head, home.tsx L10317's "<1.15" guard returns
+      // "--" — exactly the user-reported "--" on Augsburg home. NEW
+      // rule: `suspended=true` is STILL an odds row with a real price;
+      // only drop rows where the market is PERMANENTLY stopped
+      // (stopped=true, different signal: means the market closed, not
+      // just mid-flicker). Suspension-as-a-market-level flag is read
+      // separately in matches.ts via bookmakerSuspended check.
       !o.stopped,
   );
 }
@@ -330,59 +341,33 @@ export type SportMonksFootballOverride = {
 
 export function extractSportMonksFootballOverride(
   fixture: SportMonksFixture,
-  bookmakerId = 35,
+  bookmakerId = 2,
 ): SportMonksFootballOverride {
   const out: SportMonksFootballOverride = {};
-  const tryBookmakers = new Set<number>();
-  if (bookmakerId === 2) {
-    tryBookmakers.add(35);
-    tryBookmakers.add(2);
-  } else {
-    tryBookmakers.add(bookmakerId);
-    tryBookmakers.add(35);
-    tryBookmakers.add(2);
-  }
-  const chosenBookmakerIds: number[] = [...tryBookmakers];
-  const ftrRows: SportMonksOdd[] = [];
-  const dcRows: SportMonksOdd[] = [];
-  const btsRows: SportMonksOdd[] = [];
-  const dnbRows: SportMonksOdd[] = [];
-  const tgRows: SportMonksOdd[] = [];
-  const crRows: SportMonksOdd[] = [];
-  const cdRows: SportMonksOdd[] = [];
-  const htRows: SportMonksOdd[] = [];
-  const shRows: SportMonksOdd[] = [];
-  const csRows: SportMonksOdd[] = [];
-  const htftRows: SportMonksOdd[] = [];
-  const goeRows: SportMonksOdd[] = [];
-  const tg2Rows: SportMonksOdd[] = [];
-  const bts1hRows: SportMonksOdd[] = [];
-  const bts2hRows: SportMonksOdd[] = [];
-  const hshRows: SportMonksOdd[] = [];
-  for (const bmId of chosenBookmakerIds) {
-    if (ftrRows.length === 0) ftrRows.push(...oddsByDeveloperName(fixture, "FULLTIME_RESULT", bmId));
-    if (dcRows.length === 0) dcRows.push(...oddsByDeveloperName(fixture, "DOUBLE_CHANCE", bmId));
-    if (btsRows.length === 0) btsRows.push(...oddsByDeveloperName(fixture, "BOTH_TEAMS_SCORE", bmId));
-    if (dnbRows.length === 0) dnbRows.push(...oddsByDeveloperName(fixture, "DRAW_NO_BET", bmId));
-    if (tgRows.length === 0) tgRows.push(...oddsByDeveloperName(fixture, "TOTAL_GOALS", bmId));
-    if (crRows.length === 0) crRows.push(...oddsByDeveloperName(fixture, "TOTAL_CORNERS", bmId));
-    if (cdRows.length === 0) cdRows.push(...oddsByDeveloperName(fixture, "TOTAL_CARDS", bmId));
-    if (htRows.length === 0) htRows.push(...oddsByDeveloperName(fixture, "FIRST_HALF_RESULT", bmId));
-    if (shRows.length === 0) shRows.push(...oddsByDeveloperName(fixture, "SECOND_HALF_RESULT", bmId));
-    if (csRows.length === 0) csRows.push(...oddsByDeveloperName(fixture, "CORRECT_SCORE", bmId));
-    if (htftRows.length === 0) htftRows.push(...oddsByDeveloperName(fixture, "HALF_TIME_FULL_TIME", bmId));
-    if (goeRows.length === 0) goeRows.push(...oddsByDeveloperName(fixture, "GOALS_ODD_EVEN", bmId));
-    if (tg2Rows.length === 0) tg2Rows.push(...oddsByDeveloperName(fixture, "TEAM_TOTAL_GOALS", bmId));
-    if (bts1hRows.length === 0) bts1hRows.push(...oddsByDeveloperName(fixture, "FIRST_HALF_BOTH_TEAMS_SCORE", bmId));
-    if (bts2hRows.length === 0) bts2hRows.push(...oddsByDeveloperName(fixture, "SECOND_HALF_BOTH_TEAMS_SCORE", bmId));
-    if (hshRows.length === 0) hshRows.push(...oddsByDeveloperName(fixture, "HIGHEST_SCORING_HALF", bmId));
-    const allCollected =
-      ftrRows.length > 0 && dcRows.length > 0 && btsRows.length > 0 && dnbRows.length > 0 &&
-      tgRows.length > 0 && crRows.length > 0 && cdRows.length > 0 && htRows.length > 0 &&
-      shRows.length > 0 && csRows.length > 0 && htftRows.length > 0 && goeRows.length > 0 &&
-      tg2Rows.length > 0 && bts1hRows.length > 0 && bts2hRows.length > 0 && hshRows.length > 0;
-    if (allCollected) break;
-  }
+  // The user's actual SportMonks subscription for football carries ONLY
+  // bet365 (bookmaker_id 2) live + pre-match odds; 1xbet (35) data lives
+  // exclusively on PulseScore (which intentionally isn't mixed into the
+  // SportMonks builder per explicit user instruction — 2026-08-30). So we
+  // read bookmakerId (default 2 = bet365) ONLY here, no silent fallback to
+  // any other bookmaker id inside extraction.
+  const chosenBookmakerIds = [bookmakerId];
+
+  const ftrRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "FULLTIME_RESULT", bookmakerId);
+  const dcRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "DOUBLE_CHANCE", bookmakerId);
+  const btsRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "BOTH_TEAMS_SCORE", bookmakerId);
+  const dnbRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "DRAW_NO_BET", bookmakerId);
+  const tgRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_GOALS", bookmakerId);
+  const crRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_CORNERS", bookmakerId);
+  const cdRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TOTAL_CARDS", bookmakerId);
+  const htRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "FIRST_HALF_RESULT", bookmakerId);
+  const shRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "SECOND_HALF_RESULT", bookmakerId);
+  const csRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "CORRECT_SCORE", bookmakerId);
+  const htftRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "HALF_TIME_FULL_TIME", bookmakerId);
+  const goeRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "GOALS_ODD_EVEN", bookmakerId);
+  const tg2Rows: SportMonksOdd[] = oddsByDeveloperName(fixture, "TEAM_TOTAL_GOALS", bookmakerId);
+  const bts1hRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "FIRST_HALF_BOTH_TEAMS_SCORE", bookmakerId);
+  const bts2hRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "SECOND_HALF_BOTH_TEAMS_SCORE", bookmakerId);
+  const hshRows: SportMonksOdd[] = oddsByDeveloperName(fixture, "HIGHEST_SCORING_HALF", bookmakerId);
 
   // Fulltime Result -> 1X2
   const ftr = ftrRows;
@@ -425,15 +410,7 @@ export function extractSportMonksFootballOverride(
   // Both Teams To Score -> Yes/No
   const btts = btsRows.length > 0
     ? btsRows
-    : [
-        ...oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE", chosenBookmakerIds[0]!),
-        ...(chosenBookmakerIds[1] !== undefined
-          ? oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE", chosenBookmakerIds[1]!)
-          : []),
-        ...(chosenBookmakerIds[2] !== undefined
-          ? oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE", chosenBookmakerIds[2]!)
-          : []),
-      ];
+    : oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE", bookmakerId);
   if (btts.length > 0) {
     let yes: number | null = null;
     let no: number | null = null;
@@ -463,41 +440,26 @@ export function extractSportMonksFootballOverride(
   }
 
   // Total goals -> totalGoals ladder (0.5..6.5). bet365 splits this across
-  // MATCH_GOALS (standard line) + ALTERNATIVE_MATCH_GOALS (extra lines);
-  // 1xbet (confirmed real, 2026-08-29) uses a single GOALS_OVER_UNDER
-  // market instead, same Over/Under + `total` shape — merged in here too.
-  const mgRowsByBm: SportMonksOdd[] = [];
-  const amgRowsByBm: SportMonksOdd[] = [];
-  const gouRowsByBm: SportMonksOdd[] = [];
-  for (const bmId of chosenBookmakerIds) {
-    if (mgRowsByBm.length === 0) mgRowsByBm.push(...oddsByDeveloperName(fixture, "MATCH_GOALS", bmId));
-    if (amgRowsByBm.length === 0) amgRowsByBm.push(...oddsByDeveloperName(fixture, "ALTERNATIVE_MATCH_GOALS", bmId));
-    if (gouRowsByBm.length === 0) gouRowsByBm.push(...oddsByDeveloperName(fixture, "GOALS_OVER_UNDER", bmId));
-    if (
-      mgRowsByBm.length > 0 &&
-      amgRowsByBm.length > 0 &&
-      gouRowsByBm.length > 0
-    ) break;
-  }
+  // MATCH_GOALS (standard line) + ALTERNATIVE_MATCH_GOALS (extra lines).
   const totalGoalsOdds = tgRows.length > 0
     ? tgRows
-    : [...mgRowsByBm, ...amgRowsByBm, ...gouRowsByBm];
+    : [
+        ...oddsByDeveloperName(fixture, "MATCH_GOALS", bookmakerId),
+        ...oddsByDeveloperName(fixture, "ALTERNATIVE_MATCH_GOALS", bookmakerId),
+        ...oddsByDeveloperName(fixture, "GOALS_OVER_UNDER", bookmakerId),
+      ];
   if (totalGoalsOdds.length > 0) {
     const patch = fillLadder(totalGoalsOdds, TOTAL_GOALS_LINE_KEYS);
     if (Object.keys(patch).length > 0) out.totalGoals = patch;
   }
 
-  // Total Corners -> corners ladder (8.5/9.5/10.5). 1xbet (confirmed real)
-  // uses developer_name CORNER_MARKET instead of bet365's TOTAL_CORNERS,
-  // same Over/Under + `total` shape.
-  const tcRowsByBm: SportMonksOdd[] = [];
-  const cmRowsByBm: SportMonksOdd[] = [];
-  for (const bmId of chosenBookmakerIds) {
-    if (tcRowsByBm.length === 0) tcRowsByBm.push(...oddsByDeveloperName(fixture, "TOTAL_CORNERS", bmId));
-    if (cmRowsByBm.length === 0) cmRowsByBm.push(...oddsByDeveloperName(fixture, "CORNER_MARKET", bmId));
-    if (tcRowsByBm.length > 0 && cmRowsByBm.length > 0) break;
-  }
-  const cornersOdds = crRows.length > 0 ? crRows : [...tcRowsByBm, ...cmRowsByBm];
+  // Total Corners -> corners ladder (8.5/9.5/10.5)
+  const cornersOdds = crRows.length > 0
+    ? crRows
+    : [
+        ...oddsByDeveloperName(fixture, "TOTAL_CORNERS", bookmakerId),
+        ...oddsByDeveloperName(fixture, "CORNER_MARKET", bookmakerId),
+      ];
   if (cornersOdds.length > 0) {
     const patch = fillLadder(cornersOdds, CORNERS_LINE_KEYS);
     if (Object.keys(patch).length > 0) out.corners = patch;
@@ -506,13 +468,7 @@ export function extractSportMonksFootballOverride(
   // Number of Cards -> cards ladder (3.5/4.5)
   const cardsOdds = cdRows.length > 0
     ? cdRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "NUMBER_OF_CARDS", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "NUMBER_OF_CARDS", bookmakerId);
   if (cardsOdds.length > 0) {
     const patch = fillLadder(cardsOdds, CARDS_LINE_KEYS);
     if (Object.keys(patch).length > 0) out.cards = patch;
@@ -522,13 +478,7 @@ export function extractSportMonksFootballOverride(
   // Fulltime Result (confirmed real, 2026-08-29).
   const htr = htRows.length > 0
     ? htRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "HALF_TIME_RESULT", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "HALF_TIME_RESULT", bookmakerId);
   if (htr.length > 0) {
     let home: number | null = null;
     let draw: number | null = null;
@@ -547,13 +497,7 @@ export function extractSportMonksFootballOverride(
   // 2nd Half Result -> 1X2 for the 2nd half only, same vocabulary.
   const shr = shRows.length > 0
     ? shRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "2ND_HALF_RESULT", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "2ND_HALF_RESULT", bookmakerId);
   if (shr.length > 0) {
     let home: number | null = null;
     let draw: number | null = null;
@@ -574,13 +518,7 @@ export function extractSportMonksFootballOverride(
   // settlement.ts/home.tsx's cs-{k} selection keys already expect.
   const csOdds = csRows.length > 0
     ? csRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "CORRECT_SCORE", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "CORRECT_SCORE", bookmakerId);
   if (csOdds.length > 0) {
     const scores: Record<string, number> = {};
     for (const o of csOdds) {
@@ -597,13 +535,7 @@ export function extractSportMonksFootballOverride(
   // settlement.ts already grades.
   const htftOdds = htftRows.length > 0
     ? htftRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "HT_FT_DOUBLE", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "HT_FT_DOUBLE", bookmakerId);
   if (htftOdds.length > 0) {
     const patch: Record<string, number> = {};
     for (const o of htftOdds) {
@@ -622,13 +554,7 @@ export function extractSportMonksFootballOverride(
   // Odd/Even (total match goals) -> "Odd"/"Even" labels.
   const oddEven = goeRows.length > 0
     ? goeRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "ODD_EVEN", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "ODD_EVEN", bookmakerId);
   if (oddEven.length > 0) {
     let odd: number | null = null;
     let even: number | null = null;
@@ -643,22 +569,11 @@ export function extractSportMonksFootballOverride(
   }
 
   // Home/Away Team Goals -> per-team totalGoals-style ladder (0.5/1.5/2.5).
-  const htGoalsByBm: SportMonksOdd[] = [];
-  const atGoalsByBm: SportMonksOdd[] = [];
-  const teamTotalByBm: SportMonksOdd[] = [];
-  for (const bmId of chosenBookmakerIds) {
-    if (htGoalsByBm.length === 0) htGoalsByBm.push(...oddsByDeveloperName(fixture, "HOME_TEAM_GOALS", bmId));
-    if (atGoalsByBm.length === 0) atGoalsByBm.push(...oddsByDeveloperName(fixture, "AWAY_TEAM_GOALS", bmId));
-    if (teamTotalByBm.length === 0) teamTotalByBm.push(...oddsByDeveloperName(fixture, "TEAM_TOTAL_GOALS", bmId));
-    if (
-      htGoalsByBm.length > 0 &&
-      atGoalsByBm.length > 0 &&
-      teamTotalByBm.length > 0
-    ) break;
-  }
-  const homeTeamGoals = htGoalsByBm;
-  const awayTeamGoals = atGoalsByBm;
-  const tgExtra = tg2Rows.length > 0 ? tg2Rows : teamTotalByBm;
+  const homeTeamGoals = oddsByDeveloperName(fixture, "HOME_TEAM_GOALS", bookmakerId);
+  const awayTeamGoals = oddsByDeveloperName(fixture, "AWAY_TEAM_GOALS", bookmakerId);
+  const tgExtra = tg2Rows.length > 0
+    ? tg2Rows
+    : oddsByDeveloperName(fixture, "TEAM_TOTAL_GOALS", bookmakerId);
   const teamGoalsPatch: Record<string, number> = {};
   if (homeTeamGoals.length > 0) Object.assign(teamGoalsPatch, fillLadder(homeTeamGoals, teamGoalsLineKeys("home")));
   if (awayTeamGoals.length > 0) Object.assign(teamGoalsPatch, fillLadder(awayTeamGoals, teamGoalsLineKeys("away")));
@@ -669,13 +584,7 @@ export function extractSportMonksFootballOverride(
   // full-match Both Teams To Score market.
   const btts1H = bts1hRows.length > 0
     ? bts1hRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE_IN_1ST_HALF", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE_IN_1ST_HALF", bookmakerId);
   if (btts1H.length > 0) {
     let yes: number | null = null;
     let no: number | null = null;
@@ -690,13 +599,7 @@ export function extractSportMonksFootballOverride(
   }
   const btts2H = bts2hRows.length > 0
     ? bts2hRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE_IN_2ND_HALF", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "BOTH_TEAMS_TO_SCORE_IN_2ND_HALF", bookmakerId);
   if (btts2H.length > 0) {
     let yes: number | null = null;
     let no: number | null = null;
@@ -717,13 +620,7 @@ export function extractSportMonksFootballOverride(
   // not a port.
   const hsm = hshRows.length > 0
     ? hshRows
-    : (() => {
-        for (const bmId of chosenBookmakerIds) {
-          const rows = oddsByDeveloperName(fixture, "HALF_WITH_MOST_GOALS", bmId);
-          if (rows.length > 0) return rows;
-        }
-        return [];
-      })();
+    : oddsByDeveloperName(fixture, "HALF_WITH_MOST_GOALS", bookmakerId);
   if (hsm.length > 0) {
     let first: number | null = null;
     let second: number | null = null;

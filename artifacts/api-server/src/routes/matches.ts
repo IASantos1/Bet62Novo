@@ -14621,13 +14621,12 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // list this loop iterates rejects the odds include outright), so it's
     // merged in here before extraction.
     const liveFixtureOdds = liveOddsByFixture.get(fx.id) ?? [];
-    // Default bookmakerId for the live builder: 1xbet (35, the user-selected
-    // standard across all other sports). extractSportMonksFootballOverride now
-    // has a built-in 1xbet-first fallback chain (35 → 2 → other) when the
-    // primary bookmaker has no rows for a specific market, so passing 35
-    // maximizes real odds coverage instead of the old bet365-only default
-    // that left Augsburg / Nordsjælland home odds as "--" (user bug 2026-08-30).
-    const override = extractSportMonksFootballOverride({ ...fx, odds: liveFixtureOdds }, 35);
+    // SportMonks football subscription confirmed by user (2026-08-30) has
+    // ONLY bet365 (bookmaker_id 2) — 1xbet and other books live exclusively
+    // on PulseScore, which is intentionally NOT merged into SportMonks. So
+    // pass bookmaker 2 explicitly here (default is also 2 in the function
+    // but spelling it out documents the expectation).
+    const override = extractSportMonksFootballOverride({ ...fx, odds: liveFixtureOdds }, 2);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const markets: AdvancedMarkets = applySportMonksFootballOverride(
       { ...baseMarkets },
@@ -14662,13 +14661,10 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       !!existing &&
       redCardsHome + redCardsAway > (existing.redCardsHome ?? 0) + (existing.redCardsAway ?? 0);
     const resultOdds = liveFixtureOdds.filter(
-      (o) =>
-        o.market?.developer_name === "FULLTIME_RESULT" &&
-        (o.bookmaker_id === 35 || o.bookmaker_id === 2),
+      (o) => o.market?.developer_name === "FULLTIME_RESULT" && o.bookmaker_id === 2,
     );
     const bookmakerSuspended =
-      resultOdds.length > 0 &&
-      resultOdds.every((o) => o.suspended || o.stopped);
+      resultOdds.length > 0 && resultOdds.every((o) => o.suspended || o.stopped);
 
     if (newGoal) {
       const now = Date.now();
