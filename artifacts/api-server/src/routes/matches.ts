@@ -27775,6 +27775,18 @@ setInterval(() => {
     // random. PulseScore matches don't need synthetic drift at all; they
     // have an actual live feed.
     if (id.startsWith("pulsescore-football-")) continue;
+    // SAME bug, found real 2026-08-30: SportMonks-sourced live football
+    // (buildFootballLiveFromSportMonks) rebuilds real bet365 odds into
+    // liveMatchState every ~2s too — this drift engine was never taught to
+    // skip those entries either, so it kept overwriting real bet365 prices
+    // with synthetic drift moments later, on its own uncoordinated timer.
+    // This is very likely why live odds looked "frozen"/wrong even after
+    // the real SportMonks fetch was confirmed working end-to-end via
+    // /api/matches/debug/football-live-odds: the debug route reads the
+    // fetch result directly, bypassing this drift engine entirely, so it
+    // could never have shown this bug — only the actual broadcast path
+    // (this loop) could.
+    if (id.startsWith("sportmonks-football-")) continue;
     const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
     if (skip.includes(state.status)) continue;
     if (state.marketSuspension) {
