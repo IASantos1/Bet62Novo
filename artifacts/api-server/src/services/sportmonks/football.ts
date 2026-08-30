@@ -58,8 +58,10 @@ export type SportMonksOdd = {
   original_label?: string | null;
   total?: string | null;
   handicap?: string | null;
-  suspended?: boolean;
-  stopped?: boolean;
+  suspended?: boolean | null;
+  stopped?: boolean | null;
+  participant_id?: number | null;
+  latest_bookmaker_update?: string | null;
   market: { id: number; name: string; developer_name: string };
   bookmaker: { id: number; name: string };
 };
@@ -841,13 +843,17 @@ async function fetchUpcomingForLeague(leagueId: number, bookmakerId: number): Pr
   };
 }
 
-/** Upcoming (not-yet-started) fixtures with 1xbet odds for one SportMonks
- * league, cached ~5 minutes. `leagueId` is SportMonks' own numeric id (see
- * GET /v3/football/leagues for the confirmed real list this account's plan
- * covers — Brazilian Série A is 648, Premier League 8, etc.). */
+/** Upcoming (not-yet-started) fixtures with bet365 (bookmaker_id 2) odds
+ * for one SportMonks league, cached ~5 minutes. User EXPLICIT decision
+ * 2026-08-30: SportMonks football (prematch + live) is EXCLUSIVE to
+ * bet365 (id 2) — 1xbet (id 35) only exists on PulseScore and must NEVER
+ * be requested from SportMonks (returns 0 rows → Poisson fake fallbacks).
+ * `leagueId` is SportMonks' own numeric id (see GET /v3/football/leagues
+ * for the confirmed real list this account's plan covers — Brazilian
+ * Série A is 648, Premier League 8, etc.). */
 export async function getSportMonksFootballUpcomingForLeague(
   leagueId: number,
-  bookmakerId = 35,
+  bookmakerId = 2,
 ): Promise<SportMonksLeagueUpcoming> {
   const cached = upcomingCache.get(leagueId);
   if (cached && Date.now() - cached.fetchedAt < UPCOMING_TTL_MS) return cached.result;
@@ -873,7 +879,7 @@ export async function getSportMonksFootballUpcomingForLeague(
  * it — logged and just contributes an empty fixture list. */
 export async function getSportMonksFootballUpcoming(
   leagueIds: number[],
-  bookmakerId = 35,
+  bookmakerId = 2,
 ): Promise<SportMonksLeagueUpcoming[]> {
   return Promise.all(
     leagueIds.map((leagueId) =>
@@ -1250,9 +1256,11 @@ async function fetchLive(): Promise<SportMonksFixture[]> {
 }
 
 /** Every fixture currently in play, across every SportMonks league this plan
- * covers, cached ~20s. Real odds only for fixtures where the requested
- * bookmaker (1xbet, id 35) actually has live odds — extractSportMonksFootballOverride
- * already handles that gracefully (empty override, not an error). */
+ * covers, cached ~2s. Real odds only for fixtures where bet365 (bookmaker_id
+ * 2) actually has live odds loaded per-fixture via getSportMonksLiveOddsByFixture
+ * — /livescores/inplay itself rejects odds include entirely, confirmed real.
+ * User EXPLICIT rule (2026-08-30): SportMonks football = bet365 id=2 ONLY;
+ * 1xbet id=35 is PulseScore-exclusive and must never be queried here. */
 export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> {
   if (liveCache && Date.now() - liveCache.fetchedAt < LIVE_TTL_MS) return liveCache.fixtures;
   if (liveInFlight) return liveInFlight;

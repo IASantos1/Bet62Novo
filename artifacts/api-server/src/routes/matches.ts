@@ -11747,17 +11747,24 @@ function applySportMonksFootballOverride(
  * Football prematch, sourced from SportMonks (getSportMonksFootballUpcoming)
  * — replacing PulseScore/bwin (blocked 2026-08-28, see
  * pulsescore/football.ts's FOOTBALL_PULSESCORE_BLOCKED) as football's odds
- * provider. Bookmaker: 1xbet (explicit user decision, 2026-08-29), same
- * brand every other sport already standardized on. Only the 7 markets
- * extractSportMonksFootballOverride covers so far get real data — everything
- * else in AdvancedMarkets stays the synthetic Poisson-model baseline, same
- * "real data patches synthetic" pattern buildFootballUpcomingFromPulseScore
- * already uses. Logos come straight from SportMonks' own participant
- * image_path (confirmed present on every real sample) rather than the
- * separate API-Football crest lookup the PulseScore builder needs.
+ * provider. EXPLICIT bookmaker = bet365 (id 2) per USER RULE 2026-08-30:
+ * "SPORTMONKS NAO ESTA DISPONIVEM PARA ME A 1XBET E SIM SO A BET365 PARA
+ * PRE JOGOS E AO VIVO. NAO MISTURAR BOOKMAKERS. 1xbet (id 35) is ONLY on
+ * PulseScore." Pass bookmakerId=2 explicitly (default is also 2 now in the
+ * function, but spelling it out documents the hard requirement and guards
+ * against a future accidental default flip back to 35 in football.ts —
+ * which would cause filters=bookmakers:35 → 0 odds rows → Poisson FAKE
+ * fallbacks, exactly the user-reported "3-0 e odds dele 1.37 em vez de
+ * 1.05~1.15" bug). Only the 7 markets extractSportMonksFootballOverride
+ * covers so far get real data — everything else in AdvancedMarkets stays
+ * the synthetic Poisson-model baseline, same "real data patches synthetic"
+ * pattern buildFootballUpcomingFromPulseScore already uses. Logos come
+ * straight from SportMonks' own participant image_path (confirmed present
+ * on every real sample) rather than the separate API-Football crest lookup
+ * the PulseScore builder needs.
  */
 async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
-  const leagueResults = await getSportMonksFootballUpcoming(SPORTMONKS_FOOTBALL_LEAGUE_IDS);
+  const leagueResults = await getSportMonksFootballUpcoming(SPORTMONKS_FOOTBALL_LEAGUE_IDS, 2);
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
 
