@@ -14443,13 +14443,15 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // apiFootballFixtures as arg #1 and got every call's arg order wrong,
     // hence the batch of "Expected N args but got M" TS errors.
     if (!apiFixture) {
+      const approxKickoffMs = fx.starting_at ? new Date(fx.starting_at).getTime() : Date.now();
       const guessed = findApiFootballFixture(
         home,
         away,
         apiFootballFixtures,
-        fx.league?.name ?? null,
-        fx.league?.country?.name ?? null,
-        new Date(fx.starting_at ?? Date.now()),
+        {
+          league: fx.league?.name ?? undefined,
+          approxKickoffMs,
+        },
       );
       if (guessed) {
         apiFixture = guessed;
@@ -14537,8 +14539,19 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     //      parked on 90 ±60s with stale clock and not an obvious knockout
     //      continuation → FT
     //   4. Minute >= 91 during LIVE → ET (catch-all before cross-ref)
-    //   5. Fall through to norm.status (most common: "LIVE")
-    let liveStatus: "LIVE" | "HT" | "FT" | "ET" | "PEN" = norm.status;
+    //   5. Fall through to the normalized SportMonks status (most common:
+    //      "LIVE").
+    // The initial base value is clamped to {LIVE,HT,FT,ET,PEN} — norm.status
+    // includes the internal-only "NS" (not started) that both
+    // isSportMonksFixtureLive() and the earlier `if (!isSportMonksFixtureLive)
+    // continue;` guard already filtered out by this point, so the cast here
+    // is safe in practice — this line just gives TS the narrowed union the
+    // downstream LiveMatchState.status field expects.
+    let liveStatus: "LIVE" | "HT" | "FT" | "ET" | "PEN" = (norm.status !== "NS" && norm.status !== "FT")
+      ? norm.status
+      : norm.status === "FT"
+        ? "FT"
+        : "LIVE";
     if (apiFootballConfirmsEt) liveStatus = "ET";
     else if (apiFootballConfirmsPen) liveStatus = "PEN";
     else if (apiFootballConfirmsFt) liveStatus = "FT";
