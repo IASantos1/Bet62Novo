@@ -30,9 +30,9 @@ import { pulseScoreWsUrl, type PulseScoreEvent } from "./client.js";
 
 // 2026-08-28: kept in sync with the same-named flag in football.ts (not
 // imported directly, to avoid a circular import — football.ts already
-// imports getFootballWsEventIfFresh from this file). Flip both back to
-// false together to restore football's PulseScore/bwin feed.
-const FOOTBALL_PULSESCORE_BLOCKED = true;
+// imports getFootballWsEventIfFresh from this file). RE-ENABLED
+// 2026-08-30 alongside football.ts's flag — see that file's header for why.
+const FOOTBALL_PULSESCORE_BLOCKED = false;
 
 let ws: WebSocket | null = null;
 let connected = false;
