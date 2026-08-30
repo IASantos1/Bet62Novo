@@ -14578,14 +14578,39 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       continue;
     }
 
-    const leagueName = fx.league?.name || "";
+    const rawLeagueName = fx.league?.name || "";
     const countryName = fx.league?.country?.name || "";
-    const isIntl = isIntlTournamentName(leagueName);
+    // Disambiguate generic league names like "Pro League" that SportMonks uses
+    // for *both* Belgium (Jupiler Pro League) AND Saudi Arabia (Roshn Saudi
+    // Pro League / Saudi Pro League). Without this, the frontend's
+    // per-league flag lookup (LEAGUE_FLAGS["Pro League"] = 🇧🇪) would stamp a
+    // Belgian flag onto Saudi matches like Al Hazm v Al Shabab (user-visible
+    // bug 2026-08-30). When league name is generic AND country is present,
+    // append the country in parens so every league's display name is unique
+    // even when the raw SportMonks name collides.
+    const GENERIC_LEAGUE_COLLISIONS = new Set([
+      "pro league",
+      "first division",
+      "second division",
+      "premier league",
+      "super league",
+      "division 1",
+      "liga",
+      "league one",
+      "championship",
+    ]);
+    const isGenericLeague =
+      rawLeagueName && GENERIC_LEAGUE_COLLISIONS.has(rawLeagueName.trim().toLowerCase());
+    const leagueName =
+      isGenericLeague && countryName
+        ? `${rawLeagueName} (${countryName})`
+        : rawLeagueName;
+    const isIntl = isIntlTournamentName(rawLeagueName);
     const countryKey = countryName ? countryName.toLowerCase() : null;
     const country = countryName || "Internacional";
-    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
+    const prioKey = countryKey ? `${countryKey}: ${rawLeagueName}` : rawLeagueName;
     const prio = leaguePriority(prioKey, countryKey ?? undefined);
-    const tier = footballMarketTier(leagueName, country);
+    const tier = footballMarketTier(rawLeagueName, country);
 
     // Live odds (confirmed real, 2026-08-29): bet365 (bookmaker_id 2) via
     // GET /fixtures/{id}?include=odds.market;odds.bookmaker — the same
@@ -14596,7 +14621,13 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // list this loop iterates rejects the odds include outright), so it's
     // merged in here before extraction.
     const liveFixtureOdds = liveOddsByFixture.get(fx.id) ?? [];
-    const override = extractSportMonksFootballOverride({ ...fx, odds: liveFixtureOdds }, 2);
+    // Default bookmakerId for the live builder: 1xbet (35, the user-selected
+    // standard across all other sports). extractSportMonksFootballOverride now
+    // has a built-in 1xbet-first fallback chain (35 → 2 → other) when the
+    // primary bookmaker has no rows for a specific market, so passing 35
+    // maximizes real odds coverage instead of the old bet365-only default
+    // that left Augsburg / Nordsjælland home odds as "--" (user bug 2026-08-30).
+    const override = extractSportMonksFootballOverride({ ...fx, odds: liveFixtureOdds }, 35);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
     const markets: AdvancedMarkets = applySportMonksFootballOverride(
       { ...baseMarkets },
@@ -14631,10 +14662,13 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       !!existing &&
       redCardsHome + redCardsAway > (existing.redCardsHome ?? 0) + (existing.redCardsAway ?? 0);
     const resultOdds = liveFixtureOdds.filter(
-      (o) => o.market?.developer_name === "FULLTIME_RESULT" && o.bookmaker_id === 2,
+      (o) =>
+        o.market?.developer_name === "FULLTIME_RESULT" &&
+        (o.bookmaker_id === 35 || o.bookmaker_id === 2),
     );
     const bookmakerSuspended =
-      resultOdds.length > 0 && resultOdds.every((o) => o.suspended || o.stopped);
+      resultOdds.length > 0 &&
+      resultOdds.every((o) => o.suspended || o.stopped);
 
     if (newGoal) {
       const now = Date.now();
