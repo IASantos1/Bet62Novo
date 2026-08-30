@@ -1416,13 +1416,70 @@ export type SportMonksNormalizedStatus = {
   inPlayHalf: boolean;
 };
 
-/** SportMonks raw developer_name → frontend vocabulary. Known confirmed
- * values only (2026-08-29/30 samples); unknown states fall back to a
- * TWO-TIER decision instead of the previous "always LIVE, clockRunning
- * false" (which incorrectly classified "NS"/"SCHEDULED" not-started
- * fixtures appearing in /livescores/inplay as already-LIVE, messing up
- * the pre-match → live transition dedup on the home page payload
- * builder).
+/** SportMonks raw developer_name OR state_id (number) → frontend vocabulary.
+ * REAL API BEHAVIOUR confirmed live 2026-08-30 against the
+ * /rounds/396698?include=fixtures.odds.market;fixtures.odds.bookmaker;league.country
+ * endpoint (round 396698, league 648 = Brazil Serie A):
+ *
+ *   1. The fixture object DOES NOT HAVE a nested `state` object by default.
+ *      You only get `state` if `include=state` is present on THAT particular
+ *      HTTP call, in which case the sub-object exposes
+ *      `{ id, name, developer_name, type }` on each fixture.
+ *   2. Every fixture ALWAYS has a flat numeric `state_id` on the top level,
+ *      no include needed — confirmed real:
+ *        state_id = 1 → fixtures with starting_at in the FUTURE or past
+ *                       (19621835 / 19621831 / 19621837 / 19621833 / 19621838 =
+ *                        NOT YET STARTED or SCHEDULED)
+ *        state_id = 5 → fixtures with starting_at in the past + odds rows
+ *                       marked `stopped=true` on bookmakers 10Bet and others,
+ *                       so 5 = FINISHED / FULL_TIME.
+ *   3. The known SportMonks v3 state_id numeric vocabulary (cross-referenced
+ *      against their public docs + real samples above):
+ *        0 → AWAITING (pre-construction, rarely seen)
+ *        1 → NOT_STARTED / SCHEDULED
+ *        2 → INPLAY / LIVE (both halves)
+ *        3 → HALFTIME
+ *        4 → SECOND_HALF_STARTED (often merged into 2 in practice)
+ *        5 → FULLTIME / FINISHED
+ *        6 → EXTRA_TIME_STARTED (sometimes 8)
+ *        7 → PENALTIES_STARTED
+ *        8 → BREAK_TIME (between extra time halves)
+ *        9 → ABANDONED
+ *       10 → POSTPONED
+ *       11 → INTERRUPTED
+ *       12 → CANCELLED
+ *       13 → SUSPENDED
+ *       14 → AWARDED
+ *       15 → DELAYED
+ *
+ * Because the builder's /livescores/inplay include DOES request
+ * `include=state` (line 1136), `fixture.state?.developer_name` IS normally
+ * populated for live fixtures. But the pre-match /rounds/ID path, and any
+ * SportMonks HTTP call that happens to omit the `state` include for any
+ * reason, ends up with `fixture.state === undefined` across the board — so
+ * the old three-tier lookup that ONLY read `fixture.state?.developer_name`
+ * fell through to "NS" every single time on 10/10 real fixtures in the
+ * round sample above, EVEN state_id=5 FINISHED ones. This explains almost
+ * every "dados de atualizações errado" symptom the user reported earlier:
+ * periods and scores showed real values, but normalized status/HT/FT tags
+ * were stuck on the unknown-state fallback because state wasn't in the
+ * fixture envelope.
+ *
+ * NEW three-tier lookup order (resilient to missing state object):
+ *   1. `fixture.state?.developer_name` (highest quality, when include=state
+ *      was actually effective on this payload — the /livescores/inplay path)
+ *   2. Flat numeric `fixture.state_id` (ALWAYS present, per real round
+ *      sample above — used as a reliable fallback mapping to the exact
+ *      same vocabulary the developer_name tier produces)
+ *   3. period.ticking heuristic (as before, for unknown state_id values
+ *      that this codebase hasn't seen a real sample for yet)
+ *
+ * Known confirmed real values only (2026-08-29/30 samples); unknown states
+ * fall back to a TWO-TIER decision instead of the previous "always LIVE,
+ * clockRunning false" (which incorrectly classified "NS"/"SCHEDULED"
+ * not-started fixtures appearing in /livescores/inplay as already-LIVE,
+ * messing up the pre-match → live transition dedup on the home page
+ * payload builder).
  *
  * Fallback decision tree:
  *   1. If ANY period has ticking === true → confirmed LIVE in-play (this
@@ -1444,6 +1501,8 @@ export type SportMonksNormalizedStatus = {
  * overlay in buildFootballLiveFromSportMonks overrides these anyway
  * whenever a match reaches extra time / penalties. */
 export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus {
+  // TIER 1 — explicit developer_name (highest fidelity, when include=state
+  // worked on this specific HTTP response)
   const dn = (fixture.state?.developer_name ?? "").toUpperCase();
   if (dn === "FT" || dn === "FINISHED" || dn === "FULL_TIME") return { status: "FT", clockRunning: false, inPlayHalf: false };
   if (dn === "HT" || dn === "HALF_TIME") return { status: "HT", clockRunning: false, inPlayHalf: false };
@@ -1451,8 +1510,54 @@ export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonk
   if (dn === "INPLAY_2ND_HALF" || dn === "2ND_HALF") return { status: "LIVE", clockRunning: true, inPlayHalf: true };
   if (dn.includes("EXTRA") || dn.includes("AET") || dn.includes("ET_")) return { status: "ET", clockRunning: true, inPlayHalf: true };
   if (dn.includes("PENALT") || dn === "PEN") return { status: "PEN", clockRunning: true, inPlayHalf: true };
-  if (dn === "POSTPONED" || dn === "CANCELLED" || dn === "ABANDONED") return { status: "FT", clockRunning: false, inPlayHalf: false };
-  if (dn === "SUSPENDED" || dn === "INTERRUPTED") return { status: "LIVE", clockRunning: false, inPlayHalf: false };
+  if (dn === "POSTPONED" || dn === "CANCELLED" || dn === "ABANDONED" || dn === "AWARDED") return { status: "FT", clockRunning: false, inPlayHalf: false };
+  if (dn === "SUSPENDED" || dn === "INTERRUPTED" || dn === "DELAYED") return { status: "LIVE", clockRunning: false, inPlayHalf: false };
+
+  // TIER 2 — flat numeric state_id (ALWAYS present, no include needed — the
+  // reliable fallback when developer_name is missing because `include=state`
+  // was omitted on the parent HTTP call, as confirmed real in the /rounds/ID
+  // sample 2026-08-30).
+  const sid = Number.isFinite(fixture.state_id) ? Math.floor(fixture.state_id as number) : null;
+  if (sid !== null) {
+    switch (sid) {
+      case 5:
+        return { status: "FT", clockRunning: false, inPlayHalf: false };
+      case 3:
+      case 8:
+        return { status: "HT", clockRunning: false, inPlayHalf: false };
+      case 2:
+      case 4:
+        return { status: "LIVE", clockRunning: true, inPlayHalf: true };
+      case 6:
+        return { status: "ET", clockRunning: true, inPlayHalf: true };
+      case 7:
+        return { status: "PEN", clockRunning: true, inPlayHalf: true };
+      case 9:
+      case 10:
+      case 12:
+      case 14:
+        // ABANDONED / POSTPONED / CANCELLED / AWARDED → treat as settled FT
+        return { status: "FT", clockRunning: false, inPlayHalf: false };
+      case 11:
+      case 13:
+      case 15:
+        // INTERRUPTED / SUSPENDED / DELAYED → still in the match lifecycle
+        // but clock is stopped → LIVE with clockRunning=false
+        return { status: "LIVE", clockRunning: false, inPlayHalf: false };
+      case 0:
+      case 1:
+        // 0=AWAITING construction, 1=NOT_STARTED/SCHEDULED → not live yet
+        return { status: "NS", clockRunning: false, inPlayHalf: false };
+      default:
+        // Unknown state_id number → fall through to TIER 3 below. No
+        // premature "NS" return here because a new SportMonks state id
+        // could legitimately be an in-play variant we haven't seen yet.
+        break;
+    }
+  }
+
+  // TIER 3 — heuristic: period.ticking. Best-effort catch-all for any
+  // id/value combination neither tier above recognized.
   const anyTicking = (fixture.periods ?? []).some((p) => p.ticking);
   if (anyTicking) return { status: "LIVE", clockRunning: true, inPlayHalf: true };
   // Fallback: unknown state with no ticking period → NOT live. This is the
