@@ -14319,7 +14319,15 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   for (const fx of fixtures) {
     if (isSportMonksFixtureFinished(fx)) {
       const idDone = `sportmonks-football-${fx.id}`;
-      currentIds.add(idDone);
+      // IMPORTANT: do NOT add idDone to currentIds here. A finalized FT
+      // fixture that still lingers 1-2 more ticks in SportMonks' own
+      // /livescores/inplay endpoint (confirmed real — Napoli Como id
+      // 19713599 remained listed state_id=5 SEM_TICK for ~20s after
+      // finishing) must NOT be treated as "still actively present" because
+      // (a) we are deleting it from liveMatchState below, and (b) the
+      // post-loop GC L14837-L14853 only cleans ids NOT in currentIds.
+      // Adding FT here would silently pin the id in currentIds, defeating
+      // GC if future code moves the delete statement earlier.
       const existingDone = liveMatchState.get(idDone);
       if (existingDone) {
         try {
@@ -14665,35 +14673,51 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       baseMarkets,
       override,
     );
-    // Real-time 1X2 preference: bwin/PulseScore (confirmed ~1s live update
-    // cadence) over bet365/SportMonks (correct but confirmed slow to
-    // reprice several lower-tier leagues — explicit user report/decision,
-    // 2026-08-30: "estava a funcionar perfeitamente ontem", describing
-    // exactly this bwin-sourced live-odds behavior from before the
-    // SportMonks migration). SportMonks stays authoritative for
-    // score/clock/events/corners/cards/every other market regardless —
-    // this only swaps the primary 1X2 price when a real-time bwin quote
-    // for this exact fixture is found (team-name matched, see
-    // findPulseScoreFootballOverride). Falls back to bet365/SportMonks
-    // (or synthetic) when bwin doesn't cover this fixture.
+    // Real-time 1X2 preference: BET365/SportMonks (EXCLUSIVE PER USER 2026-08-30
+    // VERBATIM rule: "SPORTMONKS NAO ESTA DISPONIVEM PARA ME A 1XBET E SIM SO A
+    // BET365 PARA PRE JOGOS E AO VIVO. NAO MISTURAR BOOKMAKERS DA SPORTMONKS
+    // DEPENDECIA SO DA BET365.") is the PRIMARY 1X2 source. bwin/PulseScore
+    // (FOOTBALL_PULSESCORE_BLOCKED=false in pulsescore/football.ts, re-enabled
+    // 2026-08-30 for slow-reprice lower-tier league overlays) is ONLY a FALLBACK
+    // — it fills sides where bet365 is momentarily absent (null/undefined during
+    // a reprice), but a real bet365 quote (sm?.side != null) ALWAYS wins.
+    //
+    // Root cause of the user's "mesmos jogos com duplicação quando atualiza as
+    // odds" bug (screenshot: Casa Pia odds 41.00 live AFTER the 0:1 goal → then
+    // the SAME match card showed 2.60/3.00/2.87 PRE-GOAL stale values): pulse-
+    // Score's own cached bwin quote (stale ~30s out of date) was being placed
+    // HIGHER than bet365's current live quote in the per-side priority chain
+    // below. Because the two providers reprice on different cadences, a stale
+    // bwin value arriving in one tick would overwrite a FRESH bet365 value that
+    // had been correctly shown the previous tick, making the same card appear
+    // with two different price sets in back-to-back polls — indistinguishable
+    // from a "duplicated match" to the user scrolling the live list. Reversing
+    // the order (bet365 first) eliminates that class of oscillations entirely,
+    // while still keeping bwin as a safety net for matches where bet365 hasn't
+    // published live odds yet.
+    //
+    // SportMonks stays authoritative for score/clock/events/corners/cards and
+    // every advanced market regardless — this only affects 1X2 side ordering.
     const pulseOverride = findPulseScoreFootballOverride(home, away, pulseScoreEvents);
     const baseOdds = makeOddsFromTeams(home, away);
 
     // ── Real 1X2 AO VIVO: NUNCA misturar odds reais com FAKE Poisson ──
     // User explicit 2026-08-30: "1x2 NAO duplicado com odds facks".
     // Resolve priority chain por LADO (cada lado é independente):
-    //   pulseOverride? (bwin 1s atualização) > override? SportMonks bet365
-    //   > existing?.odds[side] último valor REAL gravado em liveMatchState
-    //     (proteção para re-preço momentâneo durante golo — não deixar
-    //      cair para 0/"--" se um lado sumir por 300ms durante atualização)
-    //   > 0 (zero, sinal "não disponível" → frontend --).
+    //   1. override? (SportMonks BET365 — AUTORITATIVO user rule)
+    //   2. pulseOverride? (bwin/PulseScore — FALLBACK apenas se bet365
+    //      não cotar este lado neste tick; NUNCA sobrescreve cotação real bet365)
+    //   3. existing?.odds[side] último valor REAL gravado em liveMatchState
+    //      (proteção para re-preço momentâneo durante golo — não deixar
+    //       cair para 0/"--" se um lado sumir por 300ms durante atualização)
+    //   4. 0 (zero, sinal "não disponível" → frontend --).
     // baseOdds (FAKE Poisson) NUNCA é utilizado aqui — cai no zero.
     const prevOdds = existing?.odds ?? { home: 0, draw: 0, away: 0 };
     const sm = override.odds ?? null;
     const ps = pulseOverride?.odds ?? null;
-    const h = (ps?.home as number | undefined) ?? (sm?.home as number | undefined) ?? prevOdds.home ?? 0;
-    const d = (ps?.draw as number | undefined) ?? (sm?.draw as number | undefined) ?? prevOdds.draw ?? 0;
-    const a = (ps?.away as number | undefined) ?? (sm?.away as number | undefined) ?? prevOdds.away ?? 0;
+    const h = (sm?.home as number | undefined) ?? (ps?.home as number | undefined) ?? prevOdds.home ?? 0;
+    const d = (sm?.draw as number | undefined) ?? (ps?.draw as number | undefined) ?? prevOdds.draw ?? 0;
+    const a = (sm?.away as number | undefined) ?? (ps?.away as number | undefined) ?? prevOdds.away ?? 0;
     const odds = { home: h, draw: d, away: a };
     const smHasAny = !!(sm && (sm.home != null || sm.draw != null || sm.away != null));
     const psHasAny = !!(ps && (ps.home != null || ps.draw != null || ps.away != null));
@@ -14833,6 +14857,16 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   // without ever showing state FT — same disappearance-grace pattern the
   // PulseScore builder above uses, as a safety net for whatever real state
   // this hasn't seen confirmed yet (postponed, abandoned, ...).
+  //
+  // User report: "jogos que ja acabou e ainda esta aparecendo em ao vivo".
+  // Old grace window = 60_000 ms (1 minute) → way too long: a finalized FT
+  // that disappeared from SportMonks' live endpoint lingered in the "Ao
+  // Vivo" section for a full minute after ending, exactly the user's
+  // complaint. New window = 15_000 ms (15 seconds) — this is still 20x
+  // our 750ms poll interval (~20 server ticks) so transient provider
+  // hiccups won't accidentally settle anything, but it vanishes ~4x
+  // faster from the user's point of view (subjectively "instant" for a
+  // match that has truly ended).
   const now = Date.now();
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("sportmonks-football-")) continue;
@@ -14842,7 +14876,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
       continue;
     }
-    if (now - missingSince > 60_000) {
+    if (now - missingSince > 15_000) {
       try {
         await finalizeStaleLiveMatch(state);
       } catch (err) {

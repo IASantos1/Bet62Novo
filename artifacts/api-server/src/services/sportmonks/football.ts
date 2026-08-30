@@ -19,25 +19,28 @@
 // same way it already merges extractFootballOverride's result — no new UI
 // needed for these seven, just a new real data source.
 //
-// Real-world quirks found comparing bookmakers/leagues within SportMonks:
+// Real-world quirks found comparing bookmakers/leagues within SportMonks (historic):
 // - Fulltime Result: "1"/"X"/"2" labels with the team name in `name`
 //   (bet365, Bodø/Glimt sample) vs "Home"/"Draw"/"Away" labels with `name`
-//   null (both bet365-Brazilian-league AND 1xbet use this style).
+//   null (bet365 in both Brazilian and European leagues).
 //   `original_label` (present on some rows, absent on others) is the one
 //   field seen so far consistently normalized to "1"/"Draw"/"2" — used as
 //   the primary key, falling back to normalizing `label` otherwise.
-// - Double Chance: bet365 uses "1X"/"X2"/"12"; 1xbet uses
+// - Double Chance: bet365 uses "1X"/"X2"/"12"; other bookmakers use
 //   "Home/Draw"/"Draw/Away"/"Home/Away" instead — same market, different
 //   vocabulary.
 // - Total goals: bet365 splits MATCH_GOALS (standard line) +
-//   ALTERNATIVE_MATCH_GOALS (extra lines); 1xbet uses a single
-//   GOALS_OVER_UNDER market instead — same Over/Under + `total` shape,
-//   just a different developer_name, merged in here.
-// - Total corners: bet365 uses TOTAL_CORNERS; 1xbet uses CORNER_MARKET —
-//   same shape, different developer_name, merged in here too.
-// - Draw No Bet: not offered by 1xbet at all for this (lower-coverage)
-//   competition in the confirmed sample — stays unset, same tolerant
+//   ALTERNATIVE_MATCH_GOALS (extra lines).
+// - Total corners: bet365 uses TOTAL_CORNERS standard.
+// - Draw No Bet: not offered by every bookmaker for lower-coverage
+//   competitions in confirmed samples — stays unset, same tolerant
 //   "real absence, not a bug" behavior used throughout this codebase.
+//
+// USER HARD RULE (2026-08-30, VERBATIM): "SPORTMONKS NAO ESTA DISPONIVEM
+// PARA ME A 1XBET E SIM SO A BET365 PARA PRE JOGOS E AO VIVO. NAO MISTURAR
+// BOOKMAKERS DA SPORTMONKS DEPENDECIA SO DA BET365." Football data and all
+// odds requests from SportMonks are EXCLUSIVE to bet365 (bookmaker_id = 2).
+// 1xbet (id 35) belongs to PulseScore only and is NEVER requested here.
 //
 // NOT yet implemented (real data confirmed to exist — e.g. Half Time/Full
 // Time, Correct Score, Goalscorers, Asian Handicap, Odd/Even, and 100+ more
@@ -1215,10 +1218,14 @@ export function getPlayerRecentMatches(player: SportMonksPlayer, limit = 10): Pl
 // delay. Their rate limiter is 3000 calls/hour PER ENTITY (Livescores is
 // its own entity, independent of the Fixtures/Odds/Players calls this file
 // also makes), so 2s intervals (1800/hour) stay safely under budget with
-// real headroom for retries — the previous 20s TTL was far more
-// conservative than needed and was contributing to the live page feeling
-// stuck between updates.
-const LIVE_TTL_MS = 2 * 1000;
+// real headroom for retries — old 20s TTL → reduced to 2s (last commit)
+// was STILL too slow for the 750ms LIVE_UPDATE_INTERVAL server poll: every
+// 2nd/3rd 750ms tick would hit the 2s stale cache and re-emit identical
+// minute/seconds reading, so clockAtMs didn't move and the frontend saw a
+// "stuck/atrasado" clock for ~1-2s windows. New TTL = 750ms aligns exactly
+// with the live-loop interval so each real server tick gets FRESH data from
+// SportMonks — clockSec advances continuously, never stuck.
+const LIVE_TTL_MS = 750;
 let liveCache: { fixtures: SportMonksFixture[]; fetchedAt: number } | null = null;
 let liveInFlight: Promise<SportMonksFixture[]> | null = null;
 
@@ -1307,7 +1314,11 @@ export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> 
 // below now excludes stopped rows too, not just suspended ones.
 export type SportMonksFixtureWithOdds = SportMonksFixture & { odds?: SportMonksOdd[] };
 
-const LIVE_ODDS_TTL_MS = 2 * 1000; // matches SportMonks' own documented live-polling cadence
+// Clock alignment with LIVE_TTL_MS (now 750ms): odds need to feel live,
+// but a 1s TTL is still safe (bookmakers rarely reprice more often than
+// once per second per match). Old 2s TTL was visibly stale compared to the
+// 750ms server tick — odds felt atrasadas vs Betclic reference.
+const LIVE_ODDS_TTL_MS = 1 * 1000;
 
 const liveOddsCache = new Map<number, { odds: SportMonksOdd[]; fetchedAt: number }>();
 const liveOddsInFlight = new Map<number, Promise<SportMonksOdd[]>>();
