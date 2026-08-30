@@ -1074,7 +1074,7 @@ async function fetchLive(): Promise<SportMonksFixture[]> {
   const resp = await sportMonksGetWithRetry<{ data: SportMonksInplayFixture[] }>(
     "/livescores/inplay",
     {
-      include: "state;events.type;events.player;periods;participants;scores;league.country",
+      include: "state;events.type;events.player;periods;participants;scores;league.country;statistics.type",
     },
   );
   if (!resp) {
@@ -1247,39 +1247,134 @@ export function getSportMonksFixtureScore(
   return home !== null && away !== null ? { home, away } : null;
 }
 
-/** Live clock in whole minutes, from the currently-ticking period
- * (confirmed real: `periods[].ticking` marks exactly one period as
- * actively running; `.minutes` already accounts for stoppage time added
- * to earlier periods — e.g. a 2nd-half period starting at minute 46+ after
- * a 1st half that ran into injury time). Falls back to the last period in
- * the list (not ticking — half-time or full-time) when none is actively
- * ticking, so the clock still shows a sensible "45" during HT rather than 0. */
-export function getSportMonksFixtureMinute(fixture: SportMonksFixture): number {
+/** Returns periods sorted by `counts_from` ascending (chronological).
+ * SportMonks does NOT guarantee insertion order in the raw periods[] array
+ * (confirmed real: during 1H→HT→2H transitions the array can be out of
+ * order, which made the old "last element" fallback pick 1H at minute 27
+ * instead of 2H at minute 46 — see matches.ts's bug comment). */
+function sortedSportMonksPeriods(fixture: SportMonksFixture): SportMonksPeriod[] {
   const periods = fixture.periods ?? [];
-  const ticking = periods.find((p) => p.ticking);
-  const period = ticking ?? periods[periods.length - 1];
+  return [...periods].sort((a, b) => {
+    const ca = Number.isFinite(a.counts_from) ? a.counts_from : 0;
+    const cb = Number.isFinite(b.counts_from) ? b.counts_from : 0;
+    if (ca !== cb) return ca - cb;
+    return (a.type_id ?? 0) - (b.type_id ?? 0);
+  });
+}
+
+/** Picks the authoritative period for clock reading: the one currently
+ * `ticking:true`, else the chronologically-last period in the sorted list
+ * (not the raw array's tail). */
+function pickSportMonksClockPeriod(fixture: SportMonksFixture): SportMonksPeriod | undefined {
+  const sorted = sortedSportMonksPeriods(fixture);
+  const ticking = sorted.find((p) => p.ticking);
+  return ticking ?? sorted[sorted.length - 1];
+}
+
+/** Live clock in whole minutes — same semantics as the old function but
+ * with (1) periods sorted by counts_from to avoid picking an out-of-order
+ * earlier period during HT/2H transitions, and (2) the same
+ * never-go-backwards floor NOT applied here (that belongs at the
+ * per-fixture aggregation layer in matches.ts so it survives process
+ * restarts via liveMatchState the same way PulseScore's clockSec guard
+ * does). */
+export function getSportMonksFixtureMinute(fixture: SportMonksFixture): number {
+  const period = pickSportMonksClockPeriod(fixture);
   return period && Number.isFinite(period.minutes) && period.minutes >= 0 ? period.minutes : 0;
+}
+
+/** Total elapsed seconds from the fixture's currently-authoritative period
+ * (ticking period else last chronological period). Feeds
+ * LiveMatchState._liveExtra.clockSec so the frontend's existing MM:SS
+ * ticking-clock extrapolation path (getFootballClockLabel / getDisplayMinute
+ * in home.tsx) works for SportMonks exactly the same way it already works
+ * for PulseScore — the single biggest contributor to eliminating the user's
+ * "relógio oscilando" report, since the coarse minute-only interpolation
+ * path was the real source of the jitter. `time_added` is deliberately NOT
+ * folded into the total here; stoppage is already reflected in the raw
+ * `.minutes` value (confirmed real: a 1H that ran +2 injury time reports
+ * the next period's counts_from == 45 and its own minutes start at 46,
+ * so the minutes field is already the effective global elapsed minute). */
+export function getSportMonksFixtureClockSec(fixture: SportMonksFixture): number {
+  const period = pickSportMonksClockPeriod(fixture);
+  if (!period) return 0;
+  const minutes = Number.isFinite(period.minutes) && period.minutes >= 0 ? period.minutes : 0;
+  const seconds =
+    Number.isFinite(period.seconds) && period.seconds >= 0 && period.seconds < 60
+      ? period.seconds
+      : 0;
+  return minutes * 60 + seconds;
+}
+
+export type SportMonksNormalizedStatus = {
+  /** Frontend-compatible status label — matches the exact vocabulary the
+   * existing getFootballPhaseTag / canLegitimatelyRephase / isHalftimeFreeze
+   * logic in home.tsx already knows: "LIVE", "HT", "FT", "ET", "PEN".
+   * SportMonks' raw developer_name values (INPLAY_1ST_HALF etc.) are NOT
+   * understood by the frontend and were causing the period tag to stay
+   * blank, injury-time labels (45+N') not to render, and
+   * canLegitimatelyRephase rejecting the 45+N → 46 transition as a
+   * "minute going backwards" — which directly created the reported
+   * oscillation because frontend's apiMinutesRef clamp and backend's
+   * Math.max(existing.minute, raw) were fighting each other tick-to-tick. */
+  status: "LIVE" | "HT" | "FT" | "ET" | "PEN";
+  /** True only when a period is actually ticking right now and the
+   * developer_name isn't a pause/break. The frontend extrapolates seconds
+   * client-side only when clockRunning === true; setting this false during
+   * HT stops the client from ticking through the 15-minute break. */
+  clockRunning: boolean;
+  /** True when the raw state is one of the in-play half values
+   *  (INPLAY_1ST_HALF / INPLAY_2ND_HALF). Used by buildFootballLiveFrom-
+   * SportMonks's freeze heuristic to distinguish "genuinely stuck clock"
+   * (should mark HT/FT) from "normal slow tick" (nothing to do). */
+  inPlayHalf: boolean;
+};
+
+/** SportMonks raw developer_name → frontend vocabulary. Known confirmed
+ * values only (2026-08-29/30 samples); unknown states fall back to "LIVE"
+ * with clockRunning false so nothing gets incorrectly finalized. ET/PEN
+ * developer names are NOT YET confirmed against real SportMonks samples,
+ * so they're handled by LITERAL passthrough keys + a best-effort substring
+ * match rather than guessed; the API-Football cross-reference overlay in
+ * buildFootballLiveFromSportMonks overrides these anyway whenever a match
+ * reaches extra time / penalties. */
+export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus {
+  const dn = (fixture.state?.developer_name ?? "").toUpperCase();
+  if (dn === "FT" || dn === "FINISHED" || dn === "FULL_TIME") return { status: "FT", clockRunning: false, inPlayHalf: false };
+  if (dn === "HT" || dn === "HALF_TIME") return { status: "HT", clockRunning: false, inPlayHalf: false };
+  if (dn === "INPLAY_1ST_HALF" || dn === "1ST_HALF") return { status: "LIVE", clockRunning: true, inPlayHalf: true };
+  if (dn === "INPLAY_2ND_HALF" || dn === "2ND_HALF") return { status: "LIVE", clockRunning: true, inPlayHalf: true };
+  if (dn.includes("EXTRA") || dn.includes("AET") || dn.includes("ET_")) return { status: "ET", clockRunning: true, inPlayHalf: true };
+  if (dn.includes("PENALT") || dn === "PEN") return { status: "PEN", clockRunning: true, inPlayHalf: true };
+  if (dn === "POSTPONED" || dn === "CANCELLED" || dn === "ABANDONED") return { status: "FT", clockRunning: false, inPlayHalf: false };
+  if (dn === "SUSPENDED" || dn === "INTERRUPTED") return { status: "LIVE", clockRunning: false, inPlayHalf: false };
+  const anyTicking = (fixture.periods ?? []).some((p) => p.ticking);
+  if (anyTicking) return { status: "LIVE", clockRunning: true, inPlayHalf: true };
+  return { status: "LIVE", clockRunning: false, inPlayHalf: false };
 }
 
 /** True for a fixture that's actually being played right now (not
  * not-started, half-time, finished, or an unconfirmed/unknown state) —
  * confirmed real developer_name values: INPLAY_1ST_HALF, INPLAY_2ND_HALF.
- * Half-time (HT) is deliberately excluded — the clock isn't running and
- * nothing new can happen, but the match is still live for suspension
- * purposes (see isSportMonksFixtureFinished for the separate FT check). */
+ * Half-time (HT) is deliberately included here because the match is still
+ * in progress for suspension/settlement purposes, even though the clock
+ * isn't running. Reimplemented on top of normalizeSportMonksStatus so FT
+ * is the one and only authoritative "finished" signal — unknown states
+ * no longer silently pass through this filter the way the old string
+ * comparison did (an unrecognized in-play state used to fail the === check
+ * and get dropped from the live feed entirely, despite the match genuinely
+ * being in progress). */
 export function isSportMonksFixtureLive(fixture: SportMonksFixture): boolean {
-  const dn = fixture.state?.developer_name;
-  return dn === "INPLAY_1ST_HALF" || dn === "INPLAY_2ND_HALF" || dn === "HT";
+  const ns = normalizeSportMonksStatus(fixture);
+  return ns.status === "LIVE" || ns.status === "HT" || ns.status === "ET" || ns.status === "PEN";
 }
 
-/** True once a fixture is confirmed over (state.developer_name "FT",
- * confirmed real) — the signal this codebase's football settlement trigger
- * needs (see buildFootballLiveFromSportMonks in matches.ts). Deliberately
- * narrow: an unconfirmed/unknown state is never treated as finished, so an
- * unrecognized real state this hasn't seen yet fails safe (stays "not
- * finished, not live either") rather than risking a false settlement. */
+/** True once a fixture is confirmed over. Reimplemented on top of
+ * normalizeSportMonksStatus so POSTPONED/ABANDONED/CANCELLED (which the
+ * old single-string === FT check ignored) also trigger settlement rather
+ * than getting stuck forever in the live feed as a stale 0-0 card. */
 export function isSportMonksFixtureFinished(fixture: SportMonksFixture): boolean {
-  return fixture.state?.developer_name === "FT";
+  return normalizeSportMonksStatus(fixture).status === "FT";
 }
 
 /** Count of real REDCARD events for one side (confirmed real developer_name,

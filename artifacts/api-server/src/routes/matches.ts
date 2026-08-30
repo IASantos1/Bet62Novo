@@ -34,6 +34,8 @@ import {
   extractSportMonksFootballOverride,
   getSportMonksFixtureScore,
   getSportMonksFixtureMinute,
+  getSportMonksFixtureClockSec,
+  normalizeSportMonksStatus,
   isSportMonksFixtureLive,
   isSportMonksFixtureFinished,
   countSportMonksRedCards,
@@ -50,6 +52,7 @@ import {
   SPORTMONKS_FOOTBALL_LEAGUE_IDS,
   type SportMonksFixture,
   type SportMonksFootballOverride,
+  type SportMonksNormalizedStatus,
 } from "../services/sportmonks/football.js";
 import {
   getPulseScoreTennisLive,
@@ -552,6 +555,28 @@ export type LiveMatchState = {
   // fresh fuzzy matching only when this id stops appearing in the live
   // batch (API-Football's own hiccup, or the match genuinely ended there).
   _apiFootballFixtureId?: number;
+  // SportMonks-only counterpart to _apiFootballEverMatched (PulseScore's
+  // existing field): first-ever API-Football match for a SportMonks-sourced
+  // fixture should treat its incident (red-card/penalty/VAR) counts as a
+  // BASELINE, not brand NEW events — same class of false-positive
+  // suspensions documented on _apiFootballEverMatched's own comment above.
+  _sportMonksEverMatched?: boolean;
+  // SportMonks-only counterpart to _apiFootballFixtureId: confirmed
+  // API-Football fixture id mapped to a given SportMonks fixture, so we
+  // never re-run fuzzy name/league/kickoff matching more than once per
+  // match (expensive + probabilistic).
+  _sportMonksMappedApiFid?: number;
+  // SportMonks-only baseline snapshot of API-Football incident counts the
+  // moment the cross-ref was first confirmed. Compared tick-to-tick in
+  // buildFootballLiveFromSportMonks to decide whether an increase in the
+  // API-Football feed corresponds to a GENUINELY NEW incident (suspend) or
+  // an incident that already happened before the first match was seen
+  // (do nothing). See reasoning on _apiFootballEverMatched /
+  // _apiFootballPenaltyEventCount above for the same class of bug this
+  // prevents.
+  _apiFootballPrevHomeRedCards?: number;
+  _apiFootballPrevAwayRedCards?: number;
+  _apiFootballPrevPenaltyCount?: number;
   // Count of consecutive live-feed ticks where a candidate API-Football
   // fixture's score was cross-validated against PulseScore's own score
   // and both sides matched (or one was null). Used as a confidence gate
@@ -628,6 +653,7 @@ export type LiveMatchState = {
     clockSec?: number;
     clockAtMs?: number;
     clockRunning?: boolean;
+    phase?: "1H" | "2H" | "HT" | "FT" | "ET" | "PEN"; // football: period badge hint, fed by normalizeSportMonksStatus + freeze heuristic
     sets?: Array<[number, number]>; // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
@@ -14199,9 +14225,19 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   // is the small SportMonks-covered live set, not PulseScore's own full
   // live list, unlike the O(n²) incident that motivated the per-event
   // design elsewhere in this file).
-  const [fixtures, pulseScoreEvents] = await Promise.all([
+  //
+  // apiFootballFixtures (2026-08-30, new for SportMonks parity with PulseScore):
+  // Same single-request live batch the PulseScore builder cross-references
+  // for VAR/red-card/penalty enrichment + ET/penalties status override.
+  // SportMonks' own ET/PEN state developer names are unconfirmed (no real
+  // sample seen yet) — without this cross-ref, a knockout tie tied after
+  // 90' would trigger the clock-stale → FT heuristic DURING the pre-ET
+  // break and incorrectly delete/finalize the match before extra time
+  // ever starts, exactly the bug PulseScore fixed with this same logic.
+  const [fixtures, pulseScoreEvents, apiFootballFixtures] = await Promise.all([
     getSportMonksFootballLive(),
     getPulseScoreFootballLive(),
+    getApiFootballLiveFixtures(),
   ]);
   // Per-fixture odds (confirmed real, 2026-08-29 — see getSportMonksLiveOddsByFixture's
   // header for how this replaced the dead-end /odds/inplay general list),
@@ -14210,6 +14246,24 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   const liveOddsByFixture = await getSportMonksLiveOddsByFixture(fixtures.map((fx) => fx.id));
   const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
   const currentIds = new Set<string>();
+
+  // Same "stuck clock → HT/FT freeze" thresholds the PulseScore builder
+  // uses (confirmed in production 2026-08-08). 20s window is long enough
+  // that ~1s polling would need ~20 consecutive missed polls before it
+  // fires, so it never triggers on healthy feeds but reliably catches
+  // SportMonks feeds that stall mid-match (confirmed real for lower-
+  // coverage matches exactly like PulseScore's Vicenza v Catania case).
+  const HALFTIME_MARK_SEC = 45 * 60;
+  const FULLTIME_MARK_SEC = 90 * 60;
+  const FREEZE_TOLERANCE_SEC = 60;
+  const STALE_CLOCK_MS = 20_000;
+  // API-Football status vocabulary — shared constant with the PulseScore
+  // builder so the two football live paths have identical ET/penalty/FT
+  // finalization semantics.
+  const API_FOOTBALL_FINISHED_STATUSES = new Set([
+    "FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO",
+  ]);
+  const API_FOOTBALL_ET_STATUSES = new Set(["ET", "BT", "P"]);
 
   for (const fx of fixtures) {
     if (isSportMonksFixtureFinished(fx)) {
@@ -14225,8 +14279,8 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
             "[sportmonks] football finalize on FT failed",
           );
         }
-        liveMatchState.delete(idDone);
       }
+      liveMatchState.delete(idDone);
       continue;
     }
     if (!isSportMonksFixtureLive(fx)) continue; // NS or an unconfirmed/unknown state
@@ -14245,20 +14299,228 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     currentIds.add(id);
     const existing = liveMatchState.get(id);
 
-    // Real bug found 2026-08-30 (user-reported: two screenshots seconds
-    // apart showed the SAME live fixture's minute going backward, e.g.
-    // 27' -> 15'). getSportMonksFixtureMinute reads whichever period is
-    // marked `ticking`, falling back to the LAST period in the array when
-    // none is ticking — SportMonks momentarily returning no ticking period
-    // (a natural race as they flip the flag between periods) could hit
-    // that fallback and pick an earlier, lower-minute period if the
-    // periods array isn't strictly chronological (unconfirmed either way).
-    // A real match clock can never move backward, so this clamps the
-    // displayed minute to never regress below the previous tick's value
-    // for the same fixture — a safe, data-driven floor rather than
-    // guessing the exact cause of the underlying SportMonks glitch.
+    // Normalized status map — SportMonks raw developer_name → frontend
+    // vocabulary (LIVE/HT/FT/ET/PEN) + clockRunning flag that tells the
+    // frontend whether to keep ticking its MM:SS interpolation clock
+    // (HT/pauses: false, in-play periods: true). Without this map the old
+    // status was INPLAY_1ST_HALF/INPLAY_2ND_HALF — strings the frontend's
+    // getFootballPhaseTag / canLegitimatelyRephase didn't recognize at all,
+    // which caused:
+    //   1. the period badge to render blank (no 1P/2P/HT label)
+    //   2. 45+N' → 46' transition to be treated as a "minute going
+    //      backwards" by the clamp logic in home.tsx L8173-8179, triggering
+    //      the exact user-reported oscillation
+    //   3. the 45+N' injury-time clock label format (getFootballClockLabel
+    //      L6867-6874) never firing
+    const norm = normalizeSportMonksStatus(fx);
+    const period = norm.inPlayHalf;
+
+    // Granular seconds-accurate clock anchor, parity with PulseScore's
+    // pulseScoreEventClockSec. getSportMonksFixtureClockSec sums
+    // (period.minutes * 60 + period.seconds) so the frontend's existing
+    // MM:SS extrapolation path (getFootballClockLabel / getDisplayMinute
+    // in home.tsx) lights up for SportMonks matches exactly the way it
+    // already does for PulseScore matches. This is the single biggest
+    // contributor to killing the user's reported oscillation: before this
+    // change only minute-level interpolation was possible, the frontend
+    // fought the backend's Math.max clamp, and could never show a real
+    // 45+N' / 90+N' label.
+    const rawClockSec = getSportMonksFixtureClockSec(fx);
+    // Never let seconds go backwards (same invariant PulseScore enforces
+    // via its own prevClockSec guard on L13539). Survives process restarts
+    // because liveMatchState keeps the previous tick's value across polls.
+    // Explicitly allows "same value" — we don't want 59→0 wrap to look
+    // like a regression.
+    const prevClockSec = existing?._liveExtra?.clockSec;
+    const clockSec =
+      prevClockSec !== undefined && Number.isFinite(prevClockSec) && rawClockSec < prevClockSec
+        ? prevClockSec
+        : rawClockSec;
+    // clockAtMs only moves when the authoritative clockSec changes. If we
+    // refreshed it every tick, Date.now() - clockAtMs (the frontend's
+    // extrapolation) would never actually accumulate client-side seconds
+    // — each server tick would reset the anchor to "now" and the displayed
+    // clock would jitter. Same pattern PulseScore uses on L13540-13543.
+    const clockAtMs =
+      prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
+        ? existing._liveExtra.clockAtMs
+        : Date.now();
+    const isClockStale = norm.clockRunning && Date.now() - clockAtMs > STALE_CLOCK_MS;
+    // The minute displayed to the user is just the floored second count,
+    // so it stays perfectly consistent with clockSec. The old Math.max
+    // (rawMinute vs existing.minute) is effectively redundant now but kept
+    // as belt-and-suspenders against the one case where clockSec *itself*
+    // advances by less than a whole minute but a new SportMonks tick
+    // reports a lower period.minutes due to a provider-side glitch.
+    const secBasedMinute = Math.floor(clockSec / 60);
     const rawMinute = getSportMonksFixtureMinute(fx);
-    const minute = existing ? Math.max(rawMinute, existing.minute) : rawMinute;
+    const minute = existing
+      ? Math.max(Math.max(rawMinute, secBasedMinute), existing.minute)
+      : Math.max(rawMinute, secBasedMinute);
+
+    // Freeze detection — parity with PulseScore L13562-13642. A clock that
+    // is stale (no clockSec advance for >20s) AND parked exactly on a
+    // known break mark (±60s around HT / ±60s around FT) is almost
+    // certainly actually in that break/end state, not a transient feed
+    // glitch. Without this, lower-coverage SportMonks feeds can stall
+    // mid-match and the card sits forever showing minute 45:01 instead of
+    // converting to HT, or minute 90:05 instead of FT — exactly analogous
+    // to PulseScore's own confirmed Vicenza-v-Catania freeze case.
+    const isHalftimeFreeze =
+      isClockStale &&
+      Math.abs(clockSec - HALFTIME_MARK_SEC) <= FREEZE_TOLERANCE_SEC &&
+      norm.status === "LIVE";
+    const isFulltimeFreeze =
+      isClockStale &&
+      Math.abs(clockSec - FULLTIME_MARK_SEC) <= FREEZE_TOLERANCE_SEC &&
+      norm.status === "LIVE" &&
+      // Conservative: don't freeze to FT if the score is tied at/around the
+      // 90' mark — the match may be going to extra time (SportMonks raw
+      // ET status is unconfirmed / not yet in the normalize map, and the
+      // API-Football cross-ref below will override to ET/PEN anyway when
+      // both providers agree). Removes the need for a dubious "is this a
+      // knockout round?" guess.
+      !(score.home === score.away);
+    // ET-by-minute — SportMonks raw ET developer name is unconfirmed, so
+    // we also trust plain "LIVE" + minute >= 91 to mean extra time has
+    // definitely started (90' + 15min break + at least 1' of play = 106'
+    // or higher in real play, but 91' captures the very start of ET too).
+    const minuteImpliesEt = minute >= 91;
+
+    // API-Football cross-reference. Same shape as PulseScore L13546-13620:
+    //   - enrich with VAR / new penalties / new red card suspensions when
+    //     the API-Football feed reports an incident SportMonks hasn't yet
+    //   - override status → ET / PEN / authoritative-FT when API-Football
+    //     confirms it, fixing the "ET/PEN never render on SportMonks" gap
+    let mappedApiFid: number | undefined;
+    if (existing?._sportMonksMappedApiFid !== undefined) {
+      mappedApiFid = existing._sportMonksMappedApiFid;
+    } else {
+      const directId = getMappedApiFootballFixtureId(home, away, fx.league?.id ?? null, fx.id);
+      if (directId !== null) {
+        mappedApiFid = directId;
+        recordConfirmedFixtureMapping(home, away, fx.league?.id ?? null, fx.id, directId);
+      }
+    }
+    let apiFootballConfirmsEt = false;
+    let apiFootballConfirmsPen = false;
+    let apiFootballConfirmsFt = false;
+    let apiFootballFrozenStatus: string | undefined;
+    if (mappedApiFid !== undefined) {
+      const af = apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid);
+      if (af) {
+        const short = (af.fixture.status.short ?? "").toUpperCase();
+        if (API_FOOTBALL_ET_STATUSES.has(short)) {
+          apiFootballConfirmsEt = true;
+          apiFootballFrozenStatus = "ET";
+        } else if (short === "PEN" || short === "PSO") {
+          apiFootballConfirmsPen = true;
+          apiFootballFrozenStatus = "PEN";
+        } else if (API_FOOTBALL_FINISHED_STATUSES.has(short)) {
+          apiFootballConfirmsFt = true;
+          apiFootballFrozenStatus = "FT";
+        }
+        // Also pull incident-based suspensions the SportMonks events list
+        // may not yet contain (VAR review timings, penalty shootout
+        // kicks, etc.) — same per-incident logic the PulseScore builder
+        // uses, so the two football live paths behave identically.
+        if (existing?._sportMonksEverMatched) {
+          const afHomeRed = fixtureHasRedCard(af, "home");
+          const afAwayRed = fixtureHasRedCard(af, "away");
+          const prevHomeRc = existing._apiFootballPrevHomeRedCards ?? existing.redCardsHome ?? 0;
+          const prevAwayRc = existing._apiFootballPrevAwayRedCards ?? existing.redCardsAway ?? 0;
+          if (afHomeRed > prevHomeRc || afAwayRed > prevAwayRc) {
+            const now = Date.now();
+            marketSuspension = Object.fromEntries(
+              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+            );
+            suspensionReason = "CARTÃO VERMELHO (API-Football)";
+          }
+          if (fixtureHasVarReview(af)) {
+            const now = Date.now();
+            marketSuspension = Object.fromEntries(
+              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+            );
+            suspensionReason = "VAR";
+          }
+          const penEvents = fixturePenaltyEvents(af);
+          const prevPenCount = existing._apiFootballPrevPenaltyCount ?? 0;
+          if (penEvents > prevPenCount) {
+            const now = Date.now();
+            marketSuspension = Object.fromEntries(
+              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+            );
+            suspensionReason = "PENÂLTIS";
+          }
+        }
+      }
+    } else {
+      const guessed = findApiFootballFixture(
+        apiFootballFixtures,
+        home,
+        away,
+        fx.league?.name ?? null,
+        fx.league?.country?.name ?? null,
+        new Date(fx.starting_at ?? Date.now()),
+      );
+      if (guessed) {
+        mappedApiFid = guessed.fixture.id;
+        recordConfirmedFixtureMapping(
+          home,
+          away,
+          fx.league?.id ?? null,
+          fx.id,
+          guessed.fixture.id,
+        );
+        const short = (guessed.fixture.status.short ?? "").toUpperCase();
+        if (API_FOOTBALL_ET_STATUSES.has(short)) {
+          apiFootballConfirmsEt = true;
+          apiFootballFrozenStatus = "ET";
+        } else if (short === "PEN" || short === "PSO") {
+          apiFootballConfirmsPen = true;
+          apiFootballFrozenStatus = "PEN";
+        } else if (API_FOOTBALL_FINISHED_STATUSES.has(short)) {
+          apiFootballConfirmsFt = true;
+          apiFootballFrozenStatus = "FT";
+        }
+      }
+    }
+
+    // Final normalized status, combining every input in priority order:
+    //   1. API-Football ET/PEN/FT wins outright (the highest-authority
+    //      signal for these unconfirmed-on-SportMonks states)
+    //   2. SportMonks explicit raw status (HT / FT) preserved via norm
+    //   3. Freeze heuristic: parked on 45 ±60s with stale clock → HT;
+    //      parked on 90 ±60s with stale clock and not an obvious knockout
+    //      continuation → FT
+    //   4. Minute >= 91 during LIVE → ET (catch-all before cross-ref)
+    //   5. Fall through to norm.status (most common: "LIVE")
+    let liveStatus: "LIVE" | "HT" | "FT" | "ET" | "PEN" = norm.status;
+    if (apiFootballConfirmsEt) liveStatus = "ET";
+    else if (apiFootballConfirmsPen) liveStatus = "PEN";
+    else if (apiFootballConfirmsFt) liveStatus = "FT";
+    else if (norm.status === "HT") liveStatus = "HT";
+    else if (norm.status === "FT") liveStatus = "FT";
+    else if (isHalftimeFreeze) liveStatus = "HT";
+    else if (isFulltimeFreeze) liveStatus = "FT";
+    else if (minuteImpliesEt && liveStatus === "LIVE") liveStatus = "ET";
+
+    // If status finally resolved to FT via freeze heuristic (no explicit
+    // SportMonks FT, no API-Football FT, just a stalled clock), treat it
+    // as finalised the same way the early isSportMonksFixtureFinished
+    // branch does — don't leave a stale card sitting in the feed forever.
+    if (liveStatus === "FT" && norm.status !== "FT" && !apiFootballConfirmsFt) {
+      const existingFt = liveMatchState.get(id);
+      if (existingFt) {
+        try {
+          await finalizeStaleLiveMatch(existingFt);
+        } catch (err) {
+          logger.error({ err, id }, "[sportmonks] football freeze-triggered finalize failed");
+        }
+      }
+      liveMatchState.delete(id);
+      continue;
+    }
 
     const leagueName = fx.league?.name || "";
     const countryName = fx.league?.country?.name || "";
@@ -14360,6 +14622,29 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // own comment: null, not 0, until SportMonks actually reports a stat).
     const cornersCards = getSportMonksFixtureCornersCards(fx);
 
+    // Persisted API-Football cross-reference bookkeeping, parity with the
+    // PulseScore builder's L13644-13673 fields. Without these, every tick
+    // would re-run findApiFootballFixture (expensive + can miss when
+    // fuzzy-match on a subsequent tick isn't as clean) AND the first-ever
+    // API-Football match's existing incident counts (red cards, penalties
+    // already awarded before we started watching) would incorrectly look
+    // like NEW incidents this tick, spamming VAR suspensions.
+    const afHomeRedBase = mappedApiFid
+      ? fixtureHasRedCard(
+          apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid),
+          "home",
+        )
+      : 0;
+    const afAwayRedBase = mappedApiFid
+      ? fixtureHasRedCard(
+          apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid),
+          "away",
+        )
+      : 0;
+    const afPenBase = mappedApiFid
+      ? fixturePenaltyEvents(apiFootballFixtures.find((f) => f.fixture.id === mappedApiFid))
+      : 0;
+
     ranked.push({
       prio,
       state: {
@@ -14375,7 +14660,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         homeScore: score.home,
         awayScore: score.away,
         minute,
-        status: fx.state?.developer_name ?? "",
+        status: liveStatus,
         hasRealOdds: hasRealOddsNow,
         odds,
         markets,
@@ -14384,8 +14669,17 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         redCardsAway,
         marketSuspension,
         _suspensionReason: suspensionReason,
+        _sportMonksMappedApiFid: mappedApiFid,
+        _sportMonksEverMatched: true,
+        _apiFootballPrevHomeRedCards: afHomeRedBase,
+        _apiFootballPrevAwayRedCards: afAwayRedBase,
+        _apiFootballPrevPenaltyCount: afPenBase,
         _liveExtra: {
           ...(existing?._liveExtra ?? {}),
+          clockSec,
+          clockAtMs,
+          clockRunning: norm.clockRunning && !isHalftimeFreeze,
+          phase: liveStatus === "HT" ? "HT" : liveStatus === "FT" ? "FT" : liveStatus === "ET" ? "ET" : liveStatus === "PEN" ? "PEN" : period ? (minute >= 46 ? "2H" : "1H") : undefined,
           ...(cornersCards.cornersTotal != null ? { cornersTotal: cornersCards.cornersTotal } : {}),
           ...(cornersCards.cornersHome != null ? { cornersHome: cornersCards.cornersHome } : {}),
           ...(cornersCards.cornersAway != null ? { cornersAway: cornersCards.cornersAway } : {}),
