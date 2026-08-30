@@ -1331,14 +1331,33 @@ export type SportMonksNormalizedStatus = {
 };
 
 /** SportMonks raw developer_name → frontend vocabulary. Known confirmed
- * values only (2026-08-29/30 samples); unknown states fall back to "LIVE"
- * with clockRunning false so nothing gets incorrectly finalized. ET/PEN
- * developer names are NOT YET confirmed against real SportMonks samples,
- * so they're handled by LITERAL passthrough keys + a best-effort substring
- * match rather than guessed; the API-Football cross-reference overlay in
- * buildFootballLiveFromSportMonks overrides these anyway whenever a match
- * reaches extra time / penalties. */
-export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus {
+ * values only (2026-08-29/30 samples); unknown states fall back to a
+ * TWO-TIER decision instead of the previous "always LIVE, clockRunning
+ * false" (which incorrectly classified "NS"/"SCHEDULED" not-started
+ * fixtures appearing in /livescores/inplay as already-LIVE, messing up
+ * the pre-match → live transition dedup on the home page payload
+ * builder).
+ *
+ * Fallback decision tree:
+ *   1. If ANY period has ticking === true → confirmed LIVE in-play (this
+ *      period.ticking signal from SportMonks is 100% authoritative for
+ *      "clock is running", matches what buildFootballLiveFromSportMonks
+ *      already uses for clock extraction)
+ *   2. Else: NOT a live fixture. normalizeSportMonksStatus returns status
+ *      "NS" (not started, NOT one of {LIVE,HT,FT,ET,PEN}) so the two
+ *      downstream callers behave correctly:
+ *        - isSportMonksFixtureLive() returns false → this fixture is
+ *          correctly SKIPPED in buildFootballLiveFromSportMonks (the
+ *          continue on L14263 in matches.ts fires)
+ *        - isSportMonksFixtureFinished() returns false (not "FT") → it
+ *          also doesn't incorrectly trigger finalizeStaleLiveMatch on a
+ *          fixture that hasn't even started yet.
+ * ET/PEN developer names are NOT YET confirmed against real SportMonks
+ * samples, so they're handled by LITERAL passthrough keys + a best-effort
+ * substring match rather than guessed; the API-Football cross-reference
+ * overlay in buildFootballLiveFromSportMonks overrides these anyway
+ * whenever a match reaches extra time / penalties. */
+export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus & { status: "LIVE" | "HT" | "FT" | "ET" | "PEN" | "NS" } {
   const dn = (fixture.state?.developer_name ?? "").toUpperCase();
   if (dn === "FT" || dn === "FINISHED" || dn === "FULL_TIME") return { status: "FT", clockRunning: false, inPlayHalf: false };
   if (dn === "HT" || dn === "HALF_TIME") return { status: "HT", clockRunning: false, inPlayHalf: false };
@@ -1350,23 +1369,40 @@ export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonk
   if (dn === "SUSPENDED" || dn === "INTERRUPTED") return { status: "LIVE", clockRunning: false, inPlayHalf: false };
   const anyTicking = (fixture.periods ?? []).some((p) => p.ticking);
   if (anyTicking) return { status: "LIVE", clockRunning: true, inPlayHalf: true };
-  return { status: "LIVE", clockRunning: false, inPlayHalf: false };
+  // Fallback: unknown state with no ticking period → NOT live. This is the
+  // crucial NS/SCHEDULED/UNKNOWN guard — return "NS" (a 6th status value
+  // only present inside this function's widened return type) so BOTH
+  // isSportMonksFixtureLive and isSportMonksFixtureFinished return false,
+  // matching the PRE-CHANGE behavior where unknown developer_name values
+  // were silently skipped (pre-change: the three strict === checks on
+  // INPLAY_1ST_HALF / INPLAY_2ND_HALF / HT simply all failed, and the
+  // fixture was filtered out by the `if (!isSportMonksFixtureLive(fx))
+  // continue;` line). Explicitly returning "NS" here documents that
+  // intent instead of relying on a coincidental lack of any matching key.
+  return { status: "NS", clockRunning: false, inPlayHalf: false };
 }
 
 /** True for a fixture that's actually being played right now (not
  * not-started, half-time, finished, or an unconfirmed/unknown state) —
  * confirmed real developer_name values: INPLAY_1ST_HALF, INPLAY_2ND_HALF.
- * Half-time (HT) is deliberately included here because the match is still
- * in progress for suspension/settlement purposes, even though the clock
- * isn't running. Reimplemented on top of normalizeSportMonksStatus so FT
- * is the one and only authoritative "finished" signal — unknown states
- * no longer silently pass through this filter the way the old string
- * comparison did (an unrecognized in-play state used to fail the === check
- * and get dropped from the live feed entirely, despite the match genuinely
- * being in progress). */
+ * Half-time (HT), extra time and penalties are deliberately included here
+ * because the match is still in progress for suspension/settlement
+ * purposes, even though the clock isn't running during HT/penalty pauses.
+ *
+ * NS / unknown states with NO currently-ticking period return false — this
+ * matches the pre-rewrite behavior (the old function had three strict
+ * === checks, so any developer_name not explicitly listed was rejected)
+ * and fixes the regression reported in production 2026-08-30: not-started
+ * fixtures leaking into /livescores/inplay used to pass the unknown-state
+ * fallback "always LIVE" and were treated as already-live by the payload
+ * builder, so the prematch dedup removed them from "Em Breve" but the
+ * live section itself had no score data (getSportMonksFixtureScore
+ * returned null for a not-started fixture) and filtered them back out —
+ * leaving the match with NO representation on the home page at all until
+ * the feed's state updated to INPLAY_1ST_HALF several minutes later. */
 export function isSportMonksFixtureLive(fixture: SportMonksFixture): boolean {
-  const ns = normalizeSportMonksStatus(fixture);
-  return ns.status === "LIVE" || ns.status === "HT" || ns.status === "ET" || ns.status === "PEN";
+  const s = normalizeSportMonksStatus(fixture).status;
+  return s === "LIVE" || s === "HT" || s === "ET" || s === "PEN";
 }
 
 /** True once a fixture is confirmed over. Reimplemented on top of

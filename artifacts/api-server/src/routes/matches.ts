@@ -14234,11 +14234,29 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   // 90' would trigger the clock-stale → FT heuristic DURING the pre-ET
   // break and incorrectly delete/finalize the match before extra time
   // ever starts, exactly the bug PulseScore fixed with this same logic.
-  const [fixtures, pulseScoreEvents, apiFootballFixtures] = await Promise.all([
+  const [fixtures, pulseScoreEvents] = await Promise.all([
     getSportMonksFootballLive(),
     getPulseScoreFootballLive(),
-    getApiFootballLiveFixtures(),
   ]);
+  // API-Football live batch: used for ET/PEN/FT authoritative override +
+  // VAR/red-card/penalty enrichment (same shape as PulseScore builder).
+  // Wrapped in its own try/catch because this batch endpoint has a history
+  // of intermittent 5xx / rate-limit (see apifootball-usage admin diagnostic)
+  // — a failure here MUST NOT take down the SportMonks live section, which
+  // is what happened the first build of this session (Promise.all rejected
+  // and footballLiveRaw became empty → matches stayed in "Em Breve" forever
+  // because the live feed never picked them up). Falls back to an empty
+  // array: freeze-heuristic + SportMonks native status still work, only
+  // ET/PEN auto-detection loses its highest-authority overlay.
+  let apiFootballFixtures: ApiFootballFixture[] = [];
+  try {
+    apiFootballFixtures = await getApiFootballLiveFixtures();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[sportmonks] apiFootball live batch fetch failed — proceeding without ET/PEN/VAR overlay for this tick",
+    );
+  }
   // Per-fixture odds (confirmed real, 2026-08-29 — see getSportMonksLiveOddsByFixture's
   // header for how this replaced the dead-end /odds/inplay general list),
   // fanned out across every fixture this tick regardless of live/NS/FT —
