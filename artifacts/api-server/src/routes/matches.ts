@@ -14233,6 +14233,21 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     currentIds.add(id);
     const existing = liveMatchState.get(id);
 
+    // Real bug found 2026-08-30 (user-reported: two screenshots seconds
+    // apart showed the SAME live fixture's minute going backward, e.g.
+    // 27' -> 15'). getSportMonksFixtureMinute reads whichever period is
+    // marked `ticking`, falling back to the LAST period in the array when
+    // none is ticking — SportMonks momentarily returning no ticking period
+    // (a natural race as they flip the flag between periods) could hit
+    // that fallback and pick an earlier, lower-minute period if the
+    // periods array isn't strictly chronological (unconfirmed either way).
+    // A real match clock can never move backward, so this clamps the
+    // displayed minute to never regress below the previous tick's value
+    // for the same fixture — a safe, data-driven floor rather than
+    // guessing the exact cause of the underlying SportMonks glitch.
+    const rawMinute = getSportMonksFixtureMinute(fx);
+    const minute = existing ? Math.max(rawMinute, existing.minute) : rawMinute;
+
     const leagueName = fx.league?.name || "";
     const countryName = fx.league?.country?.name || "";
     const isIntl = isIntlTournamentName(leagueName);
@@ -14331,7 +14346,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         matchTier: tier,
         homeScore: score.home,
         awayScore: score.away,
-        minute: getSportMonksFixtureMinute(fx),
+        minute,
         status: fx.state?.developer_name ?? "",
         hasRealOdds: hasRealOddsNow,
         odds,
