@@ -1622,9 +1622,10 @@ export type SportMonksNormalizedStatus = {
  *          fixture that hasn't even started yet.
  * ET/PEN developer names are NOT YET confirmed against real SportMonks
  * samples, so they're handled by LITERAL passthrough keys + a best-effort
- * substring match rather than guessed; the API-Football cross-reference
- * overlay in buildFootballLiveFromSportMonks overrides these anyway
- * whenever a match reaches extra time / penalties. */
+ * substring match rather than guessed; buildFootballLiveFromSportMonks also
+ * falls back to a freeze/minute heuristic (stale clock parked past 90',
+ * or LIVE past minute 91) to catch a match reaching extra time even when
+ * this normalizer can't recognize the raw status. */
 export function normalizeSportMonksStatus(fixture: SportMonksFixture): SportMonksNormalizedStatus {
   // TIER 1 — explicit developer_name (highest fidelity, when include=state
   // worked on this specific HTTP response)
@@ -1724,9 +1725,8 @@ export function isSportMonksFixtureFinished(fixture: SportMonksFixture): boolean
 }
 
 /** Count of real REDCARD events for one side (confirmed real developer_name,
- * 2026-08-29) — used to detect a NEW red card tick-to-tick the same way
- * this codebase's PulseScore+API-Football live builder does, just off
- * SportMonks' own events instead of a second cross-referenced provider. */
+ * 2026-08-29) — used to detect a NEW red card tick-to-tick, straight off
+ * SportMonks' own events (no second cross-referenced provider needed). */
 export function countSportMonksRedCards(
   fixture: SportMonksFixture,
   side: "home" | "away",

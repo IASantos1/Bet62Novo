@@ -14,7 +14,7 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import { db, matchResultsTable, apiFootballNameMismatchesTable } from "../../../../lib/db/src/index.js";
+import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
@@ -90,23 +90,6 @@ import {
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
-import {
-  getApiFootballLiveFixtures,
-  findApiFootballFixture,
-  fixtureHasRedCard,
-  fixtureHasVarReview,
-  latestGoalScorer,
-  latestGoalIsPenalty,
-  fixturePenaltyEvents,
-  getApiFootballStandingsForLeague,
-  getApiFootballFixtureStatistics,
-  getApiFootballTeamLogo,
-  batchResolveApiFootballTeamLogos,
-  getMappedApiFootballFixtureId,
-  recordConfirmedFixtureMapping,
-  recordConfirmedTeamMapping,
-  type ApiFootballFixture,
-} from "../services/apiFootball.js";
 import {
   getCachedTeamId,
   resolveTeamIdInBackground,
@@ -495,12 +478,13 @@ export type LiveMatchState = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
-  // Direct crest URLs from API-Football (football only) — preferred over the
+  // Direct crest URLs (football only) — preferred over the
   // homeTeamId/homeImageVersion pair above where present, since those need
   // an extra SportsAPI ID-to-URL construction (buildSportsApiTeamLogoUrl in
   // home.tsx) that can fail to resolve at all for lower-coverage teams,
-  // while API-Football already returns the finished URL on the same fixture
-  // this file's events/red-card data comes from.
+  // while SportMonks already returns the finished URL (participant
+  // image_path) on the same fixture this file's events/red-card data
+  // comes from.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
   league: string;
@@ -517,93 +501,12 @@ export type LiveMatchState = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string; playerId?: number; detail?: string }>;
-  // Count of VAR-typed events seen so far (API-Football) — compared tick-to-
-  // tick to detect a NEW VAR review vs. one already suspended for, same
-  // reasoning as redCardsHome/Away being counts rather than a single flag.
-  _apiFootballVarEventCount?: number;
-  // Count of penalty-outcome events (scored OR missed) seen so far — same
-  // tick-to-tick comparison reasoning, needed to catch a MISSED penalty
-  // (goalScored never fires for one, since the score doesn't change).
-  _apiFootballPenaltyEventCount?: number;
-  // True once apiFixture has been successfully cross-referenced at least
-  // ONCE for this match — bug report 2026-08-11 ("todos os jogos ficando
-  // suspensos direto"): _apiFootballVarEventCount/redCardsHome/Away/
-  // _apiFootballPenaltyEventCount all default to 0 the very first time
-  // they're ever read, indistinguishable from "genuinely 0 incidents so
-  // far". A match commonly goes several minutes (or longer — see the
-  // apifootball-usage admin diagnostic) before its FIRST successful
-  // apiFixture cross-reference; if a red card/VAR check/missed penalty
-  // already happened in that window, the fixture's real (nonzero) count
-  // compared against that untouched "0" baseline read as a brand NEW
-  // incident on the very first matched tick — firing an immediate false
-  // suspension for something that had already happened, for essentially
-  // every match sooner or later. Gates newRedCard/newVarReview/
-  // newPenaltyEvent below: on the first-ever matched tick, the real counts
-  // still get recorded (so future genuine increases compare correctly),
-  // just without treating that initial jump itself as a new incident.
-  _apiFootballEverMatched?: boolean;
-  // Once findApiFootballFixture resolves a fixture for this PulseScore
-  // match, its fixtureId is remembered here and preferred on every later
-  // tick (direct id lookup) instead of re-running fuzzy team-name/league/
-  // kickoff-time matching from scratch each time — user-requested
-  // (2026-08-12) architecture hardening: re-matching by name every ~1-2s
-  // tick, even with the league/time disambiguation added the same day, is
-  // still probabilistic and was the actual mechanism behind several bugs
-  // fixed this session (VAR/red-card counts spuriously resetting, etc.) —
-  // an id, once confirmed, is exact and can't independently drift the way
-  // two fuzzy string comparisons on two different ticks can. Falls back to
-  // fresh fuzzy matching only when this id stops appearing in the live
-  // batch (API-Football's own hiccup, or the match genuinely ended there).
-  _apiFootballFixtureId?: number;
-  // SportMonks-only counterpart to _apiFootballEverMatched (PulseScore's
-  // existing field): first-ever API-Football match for a SportMonks-sourced
-  // fixture should treat its incident (red-card/penalty/VAR) counts as a
-  // BASELINE, not brand NEW events — same class of false-positive
-  // suspensions documented on _apiFootballEverMatched's own comment above.
-  _sportMonksEverMatched?: boolean;
-  // SportMonks-only counterpart to _apiFootballFixtureId: confirmed
-  // API-Football fixture id mapped to a given SportMonks fixture, so we
-  // never re-run fuzzy name/league/kickoff matching more than once per
-  // match (expensive + probabilistic).
-  _sportMonksMappedApiFid?: number;
-  // SportMonks-only baseline snapshot of API-Football incident counts the
-  // moment the cross-ref was first confirmed. Compared tick-to-tick in
-  // buildFootballLiveFromSportMonks to decide whether an increase in the
-  // API-Football feed corresponds to a GENUINELY NEW incident (suspend) or
-  // an incident that already happened before the first match was seen
-  // (do nothing). See reasoning on _apiFootballEverMatched /
-  // _apiFootballPenaltyEventCount above for the same class of bug this
-  // prevents.
-  _sportMonksVarEventCount?: number;
-  _apiFootballPrevHomeRedCards?: number;
-  _apiFootballPrevAwayRedCards?: number;
-  _apiFootballPrevPenaltyCount?: number;
-  // Count of consecutive live-feed ticks where a candidate API-Football
-  // fixture's score was cross-validated against PulseScore's own score
-  // and both sides matched (or one was null). Used as a confidence gate
-  // BEFORE the fixture id is persisted into api_football_fixture_mappings
-  // (the cross-session DB table) — user-requested 2026-08-12 fix for a
-  // class of "wrong match attached" cases where a very-early-in-match
-  // score (0-0 everywhere) looked like it matched from the fuzzer's point
-  // of view despite actually pointing at a different 0-0 fixture. Increment
-  // resets to 0 on any score DISAGREEMENT (non-null sides differ). Only
-  // ticks ≥ 3 are considered trustworthy enough to write to the DB
-  // permanently. Hitting ≥ 3 also clears this field on the next tick since
-  // the DB table takes over as the primary fixture-id anchor from then on.
-  _apiFootballScoreAlignTicks?: number;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
-  // Timestamp (ms) the goal-confirmation hold (goalUnconfirmedByApiFootball,
-  // below) first started re-arming the suspension for the CURRENT
-  // unconfirmed goal — cleared once confirmed or once the hard cap trips.
-  // Lets the hold give up and fall back to plain timer behavior instead of
-  // re-suspending forever if API-Football's own fixture cache ever gets
-  // stuck (see GOAL_HOLD_MAX_MS's comment).
-  _goalHoldSince?: number;
   // Feed health warning (must not be treated as a market suspension)
   _feedWarning?: string;
   // Statpal league ID — used for player markets (football only)
@@ -611,23 +514,6 @@ export type LiveMatchState = {
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
-  // Live match statistics (football only) from API-Football's
-  // /fixtures/statistics — null per field when that stat wasn't present in
-  // the raw response (not yet reported for this match, or an unexpected
-  // type-string variant — see apiFootball.ts's STAT_TYPE_MAP), absent
-  // entirely when no API-Football fixture was matched at all.
-  matchStats?: {
-    shotsTotalHome: number | null;
-    shotsTotalAway: number | null;
-    shotsOnTargetHome: number | null;
-    shotsOnTargetAway: number | null;
-    possessionHome: number | null;
-    possessionAway: number | null;
-    cornersHome: number | null;
-    cornersAway: number | null;
-    foulsHome: number | null;
-    foulsAway: number | null;
-  };
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -796,8 +682,8 @@ export type UpcomingMatch = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
-  // Direct crest URLs from API-Football (football only) — see the same
-  // field on LiveMatchState for why this is preferred over homeTeamId/
+  // Direct crest URLs (football only) — see the same field on
+  // LiveMatchState for why this is preferred over homeTeamId/
   // homeImageVersion in getTeamBadgeAsset.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
@@ -1173,8 +1059,8 @@ const INTL_TOURNAMENTS = [
 // the match instead of just mis-sorting it). Previously only checked the
 // text BEFORE the first " - ", on the assumption the round/stage
 // descriptor is always a SUFFIX ("Europa League - Qualifying Round 3").
-// The only confirmed real bwin sample for this competition (apiFootball.ts)
-// predates this season's qualifiers, so that assumption is unverified for
+// The only confirmed real bwin sample for this competition predates this
+// season's qualifiers, so that assumption is unverified for
 // the actual round-naming bwin uses right now \u2014 and if it's ever reversed
 // for some competition/provider combination ("Qualifying Round 3 - Europa
 // League"), the old code would silently misclassify it as domestic. INTL_
@@ -2837,9 +2723,9 @@ function computeFootballEtExtra(
       o45: o45!, u45: u45!,
     },
     nextGoal: { home: ngH!, away: ngA! },
-    // All-zero (hidden by the frontend) — API-Football's fixture status
-    // ("ET") doesn't distinguish ET's 1st/2nd half, and this codebase has no
-    // other signal for it either, matching AdvancedMarkets.etExtra's own
+    // All-zero (hidden by the frontend) — the "ET" fixture status this
+    // codebase tracks doesn't distinguish ET's 1st/2nd half, and there is
+    // no other signal for it either, matching AdvancedMarkets.etExtra's own
     // documented convention for feeds that don't carry this split.
     firstHalfResult: { home: 0, draw: 0, away: 0 },
     secondHalfResult: { home: 0, draw: 0, away: 0 },
@@ -5465,6 +5351,23 @@ function makeHockeyMoneylineFromTeams(
   const s = hw + d + aw;
   const [h, dx, a] = probsToDecimalOdds([hw / s, d / s, aw / s], 1.08);
   return { home: h!, draw: dx!, away: a! };
+}
+
+// Two-way (no draw) synthetic moneyline for baseball's upcoming builder —
+// same seeded-margin approach makeMLBMarketsFromTeams already uses
+// internally for its run-line synthetic (marginMean/marginSd), just
+// surfaced as a standalone {home, away} price for when PulseScore hasn't
+// priced the match yet.
+function makeMLBMoneylineFromTeams(
+  home: string,
+  away: string,
+): { home: number; away: number } {
+  const sr = seededRng(`mlb-ml:${home}:${away}`);
+  const marginMean = mc((sr(1) - 0.5) * 2.0, -2.0, 2.0);
+  const marginSd = mc(2.8 + sr(2) * 0.8, 2.2, 4.0);
+  const pHome = mc(1 - normalCdf(-marginMean / marginSd), 0.15, 0.85);
+  const [h, a] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+  return { home: h!, away: a! };
 }
 
 function makeMLBMarketsFromTeams(
@@ -11532,148 +11435,6 @@ function pulseScoreEventDateTime(startTime: string): { date: string; time: strin
   };
 }
 
-/**
- * Football prematch, sourced entirely from PulseScore (getPulseScoreFootballUpcoming).
- * Reuses the exact catalog filtering (isVirtualFootballLeague/isAllowedFootballLeague/
- * footballLeagueAllowedStrict/leaguePriority) and odds extraction (extractFootballOverride)
- * already proven in buildFootballLiveFromPulseScore(), and the same
- * `pulsescore-football-${eventId}` id scheme so a match's card doesn't change identity
- * when it goes live. Confirmed against a real GET /api/v3/bet365/leagues sample
- * (2026-08-07) — canonicalMarket:"MATCH_RESULT"/rawName:"main" matches
- * isMatchWinnerMarket exactly, no changes needed to football.ts.
- */
-async function buildFootballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
-  const events = [...(await getPulseScoreFootballUpcoming())].sort((a, b) =>
-    (a.startTime || "").localeCompare(b.startTime || ""),
-  );
-  // Tracks each pushed match's priority/minor-lower-division status
-  // alongside `results` (same index) purely for the suppression pass below
-  // — kept out of the UpcomingMatch objects themselves since neither field
-  // is part of that public shape.
-  const meta: Array<{ prio: number; isMinor: boolean }> = [];
-  const results: UpcomingMatch[] = [];
-  const seen = new Set<string>();
-  for (const ev of events) {
-    // Second layer of defense against sport-tag contamination (see
-    // fetchFootballUpcoming in football.ts for the full story — the bare
-    // /leagues endpoint has no ?sport= param and leaked basketball fixtures
-    // into football's upcoming list). Checking here too means this loop is
-    // safe regardless of whether a bad league slipped past the first filter.
-    if (ev.sport !== "soccer") continue;
-    const home = stripGenderTeamSuffix(ev.home);
-    const away = stripGenderTeamSuffix(ev.away);
-    if (!home || !away) continue;
-    if (isVirtualFootballLeague(ev.league || "")) continue;
-    if (!isAllowedFootballLeague(ev.league || "")) continue;
-
-    const leagueName = ev.league || "";
-    const isIntl = isIntlTournamentName(leagueName);
-    const countryKey = countryForPulseScoreFootballEvent(ev);
-    if (!isIntl && !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName)))
-      continue;
-    const country = countryKey ?? "Internacional";
-    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
-    const prio = leaguePriority(prioKey, countryKey ?? undefined);
-
-    const key = `${home}|${away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const { date, time } = pulseScoreEventDateTime(ev.startTime);
-    const override = extractFootballOverride(ev);
-    const baseOdds = makeOddsFromTeams(home, away);
-    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const markets: AdvancedMarkets = (() => {
-      const m: AdvancedMarkets = override?.totalGoals
-        ? { ...baseMarkets, totalGoals: { ...baseMarkets.totalGoals, ...override.totalGoals } }
-        : baseMarkets;
-      if (override?.anytimeGoalscorer) m.anytimeGoalscorer = override.anytimeGoalscorer;
-      if (override?.firstGoalscorer) m.firstGoalscorer = override.firstGoalscorer;
-      if (override?.lastGoalscorer) m.lastGoalscorer = override.lastGoalscorer;
-      if (override?.doubleChance) Object.assign(m.doubleChance, override.doubleChance);
-      if (override?.bothTeamsScore) Object.assign(m.bothTeamsScore, override.bothTeamsScore);
-      if (override?.firstGoal) Object.assign(m.firstGoal, override.firstGoal);
-      if (override?.drawNoBet) m.drawNoBet = override.drawNoBet as any;
-      if (override?.secondHalf) m.secondHalf = override.secondHalf as any;
-      if (override?.goalOddEven) m.goalOddEven = override.goalOddEven;
-      if (override?.cleanSheet) m.cleanSheet = override.cleanSheet as any;
-      if (override?.correctScore) m.correctScore = { ...(m.correctScore ?? {}), ...override.correctScore };
-      if (override?.teamGoals) m.teamGoals = { ...(m.teamGoals ?? {}), ...override.teamGoals };
-      if (override?.corners) m.corners = override.corners;
-      if (override?.cards) m.cards = override.cards;
-      if (override?.htft) m.htft = override.htft;
-      if (override?.exactGoals) m.exactGoals = override.exactGoals;
-      if (override?.btts1H) m.btts1H = override.btts1H;
-      return m;
-    })();
-    const odds = override?.odds ?? baseOdds;
-    const isWomens = isWomensLeague(leagueName);
-
-    results.push({
-      id: `pulsescore-football-${ev.eventId}`,
-      home,
-      away,
-      league: normalizeBrazilLeagueDisplayName(leagueName, countryKey),
-      country,
-      time,
-      date,
-      sport: "football",
-      hasRealOdds: !!override?.odds,
-      odds,
-      markets,
-      isWomens,
-      isPriorityLeague: prio > 0,
-    });
-    meta.push({
-      prio,
-      isMinor: isMinorLowerDivisionLeague(countryKey, leagueName),
-    });
-  }
-
-  // ── Suppress minor 2nd/3rd-division leagues on days that already have
-  // real top-flight/cup/well-followed-2nd-division coverage — see
-  // isMinorLowerDivisionLeague's own header comment for exactly which
-  // leagues this narrow list covers and why (bug report 2026-08-15).
-  // Grouped by `date` (not global) so a quiet Tuesday with only Eerste
-  // Divisie on the schedule still shows it — this only kicks in once a
-  // given day already has somewhere else to bet on.
-  const bigLeagueDayHasCoverage = new Set<string>();
-  for (let i = 0; i < results.length; i++) {
-    if (meta[i]!.prio < BIG_LEAGUE_DAY_PRIORITY_THRESHOLD) {
-      bigLeagueDayHasCoverage.add(results[i]!.date);
-    }
-  }
-  const suppressed: UpcomingMatch[] = [];
-  for (let i = 0; i < results.length; i++) {
-    if (meta[i]!.isMinor && bigLeagueDayHasCoverage.has(results[i]!.date)) continue;
-    suppressed.push(results[i]!);
-  }
-  results.length = 0;
-  results.push(...suppressed);
-
-  // Team crests — batched once per rebuild cycle (not per match) so
-  // MAX_NEW_TEAM_LOOKUPS_PER_BATCH applies across the whole prematch list,
-  // not per team; see batchResolveApiFootballTeamLogos's own comment for why
-  // this is a separate lookup from the live cross-reference (a prematch
-  // match has no live fixture to match against). A team not yet resolved
-  // this cycle (deferred by the batch cap on a cold cache) just has no logo
-  // until a later cycle picks it up — same graceful "not yet available"
-  // degradation as everywhere else this integration touches.
-  const teamNames = new Set<string>();
-  for (const r of results) {
-    teamNames.add(r.home);
-    teamNames.add(r.away);
-  }
-  const logosByTeam = await batchResolveApiFootballTeamLogos(teamNames);
-  for (const r of results) {
-    const homeLogo = logosByTeam.get(r.home.trim().toLowerCase());
-    const awayLogo = logosByTeam.get(r.away.trim().toLowerCase());
-    if (homeLogo) r.homeLogoUrl = homeLogo;
-    if (awayLogo) r.awayLogoUrl = awayLogo;
-  }
-  return results;
-}
-
 /** Strips null/undefined values out of a partial nullable numeric object —
  * SportMonksFootballOverride's fields (odds, doubleChance, drawNoBet) allow
  * a side to be null when that specific selection didn't resolve to a
@@ -11698,9 +11459,8 @@ function nonNullPatch<T extends Record<string, number | null | undefined>>(
  * AdvancedMarkets object (mutates and returns `markets`) — shared between
  * the prematch and live SportMonks builders so the two never drift. Real
  * data only ever patches the specific sub-fields it actually priced,
- * leaving the Poisson-model baseline in place everywhere else (same
- * "real data patches synthetic" pattern buildFootballUpcomingFromPulseScore
- * already used with bwin's broader market set). */
+ * leaving the Poisson-model baseline in place everywhere else — a
+ * "real data patches synthetic" pattern. */
 function applySportMonksFootballOverride(
   markets: AdvancedMarkets,
   baseMarkets: AdvancedMarkets,
@@ -11757,11 +11517,9 @@ function applySportMonksFootballOverride(
  * fallbacks, exactly the user-reported "3-0 e odds dele 1.37 em vez de
  * 1.05~1.15" bug). Only the 7 markets extractSportMonksFootballOverride
  * covers so far get real data — everything else in AdvancedMarkets stays
- * the synthetic Poisson-model baseline, same "real data patches synthetic"
- * pattern buildFootballUpcomingFromPulseScore already uses. Logos come
- * straight from SportMonks' own participant image_path (confirmed present
- * on every real sample) rather than the separate API-Football crest lookup
- * the PulseScore builder needs.
+ * the synthetic Poisson-model baseline, a "real data patches synthetic"
+ * pattern. Logos come straight from SportMonks' own participant image_path
+ * (confirmed present on every real sample).
  */
 async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
   const leagueResults = await getSportMonksFootballUpcoming(SPORTMONKS_FOOTBALL_LEAGUE_IDS, 2);
@@ -12547,6 +12305,96 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
 }
 
 /**
+ * Baseball (MLB) prematch, sourced entirely from PulseScore
+ * (getPulseScoreBaseballUpcoming, onexbet) — replaces the StatPal/
+ * SportsAPI-V2-sourced match list getMLBOdds() used to provide before both
+ * providers were removed. Real Money Line / Run Line (handicap) / Total /
+ * F5 odds come from extractBaseballOverride (pulsescore/baseball.ts) when
+ * priced; makeMLBMoneylineFromTeams/makeMLBMarketsFromTeams synthesize
+ * whatever isn't, anchoring the run line/total off the real moneyline when
+ * available — same "real wins, synthetic fills the gap" pattern every other
+ * sport's upcoming builder already uses. The total-line merge (pick the
+ * middle line, then its immediate ±1 neighbors for the alt lines) mirrors
+ * the one getMergedMLBOdds() used. Same `pulsescore-baseball-${eventId}` id
+ * scheme as the live baseball builder above, so a match's identity doesn't
+ * change if it transitions from upcoming to live.
+ */
+async function buildBaseballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreBaseballUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+
+    const isDuplicate = results.some(
+      (r) => teamNamesMatch(r.home, home) && teamNamesMatch(r.away, away),
+    );
+    if (isDuplicate) continue;
+
+    const leagueName = ev.league || "Beisebol";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractBaseballOverride(ev);
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { ...makeMLBMoneylineFromTeams(home, away), draw: 0 };
+    const markets = makeMLBMarketsFromTeams(
+      home,
+      away,
+      override.odds?.home,
+      override.odds?.away,
+    );
+    if (override.runLine) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.runLine.home,
+        awayPlusOne: override.runLine.away,
+      };
+    }
+    if (override.totalLines && override.totalLines.length > 0) {
+      const mid = override.totalLines[Math.floor(override.totalLines.length / 2)]!;
+      const lo = override.totalLines.find(
+        (l) => l.line === mid.line - 0.5 || l.line === mid.line - 1,
+      );
+      const hi = override.totalLines.find(
+        (l) => l.line === mid.line + 0.5 || l.line === mid.line + 1,
+      );
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over35: mid.over,
+        under35: mid.under,
+        ...(lo ? { over25: lo.over, under25: lo.under } : {}),
+        ...(hi ? { over45: hi.over, under45: hi.under } : {}),
+      };
+      markets._total = mid.line;
+    }
+    if (override.f5 && markets.mlbExtra) {
+      markets.mlbExtra.f5Result = { home: override.f5.home, away: override.f5.away };
+    }
+    if (override.f5Total && markets.mlbExtra) {
+      markets.mlbExtra.f5Total = override.f5Total;
+    }
+
+    results.push({
+      id: `pulsescore-baseball-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "baseball",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+    });
+  }
+  return results;
+}
+
+/**
  * Volleyball live score, sourced from PulseScore's "unibetau" (Unibet
  * Australia) feed — a THIRD bookmaker, different from the bwin-sourced
  * prematch builder above. Neither bwin (no score field at all) nor bet365
@@ -12866,11 +12714,6 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
-// Dedupes the "[DIAG apifootball-miss]" log+persist site below to once per
-// match id per process, instead of once per ~1-2s tick for the whole
-// match's lifetime — the api_football_name_mismatches row it upserts
-// already tracks repeat occurrences across restarts, so this Set only
-// needs to prevent same-process log/write spam.
 const HOCKEY_DISAPPEAR_GRACE_MS = 15_000;
 const BASEBALL_DISAPPEAR_GRACE_MS = 15_000;
 
@@ -13142,1113 +12985,31 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   return results;
 }
 
-const _apiFootballMissLogged = new Set<string>();
-
-async function buildFootballLiveFromPulseScore(): Promise<LiveMatchState[]> {
-  // Helpers for PARTIAL PulseScore overrides: each selection slot can come
-  // back null individually (bwin 2H inactivates the winning side, canonical
-  // flips on some live matches, etc.). Instead of all-or-nothing (which
-  // collapsed every real-odds slot back onto Poisson the moment a single
-  // selection went dark, producing the "--" and flipped odds reported in
-  // production), we copy only the fields that the override actually priced,
-  // falling back per-slot to existing last-known-real then to the Poisson
-  // synthetic baseline for anything still missing.
-  type DefinedKeys<T> = { [K in keyof T]?: Exclude<T[K], null | undefined> };
-  const assignNonNull = <T extends Record<string, any>>(
-    target: T,
-    patch: DefinedKeys<T> | null | undefined,
-  ): T => {
-    if (!patch) return target;
-    for (const k of Object.keys(patch) as Array<keyof T>) {
-      const v = patch[k];
-      if (v !== null && v !== undefined) target[k] = v as any;
-    }
-    return target;
-  };
-  const hasAnyReal = (
-    patch: Record<string, number | null | undefined> | null | undefined,
-  ): boolean => {
-    if (!patch) return false;
-    for (const v of Object.values(patch)) if (v !== null && v !== undefined) return true;
-    return false;
-  };
-  // GET /live-events?sport=soccer already returns only live events — no
-  // separate `live` boolean field exists on each event to filter by.
-  const events = await getPulseScoreFootballLive();
-  // API-Football (api-sports.io) — real match events (goals w/ scorer name,
-  // cards, subs, VAR when one occurs). One request per tick covers every
-  // live fixture worldwide (see apiFootball.ts's own caching), so fetching
-  // it once here and reusing the same batch for every match below costs
-  // nothing extra as more matches get tracked. Empty array (not an error)
-  // when API_FOOTBALL_KEY isn't configured — every use below degrades to
-  // "no extra data available" rather than breaking football's own live feed.
-  const apiFootballFixtures = await getApiFootballLiveFixtures();
-  const ranked: Array<{ state: LiveMatchState; prio: number }> = [];
-  const currentIds = new Set<string>();
-  for (const ev of events) {
-    // Defense in depth, same reasoning as the prematch builder just below —
-    // ?sport=soccer scopes this REST endpoint, but PulseScore's own
-    // sport-tag scoping has now proven unreliable on multiple endpoints
-    // (tennis WS, this endpoint's prematch counterpart). Cheap to check.
-    if (ev.sport !== "soccer") continue;
-    const home = stripGenderTeamSuffix(ev.home);
-    const away = stripGenderTeamSuffix(ev.away);
-    if (!home || !away) continue;
-    if (isVirtualFootballLeague(ev.league || "")) continue;
-    if (!isAllowedFootballLeague(ev.league || "")) continue;
-
-    const leagueName = ev.league || "";
-    const isIntl = isIntlTournamentName(leagueName);
-    const countryKey = countryForPulseScoreFootballEvent(ev);
-    // Curated competition catalog — same allow-list/priority table the old
-    // Statpal pipeline used (already tuned for BET62: which countries are
-    // shown, first-division-only countries, etc.). A league PulseScore sends
-    // that isn't in our table at all (countryKey null) is hidden rather than
-    // shown as generic "Internacional" — PulseScore does no catalog
-    // filtering of its own, so without this every obscure/regional league it
-    // happens to carry would show up in Ao Vivo.
-    if (
-      !isIntl &&
-      !(countryKey && footballLeagueAllowedStrict(countryKey, leagueName))
-    )
-      continue;
-    const country = countryKey ?? "Internacional";
-    if (isPulseScoreEventFinished(ev)) {
-      const idDone = `pulsescore-football-${ev.eventId}`;
-      currentIds.add(idDone);
-      const existing = liveMatchState.get(idDone);
-      if (existing) {
-        try { await finalizeStaleLiveMatch(existing); } catch (err) {
-          logger.error({ err, id: idDone }, "[pulsescore] football immediate finalize failed");
-        }
-        liveMatchState.delete(idDone);
-      }
-      continue;
-    }
-    const prioKey = countryKey ? `${countryKey}: ${leagueName}` : leagueName;
-    const prio = leaguePriority(prioKey, countryKey ?? undefined);
-    const tier = footballMarketTier(leagueName, country);
-
-    // Extract directly from `ev` — this loop is iterating PulseScore's own
-    // event list, so the override we want IS `ev`, not some other event that
-    // fuzzy-matches its team names. findPulseScoreFootballOverride() (an
-    // O(n) fuzzy Levenshtein scan per call) exists for cross-provider lookups
-    // (a Statpal/SportsAPI match hunting for its PulseScore counterpart) —
-    // using it here turned this loop O(n²) (up to ~20k fuzzy string
-    // comparisons for 200 live matches, redone every 1-2s broadcast tick),
-    // which was blocking the event loop long enough to freeze the live page
-    // and stall odds-market requests.
-    const override = extractFootballOverride(ev);
-    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    const rawMarkets: AdvancedMarkets = { ...baseMarkets };
-    // Real PulseScore prices override the synthetic model WHERE THEY ACTUALLY
-    // PRICED. assignNonNull ignores null slots (individual selections inactivated by bwin mid-2H
-    // or canonical-tag flip events) instead of overwriting good Poisson defaults with null,
-    // which previously produced "--" / empty rows when 1 selection went dark.
-    if (override?.totalGoals) {
-      assignNonNull(rawMarkets.totalGoals, override.totalGoals);
-    }
-    if (override?.doubleChance) {
-      assignNonNull(rawMarkets.doubleChance, override.doubleChance);
-    }
-    if (override?.bothTeamsScore) {
-      Object.assign(rawMarkets.bothTeamsScore, override.bothTeamsScore);
-    }
-    if (override?.firstGoal) {
-      assignNonNull(rawMarkets.firstGoal, override.firstGoal);
-    }
-    if (override?.anytimeGoalscorer) {
-      rawMarkets.anytimeGoalscorer = override.anytimeGoalscorer;
-    }
-    if (override?.firstGoalscorer) {
-      rawMarkets.firstGoalscorer = override.firstGoalscorer;
-    }
-    if (override?.lastGoalscorer) {
-      rawMarkets.lastGoalscorer = override.lastGoalscorer;
-    }
-    if (override?.drawNoBet) {
-      assignNonNull(rawMarkets.drawNoBet, override.drawNoBet);
-    }
-    if (override?.secondHalf) {
-      assignNonNull(rawMarkets.secondHalf, override.secondHalf);
-    }
-    if (override?.goalOddEven) {
-      Object.assign(rawMarkets.goalOddEven, override.goalOddEven);
-    }
-    if (override?.cleanSheet) {
-      assignNonNull(rawMarkets.cleanSheet, override.cleanSheet);
-    }
-    if (override?.correctScore) {
-      Object.assign(rawMarkets.correctScore ??= {}, override.correctScore);
-    }
-    if (override?.teamGoals) {
-      rawMarkets.teamGoals = { ...rawMarkets.teamGoals, ...override.teamGoals };
-    }
-    if (override?.btts1H) {
-      Object.assign(rawMarkets.btts1H, override.btts1H);
-    }
-    if (override?.exactGoals) {
-      Object.assign(rawMarkets.exactGoals, override.exactGoals);
-    }
-    if (override?.corners) {
-      Object.assign(rawMarkets.corners, override.corners);
-    }
-    if (override?.cards) {
-      Object.assign(rawMarkets.cards, override.cards);
-    }
-    if (override?.htft) {
-      Object.assign(rawMarkets.htft, override.htft);
-    }
-    const id = `pulsescore-football-${ev.eventId}`;
-    const existing = liveMatchState.get(id);
-    // Same "don't regenerate from a default, keep the last known real value"
-    // protection already applied to odds above — pulseScoreEventScore(ev)
-    // returns null whenever ev.score is transiently missing/malformed for a
-    // single poll tick (plausible exactly at the moment a goal is being
-    // confirmed upstream, when PulseScore's own state is also mid-update).
-    // Falling back to a hard 0 here (as this used to) meant a single glitchy
-    // tick made the score visibly flash back to 0-0 AND made goalScored
-    // below fire a false positive (homeScore/awayScore momentarily != the
-    // real existing score) — resetting the goal-suspension window for no
-    // real goal, then firing AGAIN when the score corrected itself next
-    // tick. Reported in production as a match repeatedly flashing
-    // "suspended" and its odds disappearing/reappearing around a goal
-    // instead of one clean ~20s suspension. Falling back to the existing
-    // score instead means a genuinely missing reading just holds steady.
-    const score = pulseScoreEventScore(ev);
-    const homeScore = score?.home ?? existing?.homeScore ?? 0;
-    const awayScore = score?.away ?? existing?.awayScore ?? 0;
-
-    // API-Football cross-reference — tolerant team-name match against
-    // whatever fixtures came back this tick (empty array, hence null here,
-    // whenever API_FOOTBALL_KEY isn't configured or that fetch failed; every
-    // use below already treats null as "no extra data" and falls back to
-    // PulseScore-only behavior, same as before this integration existed).
-    // League + approximate kickoff time passed as extra disambiguation
-    // signals (2026-08-12, user-requested: matching on team names alone
-    // occasionally collides when a fuzzy name match satisfies more than one
-    // live fixture) — ev.league is PulseScore's own bare league name for
-    // this event; approxKickoffMs is derived with the best available signal
-    // in priority order:
-    //
-    //   1. ev.startTime (ISO string, present when bwin leaks the prematch
-    //      startTime into a live event or the event arrived from a path
-    //      that actually includes it — matches.ts handles this with a
-    //      defensive opt-in cast, PulseScoreEvent's type doesn't formally
-    //      declare it because the upstream docs don't list it).
-    //   2. ev.moreInfo.updatedAtUTC (seconds, a real-world proxy that
-    //      drifts but is still a better anchor than a pure computed value
-    //      when a match is in its very first minutes and the elapsed
-    //      time is near zero so "now - 0" collapses every fresh match into
-    //      the exact same window).
-    //   3. Date.now() - minute * 60000 fallback as before, used only when
-    //      the two stronger anchors are missing.
-    const approxFromElapsed = Date.now() - pulseScoreEventMinute(ev) * 60_000;
-    const startTimeIso =
-      (ev as PulseScoreEvent & { startTime?: string }).startTime || null;
-    const updatedAtSec =
-      (ev.moreInfo?.updatedAtUTC as number | undefined) &&
-      Number.isFinite(ev.moreInfo.updatedAtUTC as number)
-        ? (ev.moreInfo.updatedAtUTC as number)
-        : null;
-    const approxKickoffMs = startTimeIso
-      ? (Number.isFinite(Date.parse(startTimeIso)) ? Date.parse(startTimeIso) : approxFromElapsed)
-      : updatedAtSec !== null
-        ? updatedAtSec * 1000 - pulseScoreEventMinute(ev) * 60_000
-        : approxFromElapsed;
-    // Persistent remembered fixtureId (DB table api_football_fixture_mappings,
-    // cross-session, survives process restart — see apiFootballFixtureMappings.ts
-    // header for rationale). Tried BEFORE the in-memory LiveMatchState field
-    // because the DB table is the "ground truth" that outlives any individual
-    // process instance; in-memory field stays as a per-process performance
-    // anchor for the common case where this same instance saw the match before.
-    const persistentFixtureId = getMappedApiFootballFixtureId(id);
-    const rememberedFixtureId =
-      persistentFixtureId !== null ? persistentFixtureId : existing?._apiFootballFixtureId;
-    let apiFixture =
-      (rememberedFixtureId !== undefined
-        ? apiFootballFixtures.find((f) => f.fixtureId === rememberedFixtureId)
-        : undefined) ??
-      findApiFootballFixture(home, away, apiFootballFixtures, {
-        league: ev.league,
-        approxKickoffMs,
-      });
-    // Cross-validation gate before trusting a NEW (first-time for this
-    // process) apiFixture enough to persist its id in the DB for future
-    // restarts. Scoring-rule agreement (the most obvious, most failure-
-    // resistant cross-check we have — PulseScore's score text field AND the
-    // API-Football goals.home/away numbers both describe the same real
-    // match). Two non-null values that DISAGREE on either side means the
-    // fixture mapping is almost certainly wrong; in that case discard the
-    // match as if it wasn't found (falls back to PulseScore-only behavior,
-    // which doesn't enrich but also can't mis-attribute a rival's goals/
-    // cards to this match). Persistent DB write (recordConfirmedFixtureMapping)
-    // only happens AFTER 3 ticks in a row with ALIGNED scores (or when
-    // existing?._apiFootballEverMatched already reached "once trusted,
-    // trusted forever" — the DB write is the same threshold so a process
-    // restart doesn't make us re-run the confidence check from scratch).
-    let tickAlignment = existing?._apiFootballScoreAlignTicks ?? 0;
-    if (apiFixture) {
-      const psHome = Number(score?.home ?? null);
-      const psAway = Number(score?.away ?? null);
-      const afHome = typeof apiFixture.goalsHome === "number" ? apiFixture.goalsHome : null;
-      const afAway = typeof apiFixture.goalsAway === "number" ? apiFixture.goalsAway : null;
-      const scoreAligns =
-        psHome === null || afHome === null || psHome === afHome ?
-          (psAway === null || afAway === null || psAway === afAway) :
-          false;
-      if (scoreAligns) {
-        tickAlignment += 1;
-      } else {
-        // Clear mismatch — throw away fixture, don't re-count a mismatched tick
-        logger.warn(
-          {
-            id,
-            home, away,
-            pulseScore: { home: psHome, away: psAway },
-            apiFootball: { home: afHome, away: afAway, fixtureId: apiFixture.fixtureId },
-          },
-          "[api-football] score mismatch — discarding candidate fixture (did not reach 3 consecutive aligned ticks)",
-        );
-        apiFixture = null;
-        tickAlignment = 0;
-      }
-    }
-    const canPersistFixture =
-      !!apiFixture && tickAlignment >= 3 && !persistentFixtureId;
-    if (canPersistFixture) {
-      recordConfirmedFixtureMapping({
-        pulsescoreMatchId: id,
-        pulsescoreEventId: ev.eventId,
-        apiFootballFixtureId: apiFixture!.fixtureId,
-        homeTeam: home,
-        awayTeam: away,
-        league: ev.league || null,
-        kickoffMs: Number.isFinite(approxKickoffMs) ? approxKickoffMs : null,
-      });
-      recordConfirmedTeamMapping(home, apiFixture!.home.id, apiFixture!.home.name);
-      recordConfirmedTeamMapping(away, apiFixture!.away.id, apiFixture!.away.name);
-    }
-    // Originally a TEMPORARY diagnostic (2026-08-09) for a user report that
-    // goal/VAR/card/penalty enrichment "still wasn't coming through
-    // correctly" — need to know WHY apiFixture stays unmatched for a given
-    // match: a team-name mismatch between PulseScore/bwin and API-Football,
-    // or API-Football simply not covering that particular league live.
-    // Kept, and now also persisted to api_football_name_mismatches (not
-    // just logged) so the Pré-Jogo Agent (lib/aiAgents/roles/preMatch.ts)
-    // can tell a one-off/league-not-covered miss apart from a pair that
-    // keeps failing across restarts and is actually worth fixing in
-    // teamNamesMatch. Still only once per match id per process (not every
-    // ~1-2s tick), only when API-Football's own live batch came back
-    // non-empty (rules out "key missing"/"fetch failed this tick" as the
-    // cause) but this specific match — one bet365/bwin has real priced
-    // odds for, i.e. one that actually matters — wasn't in it.
-    if (!apiFixture && apiFootballFixtures.length > 0 && override?.odds && !_apiFootballMissLogged.has(id)) {
-      _apiFootballMissLogged.add(id);
-      const candidateNames = apiFootballFixtures.map((f) => `${f.home.name} v ${f.away.name}`);
-      logger.warn(
-        {
-          id,
-          home,
-          away,
-          league: ev.league,
-          apiFootballFixtureCount: apiFootballFixtures.length,
-          apiFootballTeamNames: candidateNames,
-        },
-        "[DIAG apifootball-miss] no API-Football fixture matched this PulseScore match — check team-name spelling above against apiFootballTeamNames",
-      );
-      db.insert(apiFootballNameMismatchesTable)
-        .values({ matchId: id, homeTeam: home, awayTeam: away, league: ev.league || null, apiFootballCandidateNames: candidateNames })
-        .onConflictDoUpdate({
-          target: apiFootballNameMismatchesTable.matchId,
-          set: {
-            occurrenceCount: sql`${apiFootballNameMismatchesTable.occurrenceCount} + 1`,
-            lastSeenAt: new Date(),
-            apiFootballCandidateNames: candidateNames,
-          },
-        })
-        .catch((err) => logger.warn({ err, id }, "[api-football] failed to persist name mismatch"));
-    }
-    // Team-search fallback for when this match's live fixture wasn't found
-    // above (name-matching miss, or API-Football just doesn't carry this
-    // particular match live) — getApiFootballTeamLogo has its own 7-day
-    // per-team cache, so this is a real network call only the first time
-    // either team is seen, same reasoning as the prematch batch resolver.
-    const homeLogoUrl = apiFixture?.home.logo ?? (await getApiFootballTeamLogo(home)) ?? undefined;
-    const awayLogoUrl = apiFixture?.away.logo ?? (await getApiFootballTeamLogo(away)) ?? undefined;
-    // Per-fixture request (unlike the single apiFootballFixtures fetch
-    // above) — cheap here because getApiFootballFixtureStatistics caches
-    // per fixtureId with its own 30s TTL, so this only actually hits the
-    // network once per match per 30s regardless of how often this tick
-    // runs. Null (not fetched at all) whenever there's no matched fixture,
-    // rather than guessing at a stale one.
-    const apiFootballStats = apiFixture
-      ? await getApiFootballFixtureStatistics(apiFixture.fixtureId)
-      : null;
-    // Counts, not booleans — fixtureHasRedCard/fixtureHasVarReview would stay
-    // true for the rest of the match after a single occurrence (the events
-    // array only grows), so comparing against the PREVIOUS tick's count is
-    // what actually detects a NEW red card/VAR review this tick rather than
-    // re-suspending forever after the first one. Counted directly here
-    // (not via fixtureHasRedCard, a plain boolean) since the count itself is
-    // what needs to persist tick-to-tick.
-    const redCardEvents = apiFixture
-      ? apiFixture.events.filter((e) => e.type === "Card" && e.detail.toLowerCase().includes("red card"))
-      : [];
-    // Bug report 2026-08-11: "revisão VAR aparecendo aleatoriamente" — the
-    // VAR banner was re-triggering repeatedly for the SAME already-shown
-    // review. Root cause: unlike redCardsHome/Away just below (which
-    // correctly fall back to the last known count when apiFixture briefly
-    // fails to cross-reference this tick — a real, common occurrence, see
-    // findApiFootballFixture's own "skip on ambiguity" comment and the
-    // apifootball-usage admin diagnostic built for this same investigation),
-    // varEventCount used to hard-reset to 0 on every unmatched tick and get
-    // written straight back to _apiFootballVarEventCount. The very next tick
-    // that matched again and correctly reported the real (nonzero) count
-    // then read as "count WENT UP from 0" — a false "new VAR review" every
-    // time the cross-reference merely flickered, not just when a review
-    // actually happened. Same fix as redCardsHome/Away: hold the last known
-    // count instead of zeroing it.
-    const varEventCount = apiFixture
-      ? apiFixture.events.filter((e) => e.type.toLowerCase() === "var").length
-      : (existing?._apiFootballVarEventCount ?? 0);
-    const redCardsHome = apiFixture
-      ? redCardEvents.filter((e) => e.teamId === apiFixture.home.id).length
-      : (existing?.redCardsHome ?? 0);
-    const redCardsAway = apiFixture
-      ? redCardEvents.filter((e) => e.teamId === apiFixture.away.id).length
-      : (existing?.redCardsAway ?? 0);
-    const prevRedCardTotal = (existing?.redCardsHome ?? 0) + (existing?.redCardsAway ?? 0);
-    const prevVarEventCount = existing?._apiFootballVarEventCount ?? 0;
-    // wasEverMatchedBefore: see _apiFootballEverMatched's own comment on the
-    // LiveMatchState type for the bug this guards against (a fixture's
-    // pre-existing incident count read as "new" on its first-ever match).
-    const wasEverMatchedBefore = !!existing?._apiFootballEverMatched;
-    const newRedCard =
-      apiFixture && wasEverMatchedBefore && redCardsHome + redCardsAway > prevRedCardTotal;
-    const newVarReview =
-      apiFixture && wasEverMatchedBefore && varEventCount > prevVarEventCount;
-    // Penalty (scored OR missed) — see fixturePenaltyEvents's own comment for
-    // why a missed one needed its own trigger (goalScored never covers it).
-    // Same hold-last-known-count fix as varEventCount above — this had the
-    // identical reset-to-zero-on-unmatched-tick bug (only its length is used
-    // below, never the events themselves, so a plain count is enough here).
-    const penaltyEventCount = apiFixture
-      ? fixturePenaltyEvents(apiFixture).length
-      : (existing?._apiFootballPenaltyEventCount ?? 0);
-    const prevPenaltyEventCount = existing?._apiFootballPenaltyEventCount ?? 0;
-    const newPenaltyEvent =
-      apiFixture && wasEverMatchedBefore && penaltyEventCount > prevPenaltyEventCount;
-    // Real match events (goals/cards/subs, and VAR if present) for the live
-    // event timeline — LiveMatchState.events already existed with this exact
-    // shape (see its own comment) but had no data source until now.
-    const apiFootballEvents: LiveMatchState["events"] = apiFixture
-      ? apiFixture.events.map((e) => ({
-          type: e.type,
-          team: e.teamId === apiFixture.home.id ? home : away,
-          minute: e.minute,
-          player: e.playerName ?? "",
-          detail: e.detail,
-        }))
-      : [];
-
-    // Feeds the frontend's existing clockSec-based MM:SS ticking clock
-    // (getFootballClockLabel/getDisplayMinute in home.tsx) — already built
-    // for other live sources, just never wired up for PulseScore football,
-    // which only ever supplied the coarse whole-minute `minute` field above.
-    // TS (seconds-within-the-minute) sits right next to TM in PulseScore's
-    // own moreInfo and was simply never read until now.
-    //
-    // clockAtMs is the anchor the frontend extrapolates client-side seconds
-    // forward from (Date.now() - clockAtMs) — it must only move when
-    // clockSec itself actually changes. Stamping Date.now() here
-    // unconditionally on every ~1s tick (regardless of whether PulseScore
-    // sent a fresh TM/TS reading) reset that anchor constantly, which
-    // silently defeats the whole extrapolation: whenever PulseScore's own
-    // clock for a given match updates slower than our poll, the frontend's
-    // "how long since we last confirmed this" math was always ~0, so it
-    // never extrapolated forward and the display just sat on the stale
-    // value, drifting further behind the longer PulseScore's own reading
-    // stayed stuck.
-    //
-    // Computed here (before filterLiveMarkets below), not just at the end
-    // where the rest of `state` is built — filterLiveMarkets has its own
-    // dead-until-now status-based logic (settle 1st-half markets at HT) that
-    // needs the REAL status, not the hardcoded "LIVE" it used to get passed,
-    // which meant that logic could never fire even once wired up.
-    // Pre-existing user report ("relógio salta valores estranhos" — the
-    // clock jumping to weird values, distinct from the sparse-update
-    // staleness class of bug the comment below already covers): bwin's raw
-    // per-tick TM/TS-or-matchClock reading has no protection against a
-    // single glitchy tick reporting a wrong value — e.g. a brief mix-up
-    // with a stale/incorrect period reading — and unlike homeScore/
-    // awayScore just above (guarded against ever regressing), clockSec had
-    // no such floor at all. A jump FORWARD is always legitimate here (see
-    // the Vicenza v Catania case below — a real checkpoint feed can and
-    // does leap whole minutes ahead in one tick), but a jump BACKWARD
-    // within the same tracked match can never be: a live match clock does
-    // not run in reverse. Discarding a backward reading and holding the
-    // last known-good value instead — same "advance-only" rule already
-    // applied to score in this same builder — turns a corrupted one-tick
-    // glitch into a brief (sub-second, corrects on the very next real
-    // reading) hold instead of a visible jump to a wrong number.
-    const rawClockSec = pulseScoreEventClockSec(ev);
-    const prevClockSec = existing?._liveExtra?.clockSec;
-    const clockSec =
-      prevClockSec !== undefined && rawClockSec < prevClockSec
-        ? prevClockSec
-        : rawClockSec;
-    const clockAtMs =
-      prevClockSec === clockSec && existing?._liveExtra?.clockAtMs
-        ? existing._liveExtra.clockAtMs
-        : Date.now();
-    // Stale-reading guard: confirmed in production (2026-08-08, Vicenza v
-    // Catania, a lower-coverage Coppa Italia preliminary-round match) that
-    // PulseScore doesn't refresh TM/TS continuously for every match — this
-    // one sat at exactly 45:00 for many minutes (well past any real
-    // halftime) and then jumped straight to 90:00 with nothing in between,
-    // meaning that match only gets occasional checkpoint snapshots, not a
-    // real per-second feed. clockRunning was hardcoded true regardless, so
-    // the frontend spent that whole gap extrapolating forward from a
-    // reading that was never actually advancing, hit its own +3min safety
-    // cap, and displayed a frozen wrong number that looked like a stuck
-    // clock. clockAtMs only moves when clockSec changes (above), so "how
-    // long has this exact value been sitting" is just Date.now() -
-    // clockAtMs — no extra state to track. Generic on purpose (any stuck
-    // value, not just 45:00/90:00): well-covered matches update every ~1-2s
-    // so this practically never fires for them, while lower-coverage
-    // matches can freeze at any point, not only the half/full-time marks.
-    const isClockStale = Date.now() - clockAtMs > 20_000;
-    // "HT"/"FT" are claimed for the two freeze points that are actually
-    // meaningful to label — sitting elsewhere just holds the last known
-    // minute (clockRunning: false below) without guessing a phase.
-    //
-    // A ±60s tolerance around 45:00 (not an exact clockSec === 2700 match)
-    // is required here: a real production reading (2026-08-08, eventId
-    // 199102620) froze at 45:01 — one second off the exact mark — and an
-    // exact-match check silently missed it, leaving the match labeled
-    // "LIVE" with a clock that just stopped advancing instead of "HT".
-    // Real in-play readings pass through this ±60s window in a couple of
-    // ticks (well-covered matches update every ~1-2s), so widening it this
-    // much still can't misfire on a genuinely advancing clock — only a
-    // reading that's actually stuck for the full 20s (isClockStale) lands
-    // here at all.
-    const HALFTIME_MARK_SEC = 45 * 60;
-    const FULLTIME_MARK_SEC = 90 * 60;
-    const FREEZE_TOLERANCE_SEC = 60;
-    const isHalftimeFreeze =
-      isClockStale && Math.abs(clockSec - HALFTIME_MARK_SEC) <= FREEZE_TOLERANCE_SEC;
-    // Same reasoning applied to the OTHER freeze point PulseScore's own
-    // production incident described (that same match "jumped straight to
-    // 90:00" next): a match whose clock is stuck anywhere from 89:00 onward
-    // has, in practice, ended — real stoppage time varies (a match can
-    // legitimately finish at 90:00, 93:47, or later), so this is a
-    // lower-bound check (>=), not another ±60s window, deliberately wide
-    // enough to also catch a match that got stuck mid-stoppage-time rather
-    // than exactly on the whistle.
-    // pulseScoreEventClockFinished(ev) short-circuits this for bwin events:
-    // its matchClock.period reports "Finished" directly and immediately
-    // (confirmed real, 2026-08-08), no need to wait out the 20s staleness
-    // window below — that heuristic stays as the only signal for bet365
-    // events (no matchClock) and as a safety net for any other terminal
-    // bwin period value this hasn't seen yet.
-    const bwinHeuristicFulltimeFreeze =
-      pulseScoreEventClockFinished(ev) ||
-      (isClockStale &&
-        !isHalftimeFreeze &&
-        clockSec >= FULLTIME_MARK_SEC - FREEZE_TOLERANCE_SEC);
-    // API-Football cross-reference for extra time / penalties (bug report
-    // 2026-08-11: "prorrogação não está a entrar" — a knockout match tied
-    // after 90' never transitioned into extra time at all). The bwin-clock
-    // heuristic above has no concept of extra time — bwin's own
-    // matchClock.period has never been confirmed to report anything besides
-    // "2H"/"Finished" (see client.ts's PulseScoreEvent.matchClock comment)
-    // — and a tied knockout match's clock genuinely DOES freeze around
-    // 90:00 for the real few-minute break before extra time kicks off,
-    // which is exactly what the clock-stale branch above was built to
-    // detect as "match over". Left unchecked, that fired (and immediately
-    // settled + deleted the match — see the finalize block below) during
-    // that pre-ET break, before extra time ever had a chance to start.
-    // API-Football's fixture status codes are a documented, stable contract
-    // (1H/HT/2H/ET/BT/P/FT/AET/PEN/...) that DOES distinguish extra time
-    // and penalties from a genuine finish — when a fixture is cross-
-    // referenced (apiFixture, the same one already used for VAR/red-card/
-    // stats above), it's authoritative over the bwin-only heuristic for
-    // this decision: never let a stuck bwin clock finalize a match
-    // API-Football itself still reports as live in any form, extra time or
-    // penalties included. Only when there's NO cross-reference at all does
-    // this fall back to the bwin-only heuristic, same residual risk (no
-    // better signal available) the disappearance-based GC loop below
-    // already exists to catch eventually.
-    const API_FOOTBALL_FINISHED_STATUSES = new Set([
-      "FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO",
-    ]);
-    const API_FOOTBALL_ET_STATUSES = new Set(["ET", "BT", "P"]);
-    const apiFootballConfirmsFinished =
-      !!apiFixture && API_FOOTBALL_FINISHED_STATUSES.has(apiFixture.statusShort);
-    const apiFootballConfirmsEt =
-      !!apiFixture && API_FOOTBALL_ET_STATUSES.has(apiFixture.statusShort);
-    const apiFootballConfirmsPen = !!apiFixture && apiFixture.statusShort === "P";
-    const isFulltimeFreeze = apiFixture
-      ? apiFootballConfirmsFinished
-      : bwinHeuristicFulltimeFreeze;
-    const liveStatus = isHalftimeFreeze
-      ? "HT"
-      : apiFootballConfirmsEt
-        ? "ET"
-        : isFulltimeFreeze
-          ? "FT"
-          : "LIVE";
-    // Half-time score, captured the moment HT is first confirmed and carried
-    // forward unchanged for the rest of the match — settlement.ts's
-    // liveDefinitiveOutcomeForSel() already knows how to settle ht-home/
-    // ht-away/ht-draw, 1H BTTS, and HT/FT combo bets the instant this is
-    // populated (fully pre-existing logic, provider-agnostic), but it was
-    // never reachable for PulseScore football since nothing here ever set
-    // it. The score at the exact tick HT is confirmed IS the HT score by
-    // definition, so no separate lookup is needed.
-    const htScore: [number, number] | undefined = existing?._liveExtra?.htScore
-      ? existing._liveExtra.htScore
-      : isHalftimeFreeze
-        ? [homeScore, awayScore]
-        : undefined;
-
-    // filterLiveMarkets zeroes out (hides) any line/scoreline the current
-    // score has already settled — e.g. "Over 0.5" once any goal has been
-    // scored, or a correct-score entry below the actual score. Existed in
-    // this file already (written for the old Statpal pipeline, per its own
-    // status-string checks) but was never actually called from anywhere —
-    // dead code. Real bet365 lines get the same treatment as the synthetic
-    // fallback here: if bet365 itself already pulled a settled line
-    // (common — it stops offering "Over 0.5" once it's guaranteed), the
-    // synthetic fallback that fills the gap needs this too, or it'd show a
-    // live-looking price for an already-decided outcome.
-    const settledMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, liveStatus);
-    const markets = filterFootballMarketsByTier(settledMarkets, tier);
-    // Populate the Prorrogação/Penáltis markets the moment API-Football
-    // confirms the match is actually in that phase (apiFootballConfirmsEt/
-    // Pen above) — computeFootballEtExtra/computeFootballPenExtra's own
-    // header explains why nothing populated these before now.
-    if (apiFootballConfirmsEt) {
-      markets.etExtra = computeFootballEtExtra(home, away);
-      if (apiFootballConfirmsPen) markets.penExtra = computeFootballPenExtra(home, away);
-    }
-    // Real sample (2026-08-08, eventId 199102620): a match that had a full
-    // slate of active markets 5 minutes earlier came back with just one dead
-    // market (isActive:false, odds:0 throughout) while its clock (TM/TS) sat
-    // frozen at the exact same reading — PulseScore had effectively stopped
-    // pricing it without it leaving the live-events list. Falling back to
-    // makeOddsFromTeams() here (fully synthetic, computer-generated odds)
-    // in that situation meant the site could keep taking real-money bets
-    // against invented numbers for a match no bookmaker was actually
-    // pricing. Now: once a match has shown real odds at least once, losing
-    // them doesn't regenerate synthetic ones — the last known real odds
-    // stay on screen (below) and betting gets suspended (see oddsWentDark
-    // below) until PulseScore prices it again or the match leaves the live
-    // list. Only a match that has NEVER had real odds (still bootstrapping
-    // right after it appeared) gets the synthetic starting price.
-    // PER-SLOT real-odds merge: odds are no longer all-or-nothing. Each
-    // individual side (home/draw/away) cascades through 3 donors in order:
-    //   1. fresh PulseScore real price THIS TICK (if non-null)
-    //   2. last-known real price carried in existing.odds (if the match once had real odds)
-    //   3. Poisson synthetic baseline as final guaranteed fallback — NEVER null.
-    // This eliminates "--" rows from matches where bwin inactivates just the
-    // already-winning side in 2H (common when a match is effectively decided),
-    // while still preferring real prices everywhere they actually exist.
-    const poissonOdds = makeOddsFromTeams(home, away);
-    const hasRealOddsNow = hasAnyReal(override?.odds);
-    const odds = {
-      home: (override?.odds?.home as number | undefined) ??
-        (existing?.hasRealOdds ? (existing.odds.home as number | undefined) : undefined) ??
-        poissonOdds.home,
-      draw: (override?.odds?.draw as number | undefined) ??
-        (existing?.hasRealOdds ? (existing.odds.draw as number | undefined) : undefined) ??
-        poissonOdds.draw,
-      away: (override?.odds?.away as number | undefined) ??
-        (existing?.hasRealOdds ? (existing.odds.away as number | undefined) : undefined) ??
-        poissonOdds.away,
-    };
-    // Same 3-donor cascade for the slot-based markets that can carry partial
-    // data (doubleChance / firstGoal / drawNoBet / secondHalf / cleanSheet).
-    // If no real data exists anywhere we just leave the Poisson-merged value
-    // already computed into rawMarkets above — nothing to override.
-    if (existing?.hasRealOdds || hasRealOddsNow) {
-      const dc = rawMarkets.doubleChance;
-      if (dc) {
-        dc.homeOrDraw =
-          (override?.doubleChance?.homeOrDraw as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.doubleChance?.homeOrDraw as number | undefined) : undefined) ??
-          dc.homeOrDraw;
-        dc.awayOrDraw =
-          (override?.doubleChance?.awayOrDraw as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.doubleChance?.awayOrDraw as number | undefined) : undefined) ??
-          dc.awayOrDraw;
-        dc.homeOrAway =
-          (override?.doubleChance?.homeOrAway as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.doubleChance?.homeOrAway as number | undefined) : undefined) ??
-          dc.homeOrAway;
-      }
-      const fg = rawMarkets.firstGoal;
-      if (fg) {
-        fg.home =
-          (override?.firstGoal?.home as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.firstGoal?.home as number | undefined) : undefined) ??
-          fg.home;
-        fg.noGoal =
-          (override?.firstGoal?.noGoal as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.firstGoal?.noGoal as number | undefined) : undefined) ??
-          fg.noGoal;
-        fg.away =
-          (override?.firstGoal?.away as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.firstGoal?.away as number | undefined) : undefined) ??
-          fg.away;
-      }
-      const dnb = rawMarkets.drawNoBet;
-      if (dnb) {
-        dnb.home =
-          (override?.drawNoBet?.home as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.drawNoBet?.home as number | undefined) : undefined) ??
-          dnb.home;
-        dnb.away =
-          (override?.drawNoBet?.away as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.drawNoBet?.away as number | undefined) : undefined) ??
-          dnb.away;
-      }
-      const sh = rawMarkets.secondHalf;
-      if (sh) {
-        sh.home =
-          (override?.secondHalf?.home as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.secondHalf?.home as number | undefined) : undefined) ??
-          sh.home;
-        sh.draw =
-          (override?.secondHalf?.draw as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.secondHalf?.draw as number | undefined) : undefined) ??
-          sh.draw;
-        sh.away =
-          (override?.secondHalf?.away as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.secondHalf?.away as number | undefined) : undefined) ??
-          sh.away;
-      }
-      const cs = rawMarkets.cleanSheet;
-      if (cs) {
-        cs.home =
-          (override?.cleanSheet?.home as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.cleanSheet?.home as number | undefined) : undefined) ??
-          cs.home;
-        cs.away =
-          (override?.cleanSheet?.away as number | undefined) ??
-          (existing?.hasRealOdds ? (existing.markets.cleanSheet?.away as number | undefined) : undefined) ??
-          cs.away;
-      }
-    }
-
-    // Goal-based market suspension — same trigger condition and delay table
-    // the (now-dead) Statpal football builder used (FOOTBALL_SUSP_KEYS /
-    // footballSuspensionDelayMs, both provider-agnostic). PulseScore gives us
-    // no VAR/red-card signal, so only the goal trigger is covered here —
-    // narrower than before, but still closes the main window where a stale
-    // price could be backed right after a goal.
-    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension ? { ...existing.marketSuspension } : undefined;
-    if (marketSuspension) {
-      const active = Object.fromEntries(
-        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
-      );
-      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
-    }
-    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
-    const goalScored =
-      !!existing &&
-      (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
-    if (goalScored) {
-      const now = Date.now();
-      marketSuspension = Object.fromEntries(
-        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
-      );
-      // Enriched with the scorer's name (and "DE PÊNALTI" when the last goal
-      // event's own detail says so) when API-Football has already picked up
-      // the goal event by this same tick (its own ~12s cache can lag a
-      // PulseScore score change by a few seconds) — falls back to the plain
-      // "GOLO!" banner PulseScore-only matches already had otherwise.
-      const scorer = apiFixture ? latestGoalScorer(apiFixture) : null;
-      const isPenaltyGoal = apiFixture ? latestGoalIsPenalty(apiFixture) : false;
-      const goalLabel = isPenaltyGoal ? "GOLO DE PÊNALTI!" : "GOLO!";
-      suspensionReason = scorer ? `${goalLabel} ${scorer}` : goalLabel;
-      // TEMPORARY diagnostic (remove once answered): does bet365's own feed
-      // flip a market's/selection's isActive to false when IT suspends for
-      // this goal, independent of our own synthetic delay-based suspension
-      // above? If so, mirroring that per-market instead of guessing a fixed
-      // delay would also cover VAR/penalty/card — PulseScore gives no
-      // explicit event type for those, but if bet365's live suspension state
-      // is visible in isActive, we don't need to know WHICH incident caused
-      // it. No extra API calls — this piggybacks on the tick already in
-      // flight. Logs once per goal; grep prod logs for "[DIAG goal]".
-      logger.warn(
-        {
-          eventId: ev.eventId,
-          home,
-          away,
-          homeScore,
-          awayScore,
-          // Skip player-prop markets (Goalscorer/Assists/Multi Scorers can
-          // carry 50-100+ selection rows each) — not what we extract, and
-          // would bloat this log for no benefit to the question being asked.
-          markets: (ev.markets ?? [])
-            .filter((m) => (m.selections ?? []).length <= 25)
-            .map((m) => ({
-              rawName: m.rawName,
-              canonicalMarket: m.canonicalMarket,
-              marketIsActive: m.isActive,
-              selections: (m.selections ?? []).map((s) => ({
-                raw: s.rawName,
-                outcome: s.canonicalOutcome,
-                active: s.isActive,
-                odds: s.odds,
-              })),
-            })),
-        },
-        "[DIAG goal] raw PulseScore markets at moment of goal — checking whether bet365's own isActive flips on suspension",
-      );
-    }
-    // Red-card / VAR-review / missed-penalty suspension — closes the gap
-    // PulseScore alone can't (see apiFootball.ts's header): it has no signal
-    // for any of these, only the goal-based score-diff trigger above (which
-    // itself never fires for a MISSED penalty, since the score doesn't
-    // change — that's what newPenaltyEvent covers here). Uses the "var"
-    // delay tier (20-45s, longer than a goal's 12-25s) for all three, since
-    // none has its own tier in footballSuspensionDelayMs and each plausibly
-    // involves a longer real-world stoppage than a routine goal
-    // confirmation. Does NOT overwrite a goal suspension that just fired
-    // this same tick (checked via `!goalScored`) — the goal trigger already
-    // suspends everything for its own window, and API-Football's events
-    // array often lists the goal and a related card together, which would
-    // otherwise downgrade a fresh "GOLO!" reason to a less specific one on
-    // the very tick it's set. A SCORED penalty also never reaches this
-    // branch — goalScored is already true for it, handled above instead.
-    if (!goalScored && (newRedCard || newVarReview || newPenaltyEvent)) {
-      const now = Date.now();
-      marketSuspension = Object.fromEntries(
-        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-      );
-      suspensionReason = newVarReview ? "VAR" : newRedCard ? "CARTÃO VERMELHO" : "PÊNALTI PERDIDO";
-    }
-    // Odds-unavailable suspension — separate from the goal trigger above
-    // (which already suspends everything for its own delay window and takes
-    // priority when both happen on the same tick). Re-applied fresh every
-    // tick this condition holds, so it stays suspended for as long as
-    // PulseScore keeps not pricing this match, and clears itself within a
-    // few seconds of real odds coming back (nothing renews it once
-    // hasRealOddsNow is true again). See the odds computation above for the
-    // production incident this covers.
-    const oddsWentDark = !hasRealOddsNow && !!existing?.hasRealOdds;
-    if (oddsWentDark && !goalScored) {
-      const now = Date.now();
-      marketSuspension = Object.fromEntries(
-        FOOTBALL_SUSP_KEYS.map((k) => [k, now + 5_000]),
-      );
-      suspensionReason = "ODDS INDISPONÍVEIS";
-    }
-
-    // Hold the goal suspension open until API-Football actually confirms
-    // the goal — not just until the fixed delay above elapses. Reported in
-    // production (2026-08-10): the suspension/GOLO banner would disappear
-    // and then reappear moments later for the same goal. Root cause —
-    // API-Football's own cache is ~12s (LIVE_TTL_MS, apiFootball.ts), and
-    // the "result" market's own goal-suspension delay is ALSO 12s
-    // (REOPEN_DELAY_GOAL_LOW) — so the fixed timer regularly expired before
-    // API-Football's fixture had even caught up to PulseScore's score. Once
-    // it finally did catch up, it often carried a routine automatic VAR
-    // check alongside the goal (standard even for goals that stand, not a
-    // sign of anything under review) — newVarReview above saw that as a
-    // brand new incident and re-suspended under a different label ("VAR")
-    // seconds after the goal's own suspension had already cleared, reading
-    // to the user as the suspension flickering off then back on.
-    // goalUnconfirmedByApiFootball is true exactly while API-Football's own
-    // recorded goal tally hasn't reached PulseScore's yet — for as long as
-    // that holds, keep refreshing the suspension under the goal's own
-    // reason instead of letting it lapse or relabeling to "VAR" for what's
-    // really the same goal's aftermath. A match with no API-Football
-    // coverage at all (apiFixture null) has no confirmation signal to wait
-    // for, so it's untouched — pure timer-based behavior, same as before.
-    const apiFootballGoalTotal = apiFixture
-      ? (apiFixture.goalsHome ?? 0) + (apiFixture.goalsAway ?? 0)
-      : null;
-    const goalUnconfirmedByApiFootball =
-      apiFootballGoalTotal !== null && apiFootballGoalTotal < homeScore + awayScore;
-    // Hard cap on how long the hold can keep re-arming itself (audit finding,
-    // 2026-08-10): apiFootball.ts's getApiFootballLiveFixtures serves the
-    // last successful cache on any upstream failure, so if API-Football has
-    // an outage after already caching a pre-goal snapshot, apiFootballGoalTotal
-    // freezes below the real score and this hold would otherwise re-suspend
-    // every tick for the rest of the match — a bettor unable to touch this
-    // match's main markets at all. 90s is generously above any real
-    // confirmation lag seen (API-Football's own cache is ~12s), so tripping
-    // this means confirmation has genuinely stalled, not just a slow tick.
-    const GOAL_HOLD_MAX_MS = 90_000;
-    let goalHoldSince = existing?._goalHoldSince;
-    // Skip the hold entirely when a genuinely NEW, independent incident
-    // (red card / VAR review / missed penalty) fired THIS tick — audit
-    // finding, 2026-08-10: without this guard, the hold ran unconditionally
-    // whenever an earlier goal was still unconfirmed and stomped that fresh
-    // incident's "VAR"/"CARTÃO VERMELHO" reason and longer var-tier window
-    // straight back down to "GOLO!" on the shorter goal-tier window, even
-    // though the two incidents are unrelated. Doesn't affect the original
-    // flicker fix this hold exists for (a routine VAR check bundled with the
-    // SAME goal's own confirmation) — that case turns
-    // goalUnconfirmedByApiFootball false on the very tick the VAR event
-    // shows up, so the hold was never going to fire on that tick anyway.
-    const newIndependentIncident = newRedCard || newVarReview || newPenaltyEvent;
-    if (goalUnconfirmedByApiFootball && !newIndependentIncident) {
-      const now = Date.now();
-      if (!goalHoldSince) goalHoldSince = now;
-      if (now - goalHoldSince < GOAL_HOLD_MAX_MS) {
-        marketSuspension = Object.fromEntries(
-          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]),
-        );
-        if (!suspensionReason || !suspensionReason.startsWith("GOLO")) {
-          suspensionReason = existing?._suspensionReason?.startsWith("GOLO")
-            ? existing._suspensionReason
-            : "GOLO!";
-        }
-      }
-      // else: cap tripped — stop re-arming, let whatever's already in
-      // marketSuspension expire normally so the market reopens instead of
-      // staying locked for the rest of the match.
-    } else {
-      goalHoldSince = undefined;
-    }
-
-    // PulseScore only ever gives us team NAMES (no id field anywhere in its
-    // schema — confirmed against a real event dump). Resolve a real crest
-    // via SportsAPI Pro's /search endpoint, cached and fire-and-forget
-    // (see sportsApiTeamLookup.ts) so this never blocks the ~1s live tick:
-    // the first tick for a new match has no logo, a later tick picks it up
-    // once the background lookup resolves.
-    resolveTeamIdInBackground("football", home);
-    resolveTeamIdInBackground("football", away);
-    const homeTeamId = getCachedTeamId("football", home) ?? undefined;
-    const awayTeamId = getCachedTeamId("football", away) ?? undefined;
-
-    const state: LiveMatchState = {
-      id,
-      home,
-      away,
-      homeTeamId,
-      awayTeamId,
-      homeLogoUrl,
-      awayLogoUrl,
-      league: normalizeBrazilLeagueDisplayName(ev.league || "Futebol", countryKey),
-      country,
-      sport: "football",
-      homeScore,
-      awayScore,
-      // During extra time bwin's own clock has never been confirmed to keep
-      // advancing past 90' (see the ET-detection comment above) — prefer
-      // API-Football's `elapsed` whenever it reads further along than
-      // bwin's, same "never regress a monotonic value, prefer whichever
-      // reading is more advanced" rule this codebase already applies to
-      // WS/REST merges elsewhere (footballWs.ts et al.), so a frozen bwin
-      // reading can't hold the displayed minute back once API-Football
-      // confirms play has moved on. Also floored against existing.minute
-      // (not just the two live readings against each other) — same
-      // backward-glitch protection as clockSec above, since a corrupted
-      // one-tick bwin reading could otherwise pull the displayed minute
-      // backward even with apiFixture.elapsed in the mix.
-      minute: Math.max(
-        pulseScoreEventMinute(ev),
-        apiFixture?.elapsed ?? 0,
-        existing?.minute ?? 0,
-      ),
-      status: liveStatus,
-      hasRealOdds: hasRealOddsNow,
-      odds,
-      markets,
-      matchTier: tier,
-      events: apiFootballEvents,
-      redCardsHome,
-      redCardsAway,
-      matchStats: apiFootballStats
-        ? {
-            shotsTotalHome: apiFootballStats.home?.shotsTotal ?? null,
-            shotsTotalAway: apiFootballStats.away?.shotsTotal ?? null,
-            shotsOnTargetHome: apiFootballStats.home?.shotsOnTarget ?? null,
-            shotsOnTargetAway: apiFootballStats.away?.shotsOnTarget ?? null,
-            possessionHome: apiFootballStats.home?.possessionPct ?? null,
-            possessionAway: apiFootballStats.away?.possessionPct ?? null,
-            cornersHome: apiFootballStats.home?.corners ?? null,
-            cornersAway: apiFootballStats.away?.corners ?? null,
-            foulsHome: apiFootballStats.home?.fouls ?? null,
-            foulsAway: apiFootballStats.away?.fouls ?? null,
-          }
-        : undefined,
-      _apiFootballVarEventCount: varEventCount,
-      _apiFootballPenaltyEventCount: penaltyEventCount,
-      _apiFootballEverMatched: wasEverMatchedBefore || !!apiFixture,
-      _apiFootballFixtureId: apiFixture?.fixtureId ?? rememberedFixtureId,
-      _apiFootballScoreAlignTicks: tickAlignment,
-      marketSuspension,
-      _suspensionReason: suspensionReason,
-      _goalHoldSince: goalHoldSince,
-      // clockRunning gates whether the frontend extrapolates this clock
-      // forward client-side between server updates (see getFootballClockLabel/
-      // getDisplayMinute in home.tsx). This used to be tied to isClockStale
-      // alone (>20s since PulseScore's own TM/TS reading last changed) — but
-      // PulseScore routinely goes well past 20s between real updates even for
-      // ordinary in-play matches (that's the whole reason the frontend
-      // extrapolates locally in the first place, capped at its own +180s
-      // safety net). Gating on isClockStale meant the clock froze solid every
-      // time PulseScore's own feed paused for more than 20s, then jumped
-      // straight to whatever the next real reading was — reported as the
-      // clock going "0 → freeze → jump to 45 → HT → 45 → freeze → jump to
-      // 90" instead of visibly ticking second by second. The clock should
-      // only actually stop where the match itself stops: half-time and
-      // full-time, both already detected above.
-      _liveExtra: {
-        clockSec,
-        clockAtMs,
-        clockRunning: !isHalftimeFreeze && !isFulltimeFreeze,
-        htScore,
-        // Feeds the existing "Força"/v2-statistics stat-bar UI (built for
-        // Statpal, never previously fed for PulseScore-sourced matches) —
-        // same _liveExtra.*Home/Away fields that pipeline already reads.
-        ...(apiFootballStats
-          ? {
-              possessionHome: apiFootballStats.home?.possessionPct ?? undefined,
-              possessionAway: apiFootballStats.away?.possessionPct ?? undefined,
-              shotsTotalHome: apiFootballStats.home?.shotsTotal ?? undefined,
-              shotsTotalAway: apiFootballStats.away?.shotsTotal ?? undefined,
-              shotsOnTargetHome: apiFootballStats.home?.shotsOnTarget ?? undefined,
-              shotsOnTargetAway: apiFootballStats.away?.shotsOnTarget ?? undefined,
-              foulsHome: apiFootballStats.home?.fouls ?? undefined,
-              foulsAway: apiFootballStats.away?.fouls ?? undefined,
-              cornersHome: apiFootballStats.home?.corners ?? undefined,
-              cornersAway: apiFootballStats.away?.corners ?? undefined,
-              cornersTotal: (apiFootballStats.home?.corners ?? 0) + (apiFootballStats.away?.corners ?? 0),
-              offsidesHome: apiFootballStats.home?.offsides ?? undefined,
-              offsidesAway: apiFootballStats.away?.offsides ?? undefined,
-              yellowCardsHome: apiFootballStats.home?.yellowCards ?? undefined,
-              yellowCardsAway: apiFootballStats.away?.yellowCards ?? undefined,
-              cardsTotal:
-                (apiFootballStats.home?.yellowCards ?? 0) +
-                (apiFootballStats.away?.yellowCards ?? 0) +
-                redCardsHome +
-                redCardsAway,
-              redCardsHomeCount: redCardsHome,
-              redCardsAwayCount: redCardsAway,
-            }
-          : {}),
-      },
-    };
-    // Leave "Ao Vivo" the instant FT is detected, instead of sitting there
-    // with a frozen "FT" badge until PulseScore stops returning the event
-    // AND the long disappear-grace-period (130-180 min, see the GC loop
-    // below) elapses — user-reported 2026-08-09: finished matches lingered
-    // in the live section far too long. isFulltimeFreeze is trustworthy
-    // enough to freeze the display on already (see its own comment above —
-    // bwin's matchClock.period "Finished" is immediate and confirmed real,
-    // and now also gated behind API-Football's own status whenever a
-    // fixture is cross-referenced, so a stuck bwin clock alone can no
-    // longer finalize a match that's actually in extra time or penalties —
-    // see this function's ET-detection comment further up), so it's
-    // trustworthy enough to finalize on too. Guarded on
-    // finishedMatchResults so a match PulseScore keeps reporting as
-    // "Finished" for several more ticks after the first one only finalizes
-    // (and enqueues settlement) ONCE, not on every tick it's still present.
-    if (isFulltimeFreeze) {
-      if (!finishedMatchResults.has(id)) {
-        try {
-          await finalizeStaleLiveMatch(state);
-        } catch (err) {
-          logger.error({ err, id }, "[pulsescore] football finalizeStaleLiveMatch (FT) failed");
-        }
-      }
-      liveMatchState.delete(id);
-      continue;
-    }
-    currentIds.add(id);
-    // liveMatchState is what settlement.ts (in-play resolution + cash-out
-    // suspension) and ensureFinishedMatchResult read from — this loop used to
-    // only return `result` without ever writing here, which meant no
-    // football bet placed since the PulseScore switch could ever be
-    // auto-settled (nothing marked matches as finished) or suspended after a
-    // goal. Mirrors the same liveMatchState.set() every other sport's live
-    // builder already does.
-    liveMatchState.set(id, state);
-    ranked.push({ state, prio });
-  }
-
-  // Garbage-collect: a match that was live and then disappears from
-  // PulseScore's feed is treated as finished after a grace period, same
-  // disappearance-based pattern already used by the Statpal live pipelines
-  // (finalizeStaleLiveMatch + getFootballLiveDisappearGraceMs, reused as-is —
-  // both are sport-agnostic and only need the LiveMatchState shape, not a
-  // specific provider). This is what actually triggers settlement
-  // (enqueueMatchSettlement, called inside finalizeStaleLiveMatch) for
-  // PulseScore-sourced football matches once they end.
-  for (const [id, state] of liveMatchState.entries()) {
-    if (!id.startsWith("pulsescore-football-")) continue;
-    if (currentIds.has(id)) continue;
-    const missingSince = state._missingSinceAt ?? Date.now();
-    if (!state._missingSinceAt) {
-      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
-      continue;
-    }
-    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
-      // buildLivePayload() awaits this whole function — an uncaught failure
-      // here would freeze live odds for every sport, not just football,
-      // until the next tick (or, without the global unhandledRejection
-      // guard added in api/index.ts, crash the process entirely). Deletes
-      // either way, same as before this try/catch existed.
-      try {
-        await finalizeStaleLiveMatch(state);
-      } catch (err) {
-        logger.error(
-          { err, id },
-          "[pulsescore] football finalizeStaleLiveMatch failed",
-        );
-      }
-      liveMatchState.delete(id);
-    }
-  }
-
-  // Big leagues first — same priority ranking (DOMESTIC_PRIORITY /
-  // INTL_TOURNAMENTS) the catalog filter and market-tier calc above already
-  // use, so display order agrees with market depth/stake headroom.
-  ranked.sort((a, b) => a.prio - b.prio);
-  return ranked.map((r) => r.state);
-}
-
 /**
  * Football live, sourced from SportMonks (getSportMonksFootballLive) —
  * replacing PulseScore/bwin's live pipeline the same way
  * buildFootballUpcomingFromSportMonks already replaced its prematch one.
  *
- * The PulseScore+API-Football version above needs its elaborate
- * cross-referencing (fuzzy team-name matching, a persisted fixture-id
- * mapping, confidence-tick gating, a goal-confirmation hold with a hard
- * cap...) because PulseScore's own odds feed carries NO signal at all for
- * red cards/VAR/missed penalties — that whole apparatus exists purely to
- * infer "something happened" from a SEPARATE provider (API-Football) and
- * approximate a suspension window with fixed timers. SportMonks needs none
- * of it: the SAME fixture object carries odds, real events (goals/cards/
- * subs — confirmed real developer_names GOAL/OWNGOAL/SUBSTITUTION/
- * YELLOWCARD/REDCARD), state, and score together, and every odd already
- * carries its OWN live `suspended` flag straight from the bookmaker — a
- * direct signal, not an inferred one. Suspension here is driven by three
- * real, independent triggers instead: a new goal (score increased since
- * the last tick), a new red card (REDCARD event count increased), or the
- * bookmaker itself marking the main result market suspended. All three
- * reuse the SAME footballSuspensionDelayMs/FOOTBALL_SUSP_KEYS tiering the
- * PulseScore builder already uses, so both providers suspend for
- * comparable windows.
+ * The SAME fixture object carries odds, real events (goals/cards/subs —
+ * confirmed real developer_names GOAL/OWNGOAL/SUBSTITUTION/YELLOWCARD/
+ * REDCARD), state, and score together, and every odd already carries its
+ * OWN live `suspended` flag straight from the bookmaker — a direct signal,
+ * not an inferred one. Suspension here is driven by three real, independent
+ * triggers: a new goal (score increased since the last tick), a new red
+ * card (REDCARD event count increased), or the bookmaker itself marking the
+ * main result market suspended.
  *
- * VAR: SportMonks' own events did carry a REDCARD type (confirmed real,
- * 2026-08-29) but no VAR-review type occurred in the sample checked — so
- * unlike the PulseScore+API-Football version, there is no VAR-specific
- * trigger here yet. Not a silent gap: a VAR review typically also produces
- * either a goal (reviewed and given) or nothing at all (reviewed and
- * waved away with no score change) — the former already triggers the goal
- * suspension above; the latter is the one real case this doesn't yet
- * cover, pending a confirmed real sample of that event type.
+ * VAR-review and missed-penalty suspension triggers are NOT covered here —
+ * SportMonks' own events did carry a REDCARD type (confirmed real,
+ * 2026-08-29) but no VAR-review type occurred in the sample checked, and
+ * there is no SportMonks/PulseScore signal for a missed penalty. Both were
+ * previously inferred from a separate third-party provider integration
+ * that has since been fully removed, and this is a known, accepted gap
+ * rather than something to reconstruct here. A
+ * VAR review typically also produces either a goal (reviewed and given, so
+ * the goal-suspension trigger above already covers it) or nothing at all
+ * (reviewed and waved away with no score change, the one real case this
+ * doesn't cover).
  */
 async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   // pulseScoreEvents: real-time bwin 1X2 overlay (RE-ENABLED 2026-08-30 —
@@ -14258,38 +13019,10 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   // is the small SportMonks-covered live set, not PulseScore's own full
   // live list, unlike the O(n²) incident that motivated the per-event
   // design elsewhere in this file).
-  //
-  // apiFootballFixtures (2026-08-30, new for SportMonks parity with PulseScore):
-  // Same single-request live batch the PulseScore builder cross-references
-  // for VAR/red-card/penalty enrichment + ET/penalties status override.
-  // SportMonks' own ET/PEN state developer names are unconfirmed (no real
-  // sample seen yet) — without this cross-ref, a knockout tie tied after
-  // 90' would trigger the clock-stale → FT heuristic DURING the pre-ET
-  // break and incorrectly delete/finalize the match before extra time
-  // ever starts, exactly the bug PulseScore fixed with this same logic.
   const [fixtures, pulseScoreEvents] = await Promise.all([
     getSportMonksFootballLive(),
     getPulseScoreFootballLive(),
   ]);
-  // API-Football live batch: used for ET/PEN/FT authoritative override +
-  // VAR/red-card/penalty enrichment (same shape as PulseScore builder).
-  // Wrapped in its own try/catch because this batch endpoint has a history
-  // of intermittent 5xx / rate-limit (see apifootball-usage admin diagnostic)
-  // — a failure here MUST NOT take down the SportMonks live section, which
-  // is what happened the first build of this session (Promise.all rejected
-  // and footballLiveRaw became empty → matches stayed in "Em Breve" forever
-  // because the live feed never picked them up). Falls back to an empty
-  // array: freeze-heuristic + SportMonks native status still work, only
-  // ET/PEN auto-detection loses its highest-authority overlay.
-  let apiFootballFixtures: ApiFootballFixture[] = [];
-  try {
-    apiFootballFixtures = await getApiFootballLiveFixtures();
-  } catch (err) {
-    logger.error(
-      { err },
-      "[sportmonks] apiFootball live batch fetch failed — proceeding without ET/PEN/VAR overlay for this tick",
-    );
-  }
   // Per-fixture odds (confirmed real, 2026-08-29 — see getSportMonksLiveOddsByFixture's
   // header for how this replaced the dead-end /odds/inplay general list),
   // fanned out across every fixture this tick regardless of live/NS/FT —
@@ -14308,13 +13041,6 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
   const FULLTIME_MARK_SEC = 90 * 60;
   const FREEZE_TOLERANCE_SEC = 60;
   const STALE_CLOCK_MS = 20_000;
-  // API-Football status vocabulary — shared constant with the PulseScore
-  // builder so the two football live paths have identical ET/penalty/FT
-  // finalization semantics.
-  const API_FOOTBALL_FINISHED_STATUSES = new Set([
-    "FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO",
-  ]);
-  const API_FOOTBALL_ET_STATUSES = new Set(["ET", "BT", "P"]);
 
   for (const fx of fixtures) {
     if (isSportMonksFixtureFinished(fx)) {
@@ -14374,12 +13100,8 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const norm = normalizeSportMonksStatus(fx);
     const period = norm.inPlayHalf;
 
-    // Market suspension bookkeeping — declared BEFORE the API-Football cross-
-    // reference block below because that block itself can trigger VAR / new
-    // red-card / penalty-kick suspensions for incidents SportMonks hasn't
-    // reported yet. Moving these to after the block (the initial bug) caused
-    // TS errors "Block-scoped variable used before its declaration" for every
-    // suspension triggered by the API-Football enrichment path.
+    // Market suspension bookkeeping — declared BEFORE the goal/red-card/
+    // bookmaker-suspension block below, which reads and reassigns both.
     let marketSuspension = existing?.marketSuspension;
     let suspensionReason = existing?._suspensionReason;
 
@@ -14444,10 +13166,8 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       norm.status === "LIVE" &&
       // Conservative: don't freeze to FT if the score is tied at/around the
       // 90' mark — the match may be going to extra time (SportMonks raw
-      // ET status is unconfirmed / not yet in the normalize map, and the
-      // API-Football cross-ref below will override to ET/PEN anyway when
-      // both providers agree). Removes the need for a dubious "is this a
-      // knockout round?" guess.
+      // ET status is unconfirmed / not yet in the normalize map). Removes
+      // the need for a dubious "is this a knockout round?" guess.
       !(score.home === score.away);
     // ET-by-minute — SportMonks raw ET developer name is unconfirmed, so
     // we also trust plain "LIVE" + minute >= 91 to mean extra time has
@@ -14455,131 +13175,13 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // or higher in real play, but 91' captures the very start of ET too).
     const minuteImpliesEt = minute >= 91;
 
-    // API-Football cross-reference. Same shape as PulseScore L13546-13620:
-    //   - enrich with VAR / new penalties / new red card suspensions when
-    //     the API-Football feed reports an incident SportMonks hasn't yet
-    //   - override status → ET / PEN / authoritative-FT when API-Football
-    //     confirms it, fixing the "ET/PEN never render on SportMonks" gap
-    //
-    // Implementation note: getMappedApiFootballFixtureId / recordConfirmed-
-    // FixtureMapping are PulseScore-exclusive helpers (they key the cross-
-    // session mapping table on pulsescoreMatchId/pulsescoreEventId — see
-    // apiFootball.ts L326 and L336's object arg). Calling them with the
-    // wrong arg count / wrong arg type (the initial draft did exactly
-    // that) triggered 10+ TS errors. For SportMonks we instead persist
-    // the confirmed API-Football fixtureId directly onto this LiveMatch-
-    // State's own _sportMonksMappedApiFid field and use it for direct
-    // lookup next tick — identical outcome, just without touching the
-    // PulseScore-scoped mapping helpers.
-    let mappedApiFid: number | undefined = existing?._sportMonksMappedApiFid;
-    let apiFixture: ApiFootballFixture | undefined | null = mappedApiFid !== undefined
-      ? apiFootballFixtures.find((f) => f.fixtureId === mappedApiFid)
-      : undefined;
-    // Fuzzy match on first ever encounter (or if the persisted id no
-    // longer appears in this tick's live batch — API-Football hiccups, or
-    // the match has genuinely ended there). Signature of findApiFootball-
-    // Fixture confirmed against apiFootball.ts L509: (home, away,
-    // fixtures[], league?, country?, kickoff?) — the first draft passed
-    // apiFootballFixtures as arg #1 and got every call's arg order wrong,
-    // hence the batch of "Expected N args but got M" TS errors.
-    if (!apiFixture) {
-      const approxKickoffMs = fx.starting_at ? new Date(fx.starting_at).getTime() : Date.now();
-      const guessed = findApiFootballFixture(
-        home,
-        away,
-        apiFootballFixtures,
-        {
-          league: fx.league?.name ?? undefined,
-          approxKickoffMs,
-        },
-      );
-      if (guessed) {
-        apiFixture = guessed;
-        mappedApiFid = guessed.fixtureId;
-      }
-    }
-    // Short status lives FLAT on the fixture (apiFixture.statusShort),
-    // not nested under apiFixture.fixture.status.short — the first draft
-    // treated ApiFootballFixture as if it were the raw REST envelope
-    // ({"fixture":{"id":..., "status":{...}}}) instead of the already-
-    // flattened type it actually is (see apiFootball.ts L43 type decl).
-    let apiFootballConfirmsEt = false;
-    let apiFootballConfirmsPen = false;
-    let apiFootballConfirmsFt = false;
-    // Count-based incident tracking (not boolean flags): fixtureHasRedCard/
-    // VarReview return a single boolean ("any EVER?"), which can only
-    // fire once per match. For re-suspension on NEW incidents we need
-    // counts compared tick-to-tick — same pattern PulseScore uses on
-    // L13455-13508 for this exact reason. Falls back to last-known values
-    // when apiFixture briefly disappears (same hold-on-mismatch fix the
-    // PulseScore builder added 2026-08-11 for the repeated-VAR bug).
-    const redCardEvents = apiFixture
-      ? apiFixture.events.filter(
-          (e) => e.type === "Card" && e.detail.toLowerCase().includes("red card"),
-        )
-      : [];
-    const apiHomeRedCards = apiFixture
-      ? redCardEvents.filter((e) => e.teamId === apiFixture.home.id).length
-      : (existing?._apiFootballPrevHomeRedCards ?? 0);
-    const apiAwayRedCards = apiFixture
-      ? redCardEvents.filter((e) => e.teamId === apiFixture.away.id).length
-      : (existing?._apiFootballPrevAwayRedCards ?? 0);
-    const varEventCount = apiFixture
-      ? apiFixture.events.filter((e) => e.type.toLowerCase() === "var").length
-      : (existing?._sportMonksVarEventCount ?? 0);
-    const penaltyEventCount = apiFixture
-      ? fixturePenaltyEvents(apiFixture).length
-      : (existing?._apiFootballPrevPenaltyCount ?? 0);
-    if (apiFixture) {
-      const short = (apiFixture.statusShort ?? "").toUpperCase();
-      if (API_FOOTBALL_ET_STATUSES.has(short)) apiFootballConfirmsEt = true;
-      else if (short === "PEN" || short === "PSO") apiFootballConfirmsPen = true;
-      else if (API_FOOTBALL_FINISHED_STATUSES.has(short)) apiFootballConfirmsFt = true;
-      // VAR / red-card / penalty suspensions — ONLY after the first-ever
-      // successful match (wasEverMatchedBefore). On the very first tick a
-      // fixture cross-references, apiHomeRedCards/varEventCount include
-      // everything that happened BEFORE we joined — treating those as NEW
-      // would trigger a spurious "CARTÃO VERMELHO/VAR" banner on a match
-      // that already has 2 red cards shown, same class of first-tick
-      // false-positive the PulseScore L13490-13508 "wasEverMatchedBefore"
-      // guard was added to prevent.
-      const wasEverMatchedBefore = !!existing?._sportMonksEverMatched;
-      const prevHomeRc = existing?._apiFootballPrevHomeRedCards ?? existing?.redCardsHome ?? 0;
-      const prevAwayRc = existing?._apiFootballPrevAwayRedCards ?? existing?.redCardsAway ?? 0;
-      const prevVar = existing?._sportMonksVarEventCount ?? 0;
-      const prevPen = existing?._apiFootballPrevPenaltyCount ?? 0;
-      if (wasEverMatchedBefore && (apiHomeRedCards > prevHomeRc || apiAwayRedCards > prevAwayRc)) {
-        const now = Date.now();
-        marketSuspension = Object.fromEntries(
-          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-        );
-        suspensionReason = "CARTÃO VERMELHO (API-Football)";
-      }
-      if (wasEverMatchedBefore && varEventCount > prevVar && fixtureHasVarReview(apiFixture)) {
-        const now = Date.now();
-        marketSuspension = Object.fromEntries(
-          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-        );
-        suspensionReason = "VAR";
-      }
-      if (wasEverMatchedBefore && penaltyEventCount > prevPen) {
-        const now = Date.now();
-        marketSuspension = Object.fromEntries(
-          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
-        );
-        suspensionReason = "PENÂLTIS";
-      }
-    }
-
     // Final normalized status, combining every input in priority order:
-    //   1. API-Football ET/PEN/FT wins outright (the highest-authority
-    //      signal for these unconfirmed-on-SportMonks states)
-    //   2. SportMonks explicit raw status (HT / FT) preserved via norm
-    //   3. Freeze heuristic: parked on 45 ±60s with stale clock → HT;
+    //   1. SportMonks explicit raw status (HT / FT) preserved via norm
+    //   2. Freeze heuristic: parked on 45 ±60s with stale clock → HT;
     //      parked on 90 ±60s with stale clock and not an obvious knockout
     //      continuation → FT
-    //   4. Minute >= 91 during LIVE → ET (catch-all before cross-ref)
-    //   5. Fall through to the normalized SportMonks status (most common:
+    //   3. Minute >= 91 during LIVE → ET (catch-all)
+    //   4. Fall through to the normalized SportMonks status (most common:
     //      "LIVE").
     // The initial base value is clamped to {LIVE,HT,FT,ET,PEN} — norm.status
     // includes the internal-only "NS" (not started) that both
@@ -14592,20 +13194,17 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       : norm.status === "FT"
         ? "FT"
         : "LIVE";
-    if (apiFootballConfirmsEt) liveStatus = "ET";
-    else if (apiFootballConfirmsPen) liveStatus = "PEN";
-    else if (apiFootballConfirmsFt) liveStatus = "FT";
-    else if (norm.status === "HT") liveStatus = "HT";
+    if (norm.status === "HT") liveStatus = "HT";
     else if (norm.status === "FT") liveStatus = "FT";
     else if (isHalftimeFreeze) liveStatus = "HT";
     else if (isFulltimeFreeze) liveStatus = "FT";
     else if (minuteImpliesEt && liveStatus === "LIVE") liveStatus = "ET";
 
     // If status finally resolved to FT via freeze heuristic (no explicit
-    // SportMonks FT, no API-Football FT, just a stalled clock), treat it
-    // as finalised the same way the early isSportMonksFixtureFinished
-    // branch does — don't leave a stale card sitting in the feed forever.
-    if (liveStatus === "FT" && norm.status !== "FT" && !apiFootballConfirmsFt) {
+    // SportMonks FT, just a stalled clock), treat it as finalised the same
+    // way the early isSportMonksFixtureFinished branch does — don't leave
+    // a stale card sitting in the feed forever.
+    if (liveStatus === "FT" && norm.status !== "FT") {
       const existingFt = liveMatchState.get(id);
       if (existingFt) {
         try {
@@ -14781,24 +13380,6 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // own comment: null, not 0, until SportMonks actually reports a stat).
     const cornersCards = getSportMonksFixtureCornersCards(fx);
 
-    // Persisted API-Football cross-reference bookkeeping, parity with the
-    // PulseScore builder's L13644-13673 fields. Without these, every tick
-    // would re-run findApiFootballFixture (expensive + can miss when
-    // fuzzy-match on a subsequent tick isn't as clean) AND the first-ever
-    // API-Football match's existing incident counts (red cards, penalties
-    // already awarded before we started watching) would incorrectly look
-    // like NEW incidents this tick, spamming VAR suspensions.
-    // Baseline snapshot persisted for next tick. Uses the already-counted values
-    // from the apiFixture block above instead of re-running fixtureHasRedCard /
-    // fixturePenaltyEvents a second time: those return boolean / array not counts,
-    // so re-running them with the wrong arg count and the wrong
-    // (non-flat .fixture.id access is what caused the original 14 "Expected
-    // 1/2/6 arg" / "Property 'fixture' does not exist" / "Operator '>'
-    // cannot be applied to boolean and number" TS errors.
-    const afHomeRedBase = apiHomeRedCards;
-    const afAwayRedBase = apiAwayRedCards;
-    const afPenBase = penaltyEventCount;
-
     ranked.push({
       prio,
       state: {
@@ -14823,12 +13404,6 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         redCardsAway,
         marketSuspension,
         _suspensionReason: suspensionReason,
-        _sportMonksMappedApiFid: mappedApiFid,
-        _sportMonksEverMatched: true,
-        _sportMonksVarEventCount: varEventCount,
-        _apiFootballPrevHomeRedCards: afHomeRedBase,
-        _apiFootballPrevAwayRedCards: afAwayRedBase,
-        _apiFootballPrevPenaltyCount: afPenBase,
         _liveExtra: {
           ...(existing?._liveExtra ?? {}),
           clockSec,
@@ -16579,15 +15154,24 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       "[pulsescore] buildVolleyballUpcomingFromPulseScore failed this cycle",
     );
   }
+  let baseball: UpcomingMatch[] = [];
+  try {
+    baseball = await buildBaseballUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildBaseballUpcomingFromPulseScore failed this cycle",
+    );
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
   upcomingTopCache = {
     football,
     tennis,
     basketball,
     hockey,
     volleyball,
-    baseball: [],
+    baseball,
     boxing: [],
     cricket: [],
     handball: [],
@@ -19345,35 +17929,9 @@ router.get("/stats", async (req: Request, res: Response) => {
 
   // --- League standings ---
   // Do NOT default to "england" — use only the actual league name sent by the client.
-  // Real table from API-Football when it can resolve this league (any
-  // country/tier it covers — not limited to a curated list), falling back to
-  // buildLeagueStandings's fully-synthetic filler table (fake team names,
-  // pseudo-random points) only when API-Football has no key configured,
-  // fails, or genuinely doesn't carry this particular league.
-  let standingsData = buildLeagueStandings(leagueQuery, home, away);
-  if (sport === "football" && leagueQuery.trim()) {
-    try {
-      const real = await getApiFootballStandingsForLeague(leagueQuery, countryQuery);
-      if (real && real.teams.length > 0) {
-        standingsData = {
-          league: real.leagueName || leagueQuery,
-          teams: real.teams.map((t) => ({
-            pos: t.rank,
-            name: t.teamName,
-            played: t.played,
-            won: t.win,
-            drawn: t.draw,
-            lost: t.lose,
-            gf: t.goalsFor,
-            ga: t.goalsAgainst,
-            pts: t.points,
-          })),
-        };
-      }
-    } catch (err) {
-      logger.error({ err, league: leagueQuery }, "[api-football] standings lookup failed for /stats — keeping synthetic fallback");
-    }
-  }
+  // Synthetic filler table (fake team names, pseudo-random points) — no real
+  // standings provider is wired into this route.
+  const standingsData = buildLeagueStandings(leagueQuery, home, away);
 
   // Lineups: never generate fake players — real data is fetched by clients via /v2-lineups
   const lineups = null;
@@ -28947,8 +27505,8 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
       });
 
     // Estimated possession from live 1x2 odds (implied probability ratio) —
-    // last resort only, when nothing real (Statpal _liveExtra or API-Football
-    // stats, both already handled above) was available at all.
+    // last resort only, when nothing real (Statpal _liveExtra stats,
+    // already handled above) was available at all.
     if (rows.length === 0 && liveState && sport === "football") {
       // Prefer base odds (pre-goal anchor) over current live odds for possession estimate —
       // live odds shift dramatically after a goal, making the estimate unreliable.
@@ -28971,8 +27529,8 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
 
     // Red cards / goals: pushed unconditionally (not gated on rows.length),
     // since these previously only showed when NOTHING else was available —
-    // silently disappearing the instant real API-Football stats populated
-    // the rows above them.
+    // silently disappearing the instant other real stats populated the
+    // rows above them.
     if (liveState && sport === "football") {
       if ((liveState.redCardsHome ?? 0) > 0 || (liveState.redCardsAway ?? 0) > 0) {
         rows.push({
