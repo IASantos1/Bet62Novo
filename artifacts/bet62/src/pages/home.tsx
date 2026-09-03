@@ -5979,8 +5979,6 @@ export default function Home({
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
   const [v2IncidentsFetchedAt, setV2IncidentsFetchedAt] = useState(0);
-  const v2StatsCacheRef = useRef<Record<string, V2StatsGroup[]>>({});
-  const v2IncidentsCacheRef = useRef<Record<string, V2Incident[]>>({});
   const [liveAdvancedTab, setLiveAdvancedTab] = useState<
     "all" | "goals" | "corners" | "cards"
   >("all");
@@ -6020,49 +6018,6 @@ export default function Home({
   const getProviderMatchId = useCallback(
     (matchId: string | number | undefined | null): string => {
       return String(matchId ?? "").replace(/^[a-z]+-v\d+-/, "");
-    },
-    [],
-  );
-  const sanitizeAllOddsMarkets = useCallback(
-    (rawMarkets: unknown): AllOddsMarket[] => {
-      if (!Array.isArray(rawMarkets)) return [];
-      return rawMarkets
-        .map((market): AllOddsMarket | null => {
-          if (!market || typeof market !== "object") return null;
-          const rawMarket = market as Record<string, unknown>;
-          const choices = Array.isArray(rawMarket.choices)
-            ? rawMarket.choices
-                .map((choice) => {
-                  if (!choice || typeof choice !== "object") return null;
-                  const rawChoice = choice as Record<string, unknown>;
-                  const odds =
-                    typeof rawChoice.odds === "number"
-                      ? rawChoice.odds
-                      : Number(rawChoice.odds);
-                  if (!Number.isFinite(odds) || odds < 1.01) return null;
-                  return {
-                    name: String(rawChoice.name ?? "").trim(),
-                    label:
-                      String(rawChoice.label ?? rawChoice.name ?? "").trim() ||
-                      "Opção",
-                    odds,
-                  };
-                })
-                .filter(
-                  (
-                    choice,
-                  ): choice is { name: string; label: string; odds: number } =>
-                    !!choice,
-                )
-            : [];
-          if (choices.length === 0) return null;
-          return {
-            name: String(rawMarket.name ?? "").trim() || "Mercado",
-            group: String(rawMarket.group ?? "").trim(),
-            choices,
-          };
-        })
-        .filter((market): market is AllOddsMarket => !!market);
     },
     [],
   );
@@ -6289,268 +6244,6 @@ export default function Home({
   const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [playerProfileId, setPlayerProfileId] = useState<number | null>(null);
-
-  const extractV2StatsGroups = (payload: any): V2StatsGroup[] => {
-    const root = payload?.data ?? payload;
-    const groups: any[] =
-      root?.statistics ??
-      root?.groups ??
-      root?.statisticsGroups ??
-      root?.data?.statistics ??
-      root?.data?.groups ??
-      [];
-    if (!Array.isArray(groups) || groups.length === 0) return [];
-
-    const toText = (v: unknown): string => {
-      if (v === null || typeof v === "undefined") return "";
-      if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
-      if (typeof v === "boolean") return v ? "Sim" : "Não";
-      if (typeof v === "string") return v;
-      return String(v);
-    };
-
-    const pickHomeAway = (item: any): { home: string; away: string } => {
-      const home =
-        item?.home ??
-        item?.homeValue ??
-        item?.homeStat ??
-        item?.homeTeam ??
-        item?.valueHome ??
-        item?.value?.home ??
-        item?.values?.home;
-      const away =
-        item?.away ??
-        item?.awayValue ??
-        item?.awayStat ??
-        item?.awayTeam ??
-        item?.valueAway ??
-        item?.value?.away ??
-        item?.values?.away;
-      return { home: toText(home), away: toText(away) };
-    };
-
-    return groups
-      .map((g: any) => {
-        const title = String(g?.groupName ?? g?.name ?? g?.title ?? "").trim();
-        const items: any[] =
-          g?.statisticsItems ??
-          g?.items ??
-          g?.statistics ??
-          g?.rows ??
-          g?.data ??
-          [];
-        if (!Array.isArray(items) || items.length === 0) return null;
-        const rows = items
-          .map((it: any) => {
-            const name = String(
-              it?.name ?? it?.title ?? it?.key ?? it?.statName ?? "",
-            ).trim();
-            const { home, away } = pickHomeAway(it);
-            if (!name || (!home && !away)) return null;
-            return { name, home, away };
-          })
-          .filter(Boolean) as Array<{
-          name: string;
-          home: string;
-          away: string;
-        }>;
-        if (rows.length === 0) return null;
-        return { title: title || "Estatísticas", rows } satisfies V2StatsGroup;
-      })
-      .filter(Boolean) as V2StatsGroup[];
-  };
-
-  const extractV2Incidents = (payload: any): V2Incident[] => {
-    const root = payload?.data ?? payload;
-    const arr: any[] =
-      root?.incidents ??
-      root?.events ??
-      root?.timeline ??
-      root?.data?.incidents ??
-      [];
-    if (!Array.isArray(arr) || arr.length === 0) return [];
-
-    const toText = (v: unknown): string => {
-      if (v === null || typeof v === "undefined") return "";
-      if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
-      if (typeof v === "boolean") return v ? "Sim" : "Não";
-      if (typeof v === "string") return v;
-      return String(v);
-    };
-
-    const normalize = (s: string) =>
-      s
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]+/g, " ")
-        .trim();
-
-    const parseMinute = (raw: string): number | null => {
-      const s = raw.trim();
-      if (!s) return null;
-      const parts = s
-        .split("+")
-        .map((p) => p.trim())
-        .filter(Boolean);
-      const base = Number.parseInt(parts[0] ?? "", 10);
-      if (!Number.isFinite(base)) return null;
-      const extra = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
-      return base + (Number.isFinite(extra) ? extra : 0);
-    };
-
-    return arr
-      .map((e: any, idx: number) => {
-        const minute =
-          e?.time ??
-          e?.minute ??
-          e?.matchTime ??
-          e?.timeMinute ??
-          e?.elapsed ??
-          e?.addedTime ??
-          "";
-        const minuteRaw = toText(minute);
-        const time = minuteRaw !== "" ? `${minuteRaw}'` : "";
-        const isHome = Boolean(
-          e?.isHome ||
-            e?.home ||
-            e?.team === "home" ||
-            e?.side === "home" ||
-            (typeof e?.team_id === "number" && e?.home_team_id && e.team_id === e.home_team_id),
-        );
-        const isAway = Boolean(
-          e?.isAway ||
-            e?.away ||
-            e?.team === "away" ||
-            e?.side === "away" ||
-            (typeof e?.team_id === "number" && e?.away_team_id && e.team_id === e.away_team_id),
-        );
-        const team: "home" | "away" | "neutral" = isHome
-          ? "home"
-          : isAway
-            ? "away"
-            : "neutral";
-
-        const rawType = String(
-          e?.type ?? e?.incidentType ?? e?.eventType ?? "",
-        ).trim();
-        const rawName = String(e?.name ?? e?.title ?? "").trim();
-
-        const playerName = String(
-          e?.player?.name ??
-            e?.playerName ??
-            e?.player_name ??
-            e?.scorer?.name ??
-            e?.goalScorer?.name ??
-            e?.related_player_name ??
-            e?.relatedPlayer?.name ??
-            "",
-        ).trim();
-
-        const textBody = String(
-          e?.text ??
-            e?.description ??
-            e?.detail ??
-            e?.reason ??
-            e?.comments ??
-            e?.comment ??
-            "",
-        ).trim();
-
-        const sigSrc =
-          `${rawType} ${rawName} ${playerName} ${textBody}`.toLowerCase();
-        const sig = normalize(sigSrc);
-        let kind: V2IncidentKind = "other";
-        if (sig.includes("goal") || sig.includes("golo") || sig.includes("gol"))
-          kind = "goal";
-        else if (
-          sig.includes("corner") ||
-          sig.includes("canto") ||
-          sig.includes("escanteio")
-        )
-          kind = "corner";
-        else if (
-          sig.includes("card") ||
-          sig.includes("cartao") ||
-          sig.includes("yellow") ||
-          sig.includes("red") ||
-          sig.includes("amarel") ||
-          sig.includes("vermelh")
-        )
-          kind = "card";
-        else if (sig.includes("substitution") || sig.includes("substituic") || sig.includes(" sub "))
-          kind = "sub";
-
-        const card: "yellow" | "red" | null =
-          kind === "card"
-            ? sig.includes("red") || sig.includes("vermelh")
-              ? "red"
-              : "yellow"
-            : null;
-
-        let title: string;
-        switch (kind) {
-          case "goal":
-            title = "Golo";
-            break;
-          case "corner":
-            title = "Canto";
-            break;
-          case "card":
-            title = card === "red" ? "Cartão Vermelho" : "Cartão Amarelo";
-            break;
-          case "sub":
-            title = "Substituição";
-            break;
-          default:
-            title = rawType || rawName || "Evento";
-            break;
-        }
-
-        let detail: string;
-        if (kind === "goal" || kind === "card" || kind === "sub") {
-          detail = playerName || textBody;
-        } else if (kind === "corner") {
-          detail = textBody || playerName;
-        } else {
-          detail = textBody || playerName || rawName;
-        }
-
-        const hsRaw =
-          e?.homeScore?.current ??
-          e?.homeScore ??
-          e?.score?.home ??
-          e?.homeGoals ??
-          e?.homeTeamScore ??
-          e?.home_score ??
-          null;
-        const asRaw =
-          e?.awayScore?.current ??
-          e?.awayScore ??
-          e?.score?.away ??
-          e?.awayGoals ??
-          e?.awayTeamScore ??
-          e?.away_score ??
-          null;
-        const hs = typeof hsRaw === "number" ? hsRaw : null;
-        const as = typeof asRaw === "number" ? asRaw : null;
-        const score =
-          hs !== null && as !== null ? `${hs}-${as}` : undefined;
-
-        return {
-          key: `${idx}-${kind}-${title}-${detail}-${time}`,
-          time,
-          minute: parseMinute(minuteRaw),
-          team,
-          kind,
-          card,
-          score,
-          title,
-          detail,
-        } satisfies V2Incident;
-      })
-      .filter((e) => e.title || e.detail);
-  };
 
   const extractLiveKeyStats = (
     groups: V2StatsGroup[],
@@ -7377,97 +7070,23 @@ export default function Home({
   }, [expandedMatch?.id]);
 
   useEffect(() => {
+    // The /v2-statistics backend endpoint (SportsAPI Pro V2) was removed —
+    // there is no replacement source for this per-match stats breakdown, so
+    // this now always settles straight to "not available" instead of polling
+    // a route that no longer exists.
     if (!expandedMatch) return;
-    // PulseScore-sourced football (Phase 1) has no statistics endpoint —
-    // SportsAPI Pro rejects its match id format and liveMatchState never
-    // gets populated for these matches, so this fetch can never succeed.
-    // Without this guard it retried every 30s forever, showing a permanent
-    // loading spinner instead of settling on "not available".
-    if (String(expandedMatch.id).startsWith("pulsescore-")) {
-      if (v2StatsGroups === null) setV2StatsGroups([]);
-      return;
-    }
-    if (v2StatsLoading) return;
-    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 30000) return;
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    const cacheKey = `${sport}:${rawId}`;
-    if (!rawId) return;
-    setV2StatsLoading(true);
-    fetch(`/api/matches/v2-statistics?sport=${sport}&matchId=${rawId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const nextGroups = d ? extractV2StatsGroups(d as any) : [];
-        if (nextGroups.length > 0)
-          v2StatsCacheRef.current[cacheKey] = nextGroups;
-        setV2StatsGroups(
-          nextGroups.length > 0
-            ? nextGroups
-            : (v2StatsCacheRef.current[cacheKey] ?? []),
-        );
-        setV2StatsFetchedAt(Date.now());
-      })
-      .catch(() => {
-        setV2StatsGroups(v2StatsCacheRef.current[cacheKey] ?? []);
-        setV2StatsFetchedAt(Date.now());
-      })
-      .finally(() => setV2StatsLoading(false));
-  }, [
-    matchViewTab,
-    expandedMatch?.id,
-    v2StatsGroups,
-    v2StatsLoading,
-    v2StatsFetchedAt,
-    livePollTick,
-    getProviderMatchId,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (v2StatsGroups === null) setV2StatsGroups([]);
+  }, [expandedMatch?.id, v2StatsGroups]);
 
   useEffect(() => {
+    // The /v2-incidents backend endpoint (SportsAPI Pro V2) was removed —
+    // there is no replacement source for the goals/cards/corners timeline,
+    // so this now always settles straight to "not available" instead of
+    // polling a route that no longer exists.
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
-    // Same PulseScore gap as the statistics fetch above — no incidents
-    // (goals/cards/corners timeline) endpoint exists for these matches, and
-    // this poll runs every 3s, so leaving it unguarded was the main source
-    // of "fica tentando carregar" (plus wasted requests every 3s per open
-    // match).
-    if (String(expandedMatch.id).startsWith("pulsescore-")) {
-      if (v2Incidents === null) setV2Incidents([]);
-      return;
-    }
-    if (v2IncidentsLoading) return;
-    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 3000)
-      return;
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    const cacheKey = `${sport}:${rawId}`;
-    if (!rawId) return;
-    setV2IncidentsLoading(true);
-    fetch(`/api/matches/v2-incidents?sport=${sport}&matchId=${rawId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const nextIncidents = d ? extractV2Incidents(d as any) : [];
-        if (nextIncidents.length > 0)
-          v2IncidentsCacheRef.current[cacheKey] = nextIncidents;
-        setV2Incidents(
-          nextIncidents.length > 0
-            ? nextIncidents
-            : (v2IncidentsCacheRef.current[cacheKey] ?? []),
-        );
-        setV2IncidentsFetchedAt(Date.now());
-      })
-      .catch(() => {
-        setV2Incidents(v2IncidentsCacheRef.current[cacheKey] ?? []);
-        setV2IncidentsFetchedAt(Date.now());
-      })
-      .finally(() => setV2IncidentsLoading(false));
-  }, [
-    matchViewTab,
-    expandedMatch?.id,
-    v2Incidents,
-    v2IncidentsLoading,
-    v2IncidentsFetchedAt,
-    livePollTick,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (v2Incidents === null) setV2Incidents([]);
+  }, [matchViewTab, expandedMatch?.id, expandedMatch?.isLive, v2Incidents]);
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
@@ -7518,55 +7137,21 @@ export default function Home({
             setStandingsLeague(d.league ?? league);
           }
         });
+    // The /v2-standings backend endpoint (SportsAPI Pro V2) was removed.
+    // Football still resolves standings via the V1 league-standings route;
+    // other sports had no other source for per-match standings, so they now
+    // settle straight to "not available".
     const sport = expandedMatch.sport ?? "football";
-    const idStr = String(expandedMatch.id);
-    const rawId = getProviderMatchId(idStr);
-    const isV2 = rawId !== idStr && rawId.length > 0;
-    if (isV2 && sport !== "tennis") {
-      fetch(`/api/matches/v2-standings?sport=${sport}&matchId=${rawId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d && Array.isArray(d.standings) && d.standings.length > 0) {
-            if (
-              acceptStandings(
-                d.standings as StandingRow[],
-                Array.isArray(d.groups) && d.groups.length > 0
-                  ? (d.groups as Array<{ name: string; rows: StandingRow[] }>)
-                  : null,
-                d.league ?? league,
-              )
-            ) {
-              return Promise.resolve();
-            }
-          }
-          if (sport === "football") {
-            return loadV1();
-          }
-          setStandings([]);
-          setStandingsGroups(null);
-          setStandingsLeague(d?.league ?? league);
-          return Promise.resolve();
-        })
-        .catch(() => {
-          if (sport === "football") return loadV1();
-          setStandings([]);
-          setStandingsGroups(null);
-          setStandingsLeague(league);
-          return Promise.resolve();
-        })
+    if (sport === "football") {
+      loadV1()
+        .catch(() => {})
         .finally(() => setStandingsLoading(false));
     } else {
-      if (sport === "football") {
-        loadV1()
-          .catch(() => {})
-          .finally(() => setStandingsLoading(false));
-      } else {
-        setStandings([]);
-        setStandingsGroups(null);
-        setStandingsLoading(false);
-      }
+      setStandings([]);
+      setStandingsGroups(null);
+      setStandingsLoading(false);
     }
-  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // Lazy-load MLB league stats when "liga" tab is active
@@ -7583,53 +7168,25 @@ export default function Home({
       .finally(() => setMlbLeagueStatsLoading(false));
   }, [matchViewTab, expandedMatch?.sport]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch all V2 odds markets (kept for future use / "odds" tab)
+  // The /v2-match-odds backend endpoint (SportsAPI Pro V2) was removed —
+  // there is no replacement source for the full markets list, so the
+  // "odds" tab now always settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "odds" || !expandedMatch) return;
-    setAllOddsData(null);
-    setAllOddsLoading(true);
+    setAllOddsData([]);
+    setAllOddsLoading(false);
     setAllOddsQuery("");
     setAllOddsSectionOpen({});
-    const ctrl = new AbortController();
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`, {
-      signal: ctrl.signal,
-    })
-      .then((r) => (r.ok ? r.json() : { markets: [] }))
-      .then((d) => {
-        if (ctrl.signal.aborted) return;
-        setAllOddsData(
-          sanitizeAllOddsMarkets((d as { markets?: unknown }).markets),
-        );
-      })
-      .catch(() => {
-        if (!ctrl.signal.aborted) setAllOddsData([]);
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setAllOddsLoading(false);
-      });
-    return () => ctrl.abort();
-  }, [
-    matchViewTab,
-    expandedMatch?.id,
-    getProviderMatchId,
-    sanitizeAllOddsMarkets,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id]);
 
-  // Fetch lineups when "lineups" tab is selected
+  // The /v2-lineups backend endpoint (SportsAPI Pro V2) was removed — there
+  // is no replacement source for lineups, so the "lineups" tab now always
+  // settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
     setLineupsData(null);
-    setLineupsLoading(true);
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    fetch(`/api/matches/v2-lineups?sport=${sport}&matchId=${rawId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setLineupsData(d as LineupsV2))
-      .catch(() => setLineupsData(null))
-      .finally(() => setLineupsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLineupsLoading(false);
+  }, [matchViewTab, expandedMatch?.id]);
 
   // Fetch live storyline when a live football match is expanded
   useEffect(() => {
@@ -7761,14 +7318,6 @@ export default function Home({
         .catch(() => {
           /* non-critical */
         });
-      fetch("/api/matches/basketball-schedule")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setBasketballSchedule(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
       fetch("/api/matches/basketball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
@@ -7795,26 +7344,10 @@ export default function Home({
         .catch(() => {
           /* non-critical */
         });
-      fetch("/api/matches/mlb-schedule")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setMlbSchedule(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
       fetch("/api/matches/mlb-standings")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (d) setMlbStandings(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/hockey-schedule")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setHockeySchedule(d);
         })
         .catch(() => {
           /* non-critical */
@@ -23259,13 +22792,7 @@ export default function Home({
                     : allUpcoming.filter(
                         (m) => (m.sport ?? "football") === selectedSport,
                       );
-                // Pin WC2026 matches at the top (regardless of kick-off time)
-                const sortedUpcoming = [...filteredUpcoming].sort((a, b) => {
-                  const aIsWC = isWCMatch(a.league) ? 0 : 1;
-                  const bIsWC = isWCMatch(b.league) ? 0 : 1;
-                  return aIsWC - bIsWC;
-                });
-                const visibleUpcoming = sortedUpcoming.filter((m) => {
+                const visibleUpcoming = filteredUpcoming.filter((m) => {
                   const q = upcomingSearchQuery.trim().toLowerCase();
                   if (!q) return true;
                   return (
@@ -23304,7 +22831,6 @@ export default function Home({
                 // Sport grouping for display
                 // Ordem: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
                 const SPORT_GROUPS = [
-                  { key: "wc2026", emoji: "🏆", label: "Copa do Mundo" },
                   { key: "football", emoji: "⚽", label: "Futebol" },
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
                   { key: "hockey", emoji: "🏒", label: "Hóquei no Gelo" },
@@ -23323,8 +22849,6 @@ export default function Home({
                 const _shouldLimit = !showAllLeagues && selectedSport === "all" && !selectedLeague && !upcomingSearchQuery;
                 const sportGroups = SPORT_GROUPS.map((g) => {
                   const all = listUpcoming.filter((m) => {
-                    if (g.key === "wc2026") return isWCMatch(m.league);
-                    if (g.key === "football") return (m.sport ?? "football") === "football" && !isWCMatch(m.league);
                     return (m.sport ?? "football") === g.key;
                   });
                   const matches = _shouldLimit ? all.slice(0, _PER_SPORT_LIMIT) : all;

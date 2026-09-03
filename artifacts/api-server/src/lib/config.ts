@@ -1,12 +1,12 @@
 // SportsAPI Pro's daily-leagues/league-stats/team-crest/legacy-settlement
-// roles were fully removed (2026-09-03) in favor of SportMonks + PulseScore,
-// but SPORTSAPI_KEY itself stays: the V2/V1 endpoints it authenticates
-// (sapiHeaders() in routes/matches.ts) still back the live World Cup 2026
-// section (wc2026*/-h2h/-standings/-competition routes) and the
-// basketball/hockey/mlb/volleyball/football schedule + v2-match-odds/
-// v2-lineups/v2-incidents/v2-statistics/v2-standings routes, all still
-// called by the frontend — out of scope for this SportsAPI-Pro-team-crest
-// cleanup pass.
+// roles (2026-09-03) and its World Cup 2026 / schedule / V2 market routes
+// (basketball-schedule, hockey-schedule, mlb-schedule, v2-match-odds,
+// v2-lineups, v2-incidents, v2-statistics, v2-standings, wc2026*) were
+// fully removed in favor of SportMonks + PulseScore + StatPal, but
+// SPORTSAPI_KEY itself stays: the V2/V1 endpoints it authenticates
+// (sapiHeaders() in routes/matches.ts) still back /confrontos,
+// /feed-status, /football-injuries-v1, tennis live/upcoming, and the
+// hockey/mlb/basketball standings fallback — out of scope for this pass.
 const SPORTSAPI_KEY =
   process.env["SPORTSAPIPRO_KEY"] ??
   process.env["SPORTSAPI_PRO_KEY"] ??
