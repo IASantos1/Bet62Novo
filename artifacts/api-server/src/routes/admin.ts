@@ -49,7 +49,6 @@ import {
   getPalaceCasinoProviders,
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
-import { listMappings, setMapping, createMapping } from "../services/liveStream/mapping.js";
 import { memberAccountForUser } from "./casino.js";
 
 function escapeCsv(val: unknown): string {
@@ -2815,84 +2814,6 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
     res.status(500).json({ error: "Erro ao gerar banner" });
   }
 });
-
-// ── BET62 Live Streaming — mapping admin ─────────────────────────────────────
-// An admin fills in the SMYTDRYT video fields here to wire up the live
-// stream for a match.
-router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
-  try {
-    const mappings = await listMappings();
-    res.json({ mappings });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/live-stream/mappings error");
-    res.status(500).json({ error: "Erro ao listar mapeamentos" });
-  }
-});
-
-// betbyEventId isn't a real BetBY id here — a stable placeholder is
-// generated so the NOT NULL UNIQUE column is satisfied without pretending
-// to know a real one.
-router.post("/live-stream/mappings", adminMiddleware, async (req: AdminRequest, res) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    const home = String(body["home"] ?? "").trim();
-    const away = String(body["away"] ?? "").trim();
-    const league = typeof body["league"] === "string" && body["league"].trim() ? body["league"].trim() : null;
-    if (!home || !away) {
-      res.status(400).json({ error: "home e away são obrigatórios" });
-      return;
-    }
-    const betbyEventId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const created = await createMapping({ betbyEventId, home, away, league });
-    logger.info(
-      { home, away, admin: req.admin!.username },
-      "Admin created live-stream mapping",
-    );
-    res.status(201).json(created);
-  } catch (err) {
-    logger.error({ err }, "POST /api/admin/live-stream/mappings error");
-    res.status(500).json({ error: "Erro ao criar mapeamento" });
-  }
-});
-
-router.patch(
-  "/live-stream/mappings/:betbyEventId",
-  adminMiddleware,
-  async (req: AdminRequest, res) => {
-    const betbyEventId = String(req.params["betbyEventId"]);
-    const body = req.body as Record<string, unknown>;
-    const toIntOrNull = (v: unknown): number | null | undefined => {
-      if (v === undefined) return undefined;
-      if (v === null || v === "") return null;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : undefined;
-    };
-    const toStrOrNull = (v: unknown): string | null | undefined => {
-      if (v === undefined) return undefined;
-      if (v === null || v === "") return null;
-      return String(v);
-    };
-    try {
-      const updated = await setMapping(betbyEventId, {
-        videoMatchId: toIntOrNull(body["videoMatchId"]),
-        videoSportId: toIntOrNull(body["videoSportId"]),
-        videoTournamentId: toIntOrNull(body["videoTournamentId"]),
-        videoStatsHost: toStrOrNull(body["videoStatsHost"]),
-        videoKey: toStrOrNull(body["videoKey"]),
-        videoBasePath: toStrOrNull(body["videoBasePath"]),
-        videoTimestamp: toIntOrNull(body["videoTimestamp"]),
-      });
-      if (!updated) {
-        res.status(404).json({ error: "Mapeamento não encontrado" });
-        return;
-      }
-      res.json(updated);
-    } catch (err) {
-      logger.error({ err, betbyEventId }, "PATCH /api/admin/live-stream/mappings/:betbyEventId error");
-      res.status(500).json({ error: "Erro ao atualizar mapeamento" });
-    }
-  },
-);
 
 export default router;
 

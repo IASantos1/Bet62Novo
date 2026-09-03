@@ -89,7 +89,7 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
-// ── BET62 Live + Streaming ──
+// ── BET62 Live ──
 //
 //  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
 //    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
@@ -97,21 +97,6 @@ const AI_AGENTS_MODEL =
 //      mas ainda não consumido no payload ao vivo (só observação — ver
 //      footballWs.ts).
 //    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
-//
-//  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
-//  7 campos de vídeo em live_stream_mappings por evento.
-
-// SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
-// between the host and /playlist.m3u8 was originally assumed to be a fixed
-// per-account value, but two real BetBY captures for two different matches
-// showed two different segments — it's per-match/per-stream, so it lives in
-// live_stream_mappings.videoBasePath (admin-set per event, like the key)
-// rather than as a config default here. statsHost + per-video
-// matchId/sportId/tournamentId/key/basePath come from live_stream_mappings.
-const SMYTDRYT_HOST_URL =
-  process.env["SMYTDRYT_HOST_URL"]?.trim() || "https://edg05.smytdryt.live";
-const SMYTDRYT_DEFAULT_STATS_HOST =
-  process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
   SILENTAPI_BASE_URL,
@@ -129,8 +114,6 @@ export const CONFIG = {
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
-  SMYTDRYT_HOST_URL,
-  SMYTDRYT_DEFAULT_STATS_HOST,
   LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,
