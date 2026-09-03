@@ -284,6 +284,7 @@ async function fetchBaseballUpcoming(): Promise<PulseScoreBaseballPrematchEvent[
  * call fails on the very first attempt (nothing cached yet to fall back
  * to). */
 export async function getPulseScoreBaseballUpcoming(): Promise<PulseScoreBaseballPrematchEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (upcomingCache && now - upcomingCache.fetchedAt < BASEBALL_UPCOMING_TTL_MS)

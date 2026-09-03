@@ -88,6 +88,7 @@ function scheduleReconnect(): void {
 }
 
 function connect(): void {
+  if (!CONFIG.ENABLE_PULSESCORE) return;
   if (!CONFIG.PULSESCORE_API_KEY) return;
   if (connected) return;
 
@@ -147,6 +148,7 @@ function connect(): void {
 export const __testing = { applyFrame, liveByEventId, lastSeenAt };
 
 export function startPulseScoreHockeyWs(): void {
+  if (!CONFIG.ENABLE_PULSESCORE) return;
   if (startedOnce) return;
   startedOnce = true;
   connect();

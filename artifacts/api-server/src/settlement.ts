@@ -3763,6 +3763,15 @@ function normalizeSelectionSport(
   | "hockey"
   | "volleyball"
   | "mma"
+  | "handball"
+  | "cricket"
+  | "rugby"
+  | "rugbyleague"
+  | "esports"
+  | "amfootball"
+  | "boxing"
+  | "futsal"
+  | "darts"
   | null {
   const value = String(raw ?? "")
     .trim()
@@ -3782,6 +3791,22 @@ function normalizeSelectionSport(
   // MMA, same as football) — every MMA bet would have looked up its
   // result under football's provider-matchId prefixes and never resolved.
   if (value === "mma") return "mma";
+  // GoalServe extra sports (2026)
+  if (value === "handball") return "handball";
+  if (value === "cricket") return "cricket";
+  if (value === "rugby" || value === "rugby_union") return "rugby";
+  if (value === "rugbyleague" || value === "rugby_league") return "rugbyleague";
+  if (value === "esports" || value === "esport") return "esports";
+  if (
+    value === "amfootball" ||
+    value === "american_football" ||
+    value === "nfl" ||
+    value === "us_football"
+  )
+    return "amfootball";
+  if (value === "boxing") return "boxing";
+  if (value === "futsal") return "futsal";
+  if (value === "darts") return "darts";
   return null;
 }
 
@@ -3795,6 +3820,15 @@ function readSelectionSport(
   | "hockey"
   | "volleyball"
   | "mma"
+  | "handball"
+  | "cricket"
+  | "rugby"
+  | "rugbyleague"
+  | "esports"
+  | "amfootball"
+  | "boxing"
+  | "futsal"
+  | "darts"
   | null {
   return normalizeSelectionSport(sel.providerSport ?? sel.sport);
 }
@@ -3809,6 +3843,15 @@ function inferSelectionLookupSport(
   | "hockey"
   | "volleyball"
   | "mma"
+  | "handball"
+  | "cricket"
+  | "rugby"
+  | "rugbyleague"
+  | "esports"
+  | "amfootball"
+  | "boxing"
+  | "futsal"
+  | "darts"
   | null {
   const explicitSport = readSelectionSport(sel);
   if (explicitSport) return explicitSport;
@@ -3871,7 +3914,16 @@ function providerMatchIdPrefixesForSport(
     | "baseball"
     | "hockey"
     | "volleyball"
-    | "mma",
+    | "mma"
+    | "handball"
+    | "cricket"
+    | "rugby"
+    | "rugbyleague"
+    | "esports"
+    | "amfootball"
+    | "boxing"
+    | "futsal"
+    | "darts",
 ): string[] {
   switch (sport) {
     case "football":
@@ -3882,12 +3934,14 @@ function providerMatchIdPrefixesForSport(
       // here, resultMatchesSelectionSport() rejected every current football match before
       // even attempting a team-name match, silently breaking the fuzzy-lookup fallback
       // (findLiveResultByTeams/findResultByTeams) for 100% of today's football bets.
-      return ["pulsescore-football", "football-v2"];
+      // gs-soccer added 2026 — GoalServe primary provider; uses soccer internally
+      // for historical football, so prefix is gs-soccer-XXX even after normalization.
+      return ["pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
     case "tennis":
       // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
       // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
       // kept for the same pre-migration reason as football-v2 above.
-      return ["pulsescore-tennis", "tennis-v1", "tennis-v2"];
+      return ["pulsescore-tennis", "tennis-v1", "tennis-v2", "gs-tennis"];
     case "basketball":
       // pulsescore-basketball is the current live prefix
       // (buildBasketballLiveFromPulseScore in matches.ts, switched from bwin
@@ -3902,7 +3956,7 @@ function providerMatchIdPrefixesForSport(
       // ensureFinishedMatchResult() for one either, silently breaking both
       // the fuzzy-lookup fallback and the active "confirm this match is
       // really finished" check for 100% of today's basketball bets.
-      return ["pulsescore-basketball", "bball-v2"];
+      return ["pulsescore-basketball", "bball-v2", "gs-basketball"];
     case "baseball":
       // Missing "pulsescore-baseball" until 2026-08-28 (found while wiring
       // real onexbet markets into baseball this session) — same bug class
@@ -3912,22 +3966,40 @@ function providerMatchIdPrefixesForSport(
       // since that pipeline shipped, but this list never had it, silently
       // breaking the fuzzy team-name-lookup fallback for every current
       // baseball bet — baseball-v2/mlb-v2 are the dead pre-migration prefixes.
-      return ["pulsescore-baseball", "baseball-v2", "mlb-v2"];
+      return ["pulsescore-baseball", "baseball-v2", "mlb-v2", "gs-baseball"];
     case "hockey":
       // Same gap as baseball above, same fix — hockey-v2 is the dead
       // pre-migration prefix.
-      return ["pulsescore-hockey", "hockey-v2"];
+      return ["pulsescore-hockey", "hockey-v2", "gs-hockey"];
     case "mma":
       // New sport (2026-08-28) — no pre-migration prefix exists, this is
       // the only one buildMmaUpcomingFromPulseScore ever creates.
-      return ["pulsescore-mma"];
+      return ["pulsescore-mma", "gs-mma"];
     case "volleyball":
       // pulsescore-volleyball is the current live AND prematch prefix
       // (buildVolleyballLiveFromPulseScore/buildVolleyballUpcomingFromPulseScore
       // in matches.ts, built 2026-08-09) — volley-live/volley-odds are the
       // dead Statpal-era prefixes, kept for pre-migration matchIds only.
       // Same missing-prefix bug as basketball above (see its comment).
-      return ["pulsescore-volleyball", "volley-live", "volley-odds"];
+      return ["pulsescore-volleyball", "volley-live", "volley-odds", "gs-volleyball"];
+    case "handball":
+      return ["gs-handball"];
+    case "cricket":
+      return ["gs-cricket"];
+    case "rugby":
+      return ["gs-rugby"];
+    case "rugbyleague":
+      return ["gs-rugbyleague"];
+    case "esports":
+      return ["gs-esports"];
+    case "amfootball":
+      return ["gs-amfootball"];
+    case "boxing":
+      return ["gs-boxing"];
+    case "futsal":
+      return ["gs-futsal"];
+    case "darts":
+      return ["gs-darts"];
   }
 }
 
@@ -3939,7 +4011,16 @@ function buildCanonicalMatchIds(
     | "baseball"
     | "hockey"
     | "volleyball"
-    | "mma",
+    | "mma"
+    | "handball"
+    | "cricket"
+    | "rugby"
+    | "rugbyleague"
+    | "esports"
+    | "amfootball"
+    | "boxing"
+    | "futsal"
+    | "darts",
   providerId: string,
 ): string[] {
   const normalizedId = String(providerId ?? "").trim();
@@ -4029,7 +4110,8 @@ function isProviderManagedMatchId(matchId: string): boolean {
   // found while wiring real onexbet markets into both sports this session
   // (see providerMatchIdPrefixesForSport's matching comment above).
   // pulsescore-mma added the same day — new sport, built from scratch.
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$/.test(
+  // gs-* prefixes: GoalServe (2026). Supported for all migrated sports.
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }

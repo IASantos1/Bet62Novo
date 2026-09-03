@@ -25,34 +25,47 @@ const PALACE_CASINO_API_TOKEN = process.env["PALACE_CASINO_API_TOKEN"] ?? "";
 const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
+// ── Kill-switches (suspensão sem apagar código; rollback 1 clique) ─────────
+// GoalServe = fornecedor ativo por defeito. Desativar em Railway/Replit = volta
+// a SportMonks + PulseScore automaticamente (matches.ts decide por flag).
+const ENABLE_GOALSERVE =
+  (process.env["ENABLE_GOALSERVE"] ?? "true").trim().toLowerCase() === "true";
+const ENABLE_SPORTMONKS =
+  (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
+const ENABLE_PULSESCORE =
+  (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
+
+// GoalServe — NOVO fornecedor multi-desporto.
+// - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
+// - Fixtures/scores:  https://www.goalserve.com/getfeed/<KEY>/<sport>/{home,d-1,d1}
+// - Football live:    https://livescore.goalserve.com/api/v1/soccer/{home,live}
+// - Odds settlement:  http://oddsfeed.goalserve.com/api/v1/odds/pre-game/settlements
+// Auth: key na path (feeds/scores), query param `apiKey=` (livescore) ou `k=` (settle).
+// JSON via `?json=1` appended automáticamente pelo cliente (services/goalserve/client.ts).
+// NÃO colocar a KEY real hardcodada. Vem apenas de env var.
+const GOALSERVE_API_KEY = process.env["GOALSERVE_API_KEY"]?.trim() ?? "";
+const GOALSERVE_BASE_URL =
+  process.env["GOALSERVE_BASE_URL"]?.trim() || "https://www.goalserve.com/getfeed";
+const GOALSERVE_LIVESCORE_BASE =
+  process.env["GOALSERVE_LIVESCORE_BASE"]?.trim() || "https://livescore.goalserve.com/api/v1";
+const GOALSERVE_ODDSSETTLE_BASE =
+  process.env["GOALSERVE_ODDSSETTLE_BASE"]?.trim() || "http://oddsfeed.goalserve.com/api/v1";
+
 // PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
 //   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
 //   - NÃO FAZ: Estatísticas detalhadas, H2H, rankings, logos, play-by-play.
-// Futebol e tênis ao vivo puxados via REST polling. O PRO plan só permite 1
-// conexão WS concorrente; ela está atualmente dedicada ao futebol
-// (footballWs.ts) rodando em paralelo apenas para observação — ainda não
-// alimenta o payload ao vivo, pois o comportamento snapshot-vs-delta dos
-// frames de futebol não foi confirmado (ver comentário em
-// pulsescore/football.ts). O módulo WS do tênis (tennisWs.ts) existe mas
-// está dormente (zero call sites) desde que a conexão foi movida pro futebol
-// em 2026-08-08.
-// Cota: ilimitada conforme plano do usuário. Usar sempre que possível para overlay de odds e comparação multi-bookmaker.
+// SUSPENSO POR DEFEITO (ENABLE_PULSESCORE=false). Guardas em cada função
+// pública de services/pulsescore/*.ts garantem 0 rede enquanto desligado.
 const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
 const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
 const PULSESCORE_BOOKMAKER =
   process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
 
-// SportMonks Football API v3 — replacing PulseScore/bwin as football's odds
-// provider (PulseScore's football feed was deliberately blocked 2026-08-28,
-// see pulsescore/football.ts's FOOTBALL_PULSESCORE_BLOCKED) and eventually
-// its live match-state feed too. Auth is a `api_token` query
-// param (not a header, unlike PulseScore's X-Secret) — confirmed against
-// real GET /v3/football/rounds/{id} and /v3/football/livescores/inplay
-// samples, 2026-08-28. Odds come pre-aggregated across bookmakers
-// (fixtures.odds.bookmaker) — the sample confirmed real so far is all
-// bookmaker_id 2 ("bet365"); which bookmaker(s) to standardize on is not
-// yet decided.
+// SportMonks Football API v3 — SUSPENSO POR DEFEITO (ENABLE_SPORTMONKS=false).
+// Antigo fornecedor principal de futebol: fixtures, odds bet365, livescore.
+// Guardas em cada função pública de services/sportmonks/*.ts garantem 0 rede
+// enquanto a flag estiver OFF.
 const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
@@ -105,6 +118,13 @@ export const CONFIG = {
   PALACE_CASINO_BASE_URL,
   PALACE_CASINO_API_TOKEN,
   PALACE_CASINO_CALLBACK_TOKEN,
+  ENABLE_GOALSERVE,
+  ENABLE_SPORTMONKS,
+  ENABLE_PULSESCORE,
+  GOALSERVE_API_KEY,
+  GOALSERVE_BASE_URL,
+  GOALSERVE_LIVESCORE_BASE,
+  GOALSERVE_ODDSSETTLE_BASE,
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,

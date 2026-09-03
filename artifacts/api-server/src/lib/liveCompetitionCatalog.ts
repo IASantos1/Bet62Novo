@@ -251,7 +251,7 @@ async function ensureCompetition(input: SeenCompetitionInput): Promise<number | 
     const country = String(input.country ?? "unknown").trim() || "unknown";
     const normalizedName = normalizeCatalogValue(name);
     const normalizedCountry = normalizeCatalogValue(country) || "unknown";
-    const provider = String(input.provider ?? "sportsapi").trim() || "sportsapi";
+    const provider = String(input.provider ?? "sportmonks").trim() || "sportmonks";
     const providerCompetitionKey = buildProviderCompetitionKey(input);
 
     logger.debug({ sport, name, country }, "Ensuring competition exists");
@@ -386,7 +386,7 @@ async function ensureRuntimeState(input: SeenLiveEventInput, competitionId: numb
       eventId,
       sport: normalizeCatalogValue(input.sport),
       competitionId,
-      provider: String(input.provider ?? "sportsapi").trim() || "sportsapi",
+      provider: String(input.provider ?? "sportmonks").trim() || "sportmonks",
       providerEventId: input.providerEventId?.trim() || null,
       state: newState,
       visibilityStatus: "VISIBLE",
@@ -402,7 +402,7 @@ async function ensureRuntimeState(input: SeenLiveEventInput, competitionId: numb
       set: {
         sport: normalizeCatalogValue(input.sport),
         competitionId,
-        provider: String(input.provider ?? "sportsapi").trim() || "sportsapi",
+        provider: String(input.provider ?? "sportmonks").trim() || "sportmonks",
         providerEventId: input.providerEventId?.trim() || null,
         state: newState,
         visibilityStatus: "VISIBLE",

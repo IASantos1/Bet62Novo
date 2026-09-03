@@ -51,6 +51,7 @@
 
 import { sportMonksGetWithRetry } from "./client.js";
 import { logger } from "../../lib/logger.js";
+import { CONFIG } from "../../lib/config.js";
 
 export type SportMonksOdd = {
   market_id: number;
@@ -858,6 +859,7 @@ export async function getSportMonksFootballUpcomingForLeague(
   leagueId: number,
   bookmakerId = 2,
 ): Promise<SportMonksLeagueUpcoming> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return { leagueId, fixtures: [] };
   const cached = upcomingCache.get(leagueId);
   if (cached && Date.now() - cached.fetchedAt < UPCOMING_TTL_MS) return cached.result;
 
@@ -884,6 +886,7 @@ export async function getSportMonksFootballUpcoming(
   leagueIds: number[],
   bookmakerId = 2,
 ): Promise<SportMonksLeagueUpcoming[]> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return leagueIds.map((leagueId) => ({ leagueId, fixtures: [] }));
   return Promise.all(
     leagueIds.map((leagueId) =>
       getSportMonksFootballUpcomingForLeague(leagueId, bookmakerId).catch(
@@ -947,6 +950,7 @@ async function fetchTeamSchedule(teamId: number): Promise<SportMonksFixture[]> {
  * material for both getSportMonksTeamUpcoming and
  * getSportMonksTeamHeadToHead below. */
 export async function getSportMonksTeamSchedule(teamId: number): Promise<SportMonksFixture[]> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return [];
   const cached = teamScheduleCache.get(teamId);
   if (cached && Date.now() - cached.fetchedAt < TEAM_SCHEDULE_TTL_MS) return cached.fixtures;
 
@@ -986,6 +990,7 @@ export async function getSportMonksTeamUpcoming(
   teamId: number,
   limit = 5,
 ): Promise<SportMonksFixture[]> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return [];
   const schedule = await getSportMonksTeamSchedule(teamId);
   return filterUpcomingFixtures(schedule, Date.now() / 1000, limit);
 }
@@ -1019,6 +1024,7 @@ export async function getSportMonksTeamHeadToHead(
   opponentId: number,
   limit = 10,
 ): Promise<SportMonksFixture[]> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return [];
   const schedule = await getSportMonksTeamSchedule(teamId);
   return filterHeadToHeadFixtures(schedule, opponentId, limit);
 }
@@ -1033,6 +1039,7 @@ const fixtureLookupCache = new Map<number, { fixture: SportMonksFixture | null; 
  * minutes since participants/team ids never change after a fixture is
  * scheduled. */
 export async function getSportMonksFixtureById(id: number): Promise<SportMonksFixture | null> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return null;
   const cached = fixtureLookupCache.get(id);
   if (cached && Date.now() - cached.fetchedAt < FIXTURE_LOOKUP_TTL_MS) return cached.fixture;
 
@@ -1112,6 +1119,7 @@ const playerProfileCache = new Map<number, { player: SportMonksPlayer | null; fe
  * guess, since nested-include depth limits are endpoint-specific and this
  * combination is the one actually confirmed to work. Cached ~30 minutes. */
 export async function getSportMonksPlayerProfile(playerId: number): Promise<SportMonksPlayer | null> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return null;
   const cached = playerProfileCache.get(playerId);
   if (cached && Date.now() - cached.fetchedAt < PLAYER_PROFILE_TTL_MS) return cached.player;
 
@@ -1269,6 +1277,7 @@ async function fetchLive(): Promise<SportMonksFixture[]> {
  * User EXPLICIT rule (2026-08-30): SportMonks football = bet365 id=2 ONLY;
  * 1xbet id=35 is PulseScore-exclusive and must never be queried here. */
 export async function getSportMonksFootballLive(): Promise<SportMonksFixture[]> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return [];
   if (liveCache && Date.now() - liveCache.fetchedAt < LIVE_TTL_MS) return liveCache.fixtures;
   if (liveInFlight) return liveInFlight;
 
@@ -1354,6 +1363,7 @@ export async function getSportMonksFixtureOdds(
   fixtureId: number,
   bookmakerId = 2,
 ): Promise<SportMonksOdd[]> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return [];
   const cacheKey = fixtureId * 1000 + bookmakerId; // bookmakerId is always < 1000 (confirmed real ids: 2, 35, ...)
   const cached = liveOddsCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < LIVE_ODDS_TTL_MS) return cached.odds;
@@ -1401,6 +1411,7 @@ export async function getSportMonksLiveOddsByFixture(
   fixtureIds: number[],
   bookmakerId = 2,
 ): Promise<Map<number, SportMonksOdd[]>> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return new Map();
   const entries = await Promise.all(
     fixtureIds.map(
       async (id): Promise<[number, SportMonksOdd[]]> => [

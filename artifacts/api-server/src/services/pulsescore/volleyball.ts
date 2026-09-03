@@ -442,6 +442,7 @@ async function fetchVolleyballUpcoming(): Promise<PulseScoreVolleyballPrematchEv
  * configured, or the upstream call fails on the very first attempt (nothing
  * cached yet to fall back to). */
 export async function getPulseScoreVolleyballUpcoming(): Promise<PulseScoreVolleyballPrematchEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (upcomingCache && now - upcomingCache.fetchedAt < VOLLEYBALL_UPCOMING_TTL_MS)
@@ -527,6 +528,7 @@ async function fetchVolleyballLive(): Promise<PulseScoreVolleyballLiveEvent[]> {
  * statistics.sets shape unibetau confirmed real), not yet re-verified
  * against a live onexbet sample though — see this file's header. */
 export async function getPulseScoreVolleyballLive(): Promise<PulseScoreVolleyballLiveEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (liveCache && now - liveCache.fetchedAt < VOLLEYBALL_LIVE_TTL_MS) return liveCache.events;

@@ -18,6 +18,7 @@ export type SportMonksRateLimit = {
 let lastKnownRateLimit: SportMonksRateLimit | null = null;
 
 export function getSportMonksUsage(): SportMonksRateLimit | null {
+  if (!CONFIG.ENABLE_SPORTMONKS) return null;
   return lastKnownRateLimit;
 }
 
@@ -38,6 +39,9 @@ export async function sportMonksGet<T>(
   params?: Record<string, string | undefined>,
   timeoutMs = 8000,
 ): Promise<T> {
+  if (!CONFIG.ENABLE_SPORTMONKS) {
+    throw new Error("[sportmonks] killswitch ENABLE_SPORTMONKS=false — no network");
+  }
   const resp = await fetch(sportMonksUrl(path, params), {
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -56,6 +60,7 @@ export async function sportMonksGetWithRetry<T>(
   params?: Record<string, string | undefined>,
   opts?: { timeoutMs?: number; retries?: number; retryDelayMs?: number },
 ): Promise<T | null> {
+  if (!CONFIG.ENABLE_SPORTMONKS) return null;
   const retries = opts?.retries ?? 2;
   const baseDelayMs = opts?.retryDelayMs ?? 1500;
   for (let attempt = 0; attempt <= retries; attempt++) {

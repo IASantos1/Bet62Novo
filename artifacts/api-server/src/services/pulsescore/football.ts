@@ -193,6 +193,7 @@ const FOOTBALL_WS_EVENT_FRESHNESS_MS = 4_000;
  * always the list, WS is checked per-event via getFootballWsEventIfFresh,
  * and staleness for one event never affects any other. */
 export async function getPulseScoreFootballLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (FOOTBALL_PULSESCORE_BLOCKED) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
@@ -1319,6 +1320,7 @@ async function fetchFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
  * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
  * very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreFootballUpcoming(): Promise<PulseScorePrematchEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (FOOTBALL_PULSESCORE_BLOCKED) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();

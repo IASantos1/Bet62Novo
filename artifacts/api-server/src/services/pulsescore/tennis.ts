@@ -109,6 +109,7 @@ async function fetchTennisLive(): Promise<PulseScoreEvent[]> {
  * call fails on the very first attempt (nothing cached yet to fall back
  * to). */
 export async function getPulseScoreTennisLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
 
   const now = Date.now();
@@ -593,6 +594,7 @@ async function fetchTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
  * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
  * very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreTennisUpcoming(): Promise<PulseScoreTennisPrematchEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (upcomingCache && now - upcomingCache.fetchedAt < TENNIS_UPCOMING_TTL_MS)

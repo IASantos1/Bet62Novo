@@ -121,6 +121,7 @@ function scheduleReconnect(): void {
 }
 
 function connect(): void {
+  if (!CONFIG.ENABLE_PULSESCORE) return;
   if (!CONFIG.PULSESCORE_API_KEY) return; // not configured yet
   if (connected) return;
 
@@ -192,6 +193,7 @@ export const __testing = { applyFrame, liveByEventId, lastSeenAt };
 /** Call once at server startup. Safe to call even without an API key yet —
  * it's a no-op until PULSESCORE_API_KEY is set (nothing to retry-loop). */
 export function startPulseScoreBasketballWs(): void {
+  if (!CONFIG.ENABLE_PULSESCORE) return;
   if (startedOnce) return;
   startedOnce = true;
   connect();

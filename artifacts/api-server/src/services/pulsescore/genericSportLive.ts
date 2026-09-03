@@ -121,6 +121,7 @@ export function createPulseScoreRestSport(opts: {
    * PULSESCORE_API_KEY isn't configured, or the upstream call fails on the
    * very first attempt (nothing cached yet to fall back to). */
   async function getLive(): Promise<PulseScoreEvent[]> {
+    if (!CONFIG.ENABLE_PULSESCORE) return [];
     if (!CONFIG.PULSESCORE_API_KEY) return [];
     const now = Date.now();
     if (cache && now - cache.fetchedAt < ttlMs) return cache.events;

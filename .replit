@@ -64,9 +64,19 @@ channel = "stable-25_05"
 [userenv.shared]
 ADMIN_EMAIL = "suportebet62@gmail.com"
 ADMIN_USERNAME = "Israel"
-FOOTBALL_DAILY_PROVIDER = "statpal"
-FOOTBALL_LIVE_PROVIDER = "statpal"
 NODE_ENV = "development"
 SMTP_FROM = "suportebet62@gmail.com"
 SMTP_PORT = "587"
 VITE_STRIPE_PUBLISHABLE_KEY = "pk_live_placeholder"
+# ── Kill-switches providers esportivos (rollback 1 clique) ────────────────
+# GoalServe = fornecedor primário ativo por defeito. Desligar = volta SportMonks/PulseScore.
+ENABLE_GOALSERVE = "true"
+ENABLE_SPORTMONKS = "false"
+ENABLE_PULSESCORE = "false"
+# GoalServe API key — NÃO COLOCAR valor real aqui; defina no painel Replit userenv privado
+# (este campo shared é versionado e visível no fork). Deixe vazio em código commitado.
+GOALSERVE_API_KEY = ""
+# GoalServe base URLs (opcionais; já defaults seguros em config.ts; só descomente se sobrescrever)
+# GOALSERVE_BASE_URL = "https://www.goalserve.com/getfeed"
+# GOALSERVE_LIVESCORE_BASE = "https://livescore.goalserve.com/api/v1"
+# GOALSERVE_ODDSSETTLE_BASE = "http://oddsfeed.goalserve.com/api/v1"

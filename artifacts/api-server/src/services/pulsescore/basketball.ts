@@ -422,6 +422,7 @@ async function fetchBasketballUpcoming(): Promise<PulseScoreBasketballPrematchEv
  * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
  * fails on the very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreBasketballUpcoming(): Promise<PulseScoreBasketballPrematchEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (upcomingCache && now - upcomingCache.fetchedAt < BASKETBALL_UPCOMING_TTL_MS)
@@ -514,6 +515,7 @@ const BASKETBALL_WS_EVENT_FRESHNESS_MS = 4_000;
  * (FIRST_QUARTER, THIRD_QUARTER, ...) extractBasketballOverride already
  * ignores. */
 export async function getPulseScoreBasketballLive(): Promise<PulseScoreEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   let events: PulseScoreEvent[];

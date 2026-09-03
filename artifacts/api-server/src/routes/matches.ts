@@ -91,6 +91,25 @@ import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/gen
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 
+import type { ProviderRawFixture, ProviderRawOddsSelection } from "../services/goalserve/types.js";
+
+import {
+  getGoalServeFootballUpcomingRaw,
+  getGoalServeFootballLiveRaw,
+  attachGoalServeFootballOdds,
+} from "../services/goalserve/football.js";
+import { getGoalServeTennisUpcomingRaw, getGoalServeTennisLiveRaw, attachGoalServeTennisOdds } from "../services/goalserve/tennis.js";
+import { getGoalServeBasketballUpcomingRaw, getGoalServeBasketballLiveRaw, attachGoalServeBasketballOdds } from "../services/goalserve/basketball.js";
+import { getGoalServeHockeyUpcomingRaw, getGoalServeHockeyLiveRaw, attachGoalServeHockeyOdds } from "../services/goalserve/hockey.js";
+import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw, attachGoalServeBaseballOdds } from "../services/goalserve/baseball.js";
+import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw, attachGoalServeVolleyballOdds } from "../services/goalserve/volleyball.js";
+import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw, attachGoalServeMmaOdds } from "../services/goalserve/mma.js";
+import { getGoalServeHandballUpcomingRaw, getGoalServeHandballLiveRaw, attachGoalServeHandballOdds } from "../services/goalserve/handball.js";
+import { getGoalServeCricketUpcomingRaw, getGoalServeCricketLiveRaw, attachGoalServeCricketOdds } from "../services/goalserve/cricket.js";
+import { getGoalServeRugbyUpcomingRaw, getGoalServeRugbyLiveRaw, attachGoalServeRugbyOdds } from "../services/goalserve/rugby.js";
+import { getGoalServeEsportsUpcomingRaw, getGoalServeEsportsLiveRaw, attachGoalServeEsportsOdds } from "../services/goalserve/esports.js";
+import { getGoalServeAmfootballUpcomingRaw, getGoalServeAmfootballLiveRaw, attachGoalServeAmfootballOdds } from "../services/goalserve/amfootball.js";
+
 const router: IRouter = Router();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -6026,6 +6045,50 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
+  // ── GoalServe match IDs (gs-{sport}-{id}) ─────────────────────────────
+  // Same DB-only recovery pattern as pulsescore- above: when a GoalServe
+  // match finishes while the server is live, finalizeStaleLiveMatch() has
+  // already persisted a complete record. Across a restart we just read it
+  // back from matchResultsTable to repopulate finishedMatchResults.
+  if (/^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(matchId)) {
+    const cached = finishedMatchResults.get(matchId);
+    if (
+      cached &&
+      typeof cached.home === "number" &&
+      typeof cached.away === "number"
+    )
+      return true;
+    try {
+      if (db) {
+        const [row] = await db
+          .select()
+          .from(matchResultsTable)
+          .where(eq(matchResultsTable.matchId, matchId))
+          .limit(1);
+        if (row && typeof row.home === "number" && typeof row.away === "number") {
+          const record = {
+            home: row.home,
+            away: row.away,
+            htHome: row.htHome ?? undefined,
+            htAway: row.htAway ?? undefined,
+            homeTeam: row.homeTeam ?? "",
+            awayTeam: row.awayTeam ?? "",
+            status: row.status ?? undefined,
+            cornersTotal: row.cornersTotal ?? undefined,
+            cardsTotal: row.cardsTotal ?? undefined,
+            firstGoal:
+              (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
+            extras: row.extras ?? undefined,
+            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+          };
+          finishedMatchResults.set(matchId, record);
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  }
+
   return false;
 }
 
@@ -7385,6 +7448,222 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   };
 }
 
+// ─── GoalServe Generic Fixture Converters ──────────────────────────────────────
+
+function goalServeSportToInternalSport(gsSport: ProviderRawFixture["sport"]): string {
+  if (gsSport === "soccer") return "football";
+  return gsSport;
+}
+
+function convertRawFixtureToUpcomingMatch(fx: ProviderRawFixture): UpcomingMatch {
+  const sport = goalServeSportToInternalSport(fx.sport);
+  const home = fx.home;
+  const away = fx.away;
+  const { date, time } = pulseScoreEventDateTime(fx.kickoffISO);
+
+  const oddsArr = fx.odds ?? [];
+
+  const findSel = (market: string, outcome: string, line?: number) =>
+    oddsArr.find(
+      (s) =>
+        s.canonicalMarket === market &&
+        s.canonicalOutcome === outcome &&
+        (line === undefined || s.line === line) &&
+        s.odd > 0,
+    );
+
+  const h1x2 = findSel("1X2", "HOME");
+  const d1x2 = findSel("1X2", "DRAW");
+  const a1x2 = findSel("1X2", "AWAY");
+  const hasFullReal1x2 = !!(h1x2 && d1x2 && a1x2);
+
+  let odds: { home: number; draw: number; away: number };
+  if (h1x2 || d1x2 || a1x2) {
+    odds = {
+      home: h1x2?.odd ?? 0,
+      draw: d1x2?.odd ?? 0,
+      away: a1x2?.odd ?? 0,
+    };
+  } else {
+    odds = makeOddsFromTeams(home, away);
+  }
+
+  const markets: AdvancedMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+  const hOU25 = findSel("OU", "OVER", 2.5);
+  const uOU25 = findSel("OU", "UNDER", 2.5);
+  if (hOU25) markets.totalGoals.over25 = hOU25.odd;
+  if (uOU25) markets.totalGoals.under25 = uOU25.odd;
+  const hOU15 = findSel("OU", "OVER", 1.5);
+  const uOU15 = findSel("OU", "UNDER", 1.5);
+  if (hOU15) markets.totalGoals.over15 = hOU15.odd;
+  if (uOU15) markets.totalGoals.under15 = uOU15.odd;
+  const hOU35 = findSel("OU", "OVER", 3.5);
+  const uOU35 = findSel("OU", "UNDER", 3.5);
+  if (hOU35) markets.totalGoals.over35 = hOU35.odd;
+  if (uOU35) markets.totalGoals.under35 = uOU35.odd;
+  const hOU05 = findSel("OU", "OVER", 0.5);
+  const uOU05 = findSel("OU", "UNDER", 0.5);
+  if (hOU05) markets.totalGoals.over05 = hOU05.odd;
+  if (uOU05) markets.totalGoals.under05 = uOU05.odd;
+  const hOU45 = findSel("OU", "OVER", 4.5);
+  const uOU45 = findSel("OU", "UNDER", 4.5);
+  if (hOU45) markets.totalGoals.over45 = hOU45.odd;
+  if (uOU45) markets.totalGoals.under45 = uOU45.odd;
+  const hOU55 = findSel("OU", "OVER", 5.5);
+  const uOU55 = findSel("OU", "UNDER", 5.5);
+  if (hOU55) markets.totalGoals.over55 = hOU55.odd;
+  if (uOU55) markets.totalGoals.under55 = uOU55.odd;
+  const hOU65 = findSel("OU", "OVER", 6.5);
+  const uOU65 = findSel("OU", "UNDER", 6.5);
+  if (hOU65) markets.totalGoals.over65 = hOU65.odd;
+  if (uOU65) markets.totalGoals.under65 = uOU65.odd;
+
+  const ah0H = findSel("AH", "HOME", 0);
+  const ah0A = findSel("AH", "AWAY", 0);
+  if (ah0H) markets.handicap.homeMinusOne = ah0H.odd;
+  if (ah0A) markets.handicap.awayPlusOne = ah0A.odd;
+
+  const dc1x = findSel("DC", "DOUBLE_1X");
+  const dcx2 = findSel("DC", "DOUBLE_X2");
+  const dc12 = findSel("DC", "DOUBLE_12");
+  if (dc1x) markets.doubleChance.homeOrDraw = dc1x.odd;
+  if (dcx2) markets.doubleChance.awayOrDraw = dcx2.odd;
+  if (dc12) markets.doubleChance.homeOrAway = dc12.odd;
+
+  const bttsY = findSel("BTTS", "BTTS_YES");
+  const bttsN = findSel("BTTS", "BTTS_NO");
+  if (bttsY) markets.bothTeamsScore.yes = bttsY.odd;
+  if (bttsN) markets.bothTeamsScore.no = bttsN.odd;
+
+  const csSels = oddsArr.filter((s) => s.canonicalMarket === "CS" && s.score && s.odd > 0);
+  if (csSels.length > 0) {
+    const csMap: Record<string, number> = {};
+    for (const s of csSels) {
+      if (s.score) {
+        const key = `${s.score.home}-${s.score.away}`;
+        csMap[key] = s.odd;
+      }
+    }
+    if (Object.keys(csMap).length > 0) markets.correctScore = csMap;
+  }
+
+  return {
+    id: fx.matchId,
+    home,
+    away,
+    league: fx.league,
+    country: fx.country || "Internacional",
+    time,
+    date,
+    sport,
+    hasRealOdds: hasFullReal1x2,
+    odds,
+    markets,
+    isWomens: isWomensLeague(fx.league),
+    homeLogoUrl: undefined,
+    awayLogoUrl: undefined,
+  };
+}
+
+function goalServeStateIdToStatus(stateId: ProviderRawFixture["stateId"]): { status: string; phase?: LiveMatchState["_liveExtra"]["phase"] } {
+  switch (stateId) {
+    case 1:
+      return { status: "NS" };
+    case 2:
+      return { status: "LIVE", phase: "1H" };
+    case 3:
+      return { status: "HT", phase: "HT" };
+    case 5:
+      return { status: "FT", phase: "FT" };
+    case 22:
+      return { status: "LIVE", phase: "2H" };
+    default:
+      return { status: "LIVE" };
+  }
+}
+
+function convertRawFixtureToLiveMatchState(
+  fx: ProviderRawFixture,
+  existing?: LiveMatchState | undefined,
+): LiveMatchState {
+  const sport = goalServeSportToInternalSport(fx.sport);
+  const home = fx.home;
+  const away = fx.away;
+  const { date, time } = pulseScoreEventDateTime(fx.kickoffISO);
+  const { status, phase } = goalServeStateIdToStatus(fx.stateId);
+  const minute = fx.liveMinute ?? 0;
+  const homeScore = fx.score?.home ?? existing?.homeScore ?? 0;
+  const awayScore = fx.score?.away ?? existing?.awayScore ?? 0;
+
+  const oddsArr = fx.odds ?? [];
+  const findSel = (market: string, outcome: string, line?: number) =>
+    oddsArr.find(
+      (s) =>
+        s.canonicalMarket === market &&
+        s.canonicalOutcome === outcome &&
+        (line === undefined || s.line === line) &&
+        s.odd > 0,
+    );
+  const h1x2 = findSel("1X2", "HOME");
+  const d1x2 = findSel("1X2", "DRAW");
+  const a1x2 = findSel("1X2", "AWAY");
+  const hasFullReal1x2 = !!(h1x2 && d1x2 && a1x2);
+  let odds: { home: number; draw: number; away: number };
+  if (h1x2 || d1x2 || a1x2) {
+    odds = { home: h1x2?.odd ?? 0, draw: d1x2?.odd ?? 0, away: a1x2?.odd ?? 0 };
+  } else {
+    odds = makeOddsFromTeams(home, away);
+  }
+  const markets: AdvancedMarkets = makeAdvancedMarketsFromTeams(home, away);
+  const hOU25 = findSel("OU", "OVER", 2.5);
+  const uOU25 = findSel("OU", "UNDER", 2.5);
+  if (hOU25) markets.totalGoals.over25 = hOU25.odd;
+  if (uOU25) markets.totalGoals.under25 = uOU25.odd;
+  const dc1x = findSel("DC", "DOUBLE_1X");
+  const dcx2 = findSel("DC", "DOUBLE_X2");
+  const dc12 = findSel("DC", "DOUBLE_12");
+  if (dc1x) markets.doubleChance.homeOrDraw = dc1x.odd;
+  if (dcx2) markets.doubleChance.awayOrDraw = dcx2.odd;
+  if (dc12) markets.doubleChance.homeOrAway = dc12.odd;
+  const bttsY = findSel("BTTS", "BTTS_YES");
+  const bttsN = findSel("BTTS", "BTTS_NO");
+  if (bttsY) markets.bothTeamsScore.yes = bttsY.odd;
+  if (bttsN) markets.bothTeamsScore.no = bttsN.odd;
+
+  const existingEvents = existing?.events ?? [];
+  const liveExtra: NonNullable<LiveMatchState["_liveExtra"]> = {
+    ...(existing?._liveExtra ?? {}),
+    phase,
+  };
+
+  return {
+    id: fx.matchId,
+    home,
+    away,
+    homeTeamId: fx.homeTeamId,
+    awayTeamId: fx.awayTeamId,
+    homeLogoUrl: undefined,
+    awayLogoUrl: undefined,
+    league: fx.league,
+    country: fx.country || "Internacional",
+    sport,
+    homeScore,
+    awayScore,
+    minute,
+    status,
+    hasRealOdds: hasFullReal1x2,
+    odds,
+    markets,
+    events: existingEvents,
+    date,
+    time,
+    _liveExtra: liveExtra,
+    _firstSeenAt: existing?._firstSeenAt ?? Date.now(),
+    _lastSeenAt: Date.now(),
+  };
+}
+
 // ─── Match builders ────────────────────────────────────────────────────────────
 
 // buildUpcomingMatches() used to build its own football-upcoming list via
@@ -8723,6 +9002,344 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
   return results;
 }
 
+// ─── FromGoalServe Builders (12 sports) ───────────────────────────────────────
+
+async function buildFootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeFootballUpcomingRaw();
+  fixtures = await attachGoalServeFootballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildFootballLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeFootballLiveRaw();
+  fixtures = await attachGoalServeFootballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildTennisUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeTennisUpcomingRaw();
+  fixtures = await attachGoalServeTennisOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildTennisLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeTennisLiveRaw();
+  fixtures = await attachGoalServeTennisOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildBasketballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeBasketballUpcomingRaw();
+  fixtures = await attachGoalServeBasketballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildBasketballLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeBasketballLiveRaw();
+  fixtures = await attachGoalServeBasketballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildHockeyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeHockeyUpcomingRaw();
+  fixtures = await attachGoalServeHockeyOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildHockeyLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeHockeyLiveRaw();
+  fixtures = await attachGoalServeHockeyOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildBaseballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeBaseballUpcomingRaw();
+  fixtures = await attachGoalServeBaseballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildBaseballLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeBaseballLiveRaw();
+  fixtures = await attachGoalServeBaseballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildVolleyballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeVolleyballUpcomingRaw();
+  fixtures = await attachGoalServeVolleyballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildVolleyballLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeVolleyballLiveRaw();
+  fixtures = await attachGoalServeVolleyballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildMmaUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeMmaUpcomingRaw();
+  fixtures = await attachGoalServeMmaOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildMmaLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeMmaLiveRaw();
+  fixtures = await attachGoalServeMmaOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildHandballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeHandballUpcomingRaw();
+  fixtures = await attachGoalServeHandballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildHandballLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeHandballLiveRaw();
+  fixtures = await attachGoalServeHandballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildCricketUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeCricketUpcomingRaw();
+  fixtures = await attachGoalServeCricketOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildCricketLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeCricketLiveRaw();
+  fixtures = await attachGoalServeCricketOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildRugbyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeRugbyUpcomingRaw();
+  fixtures = await attachGoalServeRugbyOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildRugbyLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeRugbyLiveRaw();
+  fixtures = await attachGoalServeRugbyOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildEsportsUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeEsportsUpcomingRaw();
+  fixtures = await attachGoalServeEsportsOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildEsportsLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeEsportsLiveRaw();
+  fixtures = await attachGoalServeEsportsOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
+async function buildAmfootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
+  let fixtures = await getGoalServeAmfootballUpcomingRaw();
+  fixtures = await attachGoalServeAmfootballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId !== 1) continue;
+    results.push(convertRawFixtureToUpcomingMatch(fx));
+  }
+  return results;
+}
+
+async function buildAmfootballLiveFromGoalServe(): Promise<LiveMatchState[]> {
+  let fixtures = await getGoalServeAmfootballLiveRaw();
+  fixtures = await attachGoalServeAmfootballOdds(fixtures);
+  const seen = new Set<string>();
+  const results: LiveMatchState[] = [];
+  for (const fx of fixtures) {
+    if (seen.has(fx.matchId)) continue;
+    seen.add(fx.matchId);
+    if (fx.stateId === 1 || fx.stateId === 5) continue;
+    results.push(convertRawFixtureToLiveMatchState(fx));
+  }
+  return results;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
@@ -8761,69 +9378,105 @@ async function rebuildUpcomingCache(): Promise<void> {
     // prior PulseScore integration) prematch are all on PulseScore, each
     // confirmed against a real /leagues sample. Every other sport's prematch
     // remains disconnected pending its own real confirmed sample.
-    let football: UpcomingMatch[];
+    let football: UpcomingMatch[] = [];
     try {
-      football = await buildFootballUpcomingFromSportMonks();
+      if (CONFIG.ENABLE_GOALSERVE) {
+        const gs = await buildFootballUpcomingFromGoalServe();
+        football.push(...gs);
+      }
+      if (CONFIG.ENABLE_SPORTMONKS && football.length === 0) {
+        football = await buildFootballUpcomingFromSportMonks();
+      }
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
         { err },
-        "[sportmonks] buildFootballUpcomingFromSportMonks failed this cycle — keeping last good prematch list",
+        "[tri-fallback] football upcoming failed this cycle — keeping last good prematch list",
       );
       football = _lastGoodFootballUpcoming;
     }
-    let tennis: UpcomingMatch[];
+    let tennis: UpcomingMatch[] = [];
     try {
-      tennis = await buildTennisUpcomingFromPulseScore();
+      if (CONFIG.ENABLE_GOALSERVE) {
+        const gs = await buildTennisUpcomingFromGoalServe();
+        tennis.push(...gs);
+      }
+      if (CONFIG.ENABLE_PULSESCORE && tennis.length === 0) {
+        tennis = await buildTennisUpcomingFromPulseScore();
+      }
       _lastGoodTennisUpcoming = tennis;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+        "[tri-fallback] tennis upcoming failed this cycle — keeping last good prematch list",
       );
       tennis = _lastGoodTennisUpcoming;
     }
-    let basketball: UpcomingMatch[];
+    let basketball: UpcomingMatch[] = [];
     try {
-      basketball = await buildBasketballUpcomingFromPulseScore();
+      if (CONFIG.ENABLE_GOALSERVE) {
+        const gs = await buildBasketballUpcomingFromGoalServe();
+        basketball.push(...gs);
+      }
+      if (CONFIG.ENABLE_PULSESCORE && basketball.length === 0) {
+        basketball = await buildBasketballUpcomingFromPulseScore();
+      }
       _lastGoodBasketballUpcoming = basketball;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+        "[tri-fallback] basketball upcoming failed this cycle — keeping last good prematch list",
       );
       basketball = _lastGoodBasketballUpcoming;
     }
-    let hockey: UpcomingMatch[];
+    let hockey: UpcomingMatch[] = [];
     try {
-      hockey = await buildHockeyUpcomingFromPulseScore();
+      if (CONFIG.ENABLE_GOALSERVE) {
+        const gs = await buildHockeyUpcomingFromGoalServe();
+        hockey.push(...gs);
+      }
+      if (CONFIG.ENABLE_PULSESCORE && hockey.length === 0) {
+        hockey = await buildHockeyUpcomingFromPulseScore();
+      }
       _lastGoodHockeyUpcoming = hockey;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildHockeyUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+        "[tri-fallback] hockey upcoming failed this cycle — keeping last good prematch list",
       );
       hockey = _lastGoodHockeyUpcoming;
     }
-    let volleyball: UpcomingMatch[];
+    let volleyball: UpcomingMatch[] = [];
     try {
-      volleyball = await buildVolleyballUpcomingFromPulseScore();
+      if (CONFIG.ENABLE_GOALSERVE) {
+        const gs = await buildVolleyballUpcomingFromGoalServe();
+        volleyball.push(...gs);
+      }
+      if (CONFIG.ENABLE_PULSESCORE && volleyball.length === 0) {
+        volleyball = await buildVolleyballUpcomingFromPulseScore();
+      }
       _lastGoodVolleyballUpcoming = volleyball;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildVolleyballUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+        "[tri-fallback] volleyball upcoming failed this cycle — keeping last good prematch list",
       );
       volleyball = _lastGoodVolleyballUpcoming;
     }
-    let mma: UpcomingMatch[];
+    let mma: UpcomingMatch[] = [];
     try {
-      mma = await buildMmaUpcomingFromPulseScore();
+      if (CONFIG.ENABLE_GOALSERVE) {
+        const gs = await buildMmaUpcomingFromGoalServe();
+        mma.push(...gs);
+      }
+      if (CONFIG.ENABLE_PULSESCORE && mma.length === 0) {
+        mma = await buildMmaUpcomingFromPulseScore();
+      }
       _lastGoodMmaUpcoming = mma;
     } catch (err) {
       logger.error(
         { err },
-        "[pulsescore] buildMmaUpcomingFromPulseScore failed this cycle — keeping last good prematch list",
+        "[tri-fallback] mma upcoming failed this cycle — keeping last good prematch list",
       );
       mma = _lastGoodMmaUpcoming;
     }
@@ -9949,72 +10602,125 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // shows zero matches in Ao Vivo until it gets the same treatment.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    footballLiveRaw = await buildFootballLiveFromSportMonks();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildFootballLiveFromGoalServe();
+      footballLiveRaw.push(...gs);
+    }
+    if (CONFIG.ENABLE_SPORTMONKS && footballLiveRaw.length === 0) {
+      footballLiveRaw = await buildFootballLiveFromSportMonks();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[sportmonks] buildFootballLiveFromSportMonks failed this tick",
+      "[tri-fallback] football live failed this tick",
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
   let basketballLiveRaw: LiveMatchState[] = [];
   try {
-    basketballLiveRaw = await buildBasketballLiveFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildBasketballLiveFromGoalServe();
+      basketballLiveRaw.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && basketballLiveRaw.length === 0) {
+      basketballLiveRaw = await buildBasketballLiveFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildBasketballLiveFromPulseScore failed this tick",
+      "[tri-fallback] basketball live failed this tick",
     );
   }
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
   let hockeyLiveRaw: LiveMatchState[] = [];
   try {
-    hockeyLiveRaw = await buildHockeyLiveFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildHockeyLiveFromGoalServe();
+      hockeyLiveRaw.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && hockeyLiveRaw.length === 0) {
+      hockeyLiveRaw = await buildHockeyLiveFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildHockeyLiveFromPulseScore failed this tick",
+      "[tri-fallback] hockey live failed this tick",
     );
   }
   const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
   let baseballLiveRaw: LiveMatchState[] = [];
   try {
-    baseballLiveRaw = await buildBaseballLiveFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildBaseballLiveFromGoalServe();
+      baseballLiveRaw.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && baseballLiveRaw.length === 0) {
+      baseballLiveRaw = await buildBaseballLiveFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildBaseballLiveFromPulseScore failed this tick",
+      "[tri-fallback] baseball live failed this tick",
     );
   }
   const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
-  // Re-enabled 2026-08-09 on a THIRD bookmaker ("unibetau") after bwin (no
-  // score field) and bet365 (score stuck at 0-0/empty even when genuinely
-  // in-play) both failed and were reverted the same day — see
-  // buildVolleyballLiveFromPulseScore's own header for the confirmed real
-  // sample that made this one work (genuine matchClock + per-set scores).
   let volleyballLiveRaw: LiveMatchState[] = [];
   try {
-    volleyballLiveRaw = await buildVolleyballLiveFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildVolleyballLiveFromGoalServe();
+      volleyballLiveRaw.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && volleyballLiveRaw.length === 0) {
+      volleyballLiveRaw = await buildVolleyballLiveFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildVolleyballLiveFromPulseScore failed this tick",
+      "[tri-fallback] volleyball live failed this tick",
     );
   }
   const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
-    tennisLiveRaw = await buildTennisLiveFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildTennisLiveFromGoalServe();
+      tennisLiveRaw.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && tennisLiveRaw.length === 0) {
+      tennisLiveRaw = await buildTennisLiveFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildTennisLiveFromPulseScore failed this tick",
+      "[tri-fallback] tennis live failed this tick",
     );
   }
   const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
+  let handballLiveRaw: LiveMatchState[] = [];
+  try {
+    if (CONFIG.ENABLE_GOALSERVE) {
+      handballLiveRaw = await buildHandballLiveFromGoalServe();
+    }
+  } catch (err) {
+    logger.error(
+      { err },
+      "[tri-fallback] handball live failed this tick",
+    );
+  }
+  const handballLive = sportWithFallback("handball", handballLiveRaw);
+  let cricketLiveRaw: LiveMatchState[] = [];
+  try {
+    if (CONFIG.ENABLE_GOALSERVE) {
+      cricketLiveRaw = await buildCricketLiveFromGoalServe();
+    }
+  } catch (err) {
+    logger.error(
+      { err },
+      "[tri-fallback] cricket live failed this tick",
+    );
+  }
+  const cricketLive = sportWithFallback("cricket", cricketLiveRaw);
   const boxingLive: LiveMatchState[] = [];
-  const cricketLive: LiveMatchState[] = [];
-  const handballLive: LiveMatchState[] = [];
   const formula1Live: LiveMatchState[] = [];
 
   // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
@@ -11024,56 +11730,92 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // confirmed sample before being rebuilt the same way.
   let football: UpcomingMatch[] = [];
   try {
-    football = await buildFootballUpcomingFromSportMonks();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildFootballUpcomingFromGoalServe();
+      football.push(...gs);
+    }
+    if (CONFIG.ENABLE_SPORTMONKS && football.length === 0) {
+      football = await buildFootballUpcomingFromSportMonks();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[sportmonks] buildFootballUpcomingFromSportMonks failed this cycle",
+      "[tri-fallback] football upcoming-top failed this cycle",
     );
   }
   let tennis: UpcomingMatch[] = [];
   try {
-    tennis = await buildTennisUpcomingFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildTennisUpcomingFromGoalServe();
+      tennis.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && tennis.length === 0) {
+      tennis = await buildTennisUpcomingFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildTennisUpcomingFromPulseScore failed this cycle",
+      "[tri-fallback] tennis upcoming-top failed this cycle",
     );
   }
   let basketball: UpcomingMatch[] = [];
   try {
-    basketball = await buildBasketballUpcomingFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildBasketballUpcomingFromGoalServe();
+      basketball.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && basketball.length === 0) {
+      basketball = await buildBasketballUpcomingFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildBasketballUpcomingFromPulseScore failed this cycle",
+      "[tri-fallback] basketball upcoming-top failed this cycle",
     );
   }
   let hockey: UpcomingMatch[] = [];
   try {
-    hockey = await buildHockeyUpcomingFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildHockeyUpcomingFromGoalServe();
+      hockey.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && hockey.length === 0) {
+      hockey = await buildHockeyUpcomingFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildHockeyUpcomingFromPulseScore failed this cycle",
+      "[tri-fallback] hockey upcoming-top failed this cycle",
     );
   }
   let volleyball: UpcomingMatch[] = [];
   try {
-    volleyball = await buildVolleyballUpcomingFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildVolleyballUpcomingFromGoalServe();
+      volleyball.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && volleyball.length === 0) {
+      volleyball = await buildVolleyballUpcomingFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildVolleyballUpcomingFromPulseScore failed this cycle",
+      "[tri-fallback] volleyball upcoming-top failed this cycle",
     );
   }
   let baseball: UpcomingMatch[] = [];
   try {
-    baseball = await buildBaseballUpcomingFromPulseScore();
+    if (CONFIG.ENABLE_GOALSERVE) {
+      const gs = await buildBaseballUpcomingFromGoalServe();
+      baseball.push(...gs);
+    }
+    if (CONFIG.ENABLE_PULSESCORE && baseball.length === 0) {
+      baseball = await buildBaseballUpcomingFromPulseScore();
+    }
   } catch (err) {
     logger.error(
       { err },
-      "[pulsescore] buildBaseballUpcomingFromPulseScore failed this cycle",
+      "[tri-fallback] baseball upcoming-top failed this cycle",
     );
   }
   rememberUpcomingFootballEligibility(football);
@@ -14246,7 +14988,11 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
   const side = String(req.query["side"] ?? "home");
   const limit = Math.min(10, Math.max(1, Number(req.query["limit"]) || 5));
 
-  if (!matchId.startsWith("sportmonks-football-")) {
+  if (!matchId.startsWith("sportmonks-football-") && !matchId.startsWith("gs-soccer-")) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  if (matchId.startsWith("gs-soccer-")) {
     res.json({ fixtures: [] });
     return;
   }

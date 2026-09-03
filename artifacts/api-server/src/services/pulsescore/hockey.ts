@@ -494,6 +494,7 @@ async function fetchHockeyUpcoming(): Promise<PulseScoreHockeyPrematchEvent[]> {
  * Empty array if PULSESCORE_API_KEY isn't configured, or the upstream call
  * fails on the very first attempt (nothing cached yet to fall back to). */
 export async function getPulseScoreHockeyUpcoming(): Promise<PulseScoreHockeyPrematchEvent[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   if (!CONFIG.PULSESCORE_API_KEY) return [];
   const now = Date.now();
   if (upcomingCache && now - upcomingCache.fetchedAt < HOCKEY_UPCOMING_TTL_MS)

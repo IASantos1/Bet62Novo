@@ -52,6 +52,9 @@ export async function pulseScoreGet<T>(
   timeoutMs = 4000,
   bookmaker?: string,
 ): Promise<T> {
+  if (!CONFIG.ENABLE_PULSESCORE) {
+    throw new Error("[pulsescore] killswitch ENABLE_PULSESCORE=false — no network");
+  }
   const bookmakerName = bookmaker ?? CONFIG.PULSESCORE_BOOKMAKER;
   await throttleBookmaker(bookmakerName);
   const resp = await fetch(pulseScoreRestUrl(path, bookmaker), {
@@ -79,6 +82,7 @@ export async function pulseScoreGetWithRetry<T>(
   path: string,
   opts?: { timeoutMs?: number; bookmaker?: string; retries?: number; retryDelayMs?: number },
 ): Promise<T | null> {
+  if (!CONFIG.ENABLE_PULSESCORE) return null;
   const retries = opts?.retries ?? 3;
   const baseDelayMs = opts?.retryDelayMs ?? 2000;
   for (let attempt = 0; attempt <= retries; attempt++) {

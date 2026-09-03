@@ -6,6 +6,7 @@
 // fetches the raw league list; the coverage report itself lives in
 // routes/admin.ts (pulsescore-league-coverage) since it needs
 // countryForLeagueName from matches.ts.
+import { CONFIG } from "../../lib/config.js";
 import { pulseScoreGet } from "./client.js";
 
 export type PulseScoreLeague = {
@@ -22,6 +23,7 @@ export type PulseScoreLeague = {
 export async function pulseScoreFetchFootballLeagues(
   maxPages = 10,
 ): Promise<PulseScoreLeague[]> {
+  if (!CONFIG.ENABLE_PULSESCORE) return [];
   const out: PulseScoreLeague[] = [];
   for (let page = 1; page <= maxPages; page++) {
     const batch = await pulseScoreGet<PulseScoreLeague[]>(
