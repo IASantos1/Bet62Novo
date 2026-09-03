@@ -325,7 +325,7 @@ router.get("/audit", adminMiddleware, async (req: AdminRequest, res: Response): 
 // ── FEED HEALTH ───────────────────────────────────────────────────────────────
 // GET /api/admin/feed
 // Tests our own internal API routes — these reflect what users actually see,
-// regardless of which Statpal plan/key is active (fallback/simulation included).
+// regardless of which upstream provider/plan is active (fallback/simulation included).
 router.get("/feed", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
   const base = "http://localhost:" + (process.env.PORT ?? "8080");
   const endpoints = [

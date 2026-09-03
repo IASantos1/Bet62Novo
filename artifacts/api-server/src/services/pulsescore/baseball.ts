@@ -1,8 +1,9 @@
 // Baseball (MLB/minor league) prematch odds from PulseScore (onexbet).
 // Built from scratch 2026-08-28 — baseball had NO PulseScore prematch
 // integration before this: prematch odds still came entirely from the old
-// Statpal/SportsAPI V2 pipeline (see matches.ts's getMLBOdds), and even
-// baseball's LIVE PulseScore integration (genericSportLive.ts's
+// StatPal/SportsAPI V2 pipeline (matches.ts's getMLBOdds, since removed
+// along with the rest of StatPal), and even baseball's LIVE PulseScore
+// integration (genericSportLive.ts's
 // pulseScoreBaseball, already on onexbet since 2026-08-27) only ever
 // extracted the plain moneyline/total/doubleChance/oddEven generically —
 // no run line, no F5, no props, and prematch not touched at all.

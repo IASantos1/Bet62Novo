@@ -43,10 +43,7 @@ import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
-import {
-  unknownStatpalMarkets,
-  countryForLeagueName,
-} from "./matches.js";
+import { countryForLeagueName } from "./matches.js";
 import { pulseScoreFetchFootballLeagues } from "../services/pulsescore/leagues.js";
 import {
   getPalaceCasinoProviders,
@@ -2160,59 +2157,6 @@ router.get(
   },
 );
 
-// ── Statpal API usage ─────────────────────────────────────────────────────────
-// Cached so the dashboard card can refresh every 60 s without hammering Statpal.
-let statpalUsageCache: { data: Record<string, unknown>; at: number } | null = null;
-const STATPAL_USAGE_TTL_MS = 60_000;
-
-router.get("/statpal-usage", adminMiddleware, async (_req, res) => {
-  try {
-    const key = process.env.STATPAL_API_KEY;
-    if (!key) {
-      res.status(503).json({ error: "STATPAL_API_KEY não configurada" });
-      return;
-    }
-
-    // Serve from cache if fresh
-    if (statpalUsageCache && Date.now() - statpalUsageCache.at < STATPAL_USAGE_TTL_MS) {
-      res.json(statpalUsageCache.data);
-      return;
-    }
-
-    const url = new URL("https://statpal.io/api/user-request-count");
-    url.searchParams.set("access_key", key);
-
-    const resp = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(8000),
-      headers: { Accept: "application/json" },
-    });
-
-    if (!resp.ok) {
-      res.status(502).json({ error: `Statpal devolveu ${resp.status}` });
-      return;
-    }
-
-    const raw = await resp.json() as Record<string, unknown>;
-
-    // Normalize field names (Statpal uses Portuguese keys)
-    const data = {
-      accessKey: raw["access_key"] ?? raw["accessKey"] ?? null,
-      date: raw["data_atual"] ?? raw["date"] ?? null,
-      requestCount:
-        raw["contagem_de_solicitações"] ??
-        raw["request_count"] ??
-        raw["requestCount"] ??
-        null,
-    };
-
-    statpalUsageCache = { data, at: Date.now() };
-    res.json(data);
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/statpal-usage error");
-    res.status(500).json({ error: "Erro ao consultar Statpal" });
-  }
-});
-
 // Read-only diagnostic for the PulseScore integration (real bookmaker odds).
 // Each sport's live odds are built directly from this same feed by its own
 // buildXLiveFromPulseScore function in matches.ts (buildFootballLive.../
@@ -2257,8 +2201,8 @@ router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res)
   }
 });
 
-// PulseScore usage — same "Utilização" card the admin dashboard already
-// shows for Statpal, but PulseScore has no /user-request-count equivalent
+// PulseScore usage — same "Utilização" card the admin dashboard shows for
+// other providers, but PulseScore has no /user-request-count equivalent
 // to query from their side, so this reports what WE'VE counted ourselves
 // (see the requestsToday/framesToday counters in the pulsescore services).
 router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res) => {
@@ -2949,19 +2893,6 @@ router.patch(
     }
   },
 );
-
-// Read-only diagnostic: market names Statpal's /odds/prematch feed returns
-// that we don't currently parse into AdvancedMarkets (see matches.ts —
-// parseStatpalPrematchMarkets). Fills up as real production traffic hits the
-// football odds endpoints; used to discover what market depth Statpal
-// actually offers (including any player props like anytime goalscorer or
-// assist) without guessing blind.
-router.get("/unknown-markets", adminMiddleware, async (_req: AdminRequest, res) => {
-  const entries = Array.from(unknownStatpalMarkets.entries())
-    .map(([name, v]) => ({ name, ...v }))
-    .sort((a, b) => b.count - a.count);
-  res.json({ count: entries.length, markets: entries });
-});
 
 export default router;
 

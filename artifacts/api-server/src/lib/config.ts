@@ -1,20 +1,5 @@
-const STATPAL_API_KEY =
-  process.env["STATPAL_API_KEY"] ??
-  process.env["STATSPAL_API_KEY"] ??
-  "";
-
-const STATPAL_BASE_URL =
-  process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
-
-const FOOTBALL_DAILY_PROVIDER =
-  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "statpal";
-
-const FOOTBALL_REFERENCE_PROVIDER =
-  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "statpal";
-
 // SilentAPI — third-party casino game aggregator (game launch + wallet
-// callback). Secrets only ever come from the environment, never hardcoded —
-// same convention as STATPAL_API_KEY above.
+// callback). Secrets only ever come from the environment, never hardcoded.
 const SILENTAPI_BASE_URL =
   process.env["SILENTAPI_BASE_URL"]?.trim() || "https://silentapi.org/api";
 const SILENTAPI_AUTH_TOKEN = process.env["SILENTAPI_AUTH_TOKEN"] ?? "";
@@ -113,13 +98,6 @@ const AI_AGENTS_MODEL =
 //      footballWs.ts).
 //    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
 //
-//  STATS/EVENTOS: StatPal — dados estatísticos, play-by-play, metadados.
-//    • RESPONSABILIDADES: Estatísticas de jogo, play-by-play, H2H, rankings/standings, logos, ligas detalhadas.
-//    • NÃO FAZ: Agregação multi-bookmaker de odds (isso é PulseScore).
-//    • Soccer: /v2/soccer/matches/live + /match/{id}/statistics. Outros esportes: /v1/*
-//    • Cota: 300.000 requests/dia. Cache TTL rigoroso. Verificação de quota via /user-request-count (GRÁTIS, não conta na cota).
-//    • 100% AUTOMÁTICO por nome de time (ZERO trabalho manual por partida — futebol apenas).
-//
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
 
@@ -136,8 +114,6 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
-  STATPAL_API_KEY,
-  STATPAL_BASE_URL,
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
   SILENTAPI_CALLBACK_SECRET,
@@ -155,8 +131,6 @@ export const CONFIG = {
   AI_AGENTS_MODEL,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
-  FOOTBALL_DAILY_PROVIDER,
-  FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,

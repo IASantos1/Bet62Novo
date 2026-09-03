@@ -19,10 +19,6 @@ import {
   ensureFinishedMatchResult,
   finishedMatchResults,
   liveMatchState,
-  scanVolleyballForFinished,
-  scanNHLForFinished,
-  scanNBAForFinished,
-  scanMLBForFinished,
 } from "./routes/matches.js";
 import { startSettlementQueueWorker } from "./lib/settlementQueue.js";
 import { runSettlementRecovery } from "./jobs/settlementRecovery.js";
@@ -4012,7 +4008,10 @@ function getSelectionLookupMatchIds(
 
 function isProviderManagedMatchId(matchId: string): boolean {
   // tennis-v1 must be included so ensureFinishedMatchResult (with DB fallback) is called
-  // nhl/nba/mlb are the prefixes used by Statpal-native scan functions
+  // nhl/nba/mlb are the prefixes that were used by StatPal-native scan functions
+  // (scanNHLForFinished/scanNBAForFinished/scanMLBForFinished, removed along with
+  // the rest of the StatPal integration — kept here only for DB-fallback lookup
+  // of historical results on old pending bets, same as tennis-v1/tennis-v2 above)
   // pulsescore-football/pulsescore-tennis added 2026-08-08 — ensureFinishedMatchResult
   // gained a DB-recovery branch for these (matches.ts) but it was never reachable from
   // the settlement cycle's ensure-loop since this regex never matched the current live
@@ -6062,17 +6061,23 @@ async function expireStalePendingBets(): Promise<void> {
  * Start the background settlement worker.
  *
  * Each cycle (every ~60 s):
- *   1. scanNHLForFinished()         — NHL finished matches (Statpal live + daily)
- *      scanNBAForFinished()         — NBA finished matches (Statpal live + daily)
- *      scanMLBForFinished()         — MLB finished matches (Statpal live + daily)
- *   2. scanVolleyballForFinished()  — volleyball finished matches from live feed
+ *   1. autoSettlePendingBets()      — settle bets with known results
+ *   2. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
  *
  * Tennis is NOT scanned here — the legacy SportsAPI Pro tennis-v1-* scan
  * (scanTennisV1ForFinished) was removed; those matchIds now fall through
  * ensureFinishedMatchResult() unhandled and resolve only via the 72h
  * stale-bet void/refund path (expireStalePendingBets()) below.
- *   3. autoSettlePendingBets()      — settle bets with known results
- *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *
+ * Volleyball/NHL/NBA/MLB are NOT scanned here either — their StatPal-only
+ * scan functions (scanVolleyballForFinished/scanNHLForFinished/
+ * scanNBAForFinished/scanMLBForFinished) were removed along with the
+ * StatPal integration. Those matchIds (volley-live-, volley-odds-, nhl-,
+ * nba-, mlb- prefixes) now fall through ensureFinishedMatchResult()
+ * unhandled too, resolving only via the same 72h stale-bet void/refund path
+ * — a known, accepted consequence of the removal (no real settlement data
+ * for pending bets on those formats any more, same tradeoff as tennis
+ * above).
  *
  * Football is NOT scanned here anymore — since the PulseScore migration
  * (2026-08-05), football matches carry "pulsescore-football-*" ids, not
@@ -6134,16 +6139,9 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: Statpal-only — volleyball, NHL, NBA, MLB.
-      // Football is no longer scanned here — see startSettlementWorker's
-      // doc comment above for why. Tennis is no longer scanned here either
-      // — see the doc comment above for why.
-      await Promise.allSettled([
-        scanVolleyballForFinished(),   // volleyball (Statpal live)
-        scanNHLForFinished(),          // hockey (Statpal live + daily)
-        scanNBAForFinished(),          // basketball (Statpal live + daily)
-        scanMLBForFinished(),          // baseball (Statpal live + daily)
-      ]);
+      // No per-sport scan step here anymore — football, tennis, and
+      // volleyball/NHL/NBA/MLB (StatPal, removed) all settle through other
+      // paths; see startSettlementWorker's doc comment above for why.
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {
         await autoSettlePendingBets();

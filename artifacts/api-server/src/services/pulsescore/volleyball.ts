@@ -1,10 +1,10 @@
 // Volleyball prematch odds from PulseScore. Built from scratch 2026-08-09,
 // pinned to bwin (VOLLEYBALL_BOOKMAKER below) — volleyball had no
-// PulseScore integration at all before this (odds came from a since-
-// disconnected Statpal feed, used today only to recover final scores for
-// old bets — see matches.ts's scanVolleyballForFinished — and a
-// computeVolleyballExtras synthetic model that was written but never
-// actually wired up anywhere).
+// PulseScore integration at all before this (odds came from the StatPal
+// feed, since fully disconnected and removed — it used to recover final
+// scores for old bets via matches.ts's scanVolleyballForFinished, also
+// removed along with it — and a computeVolleyballExtras synthetic model
+// that was written but never actually wired up anywhere).
 //
 // Live: originally split onto a separate bookmaker (bwin's volleyball live
 // events carried no `score` field at all, only matchClock.period — see git

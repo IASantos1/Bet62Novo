@@ -943,7 +943,7 @@ test("mergeTennisWsFreshness: a WS reading OLDER than REST's own must NOT regres
 // real live sample (2026-08-08). The "No goalscorer" row must be excluded
 // (it's not a player), and each surviving row's `player` string must be
 // exactly what a "pg:{player}" selection key would carry, since
-// settlement.ts matches that against Statpal's own goal-incident names.
+// settlement.ts matches that against the live goal-incident feed's names.
 test("extractFootballOverride: extracts bwin's Anytime Goalscorer market, excluding the 'No goalscorer' row", () => {
   const goalscorer = {
     canonicalMarket: "OTHER",
