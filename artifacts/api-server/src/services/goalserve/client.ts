@@ -133,13 +133,28 @@ export type GoalServeFeedRoot<T = unknown> = T & {
 
 async function gunzipIfNeeded(resp: Response): Promise<Buffer> {
   const arr = new Uint8Array(await resp.arrayBuffer());
+  const raw = Buffer.from(arr);
   const ce = resp.headers.get("content-encoding") ?? "";
-  if (ce.toLowerCase().includes("gzip")) {
-    return new Promise<Buffer>((resolve, reject) => {
-      zlib.gunzip(Buffer.from(arr), (err, buf) => (err ? reject(err) : resolve(buf)));
-    });
+  const markedGzip = ce.toLowerCase().includes("gzip");
+  if (!markedGzip && raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b) {
+    logger.debug("[goalserve] content-encoding missing but magic bytes are gzip");
   }
-  return Buffer.from(arr);
+  const tryGunzip = markedGzip || (raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b);
+  if (!tryGunzip) return raw;
+  try {
+    return await new Promise<Buffer>((resolve, reject) => {
+      zlib.gunzip(raw, (err, buf) => (err ? reject(err) : resolve(buf)));
+    });
+  } catch (err: any) {
+    if (err && err.code === "Z_DATA_ERROR") {
+      logger.debug(
+        { code: err.code, errno: err.errno, len: raw.length },
+        "[goalserve] gzip decompress failed (Z_DATA_ERROR) — returning raw as plain utf8 (proxy-decompressed or server-side plain)",
+      );
+      return raw;
+    }
+    throw err;
+  }
 }
 
 async function goalServeFetchRaw<T>(
