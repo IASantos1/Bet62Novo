@@ -1,11 +1,11 @@
 // Cross-provider team-name matching for PulseScore ↔ our own tracked
-// matches (Statpal/SportsAPI V2 team names). Deliberately a standalone
-// copy of the same tolerant-match approach already proven in
-// routes/matches.ts (namesMatch(), used there for Statpal ↔ SportScore
-// matching) rather than an import from matches.ts — importing from there
-// would create a circular dependency (matches.ts imports this service),
-// and this keeps the blast radius of a PulseScore-specific tweak away
-// from the core matches.ts matching logic used for the live tracker.
+// matches. Deliberately a standalone copy of a tolerant-match approach
+// (originally proven against the now-removed StatPal/SportsAPI V2
+// integration's team names) rather than an import from matches.ts —
+// importing from there would create a circular dependency (matches.ts
+// imports this service), and this keeps the blast radius of a
+// PulseScore-specific tweak away from the core matches.ts matching logic
+// used for the live tracker.
 //
 // The >=0.82 fuzzy floor is the same value already battle-tested there
 // (verified to separate real near-misses like "Deportivo Cali" vs
@@ -13,7 +13,7 @@
 
 // BetBY's individual-player sports (tennis, table-tennis, etc.) name
 // players "Lastname, Firstname" — e.g. "Ruse, Elena-Gabriela" — while every
-// other provider used here (Statpal/SportsAPI) shows "Firstname Lastname".
+// other provider used here shows "Firstname Lastname".
 // A literal comma essentially never appears in a real team/club name, so
 // it's an unambiguous signal to reorder before comparing rather than a
 // generic normalization that could misfire on club names.

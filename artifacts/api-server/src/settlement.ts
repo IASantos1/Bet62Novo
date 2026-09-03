@@ -19,11 +19,6 @@ import {
   ensureFinishedMatchResult,
   finishedMatchResults,
   liveMatchState,
-  scanVolleyballForFinished,
-  scanTennisV1ForFinished,
-  scanNHLForFinished,
-  scanNBAForFinished,
-  scanMLBForFinished,
 } from "./routes/matches.js";
 import { startSettlementQueueWorker } from "./lib/settlementQueue.js";
 import { runSettlementRecovery } from "./jobs/settlementRecovery.js";
@@ -4013,7 +4008,10 @@ function getSelectionLookupMatchIds(
 
 function isProviderManagedMatchId(matchId: string): boolean {
   // tennis-v1 must be included so ensureFinishedMatchResult (with DB fallback) is called
-  // nhl/nba/mlb are the prefixes used by Statpal-native scan functions
+  // nhl/nba/mlb are the prefixes that were used by StatPal-native scan functions
+  // (scanNHLForFinished/scanNBAForFinished/scanMLBForFinished, removed along with
+  // the rest of the StatPal integration — kept here only for DB-fallback lookup
+  // of historical results on old pending bets, same as tennis-v1/tennis-v2 above)
   // pulsescore-football/pulsescore-tennis added 2026-08-08 — ensureFinishedMatchResult
   // gained a DB-recovery branch for these (matches.ts) but it was never reachable from
   // the settlement cycle's ensure-loop since this regex never matched the current live
@@ -4495,9 +4493,11 @@ function liveDefinitiveOutcomeForSel(
   // total (audit finding, 2026-08-11, user report of a ticket wrongly
   // settling "lost"). These two markets always fall through to null
   // (pending) here and wait for the authoritative full-time count in
-  // match_results (SportsAPI V2's fetchFootballExtras, captured at finish)
-  // via the normal non-live settlement path — a later but correct
-  // settlement, never a fast but possibly wrong one.
+  // match_results (captured natively from SportMonks CORNERS/YELLOWCARDS
+  // statistics in finalizeStaleLiveMatch, at finish — SportsAPI Pro's old
+  // fetchFootballExtras role was removed 2026-09-03) via the normal
+  // non-live settlement path — a later but correct settlement, never a
+  // fast but possibly wrong one.
   const mCorner = s.match(/^([ou])c(\d+)$/);
   if (mCorner) return null;
 
@@ -6061,12 +6061,23 @@ async function expireStalePendingBets(): Promise<void> {
  * Start the background settlement worker.
  *
  * Each cycle (every ~60 s):
- *   1. scanNHLForFinished()         — NHL finished matches (Statpal live + daily)
- *      scanNBAForFinished()         — NBA finished matches (Statpal live + daily)
- *      scanMLBForFinished()         — MLB finished matches (Statpal live + daily)
- *   2. scanVolleyballForFinished()  — volleyball finished matches from live feed
- *   3. autoSettlePendingBets()      — settle bets with known results
- *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *   1. autoSettlePendingBets()      — settle bets with known results
+ *   2. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *
+ * Tennis is NOT scanned here — the legacy SportsAPI Pro tennis-v1-* scan
+ * (scanTennisV1ForFinished) was removed; those matchIds now fall through
+ * ensureFinishedMatchResult() unhandled and resolve only via the 72h
+ * stale-bet void/refund path (expireStalePendingBets()) below.
+ *
+ * Volleyball/NHL/NBA/MLB are NOT scanned here either — their StatPal-only
+ * scan functions (scanVolleyballForFinished/scanNHLForFinished/
+ * scanNBAForFinished/scanMLBForFinished) were removed along with the
+ * StatPal integration. Those matchIds (volley-live-, volley-odds-, nhl-,
+ * nba-, mlb- prefixes) now fall through ensureFinishedMatchResult()
+ * unhandled too, resolving only via the same 72h stale-bet void/refund path
+ * — a known, accepted consequence of the removal (no real settlement data
+ * for pending bets on those formats any more, same tradeoff as tennis
+ * above).
  *
  * Football is NOT scanned here anymore — since the PulseScore migration
  * (2026-08-05), football matches carry "pulsescore-football-*" ids, not
@@ -6128,16 +6139,9 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: Statpal-only — volleyball, tennis, NHL, NBA, MLB.
-      // Football is no longer scanned here — see startSettlementWorker's
-      // doc comment above for why.
-      await Promise.allSettled([
-        scanVolleyballForFinished(),   // volleyball (Statpal live)
-        scanTennisV1ForFinished(),     // tennis (Statpal V1)
-        scanNHLForFinished(),          // hockey (Statpal live + daily)
-        scanNBAForFinished(),          // basketball (Statpal live + daily)
-        scanMLBForFinished(),          // baseball (Statpal live + daily)
-      ]);
+      // No per-sport scan step here anymore — football, tennis, and
+      // volleyball/NHL/NBA/MLB (StatPal, removed) all settle through other
+      // paths; see startSettlementWorker's doc comment above for why.
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {
         await autoSettlePendingBets();

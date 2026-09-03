@@ -1,13 +1,13 @@
 /**
- * StatpalCache — Redis-backed cache with in-memory fallback.
+ * kvCache — Redis-backed key/value cache with in-memory fallback.
  *
  * Uses the REDIS_URL env var (same connection as settlement queue).
  * Falls back to an in-process Map when Redis is unavailable so the
  * server still works without Redis configured.
  *
- *   import { statpalCache } from "./cache.js";
- *   const data = await statpalCache.get("key");
- *   await statpalCache.set("key", data, 60);   // TTL in seconds
+ *   import { kvCache } from "./kvCache.js";
+ *   const data = await kvCache.get("key");
+ *   await kvCache.set("key", data, 60);   // TTL in seconds
  */
 
 import Redis from "ioredis";
@@ -65,7 +65,7 @@ function getRedis(): any | null {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export const statpalCache = {
+export const kvCache = {
   async get(key: string): Promise<string | null> {
     const redis = getRedis();
     if (redis) {
@@ -99,26 +99,3 @@ export const statpalCache = {
     }
   },
 };
-
-// ── TTL presets (seconds) ────────────────────────────────────────────────────
-// Used by StatpalClient.cachedGet() to pick the right TTL per endpoint type.
-
-export const STATPAL_TTL = {
-  /** Live scores / live odds — real-time, poll frequently */
-  LIVE:         15,
-  /** In-match events (goals, cards, lineups once set) */
-  EVENTS:       20,
-  /** Match lineups — set at kickoff, then stable */
-  LINEUPS:      60,
-  /** Daily fixtures / schedule */
-  FIXTURES:    120,
-  /** Team & player stats — changes only after matches */
-  TEAM_STATS:  300,
-  PLAYER_STATS:300,
-  /** League standings */
-  STANDINGS:   300,
-  /** Head-to-head history — fully historical, very static */
-  H2H:        3600,
-  /** Predictions / weather — pre-match context */
-  PREMATCH:    300,
-} as const;

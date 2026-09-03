@@ -10,7 +10,7 @@ import { and, asc, count, desc, eq, ilike, inArray } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
-import { statpalCache } from "../services/statpal/cache.js";
+import { kvCache } from "../services/cache/kvCache.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
 import { timingSafeEqualString } from "../lib/security.js";
 import {
@@ -83,7 +83,7 @@ router.get("/games", async (req: Request, res: Response) => {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
   const cacheKey = `casino:games:v3:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
-  const cached = await statpalCache.get(cacheKey);
+  const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
     res.send(cached);
@@ -141,7 +141,7 @@ router.get("/games", async (req: Request, res: Response) => {
   ]);
 
   const payload = JSON.stringify({ page, limit, total: Number(total), games });
-  await statpalCache.set(cacheKey, payload, GAMES_CACHE_TTL_SECONDS);
+  await kvCache.set(cacheKey, payload, GAMES_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);
 });
@@ -164,7 +164,7 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
   );
 
   const cacheKey = `casino:games-grouped:v1:${provider || "*"}:${page}:${limit}`;
-  const cached = await statpalCache.get(cacheKey);
+  const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
     res.send(cached);
@@ -224,14 +224,14 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
   const groups = allGroups.slice((page - 1) * limit, page * limit);
 
   const payload = JSON.stringify({ page, limit, totalGroups, groups });
-  await statpalCache.set(cacheKey, payload, GROUPS_CACHE_TTL_SECONDS);
+  await kvCache.set(cacheKey, payload, GROUPS_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);
 });
 
 router.get("/providers", async (_req: Request, res: Response) => {
   const cacheKey = "casino:providers:v2";
-  const cached = await statpalCache.get(cacheKey);
+  const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
     res.send(cached);
@@ -245,7 +245,7 @@ router.get("/providers", async (_req: Request, res: Response) => {
     .orderBy(asc(casinoGamesTable.provider));
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });
-  await statpalCache.set(cacheKey, payload, PROVIDERS_CACHE_TTL_SECONDS);
+  await kvCache.set(cacheKey, payload, PROVIDERS_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);
 });
@@ -264,7 +264,7 @@ router.get("/banners", async (req: Request, res: Response) => {
   }
 
   const cacheKey = `casino:banners:v1:${position}`;
-  const cached = await statpalCache.get(cacheKey);
+  const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
     res.send(cached);
@@ -319,7 +319,7 @@ router.get("/banners", async (req: Request, res: Response) => {
     .filter((b) => b.linkUrl || b.games.length > 0);
 
   const payload = JSON.stringify({ banners: result });
-  await statpalCache.set(cacheKey, payload, BANNERS_CACHE_TTL_SECONDS);
+  await kvCache.set(cacheKey, payload, BANNERS_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);
 });

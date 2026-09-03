@@ -12,7 +12,6 @@ declare module "@workspace/db" {
   export const settlementIdempotencyTable: any; export const manualReviewQueueTable: any;
   export const settlementReplayLogTable: any;
   export const casinoGamesTable: any; export const casinoBannersTable: any;
-  export const liveStreamMappingsTable: any;
 }
 declare module "@workspace/db/schema" {
   export const usersTable: any; export const betsTable: any;
@@ -27,7 +26,6 @@ declare module "@workspace/db/schema" {
   export const settlementIdempotencyTable: any; export const manualReviewQueueTable: any;
   export const settlementReplayLogTable: any;
   export const casinoGamesTable: any; export const casinoBannersTable: any;
-  export const liveStreamMappingsTable: any;
 }
 declare module "@workspace/api-zod" {
   export default function(...args: any[]): any;

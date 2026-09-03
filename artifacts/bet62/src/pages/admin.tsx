@@ -240,24 +240,6 @@ type AdminCasinoBanner = {
   updatedAt: string;
 };
 
-type AdminLiveMapping = {
-  id: number;
-  betbyEventId: string;
-  home: string;
-  away: string;
-  league: string | null;
-  videoMatchId: number | null;
-  videoSportId: number | null;
-  videoTournamentId: number | null;
-  videoStatsHost: string | null;
-  videoKey: string | null;
-  videoBasePath: string | null;
-  videoTimestamp: number | null;
-  resolvedBy: "auto" | "manual";
-  createdAt: string;
-  updatedAt: string;
-};
-
 type UserDetail = {
   user: AdminUser;
   bets: AdminBet[];
@@ -807,7 +789,6 @@ type TabId =
   | "events"
   | "settlement-logs"
   | "casino"
-  | "live"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -894,13 +875,6 @@ export default function AdminPage() {
   const [unsuspending, setUnsuspending] = useState<string | null>(null);
   const [savingSetting, setSavingSetting] = useState<string | null>(null);
 
-  // Statpal API usage
-  const [statpalUsage, setStatpalUsage] = useState<{
-    date: string | null;
-    requestCount: number | null;
-  } | null>(null);
-  const [statpalUsageLoading, setStatpalUsageLoading] = useState(false);
-
   // PulseScore API usage (real bookmaker odds — football + tennis both REST-polled)
   const [pulsescoreUsage, setPulsescoreUsage] = useState<{
     football: { requestsToday: number; date: string };
@@ -940,33 +914,6 @@ export default function AdminPage() {
   const [casinoGameSearch, setCasinoGameSearch] = useState("");
   const [casinoGamePage, setCasinoGamePage] = useState(1);
   const [casinoTxPage, setCasinoTxPage] = useState(1);
-
-  // Ao Vivo (SMYTDRYT) mapping tab — per-row edit buffer keyed by
-  // betbyEventId, only touched fields are sent on save.
-  const [liveMappingEdits, setLiveMappingEdits] = useState<
-    Record<string, Partial<{
-      videoMatchId: string;
-      videoSportId: string;
-      videoTournamentId: string;
-      videoStatsHost: string;
-      videoKey: string;
-      videoBasePath: string;
-      videoTimestamp: string;
-    }>>
-  >({});
-  const [liveMappingSaving, setLiveMappingSaving] = useState<Record<string, boolean>>({});
-  const [liveMappingSearch, setLiveMappingSearch] = useState("");
-  const [liveMappingStatusFilter, setLiveMappingStatusFilter] = useState<
-    "all" | "mapped" | "unmapped"
-  >("all");
-  // Bug found 2026-08-16: this whole tab only ever let you EDIT a mapping
-  // that already existed (PATCH by betbyEventId) — no row was ever created
-  // automatically, and there was no "add new" form, so the list was
-  // permanently empty in practice. This is the create-side counterpart.
-  const [newMappingHome, setNewMappingHome] = useState("");
-  const [newMappingAway, setNewMappingAway] = useState("");
-  const [newMappingLeague, setNewMappingLeague] = useState("");
-  const [newMappingSaving, setNewMappingSaving] = useState(false);
 
   const [bannerModal, setBannerModal] = useState<"new" | AdminCasinoBanner | null>(null);
   const [bannerForm, setBannerForm] = useState<{
@@ -1087,19 +1034,6 @@ export default function AdminPage() {
   });
   const stats = statsQuery.data ?? null;
   const refetchStats = statsQuery.refetch;
-
-  const fetchStatpalUsage = useCallback(async () => {
-    if (!token) return;
-    setStatpalUsageLoading(true);
-    try {
-      const res = await fetch("/api/admin/statpal-usage", { headers: authHeader });
-      if (res.ok) setStatpalUsage(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setStatpalUsageLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPulsescoreUsage = useCallback(async () => {
     if (!token) return;
@@ -1500,121 +1434,6 @@ export default function AdminPage() {
   const casinoBannersLoading = casinoBannersQuery.isLoading;
   const refetchCasinoBanners = casinoBannersQuery.refetch;
 
-  // Polls every 5s while the tab is open so mapping edits made elsewhere
-  // (e.g. another admin) show up without a manual refresh.
-  const liveMappingsQuery = useQuery({
-    queryKey: ["admin", "live-stream", "mappings"],
-    queryFn: async (): Promise<{ mappings: AdminLiveMapping[] }> => {
-      const res = await fetch("/api/admin/live-stream/mappings", { headers: authHeader });
-      if (!res.ok) throw new Error("Failed to load live-stream mappings");
-      return res.json();
-    },
-    enabled: !!token && activeTab === "live",
-    refetchInterval: activeTab === "live" ? 5000 : false,
-  });
-  const liveMappings = liveMappingsQuery.data?.mappings ?? [];
-  const liveMappingsLoading = liveMappingsQuery.isLoading;
-  const refetchLiveMappings = liveMappingsQuery.refetch;
-
-  const filteredLiveMappings = liveMappings
-    .filter((m) => {
-      if (liveMappingStatusFilter === "mapped") return m.resolvedBy === "manual";
-      if (liveMappingStatusFilter === "unmapped") return m.resolvedBy !== "manual";
-      return true;
-    })
-    .filter((m) => {
-      const q = liveMappingSearch.trim().toLowerCase();
-      if (!q) return true;
-      return (
-        m.home.toLowerCase().includes(q) ||
-        m.away.toLowerCase().includes(q) ||
-        (m.league ?? "").toLowerCase().includes(q) ||
-        m.betbyEventId.toLowerCase().includes(q)
-      );
-    });
-
-  const saveLiveMapping = useCallback(
-    async (betbyEventId: string) => {
-      const edits = liveMappingEdits[betbyEventId];
-      if (!edits) return;
-      setLiveMappingSaving((prev) => ({ ...prev, [betbyEventId]: true }));
-      try {
-        const body: Record<string, number | string | null> = {};
-        for (const key of [
-          "videoMatchId",
-          "videoSportId",
-          "videoTournamentId",
-          "videoStatsHost",
-          "videoKey",
-          "videoBasePath",
-          "videoTimestamp",
-        ] as const) {
-          if (!(key in edits)) continue;
-          const raw = (edits[key] ?? "").trim();
-          if (key === "videoStatsHost" || key === "videoKey" || key === "videoBasePath") {
-            body[key] = raw === "" ? null : raw;
-          } else {
-            body[key] = raw === "" ? null : Number(raw);
-          }
-        }
-        const res = await fetch(
-          `/api/admin/live-stream/mappings/${encodeURIComponent(betbyEventId)}`,
-          {
-            method: "PATCH",
-            headers: { ...authHeader, "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          },
-        );
-        if (!res.ok) throw new Error();
-        toast.success("Mapeamento guardado");
-        setLiveMappingEdits((prev) => {
-          const next = { ...prev };
-          delete next[betbyEventId];
-          return next;
-        });
-        refetchLiveMappings();
-      } catch {
-        toast.error("Erro ao guardar mapeamento");
-      } finally {
-        setLiveMappingSaving((prev) => ({ ...prev, [betbyEventId]: false }));
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [liveMappingEdits, token],
-  );
-
-  const createLiveMapping = useCallback(async () => {
-    const home = newMappingHome.trim();
-    const away = newMappingAway.trim();
-    if (!home || !away) {
-      toast.error("Equipa da casa e visitante são obrigatórias");
-      return;
-    }
-    setNewMappingSaving(true);
-    try {
-      const res = await fetch("/api/admin/live-stream/mappings", {
-        method: "POST",
-        headers: { ...authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          home,
-          away,
-          league: newMappingLeague.trim() || undefined,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success("Mapeamento criado");
-      setNewMappingHome("");
-      setNewMappingAway("");
-      setNewMappingLeague("");
-      refetchLiveMappings();
-    } catch {
-      toast.error("Erro ao criar mapeamento");
-    } finally {
-      setNewMappingSaving(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [newMappingHome, newMappingAway, newMappingLeague, token]);
-
   const openBannerModal = (banner: "new" | AdminCasinoBanner) => {
     if (banner === "new") {
       setBannerForm({
@@ -1887,7 +1706,6 @@ export default function AdminPage() {
     // stats/users/bets/payments/withdrawals/riskData/analyticsData fetch
     // themselves via useQuery's `enabled` above, reacting to token/activeTab.
     if (activeTab === "dashboard") {
-      fetchStatpalUsage();
       fetchPulsescoreUsage();
     }
     else if (activeTab === "withdrawals") {
@@ -2630,8 +2448,7 @@ export default function AdminPage() {
       else if (casinoSubTab === "games") refetchCasinoGames();
       else if (casinoSubTab === "transactions") refetchCasinoTx();
       else if (casinoSubTab === "promotions") refetchCasinoBanners();
-    } else if (activeTab === "live") refetchLiveMappings();
-    else if (activeTab === "settings") {
+    } else if (activeTab === "settings") {
       fetchSettings();
       fetchAuditLogs();
       fetchCompetitions();
@@ -2783,12 +2600,6 @@ export default function AdminPage() {
       section: "pro",
     },
     {
-      id: "live",
-      icon: <Radio size={18} />,
-      label: "Ao Vivo",
-      section: "pro",
-    },
-    {
       id: "settings",
       icon: <Settings size={18} />,
       label: "Configurações",
@@ -2808,7 +2619,6 @@ export default function AdminPage() {
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
-    live: "Ao Vivo · Streaming",
     settings: "Configurações",
   };
 
@@ -3149,88 +2959,6 @@ export default function AdminPage() {
                         </div>
                       </div>
                     )}
-
-                    {/* ── Statpal API Usage ── */}
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
-                          <Activity size={16} className="text-orange-400" />
-                          Statpal API — Utilização
-                        </h3>
-                        <button
-                          onClick={fetchStatpalUsage}
-                          disabled={statpalUsageLoading}
-                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                          title="Atualizar"
-                        >
-                          <RefreshCw size={14} className={statpalUsageLoading ? "animate-spin" : ""} />
-                        </button>
-                      </div>
-
-                      {statpalUsageLoading && !statpalUsage ? (
-                        <div className="flex items-center justify-center py-6">
-                          <Loader2 size={22} className="animate-spin text-orange-400" />
-                        </div>
-                      ) : statpalUsage ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                          {/* Request counter */}
-                          <div className="col-span-2 sm:col-span-1 bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
-                            <div className="text-3xl font-black text-orange-400 tabular-nums">
-                              {statpalUsage.requestCount !== null
-                                ? Number(statpalUsage.requestCount).toLocaleString("pt-PT")
-                                : "—"}
-                            </div>
-                            <div className="text-xs text-zinc-400 mt-1">Pedidos hoje</div>
-                          </div>
-
-                          {/* Date */}
-                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
-                            <div className="text-base font-black text-white tabular-nums">
-                              {statpalUsage.date
-                                ? (() => {
-                                    const [y, m, d] = String(statpalUsage.date).split("-");
-                                    return `${d}/${m}/${y}`;
-                                  })()
-                                : "—"}
-                            </div>
-                            <div className="text-xs text-zinc-400 mt-1">Data</div>
-                          </div>
-
-                          {/* Visual bar — assumes 100k daily limit */}
-                          <div className="col-span-2 sm:col-span-1 bg-zinc-800/60 rounded-xl p-4 flex flex-col justify-center gap-2">
-                            {(() => {
-                              const count = Number(statpalUsage.requestCount ?? 0);
-                              const limit = 100_000;
-                              const pct = Math.min((count / limit) * 100, 100);
-                              const color =
-                                pct >= 80 ? "bg-red-500" : pct >= 50 ? "bg-yellow-500" : "bg-emerald-500";
-                              return (
-                                <>
-                                  <div className="flex justify-between text-[10px] text-zinc-500">
-                                    <span>0</span>
-                                    <span>{pct.toFixed(1)}%</span>
-                                    <span>100k</span>
-                                  </div>
-                                  <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
-                                    <motion.div
-                                      className={`h-full rounded-full ${color}`}
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${pct}%` }}
-                                      transition={{ duration: 0.8, ease: "easeOut" }}
-                                    />
-                                  </div>
-                                  <div className="text-[10px] text-zinc-500 text-center">do limite estimado diário</div>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-center text-zinc-600 text-sm py-4">
-                          Não foi possível obter dados da Statpal.
-                        </div>
-                      )}
-                    </div>
 
                     {/* ── PulseScore API Usage (real bookmaker odds) ── */}
                     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
@@ -5668,7 +5396,7 @@ export default function AdminPage() {
                       }
                     />
                     <span className="font-bold text-sm text-zinc-300">
-                      Estado do Feed de Dados (SportsApiPro)
+                      Estado do Feed de Dados
                     </span>
                     {feedStatus && (
                       <Badge
@@ -6568,244 +6296,6 @@ export default function AdminPage() {
                         );
                       })
                     )}
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {/* ── AO VIVO (SMYTDRYT) ── */}
-            {activeTab === "live" && (
-              <motion.div
-                key="live"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="space-y-4"
-              >
-                <div className="text-xs text-zinc-500 -mt-2">
-                  A transmissão SMYTDRYT só aparece depois de preencheres os
-                  campos de vídeo, por evento.
-                </div>
-
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-zinc-300">
-                    Novo mapeamento
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div>
-                      <Label className="text-[10px] text-zinc-500">Equipa da casa</Label>
-                      <Input
-                        value={newMappingHome}
-                        onChange={(e) => setNewMappingHome(e.target.value)}
-                        placeholder="ex: Flamengo"
-                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-zinc-500">Equipa visitante</Label>
-                      <Input
-                        value={newMappingAway}
-                        onChange={(e) => setNewMappingAway(e.target.value)}
-                        placeholder="ex: Palmeiras"
-                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-zinc-500">Liga (opcional)</Label>
-                      <Input
-                        value={newMappingLeague}
-                        onChange={(e) => setNewMappingLeague(e.target.value)}
-                        placeholder="ex: Brasileirão"
-                        className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    disabled={newMappingSaving}
-                    onClick={() => void createLiveMapping()}
-                    className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
-                  >
-                    {newMappingSaving && <Loader2 size={12} className="animate-spin" />}
-                    Adicionar mapeamento
-                  </button>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
-                  <div className="relative">
-                    <Search
-                      size={16}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-                    />
-                    <Input
-                      placeholder="Buscar por equipa, liga ou betbyEventId..."
-                      value={liveMappingSearch}
-                      onChange={(e) => setLiveMappingSearch(e.target.value)}
-                      className="bg-zinc-900 border-zinc-700 text-white pl-9"
-                    />
-                  </div>
-                  <select
-                    value={liveMappingStatusFilter}
-                    onChange={(e) =>
-                      setLiveMappingStatusFilter(
-                        e.target.value as "all" | "mapped" | "unmapped",
-                      )
-                    }
-                    className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
-                  >
-                    <option value="all">Todos os estados</option>
-                    <option value="mapped">Mapeados</option>
-                    <option value="unmapped">Por mapear</option>
-                  </select>
-                </div>
-
-                {liveMappingsLoading ? (
-                  <div className="flex items-center justify-center py-16 text-zinc-500">
-                    <Loader2 className="animate-spin" size={24} />
-                  </div>
-                ) : liveMappings.length === 0 ? (
-                  <div className="text-center py-16 text-zinc-500 text-sm">
-                    Nenhum mapeamento cadastrado ainda.
-                  </div>
-                ) : filteredLiveMappings.length === 0 ? (
-                  <div className="text-center py-16 text-zinc-500 text-sm">
-                    Nenhum evento corresponde à pesquisa/filtro.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {filteredLiveMappings.map((m) => {
-                      const edits = liveMappingEdits[m.betbyEventId] ?? {};
-                      const val = (
-                        key:
-                          | "videoMatchId"
-                          | "videoSportId"
-                          | "videoTournamentId"
-                          | "videoStatsHost"
-                          | "videoKey"
-                          | "videoBasePath"
-                          | "videoTimestamp",
-                      ): string =>
-                        key in edits
-                          ? (edits[key] ?? "")
-                          : (m[key] != null ? String(m[key]) : "");
-                      const setVal = (
-                        key:
-                          | "videoMatchId"
-                          | "videoSportId"
-                          | "videoTournamentId"
-                          | "videoStatsHost"
-                          | "videoKey"
-                          | "videoBasePath"
-                          | "videoTimestamp",
-                        v: string,
-                      ) =>
-                        setLiveMappingEdits((prev) => ({
-                          ...prev,
-                          [m.betbyEventId]: { ...prev[m.betbyEventId], [key]: v },
-                        }));
-                      const hasEdits = Object.keys(edits).length > 0;
-                      const saving = !!liveMappingSaving[m.betbyEventId];
-                      return (
-                        <div
-                          key={m.betbyEventId}
-                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4"
-                        >
-                          <div className="flex items-start justify-between gap-3 mb-3">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-semibold text-white truncate">
-                                  {m.home} <span className="text-zinc-500">vs</span> {m.away}
-                                </span>
-                                <span
-                                  className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                    m.resolvedBy === "manual"
-                                      ? "bg-green-600/20 text-green-400"
-                                      : "bg-zinc-800 text-zinc-500"
-                                  }`}
-                                >
-                                  {m.resolvedBy === "manual" ? "Mapeado" : "Auto"}
-                                </span>
-                              </div>
-                              <div className="text-xs text-zinc-500 truncate mt-0.5">
-                                {m.league || "—"} · betbyEventId: {m.betbyEventId}
-                              </div>
-                            </div>
-                            <button
-                              disabled={!hasEdits || saving}
-                              onClick={() => saveLiveMapping(m.betbyEventId)}
-                              className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
-                            >
-                              {saving && <Loader2 size={12} className="animate-spin" />}
-                              Guardar
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT matchId</Label>
-                              <Input
-                                value={val("videoMatchId")}
-                                onChange={(e) => setVal("videoMatchId", e.target.value)}
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT sportId</Label>
-                              <Input
-                                value={val("videoSportId")}
-                                onChange={(e) => setVal("videoSportId", e.target.value)}
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT tournamentId</Label>
-                              <Input
-                                value={val("videoTournamentId")}
-                                onChange={(e) => setVal("videoTournamentId", e.target.value)}
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT statsHost</Label>
-                              <Input
-                                value={val("videoStatsHost")}
-                                onChange={(e) => setVal("videoStatsHost", e.target.value)}
-                                placeholder="statsstart26.sptpub.com"
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT key</Label>
-                              <Input
-                                value={val("videoKey")}
-                                onChange={(e) => setVal("videoKey", e.target.value)}
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT basePath</Label>
-                              <Input
-                                value={val("videoBasePath")}
-                                onChange={(e) => setVal("videoBasePath", e.target.value)}
-                                placeholder="ex: e34417db0028895ff9a29e8a0865eaea"
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-[10px] text-zinc-500">SMYTDRYT timestamp</Label>
-                              <Input
-                                value={val("videoTimestamp")}
-                                onChange={(e) => setVal("videoTimestamp", e.target.value)}
-                                placeholder="o timestamp exato capturado com o key"
-                                className="h-8 text-xs bg-zinc-950 border-zinc-700"
-                              />
-                            </div>
-                          </div>
-                          <div className="text-[10px] text-zinc-600 mt-2">
-                            O key e o timestamp têm de vir do mesmo pedido capturado — não colocar
-                            um timestamp diferente (ex: "agora"), o key está amarrado ao valor exato.
-                          </div>
-                        </div>
-                      );
-                    })}
                   </div>
                 )}
               </motion.div>

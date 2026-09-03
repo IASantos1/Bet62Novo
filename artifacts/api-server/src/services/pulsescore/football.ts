@@ -29,10 +29,9 @@ const FOOTBALL_LIVE_TTL_MS = 1_000; // matches the PRO plan's 1 req/s rate limit
 let cache: { events: PulseScoreEvent[]; fetchedAt: number } | null = null;
 let inFlight: Promise<PulseScoreEvent[]> | null = null;
 
-// PulseScore has no equivalent of Statpal's /user-request-count endpoint to
-// query usage from their side, so we count our own outbound calls instead —
-// resets at UTC midnight, same "requests today" shape the Statpal usage
-// admin card already shows.
+// PulseScore has no /user-request-count-style endpoint to query usage from
+// their side, so we count our own outbound calls instead — resets at UTC
+// midnight, the same "requests today" shape the admin usage card shows.
 let requestsToday = 0;
 let usageDate = todayUtc();
 
@@ -347,9 +346,9 @@ export type PulseScoreFootballOverride = {
   // against a real live sample (2026-08-08, 51 selections on one match).
   // `player` is exactly the rawName PulseScore sends — settlement.ts's
   // parseSelectionPlayerMarket matches a "pg:{playerName}" selection key
-  // against Statpal's own goal-incident player names
+  // against the live goal-incident feed's player names
   // (getFootballGoalEventsFromExtras), so this only ever auto-settles for
-  // matches Statpal also covers; otherwise it just stays pending, same as
+  // matches that feed also covers; otherwise it just stays pending, same as
   // any other player-market bet on this codebase already does.
   anytimeGoalscorer?: Array<{ player: string; odds: number }>;
   // First Goalscorer — same shape as anytime: raw player name + odds.
@@ -1111,8 +1110,8 @@ export function extractFootballOverride(ev: PulseScoreEvent): PulseScoreFootball
 }
 
 /** Finds the PulseScore live event matching a tracked match by team name
- * (tolerant cross-provider match, same approach as the existing Statpal ↔
- * SportScore matcher) and returns its market override, if any. `events`
+ * (tolerant cross-provider match, same approach as teamMatch.ts's
+ * cross-provider matcher) and returns its market override, if any. `events`
  * should be one already-fetched getPulseScoreFootballLive() batch — never
  * call this per-match, it would blow the 1 req/s PRO rate limit. */
 export function findPulseScoreFootballOverride(
