@@ -93,13 +93,11 @@ import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 
 const router: IRouter = Router();
 
-// SportsAPI Pro V2 — real-time live scores (V2 domains, correct paths)
-const SAPI_V2_FOOTBALL = "https://v2.football.sportsapipro.com/api";
-const SAPI_V2_BASKETBALL = "https://v2.basketball.sportsapipro.com/api";
-const SAPI_V2_HOCKEY = "https://v2.hockey.sportsapipro.com/api";
+// SportsAPI Pro V2 tennis — the only sport whose V2 base URL is still used
+// directly (getTennisTodayV2); basketball/hockey/baseball/football V2 calls
+// now go through WS_DOMAINS instead (see getScheduleV2/getPreMatchOddsV2/
+// getV2TournamentIds/getV2EventsLast below).
 const SAPI_V2_TENNIS = "https://v2.tennis.sportsapipro.com/api";
-const SAPI_V2_BASEBALL = "https://v2.baseball.sportsapipro.com/api";
-// No V2 volleyball domain is available
 
 // SportsAPI Pro V1 — lower-latency HTTP endpoints (1-2s vs V2's 3-5s)
 // IMPORTANT: V1 uses versioned paths /api/v1/{sport}/ — NOT /api/ (which returns 404)
@@ -6258,16 +6256,6 @@ let volleyLiveFetchedAt = 0;
 // until the next poll anyway).
 const VOLLEY_LIVE_TTL = CONFIG.LIVE_UPDATE_INTERVAL;
 
-// SportsAPI Pro V2 live fetch timestamps — the V2 live builders that used to
-// populate these (and the parallel *LiveV2Cache arrays) were deleted when all
-// sports data providers were disconnected from live (2026-08-06); these stay
-// at 0 forever now, which /feed-status reports honestly as "not connected".
-let footballLiveV2FetchedAt = 0;
-let basketballLiveV2FetchedAt = 0;
-let hockeyLiveV2FetchedAt = 0;
-let baseballLiveV2FetchedAt = 0;
-let tennisLiveV2FetchedAt = 0;
-
 const v2FootballOddsCache = new Map<
   string,
   { home: number; draw: number; away: number }
@@ -9091,13 +9079,9 @@ type V1LiveGame = {
 };
 
 // SportKey is still used as a parameter type by many still-alive V2 helpers
-// below (getScheduleV2, getUpcomingEventsV2, getV2TournamentIds, etc.) even
-// though the SportsAPI Pro V2/V1 WebSocket layer that used to populate
-// wsConnected/v1WsConnected/wsLastMessageAt was deleted (all sports data
-// providers disconnected from live, 2026-08-06). These three are kept as
-// permanently-empty state purely so the /feed-status diagnostic route below
-// still compiles and honestly reports "not connected" for every sport,
-// rather than needing its response shape rewritten for this.
+// below (getScheduleV2, getUpcomingEventsV2, getV2TournamentIds, etc.), and
+// WS_DOMAINS still resolves the SportsAPI Pro V2 host per sport for those
+// helpers' direct fetch calls.
 type SportKey = "football" | "basketball" | "hockey" | "baseball" | "tennis";
 const WS_DOMAINS: Record<SportKey, string> = {
   football: "v2.football.sportsapipro.com",
@@ -9106,9 +9090,6 @@ const WS_DOMAINS: Record<SportKey, string> = {
   baseball: "v2.baseball.sportsapipro.com",
   tennis: "v2.tennis.sportsapipro.com",
 };
-const wsConnected = new Set<SportKey>();
-const wsLastMessageAt = new Map<SportKey, number>();
-const v1WsConnected = new Set<SportKey>();
 
 // ─── V2 /api/schedule/:date — multi-day upcoming events ──────────────────────
 
@@ -9885,57 +9866,6 @@ async function getV2EventsLast(sport: SportKey, n = 30): Promise<unknown[]> {
     return events;
   } catch {
     return cached?.events ?? [];
-  }
-}
-
-// ─── V2 Standings Rows ─────────────────────────────────────────────────────────
-type V2StandingRow = {
-  position: number;
-  team: { id: number; name: string; nameCode: string };
-  matches: number;
-  wins: number;
-  losses: number;
-  draws?: number;
-  points?: number;
-  percentage?: number;
-  gamesBehind?: number;
-  streak?: number;
-  normaltimeLosses?: number;
-  overtimeLosses?: number;
-  scoresFor?: number;
-  scoresAgainst?: number;
-  scoreDiffFormatted?: string;
-};
-
-const v2StandingsRowCache = new Map<
-  string,
-  { rows: V2StandingRow[]; fetchedAt: number }
->();
-const V2_STANDINGS_ROWS_TTL = 30 * 60_000;
-
-async function getV2StandingRows(sport: SportKey): Promise<V2StandingRow[]> {
-  const ids = await getV2TournamentIds(sport);
-  if (!ids) return [];
-  const cacheKey = `${sport}:${ids.tid}:${ids.sid}`;
-  const cached = v2StandingsRowCache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < V2_STANDINGS_ROWS_TTL)
-    return cached.rows;
-  const domain = WS_DOMAINS[sport];
-  try {
-    const resp = await fetch(
-      `https://${domain}/api/tournament/${ids.tid}/season/${ids.sid}/standings`,
-      { signal: AbortSignal.timeout(9000), headers: sapiHeaders() },
-    );
-    if (!resp.ok) return cached?.rows ?? [];
-    const d = (await resp.json()) as Record<string, unknown>;
-    const standings = ((d["data"] as Record<string, unknown>)?.["standings"] ??
-      []) as Array<{ type: string; rows?: V2StandingRow[] }>;
-    const total = standings.find((s) => s.type === "total") ?? standings[0];
-    const rows = (total?.rows ?? []) as V2StandingRow[];
-    v2StandingsRowCache.set(cacheKey, { rows, fetchedAt: Date.now() });
-    return rows;
-  } catch {
-    return cached?.rows ?? [];
   }
 }
 
@@ -13667,43 +13597,6 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/feed-status", (_req: Request, res: Response) => {
-  res.setHeader(
-    "Cache-Control",
-    "no-store, no-cache, must-revalidate, max-age=0",
-  );
-  const now = Date.now();
-  const asAge = (t: number) => (t > 0 ? Math.max(0, now - t) : null);
-  res.json({
-    serverTime: now,
-    sportsApiKeyPresent: !!CONFIG.SPORTSAPI_KEY,
-    wsConnected: Array.from(wsConnected),
-    v1WsConnected: Array.from(v1WsConnected),
-    lastMessageAt: Object.fromEntries(
-      (Object.keys(WS_DOMAINS) as SportKey[]).map((k) => [
-        k,
-        wsLastMessageAt.get(k) ?? 0,
-      ]),
-    ),
-    fetchedAt: {
-      football: footballLiveV2FetchedAt,
-      basketball: basketballLiveV2FetchedAt,
-      hockey: hockeyLiveV2FetchedAt,
-      baseball: baseballLiveV2FetchedAt,
-      tennis: tennisLiveV2FetchedAt,
-      tennisV1: _tennisLiveV1Cache?.fetchedAt ?? 0,
-    },
-    ageMs: {
-      football: asAge(footballLiveV2FetchedAt),
-      basketball: asAge(basketballLiveV2FetchedAt),
-      hockey: asAge(hockeyLiveV2FetchedAt),
-      baseball: asAge(baseballLiveV2FetchedAt),
-      tennis: asAge(tennisLiveV2FetchedAt),
-      tennisV1: asAge(_tennisLiveV1Cache?.fetchedAt ?? 0),
-    },
-  });
-});
-
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/event-stream");
@@ -16849,47 +16742,7 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
     }
   }
 
-  try {
-    const rows = await getV2StandingRows("hockey");
-    if (!rows.length)
-      return hockeyStandingsCache ?? { season: "", conferences: [] };
-    const teams: NHLStandingsTeam[] = rows
-      .map((row) => ({
-        id: String(row.team.id),
-        name: row.team.name,
-        abbr:
-          NHL_ABBR[row.team.name] ??
-          row.team.nameCode?.toLowerCase() ??
-          row.team.name.slice(0, 3).toLowerCase(),
-        position: row.position,
-        gp: row.matches,
-        won: row.wins,
-        lost: row.normaltimeLosses ?? row.losses,
-        otLosses: row.overtimeLosses ?? 0,
-        points: row.points ?? row.wins * 2,
-        gf: row.scoresFor ?? 0,
-        ga: row.scoresAgainst ?? 0,
-        diff: row.scoreDiffFormatted ?? "0",
-        streak:
-          typeof row.streak === "number"
-            ? String(row.streak)
-            : ((row.streak as string | undefined) ?? ""),
-        lastTen: "",
-        homeRecord: "",
-        roadRecord: "",
-      }))
-      .sort((a, b) => a.position - b.position);
-    hockeyStandingsCache = {
-      season: "2025-26",
-      conferences: [
-        { name: "NHL", divisions: [{ name: "Classificação", teams }] },
-      ],
-    };
-    hockeyStandingsFetchedAt = now;
-    return hockeyStandingsCache;
-  } catch {
-    return hockeyStandingsCache ?? { season: "", conferences: [] };
-  }
+  return hockeyStandingsCache ?? { season: "", conferences: [] };
 }
 
 async function getMLBStandings(): Promise<MLBStandingsData> {
@@ -16897,37 +16750,7 @@ async function getMLBStandings(): Promise<MLBStandingsData> {
   if (mlbStandingsCache && now - mlbStandingsFetchedAt < MLB_STANDINGS_TTL)
     return mlbStandingsCache;
   const empty: MLBStandingsData = { season: "", leagues: [] };
-  try {
-    const rows = await getV2StandingRows("baseball");
-    if (!rows.length) return mlbStandingsCache ?? empty;
-    const teams: MLBStandingsTeam[] = rows
-      .map((row) => ({
-        id: String(row.team.id),
-        name: row.team.name,
-        position: row.position,
-        won: row.wins,
-        lost: row.losses,
-        gamesBack: row.gamesBehind != null ? String(row.gamesBehind) : "-",
-        streak:
-          typeof row.streak === "number"
-            ? String(row.streak)
-            : ((row.streak as string | undefined) ?? ""),
-        homeRecord: "",
-        awayRecord: "",
-        runsScored: row.scoresFor ?? 0,
-        runsAllowed: row.scoresAgainst ?? 0,
-        runsDiff: row.scoreDiffFormatted ?? "0",
-      }))
-      .sort((a, b) => a.position - b.position);
-    mlbStandingsCache = {
-      season: "2025",
-      leagues: [{ name: "MLB", divisions: [{ name: "Classificação", teams }] }],
-    };
-    mlbStandingsFetchedAt = now;
-    return mlbStandingsCache;
-  } catch {
-    return mlbStandingsCache ?? empty;
-  }
+  return mlbStandingsCache ?? empty;
 }
 
 router.get("/mlb-standings", async (_req: Request, res: Response) => {
@@ -17105,58 +16928,7 @@ async function getNBAStandings(): Promise<NBAStandingsData> {
   const now = Date.now();
   if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL)
     return nbaStandingsCache;
-  try {
-    const rows = await getV2StandingRows("basketball");
-    if (!rows.length)
-      return nbaStandingsCache ?? { season: "", conferences: [] };
-    const teams: NBAStandingsTeam[] = rows
-      .map((row) => ({
-        id: String(row.team.id),
-        name: row.team.name,
-        abbr:
-          NBA_ABBR[row.team.name] ??
-          row.team.nameCode?.toLowerCase() ??
-          row.team.name.slice(0, 3).toLowerCase(),
-        position: row.position,
-        won: row.wins,
-        lost: row.losses,
-        pct:
-          row.percentage != null
-            ? "." +
-              Math.round(row.percentage * 1000)
-                .toString()
-                .padStart(3, "0")
-            : ".000",
-        gb: row.gamesBehind != null ? String(row.gamesBehind) : "-",
-        streak:
-          typeof row.streak === "number"
-            ? String(row.streak)
-            : ((row.streak as string | undefined) ?? ""),
-        lastTen: "",
-        homeRecord: "",
-        roadRecord: "",
-        ppg:
-          row.scoresFor != null && row.matches > 0
-            ? (row.scoresFor / row.matches).toFixed(1)
-            : "0.0",
-        papg:
-          row.scoresAgainst != null && row.matches > 0
-            ? (row.scoresAgainst / row.matches).toFixed(1)
-            : "0.0",
-        diff: row.scoreDiffFormatted ?? "0",
-      }))
-      .sort((a, b) => a.position - b.position);
-    nbaStandingsCache = {
-      season: "2025-26",
-      conferences: [
-        { name: "NBA", divisions: [{ name: "Classificação", teams }] },
-      ],
-    };
-    nbaStandingsFetchedAt = now;
-    return nbaStandingsCache;
-  } catch {
-    return nbaStandingsCache ?? { season: "", conferences: [] };
-  }
+  return nbaStandingsCache ?? { season: "", conferences: [] };
 }
 
 router.get("/basketball-standings", async (_req: Request, res: Response) => {
@@ -22489,55 +22261,6 @@ router.get(
   },
 );
 
-// ─── Football Injuries/Suspensions (v1) ───────────────────────────────────────
-// v1/soccer/injuries — global (no country param), same root "injuries_suspensions"
-// and same sidelined structure as v2/soccer/injuries-suspensions (used by
-// /football-injuries). Differences in match object:
-//   v2: main_id (not id), no goals/status/alternate_id/static_id
-//   v1: id + alternate_id + alternate_id_2 + static_id + goals:"?" + status (time)
-// Reuses FootballInjuryPlayerRaw, FootballInjurySidelinedRaw, parseInjuryPlayers,
-// parseInjuryTeam helpers already defined above.
-
-type V1InjuryTeamRaw = {
-  id: string;
-  name: string;
-  goals: string; // "?" when upcoming
-  sidelined?: FootballInjurySidelinedRaw;
-};
-type V1InjuryMatchRaw = {
-  id: string;
-  alternate_id: string;
-  alternate_id_2: string;
-  static_id: string;
-  date: string;
-  time: string;
-  status: string; // kickoff time e.g. "06:00"
-  home: V1InjuryTeamRaw;
-  away: V1InjuryTeamRaw;
-};
-type V1InjuryLeagueRaw = {
-  id: string;
-  name: string;
-  sub_id: string;
-  // no "country" field at league level in v1
-  match: V1InjuryMatchRaw | V1InjuryMatchRaw[];
-};
-type V1InjuriesRaw = {
-  injuries_suspensions?: {
-    updated?: string;
-    sport?: string;
-    league?: V1InjuryLeagueRaw | V1InjuryLeagueRaw[];
-  };
-};
-
-let footballInjuriesV1Cache: object[] | null = null;
-let footballInjuriesV1FetchedAt = 0;
-const FOOTBALL_INJURIES_V1_TTL = 15 * 60 * 1000; // 15 min — same as v2
-
-router.get("/football-injuries-v1", (_req: Request, res: Response) => {
-  res.json({ leagues: footballInjuriesV1Cache ?? [] });
-});
-
 // ─── Football Odds by country (v1) — public multi-market route ────────────────
 // v1/soccer/odds/{country} — exposes all 5 market types with proper averaging.
 // Already used internally by getOddsMap() for live card bet slip odds.
@@ -22827,28 +22550,6 @@ setInterval(() => {
   }
 }, LIVE_BROADCAST_INTERVAL_MS);
 
-// SportsAPI Pro V2 base URL per sport — still used by /confrontos
-function v2SportBase(sport: string): string | null {
-  switch (sport) {
-    case "football":
-      return SAPI_V2_FOOTBALL;
-    case "basketball":
-      return SAPI_V2_BASKETBALL;
-    case "hockey":
-      return SAPI_V2_HOCKEY;
-    case "icehockey":
-      return SAPI_V2_HOCKEY;
-    case "tennis":
-      return SAPI_V2_TENNIS;
-    case "baseball":
-      return SAPI_V2_BASEBALL;
-    case "basebol":
-      return SAPI_V2_BASEBALL;
-    default:
-      return null;
-  }
-}
-
 // ─── Confrontos (H2H Real Data) ───────────────────────────────────────────────
 
 type ConfrontosH2HMeeting = {
@@ -23000,54 +22701,7 @@ router.get("/confrontos", async (req: Request, res: Response) => {
             } catch { /* skip */ }
           }
         }
-      } catch { /* ignore — fall through to SportsAPI Pro */ }
-    }
-  }
-
-  // V2 h2h aggregate (works for all sports) — skip if Statpal already found data
-  const base = v2SportBase(sport);
-  if (base && matchId && homeWins === 0 && awayWins === 0 && draws === 0 && recentMeetings.length === 0) {
-    try {
-      const resp = await fetch(`${base}/match/${matchId}/h2h`, {
-        signal: AbortSignal.timeout(8000),
-        headers: sapiHeaders(),
-      });
-      if (resp.ok) {
-        const d = (await resp.json()) as {
-          data?: {
-            teamDuel?: { homeWins?: number; awayWins?: number; draws?: number };
-            previousMatches?: Array<{
-              homeTeam?: { name?: string };
-              awayTeam?: { name?: string };
-              homeScore?: { current?: number };
-              awayScore?: { current?: number };
-              startTimestamp?: number;
-              tournament?: { name?: string };
-            }>;
-          };
-        };
-        const td = d.data?.teamDuel;
-        if (td) {
-          homeWins = td.homeWins ?? 0;
-          awayWins = td.awayWins ?? 0;
-          draws = td.draws ?? 0;
-        }
-        for (const m of (d.data?.previousMatches ?? []).slice(0, 10)) {
-          const dt = m.startTimestamp
-            ? new Date(m.startTimestamp * 1000).toISOString().slice(0, 10)
-            : "";
-          recentMeetings.push({
-            date: dt,
-            team1: m.homeTeam?.name ?? "",
-            team2: m.awayTeam?.name ?? "",
-            score1: m.homeScore?.current ?? 0,
-            score2: m.awayScore?.current ?? 0,
-            league: m.tournament?.name ?? "",
-          });
-        }
-      }
-    } catch {
-      /* ignore */
+      } catch { /* ignore */ }
     }
   }
 
