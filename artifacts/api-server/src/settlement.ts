@@ -4491,23 +4491,13 @@ function liveDefinitiveOutcomeForSel(
     return total > line ? "lost" : null;
   }
 
-  // Corners/Cards O/U — deliberately NEVER settled early from live
-  // score.cornersTotal/cardsTotal (audit finding, 2026-08-11, user report
-  // of a ticket wrongly settling "lost"). That live total is sourced from
-  // API-Football's per-fixture stats (routes/matches.ts's
-  // buildFootballLiveFromPulseScore, findApiFootballFixture), matched to
-  // the PulseScore live match by tolerant team-name comparison
-  // (teamNamesMatch) with no kickoff/date/league to disambiguate a
-  // single wrong fixture — findApiFootballFixture only refuses when
-  // MULTIPLE live fixtures satisfy the match, not when exactly one wrong
-  // one does. A false-positive match silently attaches another game's
-  // card/corner count, which can cross an Under line early and settle
-  // this leg "lost" on data that was never this match's own. These two
-  // markets now always fall through to null (pending) here and wait for
-  // the authoritative full-time count in match_results (SportsAPI V2's
-  // fetchFootballExtras, captured at finish, not API-Football) via the
-  // normal non-live settlement path — a later but correct settlement,
-  // never a fast but possibly wrong one.
+  // Corners/Cards O/U — deliberately NEVER settled early from a live running
+  // total (audit finding, 2026-08-11, user report of a ticket wrongly
+  // settling "lost"). These two markets always fall through to null
+  // (pending) here and wait for the authoritative full-time count in
+  // match_results (SportsAPI V2's fetchFootballExtras, captured at finish)
+  // via the normal non-live settlement path — a later but correct
+  // settlement, never a fast but possibly wrong one.
   const mCorner = s.match(/^([ou])c(\d+)$/);
   if (mCorner) return null;
 

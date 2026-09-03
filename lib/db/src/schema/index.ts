@@ -43,18 +43,3 @@ export * from "./casinoBanners.js";
 export * from "./liveStreamMappings.js";
 export * from "./aiAgents.js";
 export * from "./aiConsoleCommands.js";
-
-// ==================== EXPORTS EXPLÍCITOS NOMEADOS DOS 3 NOVOS ====================
-// NÃO usa mais export * chain para evitar cache de barrel quebrado na IDE.
-export {
-  apiFootballNameMismatchesTable,
-  type ApiFootballNameMismatch,
-} from "./apiFootballNameMismatches.js";
-export {
-  apiFootballTeamMappingsTable,
-  type ApiFootballTeamMapping,
-} from "./apiFootballTeamMappings.js";
-export {
-  apiFootballFixtureMappingsTable,
-  type ApiFootballFixtureMapping,
-} from "./apiFootballFixtureMappings.js";

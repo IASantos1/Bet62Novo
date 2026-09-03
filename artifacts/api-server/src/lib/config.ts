@@ -64,23 +64,10 @@ const PULSESCORE_BASE_URL =
 const PULSESCORE_BOOKMAKER =
   process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
 
-// API-Football (api-sports.io) — real match events (goals with scorer/assist
-// name, yellow/red cards, substitutions, and VAR when one actually occurs)
-// for football only. Added 2026-08-09 specifically to close a gap PulseScore
-// can't: it carries no red-card or VAR signal at all (only a goal-based
-// score-diff trigger — see football's isFulltimeFreeze/goalScored comments
-// in matches.ts), so a red card or VAR review currently never suspends
-// betting. Paid plan confirmed (150k requests/day) — GET /fixtures?live=all
-// is a single request that returns every live fixture's events at once, so
-// this stays cheap regardless of how many matches are tracked concurrently.
-const API_FOOTBALL_KEY = process.env["API_FOOTBALL_KEY"] ?? "";
-const API_FOOTBALL_BASE_URL =
-  process.env["API_FOOTBALL_BASE_URL"]?.trim() || "https://v3.football.api-sports.io";
-
 // SportMonks Football API v3 — replacing PulseScore/bwin as football's odds
 // provider (PulseScore's football feed was deliberately blocked 2026-08-28,
 // see pulsescore/football.ts's FOOTBALL_PULSESCORE_BLOCKED) and eventually
-// API-Football's live match-state feed too. Auth is a `api_token` query
+// its live match-state feed too. Auth is a `api_token` query
 // param (not a header, unlike PulseScore's X-Secret) — confirmed against
 // real GET /v3/football/rounds/{id} and /v3/football/livescores/inplay
 // samples, 2026-08-28. Odds come pre-aggregated across bookmakers
@@ -167,8 +154,6 @@ export const CONFIG = {
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
-  API_FOOTBALL_KEY,
-  API_FOOTBALL_BASE_URL,
   SPORTMONKS_API_KEY,
   SPORTMONKS_BASE_URL,
   ANTHROPIC_API_KEY,

@@ -1110,9 +1110,9 @@ test("teamNamesMatch: nickname-suffix fallback matches bwin's short hockey team 
   assert.equal(teamNamesMatch("Real Madrid", "Atletico Madrid"), false);
 });
 
-// Real side-by-side PulseScore/bwin vs API-Football live-feed comparison
-// (2026-08-09) — bwin keeps a national club-type prefix API-Football's own
-// name drops.
+// Real side-by-side PulseScore/bwin vs another live-feed source's naming
+// (2026-08-09) — bwin keeps a national club-type prefix the other feed's
+// own name drops.
 test("teamNamesMatch: club-token stripping covers non-Western club-type prefixes (CA/FK/SK/CS/UC/SS/GKS)", () => {
   assert.equal(teamNamesMatch("CA Atlanta", "Atlanta"), true);
   assert.equal(teamNamesMatch("FK Borac Banja Luka", "Borac Banja Luka"), true);
@@ -1123,10 +1123,10 @@ test("teamNamesMatch: club-token stripping covers non-Western club-type prefixes
 });
 
 // Same real comparison — the OPPOSITE truncation direction from the
-// nickname-suffix test above: API-Football drops a trailing city/qualifier
+// nickname-suffix test above: the other feed drops a trailing city/qualifier
 // word that bwin keeps, so the shorter name's tokens are a LEADING (not
 // trailing) match of the longer one.
-test("teamNamesMatch: leading-token fallback matches when API-Football drops a trailing city/qualifier word", () => {
+test("teamNamesMatch: leading-token fallback matches when a trailing city/qualifier word is dropped", () => {
   assert.equal(teamNamesMatch("FK Vojvodina Novi Sad", "Vojvodina"), true);
   assert.equal(teamNamesMatch("SK Artis Brno", "Artis"), true);
   assert.equal(teamNamesMatch("CA San Lorenzo de Almagro", "San Lorenzo"), true);

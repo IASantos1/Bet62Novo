@@ -35,19 +35,19 @@ function slugifyTeamName(name: string): string {
 }
 
 // ca/fk/sk/cs/uc/ss/gks/kv added 2026-08-09 — confirmed real (side-by-side
-// PulseScore/bwin vs API-Football live-feed comparison, same day): "CA
+// PulseScore/bwin vs another live-feed source's naming, same day): "CA
 // Atlanta" vs "Atlanta", "SS Arezzo" vs "Arezzo", "FK Borac Banja Luka" vs
 // "Borac Banja Luka", "UC Sampdoria" vs "Sampdoria", "CS Dock Sud" vs "Dock
 // Sud", "SK Sigma Olomouc" vs "Sigma Olomouc", "GKS Tychy" vs "Tychy 71" —
 // bwin keeps the club-type prefix (Club Atlético, Fudbalski Klub, Sportovní
 // klub, Club Sportivo, Unione Calcio, Società Sportiva, Górniczy Klub
-// Sportowy, Koninklijke Voetbalclub), API-Football's own name usually drops
-// it. None of these overlapped with the original list (which only covered
-// Western European abbreviations).
+// Sportowy, Koninklijke Voetbalclub), the other feed's own name usually
+// drops it. None of these overlapped with the original list (which only
+// covered Western European abbreviations).
 //
 // BR-specific club-type prefixes/suffixes added 2026-08-12 after a real
-// PulseScore/bwin vs API-Football comparison of ~40 Brazilian live fixtures
-// confirmed these are dropped by API-Football but carried by bwin:
+// comparison of ~40 Brazilian live fixtures confirmed these are dropped by
+// that other feed but carried by bwin:
 //   SE  (Sociedade Esportiva)            — SE Palmeiras vs Palmeiras
 //   CR  (Clube de Regatas)               — CR Flamengo vs Flamengo
 //   AA  (Associação Atlética)            — AA Internacional vs Internacional
@@ -213,8 +213,8 @@ export function teamNamesMatch(a: string, b: string): boolean {
 
     // Leading-token fallback — the mirror image of the trailing/nickname
     // one just above, added 2026-08-09 after a real PulseScore/bwin vs
-    // API-Football live-feed comparison turned up the OPPOSITE truncation
-    // direction repeatedly: API-Football drops a trailing city/qualifier
+    // another live-feed source's naming turned up the OPPOSITE truncation
+    // direction repeatedly: that other feed drops a trailing city/qualifier
     // word bwin keeps, e.g. "FK Vojvodina Novi Sad" vs "Vojvodina" (Novi
     // Sad dropped), "SK Artis Brno" vs "Artis" (Brno dropped), "CA San
     // Lorenzo de Almagro" vs "San Lorenzo" (de Almagro dropped) — the

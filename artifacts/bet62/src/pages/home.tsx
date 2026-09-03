@@ -2046,7 +2046,7 @@ function getTeamBadgeAsset(
   >,
   side: "home" | "away",
 ): { src?: string; fit: "cover" | "contain"; padded: boolean } {
-  // API-Football's crest URL is already the finished asset — no ID-to-URL
+  // homeLogoUrl/awayLogoUrl is already the finished asset URL — no ID-to-URL
   // construction needed, and it resolves for teams buildSportsApiTeamLogoUrl
   // sometimes can't (lower-coverage leagues with no SportsAPI team ID
   // cached yet). Preferred when present; falls through to the SportsAPI
@@ -3708,7 +3708,7 @@ type Match = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
-  // Direct crest URLs from API-Football (football only) — preferred over
+  // Direct crest URLs (football only) — preferred over
   // homeTeamId/homeImageVersion in getTeamBadgeAsset, see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
@@ -4330,7 +4330,7 @@ function MomentumChart({
           })()}
 
           {/* Card & substitution minute markers 🟨🟥🔄 — from the real
-              API-Football event timeline (match.events), placed close to the
+              event timeline (match.events), placed close to the
               center axis so they read as "inside the chart" alongside the
               existing goal markers above/below. */}
           {(() => {
