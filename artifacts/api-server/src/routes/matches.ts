@@ -5467,6 +5467,23 @@ function makeHockeyMoneylineFromTeams(
   return { home: h!, draw: dx!, away: a! };
 }
 
+// Two-way (no draw) synthetic moneyline for baseball's upcoming builder —
+// same seeded-margin approach makeMLBMarketsFromTeams already uses
+// internally for its run-line synthetic (marginMean/marginSd), just
+// surfaced as a standalone {home, away} price for when PulseScore hasn't
+// priced the match yet.
+function makeMLBMoneylineFromTeams(
+  home: string,
+  away: string,
+): { home: number; away: number } {
+  const sr = seededRng(`mlb-ml:${home}:${away}`);
+  const marginMean = mc((sr(1) - 0.5) * 2.0, -2.0, 2.0);
+  const marginSd = mc(2.8 + sr(2) * 0.8, 2.2, 4.0);
+  const pHome = mc(1 - normalCdf(-marginMean / marginSd), 0.15, 0.85);
+  const [h, a] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+  return { home: h!, away: a! };
+}
+
 function makeMLBMarketsFromTeams(
   home: string,
   away: string,
@@ -12547,6 +12564,96 @@ async function buildVolleyballUpcomingFromPulseScore(): Promise<UpcomingMatch[]>
 }
 
 /**
+ * Baseball (MLB) prematch, sourced entirely from PulseScore
+ * (getPulseScoreBaseballUpcoming, onexbet) — replaces the StatPal/
+ * SportsAPI-V2-sourced match list getMLBOdds() used to provide before both
+ * providers were removed. Real Money Line / Run Line (handicap) / Total /
+ * F5 odds come from extractBaseballOverride (pulsescore/baseball.ts) when
+ * priced; makeMLBMoneylineFromTeams/makeMLBMarketsFromTeams synthesize
+ * whatever isn't, anchoring the run line/total off the real moneyline when
+ * available — same "real wins, synthetic fills the gap" pattern every other
+ * sport's upcoming builder already uses. The total-line merge (pick the
+ * middle line, then its immediate ±1 neighbors for the alt lines) mirrors
+ * the one getMergedMLBOdds() used. Same `pulsescore-baseball-${eventId}` id
+ * scheme as the live baseball builder above, so a match's identity doesn't
+ * change if it transitions from upcoming to live.
+ */
+async function buildBaseballUpcomingFromPulseScore(): Promise<UpcomingMatch[]> {
+  const events = [...(await getPulseScoreBaseballUpcoming())].sort((a, b) =>
+    (a.startTime || "").localeCompare(b.startTime || ""),
+  );
+  const results: UpcomingMatch[] = [];
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+
+    const isDuplicate = results.some(
+      (r) => teamNamesMatch(r.home, home) && teamNamesMatch(r.away, away),
+    );
+    if (isDuplicate) continue;
+
+    const leagueName = ev.league || "Beisebol";
+    const { date, time } = pulseScoreEventDateTime(ev.startTime);
+    const override = extractBaseballOverride(ev);
+    const odds = override.odds
+      ? { home: override.odds.home, draw: 0, away: override.odds.away }
+      : { ...makeMLBMoneylineFromTeams(home, away), draw: 0 };
+    const markets = makeMLBMarketsFromTeams(
+      home,
+      away,
+      override.odds?.home,
+      override.odds?.away,
+    );
+    if (override.runLine) {
+      markets.handicap = {
+        ...markets.handicap,
+        homeMinusOne: override.runLine.home,
+        awayPlusOne: override.runLine.away,
+      };
+    }
+    if (override.totalLines && override.totalLines.length > 0) {
+      const mid = override.totalLines[Math.floor(override.totalLines.length / 2)]!;
+      const lo = override.totalLines.find(
+        (l) => l.line === mid.line - 0.5 || l.line === mid.line - 1,
+      );
+      const hi = override.totalLines.find(
+        (l) => l.line === mid.line + 0.5 || l.line === mid.line + 1,
+      );
+      markets.totalGoals = {
+        ...markets.totalGoals,
+        over35: mid.over,
+        under35: mid.under,
+        ...(lo ? { over25: lo.over, under25: lo.under } : {}),
+        ...(hi ? { over45: hi.over, under45: hi.under } : {}),
+      };
+      markets._total = mid.line;
+    }
+    if (override.f5 && markets.mlbExtra) {
+      markets.mlbExtra.f5Result = { home: override.f5.home, away: override.f5.away };
+    }
+    if (override.f5Total && markets.mlbExtra) {
+      markets.mlbExtra.f5Total = override.f5Total;
+    }
+
+    results.push({
+      id: `pulsescore-baseball-${ev.eventId}`,
+      home,
+      away,
+      league: leagueName,
+      country: "Internacional",
+      time,
+      date,
+      sport: "baseball",
+      hasRealOdds: !!override.odds,
+      odds,
+      markets,
+    });
+  }
+  return results;
+}
+
+/**
  * Volleyball live score, sourced from PulseScore's "unibetau" (Unibet
  * Australia) feed — a THIRD bookmaker, different from the bwin-sourced
  * prematch builder above. Neither bwin (no score field at all) nor bet365
@@ -16579,15 +16686,24 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       "[pulsescore] buildVolleyballUpcomingFromPulseScore failed this cycle",
     );
   }
+  let baseball: UpcomingMatch[] = [];
+  try {
+    baseball = await buildBaseballUpcomingFromPulseScore();
+  } catch (err) {
+    logger.error(
+      { err },
+      "[pulsescore] buildBaseballUpcomingFromPulseScore failed this cycle",
+    );
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
   upcomingTopCache = {
     football,
     tennis,
     basketball,
     hockey,
     volleyball,
-    baseball: [],
+    baseball,
     boxing: [],
     cricket: [],
     handball: [],
