@@ -1,3 +1,12 @@
+// SportsAPI Pro's daily-leagues/league-stats/team-crest/legacy-settlement
+// roles were fully removed (2026-09-03) in favor of SportMonks + PulseScore,
+// but SPORTSAPI_KEY itself stays: the V2/V1 endpoints it authenticates
+// (sapiHeaders() in routes/matches.ts) still back the live World Cup 2026
+// section (wc2026*/-h2h/-standings/-competition routes) and the
+// basketball/hockey/mlb/volleyball/football schedule + v2-match-odds/
+// v2-lineups/v2-incidents/v2-statistics/v2-standings routes, all still
+// called by the frontend — out of scope for this SportsAPI-Pro-team-crest
+// cleanup pass.
 const SPORTSAPI_KEY =
   process.env["SPORTSAPIPRO_KEY"] ??
   process.env["SPORTSAPI_PRO_KEY"] ??
@@ -20,7 +29,7 @@ const FOOTBALL_REFERENCE_PROVIDER =
 
 // SilentAPI — third-party casino game aggregator (game launch + wallet
 // callback). Secrets only ever come from the environment, never hardcoded —
-// same convention as SPORTSAPI_KEY/STATPAL_API_KEY above.
+// same convention as STATPAL_API_KEY above.
 const SILENTAPI_BASE_URL =
   process.env["SILENTAPI_BASE_URL"]?.trim() || "https://silentapi.org/api";
 const SILENTAPI_AUTH_TOKEN = process.env["SILENTAPI_AUTH_TOKEN"] ?? "";

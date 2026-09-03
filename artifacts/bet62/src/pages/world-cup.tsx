@@ -224,21 +224,14 @@ const TEAM_EMOJI: Record<string, string> = {
   "países baixos": "🇳🇱", "netherlands": "🇳🇱",
 };
 
-function buildCompetitorLogoUrl(teamId?: string, imageVersion?: string): string | null {
-  const cleanId = String(teamId ?? "").trim();
-  if (!cleanId) return null;
-  const url = new URL(`https://v1.football.sportsapipro.com/images/competitors/${encodeURIComponent(cleanId)}`);
-  const cleanVersion = String(imageVersion ?? "").trim();
-  if (cleanVersion) url.searchParams.set("imageVersion", cleanVersion);
-  return url.toString();
-}
-
-function FlagImg({ name, size = 32, teamId, imageVersion }: { name: string; size?: number; teamId?: string; imageVersion?: string }) {
+// teamId/imageVersion are still accepted (callers still pass them) but no
+// longer read: they used to feed the SportsAPI Pro V1 competitor-crest URL
+// this component built as a middle fallback tier, removed 2026-09-03 — the
+// flag-CDN match below now falls straight through to the emoji fallback.
+function FlagImg({ name, size = 32 }: { name: string; size?: number; teamId?: string; imageVersion?: string }) {
   const [flagErr, setFlagErr] = useState(false);
-  const [logoErr, setLogoErr] = useState(false);
   const code = TEAM_CODES[name.toLowerCase()];
   const emoji = TEAM_EMOJI[name.toLowerCase()] ?? "🌐";
-  const logoUrl = buildCompetitorLogoUrl(teamId, imageVersion);
   const s = size;
   const shell: React.CSSProperties = {
     width: s, height: s, borderRadius: "50%", flexShrink: 0, overflow: "hidden",
@@ -259,20 +252,6 @@ function FlagImg({ name, size = 32, teamId, imageVersion }: { name: string; size
           onError={() => setFlagErr(true)}
         />
         <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "linear-gradient(140deg,rgba(255,255,255,0.45) 0%,transparent 45%)", pointerEvents: "none" }} />
-      </div>
-    );
-  }
-  if (logoUrl && !logoErr) {
-    return (
-      <div style={{ ...shell, padding: Math.max(2, Math.round(s * 0.12)) }}>
-        <img
-          src={logoUrl}
-          alt={name}
-          style={{ width: "100%", height: "100%", objectFit: "contain" }}
-          loading="lazy"
-          decoding="async"
-          onError={() => setLogoErr(true)}
-        />
       </div>
     );
   }

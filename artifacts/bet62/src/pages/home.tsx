@@ -2002,34 +2002,6 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
 
 const ARENA_BANNER = "/arena-banner.png";
 
-function buildSportsApiTeamLogoUrl(
-  sport: string | undefined,
-  teamId?: string,
-  imageVersion?: string,
-): string | undefined {
-  const cleanId = String(teamId ?? "").trim();
-  const cleanSport = String(sport ?? "football")
-    .trim()
-    .toLowerCase();
-  if (!cleanId) return undefined;
-  if (
-    ![
-      "football",
-      "basketball",
-      "hockey",
-      "tennis",
-      "baseball",
-      "volleyball",
-    ].includes(cleanSport)
-  ) {
-    return undefined;
-  }
-  const params = new URLSearchParams();
-  if (imageVersion) params.set("imageVersion", imageVersion);
-  const query = params.toString();
-  return `/api/matches/team-logo/${encodeURIComponent(cleanSport)}/${encodeURIComponent(cleanId)}${query ? `?${query}` : ""}`;
-}
-
 function getTeamBadgeAsset(
   match: Pick<
     Match,
@@ -2047,21 +2019,11 @@ function getTeamBadgeAsset(
   side: "home" | "away",
 ): { src?: string; fit: "cover" | "contain"; padded: boolean } {
   // homeLogoUrl/awayLogoUrl is already the finished asset URL — no ID-to-URL
-  // construction needed, and it resolves for teams buildSportsApiTeamLogoUrl
-  // sometimes can't (lower-coverage leagues with no SportsAPI team ID
-  // cached yet). Preferred when present; falls through to the SportsAPI
-  // path otherwise, unchanged.
+  // construction needed (populated from SportMonks's own image_path for
+  // football; other sports simply have no crest source once the SportsAPI
+  // Pro V2 image proxy was removed, 2026-09-03).
   const directLogo = side === "home" ? match.homeLogoUrl : match.awayLogoUrl;
   if (directLogo) return { src: directLogo, fit: "contain", padded: true };
-  const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
-  const imageVersion =
-    side === "home" ? match.homeImageVersion : match.awayImageVersion;
-  const officialLogo = buildSportsApiTeamLogoUrl(
-    match.sport,
-    teamId,
-    imageVersion,
-  );
-  if (officialLogo) return { src: officialLogo, fit: "contain", padded: true };
   // No local-banner fallback here on purpose — TEAM_BANNERS holds wide
   // promotional photos (getMatchBanner's card-background art), not circular
   // crest logos. Cropping one into the small round badge slot showed a
@@ -3704,12 +3666,17 @@ type Match = {
   id: string | number;
   home: string;
   away: string;
+  // homeTeamId/awayTeamId/homeImageVersion/awayImageVersion used to feed
+  // buildSportsApiTeamLogoUrl (SportsAPI Pro V2 crest proxy) in
+  // getTeamBadgeAsset; that proxy was removed 2026-09-03, so these are no
+  // longer read there — kept only because the API response shape still
+  // carries them (see the raw match types below).
   homeTeamId?: string;
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
-  // Direct crest URLs (football only) — preferred over
-  // homeTeamId/homeImageVersion in getTeamBadgeAsset, see that function.
+  // Direct crest URL (football only, from SportMonks's own image_path) —
+  // the only source getTeamBadgeAsset uses; see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
   league: string;
