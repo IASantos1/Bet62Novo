@@ -3794,7 +3794,7 @@ type Match = {
   scheduledTime?: string;
   // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
   scheduledDate?: string;
-  // SportsApiPro league ID — used to fetch player markets (football only)
+  // StatPal league ID — used to fetch player markets (football only)
   leagueId?: string;
   /** Formula 1 only — race winner and podium odds by driver */
   f1Extra?: {

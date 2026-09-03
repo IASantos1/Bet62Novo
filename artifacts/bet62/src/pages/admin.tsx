@@ -5668,7 +5668,7 @@ export default function AdminPage() {
                       }
                     />
                     <span className="font-bold text-sm text-zinc-300">
-                      Estado do Feed de Dados (SportsApiPro)
+                      Estado do Feed de Dados
                     </span>
                     {feedStatus && (
                       <Badge

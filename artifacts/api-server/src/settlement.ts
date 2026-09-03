@@ -20,7 +20,6 @@ import {
   finishedMatchResults,
   liveMatchState,
   scanVolleyballForFinished,
-  scanTennisV1ForFinished,
   scanNHLForFinished,
   scanNBAForFinished,
   scanMLBForFinished,
@@ -6067,6 +6066,11 @@ async function expireStalePendingBets(): Promise<void> {
  *      scanNBAForFinished()         — NBA finished matches (Statpal live + daily)
  *      scanMLBForFinished()         — MLB finished matches (Statpal live + daily)
  *   2. scanVolleyballForFinished()  — volleyball finished matches from live feed
+ *
+ * Tennis is NOT scanned here — the legacy SportsAPI Pro tennis-v1-* scan
+ * (scanTennisV1ForFinished) was removed; those matchIds now fall through
+ * ensureFinishedMatchResult() unhandled and resolve only via the 72h
+ * stale-bet void/refund path (expireStalePendingBets()) below.
  *   3. autoSettlePendingBets()      — settle bets with known results
  *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
  *
@@ -6130,12 +6134,12 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: Statpal-only — volleyball, tennis, NHL, NBA, MLB.
+      // Parallel scan: Statpal-only — volleyball, NHL, NBA, MLB.
       // Football is no longer scanned here — see startSettlementWorker's
-      // doc comment above for why.
+      // doc comment above for why. Tennis is no longer scanned here either
+      // — see the doc comment above for why.
       await Promise.allSettled([
         scanVolleyballForFinished(),   // volleyball (Statpal live)
-        scanTennisV1ForFinished(),     // tennis (Statpal V1)
         scanNHLForFinished(),          // hockey (Statpal live + daily)
         scanNBAForFinished(),          // basketball (Statpal live + daily)
         scanMLBForFinished(),          // baseball (Statpal live + daily)

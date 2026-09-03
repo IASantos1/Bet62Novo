@@ -1,27 +1,3 @@
-// SportsAPI Pro's daily-leagues/league-stats/team-crest/legacy-settlement
-// roles (2026-09-03), its World Cup 2026 / schedule / V2 market routes
-// (basketball-schedule, hockey-schedule, mlb-schedule, v2-match-odds,
-// v2-lineups, v2-incidents, v2-statistics, v2-standings, wc2026*), its
-// generic /confrontos H2H fallback, /feed-status, /football-injuries-v1,
-// and its hockey/mlb/basketball standings fallback (2026-09-03) were all
-// removed in favor of SportMonks + PulseScore + StatPal, but SPORTSAPI_KEY
-// itself stays: the V2/V1 endpoints it authenticates (sapiHeaders() in
-// routes/matches.ts) still back tennis prematch odds + league labels
-// (getTennisOdds/getTennisTodayV2), basketball/hockey/baseball/tennis
-// prematch odds and upcoming-event listings (getPreMatchOddsV2/
-// getUpcomingLeagueEventsV2), hockey/baseball/basketball daily-results
-// fallback (getV2EventsLast), the football upcoming-matches fallback
-// (buildFootballUpcomingV1), and — critically — settlement of legacy
-// tennis-v1-* bets (scanTennisV1ForFinished in settlement.ts). None of
-// that was in scope for this pass; removing it needs its own pass with a
-// verified replacement for each (PulseScore doesn't yet cover prematch
-// odds or upcoming listings for basketball/hockey/baseball).
-const SPORTSAPI_KEY =
-  process.env["SPORTSAPIPRO_KEY"] ??
-  process.env["SPORTSAPI_PRO_KEY"] ??
-  process.env["SPORTSAPI_KEY"] ??
-  "";
-
 const STATPAL_API_KEY =
   process.env["STATPAL_API_KEY"] ??
   process.env["STATSPAL_API_KEY"] ??
@@ -160,7 +136,6 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
-  SPORTSAPI_KEY,
   STATPAL_API_KEY,
   STATPAL_BASE_URL,
   SILENTAPI_BASE_URL,

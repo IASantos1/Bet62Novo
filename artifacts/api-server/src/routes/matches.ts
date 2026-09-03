@@ -93,24 +93,6 @@ import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 
 const router: IRouter = Router();
 
-// SportsAPI Pro V2 tennis — the only sport whose V2 base URL is still used
-// directly (getTennisTodayV2); basketball/hockey/baseball/football V2 calls
-// now go through WS_DOMAINS instead (see getScheduleV2/getPreMatchOddsV2/
-// getV2TournamentIds/getV2EventsLast below).
-const SAPI_V2_TENNIS = "https://v2.tennis.sportsapipro.com/api";
-
-// SportsAPI Pro V1 — lower-latency HTTP endpoints (1-2s vs V2's 3-5s)
-// IMPORTANT: V1 uses versioned paths /api/v1/{sport}/ — NOT /api/ (which returns 404)
-// Tennis is the exception: it still uses /api as base because its own functions
-// append /v1/tennis/ manually (e.g. ${SAPI_V1_TENNIS}/v1/tennis/live)
-const SAPI_V1_FOOTBALL = "https://v1.football.sportsapipro.com/api/v1/football";
-const SAPI_V1_TENNIS = "https://v1.tennis.sportsapipro.com/api";
-
-// Auth headers helper
-const sapiHeaders = (): Record<string, string> => ({
-  "x-api-key": CONFIG.SPORTSAPI_KEY,
-});
-
 type FootballProviderMode = "auto" | "sportsapipro" | "statpal";
 
 function normalizeFootballProviderMode(
@@ -5558,33 +5540,6 @@ function isTennisExcludedName(name: string): boolean {
   );
 }
 
-function isTennisFinishedStatusText(status: string | undefined): boolean {
-  const s = String(status ?? "").toLowerCase();
-  return (
-    s.includes("ended") ||
-    s.includes("finished") ||
-    s.includes("complete") ||
-    s.includes("retired") ||
-    s.includes("walkover") ||
-    s.includes("default") ||
-    s.includes("abandon") ||
-    s.includes("cancel") ||
-    s.includes("awarded")
-  );
-}
-
-function isTennisV1GameFinished(
-  game: Pick<
-    V1TennisGame,
-    "statusGroup" | "statusText" | "homeCompetitor" | "awayCompetitor"
-  >,
-): boolean {
-  // V1 tennis statusGroup: 2=Scheduled, 3=Live/in-play ("Set 1"/"Set 3"), 4=Finished/Cancelled
-  if (game.statusGroup === 4) return true;
-  if (isTennisFinishedStatusText(game.statusText)) return true;
-  return !!game.homeCompetitor?.isWinner || !!game.awayCompetitor?.isWinner;
-}
-
 type SAPIV2TeamObj = { id?: number; name: string };
 
 type SAPIV2Event = {
@@ -5854,68 +5809,6 @@ function tennisTournLabel(
   return tier ? `${tier} · ${displayBase}` : displayBase;
 }
 
-// ── V1 tennis league label cache ─────────────────────────────────────────────
-// Populated from V2 today/live events; maps normalized base name → full tier label.
-// Used to enrich V1 game league labels that only carry city names.
-const _tennisV2LeagueLabelByCompName = new Map<string, string>();
-
-function refreshTennisV2LeagueCache(events: SAPIV2Event[]): void {
-  for (const ev of events) {
-    if (!ev.tournament || typeof ev.tournament === "string") continue;
-    const label = tennisTournLabel(ev.tournament);
-    const base = v2TournName(ev.tournament);
-    if (!base || base === "Unknown" || label === base) continue;
-    const norm = base
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
-    if (!_tennisV2LeagueLabelByCompName.has(norm)) {
-      _tennisV2LeagueLabelByCompName.set(norm, label);
-    }
-  }
-}
-
-/**
- * Returns true if the raw event (Record<string, unknown>) belongs to the primary
- * competition we show for a given sport.  Used by getV2TournamentIds and
- * getUpcomingLeagueEventsV2 to exclude non-target tournaments.
- */
-function isMainLeagueEventRaw(
-  sport: SportKey,
-  e: Record<string, unknown>,
-): boolean {
-  if (sport === "football") return true;
-  const t = e["tournament"] as Record<string, unknown> | undefined;
-  const slug = String(t?.["slug"] ?? "").toLowerCase();
-  const name = String(t?.["name"] ?? "").toLowerCase();
-  switch (sport) {
-    case "basketball":
-      // Match NBA or NBA Playoffs; exclude WNBA (slug/name contains "nba" but also "wnba")
-      return (
-        (slug.includes("nba") || name.includes("nba")) &&
-        !slug.includes("wnba") &&
-        !name.includes("wnba")
-      );
-    case "hockey":
-      return slug.includes("nhl") || name.includes("nhl");
-    case "baseball":
-      return slug.includes("mlb") || name.includes("mlb");
-    case "tennis": {
-      const cat = String(
-        (t?.["category"] as Record<string, unknown> | undefined)?.["name"] ??
-          "",
-      );
-      if (cat !== "ATP" && cat !== "WTA") return false;
-      // The V2 API may have wrong slugs for doubles/qualifying — check the name too
-      if (name.includes("double") || name.includes("qualifying")) return false;
-      if (slug.includes("double") || slug.includes("qualifying")) return false;
-      return true;
-    }
-    default:
-      return true;
-  }
-}
 
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
@@ -6031,21 +5924,6 @@ setInterval(() => {
 // v2/daily today: cache 5min
 let dailyCache: SAPILeagueV2[] | null = null;
 let dailyFetchedAt = 0;
-
-// Ground-truth scheduled kickoff (epoch seconds) per football event id, captured
-// from the pre-match schedule feed (getUpcomingEventsV2) *before* the match ever
-// appears live. The live feed's own self-reported startTimestamp can be wrong —
-// some providers report a fixture's date/time as already-past in lockstep with a
-// fake early "live" status, which defeats a guard that only trusts the live feed.
-// This map is populated purely from the schedule/upcoming source, so it can't be
-// corrupted by a bad live-status glitch, and is used to gate when a match is
-// allowed to actually enter the live list.
-const footballScheduledKickoffSec = new Map<number, number>();
-
-// V2 /api/today cache — 60s TTL (includes not-started + live events for the current day)
-let tennisTodayV2Cache: SAPIV2Event[] | null = null;
-let tennisTodayV2FetchedAt = 0;
-const TODAY_V2_TTL = 60_000;
 
 // v1 odds: map from match numeric ID → real odds; cache 10min
 type RealOdds = { home: number; draw: number; away: number; types: OddsType[] };
@@ -6261,44 +6139,6 @@ const v2FootballOddsCache = new Map<
   { home: number; draw: number; away: number }
 >();
 const V2_FOOTBALL_ODDS_TTL = 30 * 60_000;
-
-// V1 tennis native format (all endpoint — different schema from SAPIV2Event)
-interface V1TennisStage {
-  id: number;
-  name: string;
-  shortName?: string;
-  homeCompetitorScore: number;
-  awayCompetitorScore: number;
-  isLive?: boolean;
-  isEnded?: boolean;
-}
-
-interface V1TennisGame {
-  id: number;
-  competitionId?: number;
-  competitionDisplayName?: string;
-  startTime: string;
-  statusGroup?: number; // 1=live, 2=scheduled, 3=finished
-  statusText?: string;
-  homeCompetitor?: {
-    id?: number;
-    name?: string;
-    score?: number;
-    isWinner?: boolean;
-  };
-  awayCompetitor?: {
-    id?: number;
-    name?: string;
-    score?: number;
-    isWinner?: boolean;
-  };
-  stageName?: string;
-  roundName?: string;
-  // stages: per-set (and game-level) breakdown — present when API returns detail
-  stages?: V1TennisStage[];
-}
-let _tennisAllV1Cache: V1TennisGame[] | null = null;
-let _tennisAllV1FetchedAt = 0;
 
 // Tennis daily results (d-1 = yesterday) — longer TTL (yesterday won't change)
 type TennisDailyResult = {
@@ -6725,9 +6565,9 @@ const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
 // disconnect and football's 2026-08-07 PulseScore re-instatement. Restored
 // now — football bets settle the same way they did before the disconnect.
 // settlement.ts's separate scan chain (scanVolleyballForFinished/
-// scanTennisV1ForFinished/scanNHLForFinished/scanNBAForFinished/
-// scanMLBForFinished) never covered football either way; this GC path is
-// football's only settlement trigger, same as it's always been.
+// scanNHLForFinished/scanNBAForFinished/scanMLBForFinished) never covered
+// football either way; this GC path is football's only settlement trigger,
+// same as it's always been.
 export const liveMatchState = new Map<string, LiveMatchState>();
 
 // Finished football match results — populated when matches leave liveMatchState
@@ -6755,24 +6595,6 @@ function _pruneFinishedResults(): void {
   for (const [id, r] of finishedMatchResults.entries()) {
     if (r.finishedAt < cutoff) finishedMatchResults.delete(id);
   }
-}
-
-function extractFinishedTennisSets(
-  hS: SAPIV2ScoreObj | null,
-  aS: SAPIV2ScoreObj | null,
-): Array<[number, number]> {
-  const sets: Array<[number, number]> = [];
-  if (!hS || !aS) return sets;
-  (
-    ["period1", "period2", "period3", "period4", "period5"] as Array<
-      keyof SAPIV2ScoreObj
-    >
-  ).forEach((p) => {
-    const h = hS[p] as number | undefined;
-    const a = aS[p] as number | undefined;
-    if (h !== undefined && a !== undefined) sets.push([h, a]);
-  });
-  return sets;
 }
 
 function volleyballMatchFinished(match: VolleyMatch): boolean {
@@ -7079,79 +6901,6 @@ async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   await persistFinishedMatchRecord(state.id, state.sport, record);
 }
 
-function extractFinishedBasketballQuarters(
-  hS: SAPIV2ScoreObj | null,
-  aS: SAPIV2ScoreObj | null,
-): Array<[number, number]> {
-  const quarters: Array<[number, number]> = [];
-  if (!hS || !aS) return quarters;
-  (
-    ["period1", "period2", "period3", "period4"] as Array<keyof SAPIV2ScoreObj>
-  ).forEach((p) => {
-    const h = hS[p] as number | undefined;
-    const a = aS[p] as number | undefined;
-    if ((h ?? 0) > 0 || (a ?? 0) > 0) quarters.push([h ?? 0, a ?? 0]);
-  });
-  return quarters;
-}
-
-function extractFinishedBaseballInnings(
-  hS: SAPIV2ScoreObj | null,
-  aS: SAPIV2ScoreObj | null,
-): Array<[number, number]> {
-  const innings: Array<[number, number]> = [];
-  if (!hS || !aS) return innings;
-  for (let i = 1; i <= 12; i++) {
-    const key = `period${i}` as keyof SAPIV2ScoreObj;
-    const h = hS[key];
-    const a = aS[key];
-    if (typeof h !== "number" && typeof a !== "number") break;
-    innings.push([typeof h === "number" ? h : 0, typeof a === "number" ? a : 0]);
-  }
-  return innings;
-}
-
-function buildFinishedResultExtrasFromV2Event(
-  sport: SportKey,
-  ev: SAPIV2Event,
-  hS: SAPIV2ScoreObj | null,
-  aS: SAPIV2ScoreObj | null,
-): Record<string, unknown> {
-  const extras: Record<string, unknown> = {
-    homeScore: ev.homeScore,
-    awayScore: ev.awayScore,
-  };
-  if (sport === "tennis") {
-    const sets = extractFinishedTennisSets(hS, aS);
-    if (sets.length > 0) extras["tennis"] = { sets };
-  } else if (sport === "basketball") {
-    const quarters = extractFinishedBasketballQuarters(hS, aS);
-    if (quarters.length > 0) extras["basketball"] = { quarters };
-  } else if (sport === "baseball") {
-    const innings = extractFinishedBaseballInnings(hS, aS);
-    if (innings.length > 0) extras["baseball"] = { innings };
-  }
-  return extras;
-}
-
-function finishedResultHasSettlementExtras(
-  sport: SportKey,
-  extras: unknown,
-): boolean {
-  if (sport === "tennis") {
-    const tennis = (extras as Record<string, unknown> | undefined)?.[
-      "tennis"
-    ] as Record<string, unknown> | undefined;
-    return Array.isArray(tennis?.["sets"]);
-  }
-  if (sport === "basketball") {
-    const basketball = (extras as Record<string, unknown> | undefined)?.[
-      "basketball"
-    ] as Record<string, unknown> | undefined;
-    return Array.isArray(basketball?.["quarters"]);
-  }
-  return true;
-}
 
 export async function ensureFinishedMatchResult(
   matchId: string,
@@ -7197,113 +6946,6 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
-  // ── Tennis V1 match IDs (tennis-v1-{id}) ──────────────────────────────────
-  const tennisV1Match = matchId.match(/^tennis-v1-(\d+)$/);
-  if (tennisV1Match) {
-    const providerId = Number(tennisV1Match[1]);
-    const cached = finishedMatchResults.get(matchId);
-    if (cached && typeof cached.home === "number" && typeof cached.away === "number" && cached.home + cached.away > 0)
-      return true;
-
-    // Check DB
-    try {
-      if (db) {
-        const [row] = await db
-          .select()
-          .from(matchResultsTable)
-          .where(eq(matchResultsTable.matchId, matchId))
-          .limit(1);
-        if (row && typeof row.home === "number" && typeof row.away === "number" && row.home + row.away > 0) {
-          const dbExtras = row.extras as Record<string, unknown> | null | undefined;
-          const hasSetData =
-            dbExtras != null &&
-            Array.isArray((dbExtras["tennis"] as Record<string, unknown> | undefined)?.["sets"]) &&
-            ((dbExtras["tennis"] as Record<string, unknown>)["sets"] as unknown[]).length > 0;
-
-          if (!hasSetData) {
-            // DB record has no per-set scores — try to get them from the live feed
-            // (finished matches linger briefly; stages carry set-by-set data needed for sc1-/sc2-/sc3-)
-            try {
-              const games = await getTennisLiveV1();
-              for (const g of games) {
-                if (Number(g.id) !== providerId) continue;
-                const _stages = (g as any).stages ?? [];
-                const _setSets: [number, number][] = _stages
-                  .filter((s: any) => /^set \d+$/i.test(String(s.name ?? "")) && s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0)
-                  .map((s: any): [number, number] => [Math.max(0, s.homeCompetitorScore), Math.max(0, s.awayCompetitorScore)]);
-                if (_setSets.length > 0) {
-                  const refreshedExtras = { tennis: { sets: _setSets } };
-                  const record = {
-                    home: row.home,
-                    away: row.away,
-                    homeTeam: row.homeTeam ?? "",
-                    awayTeam: row.awayTeam ?? "",
-                    status: row.status ?? "finished",
-                    finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
-                    extras: refreshedExtras,
-                  };
-                  finishedMatchResults.set(matchId, record);
-                  // Persist updated record so future server restarts retain set data
-                  await persistFinishedMatchRecord(matchId, "tennis", record);
-                  return true;
-                }
-                break; // found the game but no stage data available yet
-              }
-            } catch { /* live feed unavailable — fall through with DB record as-is */ }
-          }
-
-          finishedMatchResults.set(matchId, {
-            home: row.home,
-            away: row.away,
-            homeTeam: row.homeTeam ?? "",
-            awayTeam: row.awayTeam ?? "",
-            status: row.status ?? undefined,
-            extras: row.extras ?? undefined,
-            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
-          });
-          return true;
-        }
-      }
-    } catch {}
-
-    // Fallback: call V1 live feed and look for this game (finished games stay in the live feed briefly)
-    try {
-      const games = await getTennisLiveV1();
-      for (const g of games) {
-        if (Number(g.id) !== providerId) continue;
-        if (!isTennisV1GameFinished(g)) return false;
-        const home = Math.max(0, g.homeCompetitor?.score ?? 0);
-        const away = Math.max(0, g.awayCompetitor?.score ?? 0);
-        if (home === 0 && away === 0) return false;
-        // Extract per-set scores so sc1-/sc2-/sc3- bets can settle in the finished-match path
-        const _stages = (g as any).stages ?? [];
-        const _setSets: [number, number][] = _stages
-          .filter((s: any) => /^set \d+$/i.test(String(s.name ?? "")) && s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0)
-          .map((s: any): [number, number] => [Math.max(0, s.homeCompetitorScore), Math.max(0, s.awayCompetitorScore)]);
-        const _extras: Record<string, unknown> | undefined =
-          _setSets.length > 0 ? { tennis: { sets: _setSets } } : undefined;
-        const record = {
-          home,
-          away,
-          homeTeam: g.homeCompetitor?.name?.trim() ?? "",
-          awayTeam: g.awayCompetitor?.name?.trim() ?? "",
-          status: "finished",
-          finishedAt: Date.now(),
-          extras: _extras,
-        };
-        finishedMatchResults.set(matchId, record);
-        await enqueueMatchSettlement({
-          matchId,
-          jobId: buildMatchSettlementJobId({ matchId, home, away }),
-        });
-        await persistFinishedMatchRecord(matchId, "tennis", record);
-        _pruneFinishedResults();
-        return true;
-      }
-    } catch {}
-    return false;
-  }
-
   // ── PulseScore football/tennis/basketball/volleyball match IDs
   // (pulsescore-{sport}-{id}) ──────────────────────────────────────────────
   // DB-only recovery path: finalizeStaleLiveMatch() already writes a
@@ -7322,8 +6964,8 @@ export async function ensureFinishedMatchResult(
   // isProviderManagedMatchId at all when those two sports' PulseScore live
   // pipelines shipped (2026-08-08/09), so this branch is now generalized to
   // cover all four instead of being duplicated per sport. No live-feed
-  // fallback needed here (unlike tennis-v1 above) since finalizeStaleLiveMatch
-  // already persists the full record (including extras.basketball.quarters/
+  // fallback needed here since finalizeStaleLiveMatch already persists the
+  // full record (including extras.basketball.quarters/
   // extras.volleyball.sets, same shape read back below) up front.
   if (/^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(matchId)) {
     const cached = finishedMatchResults.get(matchId);
@@ -7409,121 +7051,6 @@ export async function scanVolleyballForFinished(): Promise<void> {
     _pruneFinishedResults();
   } catch (err) {
     logger.error({ err }, "scanVolleyballForFinished failed");
-  }
-}
-
-export async function scanTennisV1ForFinished(): Promise<void> {
-  try {
-    // 1. Check BOTH the live feed (in-progress/just-finished) AND the /all feed
-    //    (all of today's games — finished matches remain here for hours).
-    const [liveGames, allGames] = await Promise.all([
-      getTennisLiveV1(),
-      getTennisAllV1(),
-    ]);
-
-    // Deduplicate by game id (live feed may subset all feed)
-    const seenIds = new Set<string>();
-    const games: V1TennisGame[] = [];
-    for (const g of [...liveGames, ...allGames]) {
-      if (!g?.id) continue;
-      const id = String(g.id);
-      if (seenIds.has(id)) continue;
-      seenIds.add(id);
-      games.push(g);
-    }
-
-    for (const g of games) {
-      if (!isTennisV1GameFinished(g)) continue;
-      const providerId = String(g.id);
-      const matchId = `tennis-v1-${providerId}`;
-      if (finishedMatchResults.has(matchId)) continue;
-
-      const home = Math.max(0, g.homeCompetitor?.score ?? 0);
-      const away = Math.max(0, g.awayCompetitor?.score ?? 0);
-      if (home === 0 && away === 0) continue; // score data not yet available
-
-      const homeTeam = g.homeCompetitor?.name?.trim() ?? "";
-      const awayTeam = g.awayCompetitor?.name?.trim() ?? "";
-
-      // Extract per-set game scores from stages (e.g. "Set 1": [6,3], "Set 2": [4,6])
-      // Required to settle correct-score-of-set markets (sc1-, sc2-, sc3-, ses-)
-      const stages = g.stages ?? [];
-      const setSets: [number, number][] = stages
-        .filter(
-          (s) =>
-            /^set \d+$/i.test(s.name) &&
-            s.homeCompetitorScore >= 0 &&
-            s.awayCompetitorScore >= 0,
-        )
-        .map((s): [number, number] => [
-          Math.max(0, s.homeCompetitorScore),
-          Math.max(0, s.awayCompetitorScore),
-        ]);
-
-      const extras: Record<string, unknown> | undefined =
-        setSets.length > 0 ? { tennis: { sets: setSets } } : undefined;
-
-      const record = {
-        home,
-        away,
-        homeTeam,
-        awayTeam,
-        status: "finished",
-        finishedAt: Date.now(),
-        extras,
-      };
-      finishedMatchResults.set(matchId, record);
-      await enqueueMatchSettlement({
-        matchId,
-        jobId: buildMatchSettlementJobId({ matchId, home, away }),
-      });
-      await persistFinishedMatchRecord(matchId, "tennis", record);
-    }
-
-    // 2. DB recovery pass — reload tennis results that were stored before the current
-    //    server session (e.g. after a restart). Finished matches leave the live feed
-    //    within minutes, so without this, pending bets from yesterday or earlier
-    //    would never settle even though the result is in the DB.
-    if (db) {
-      try {
-        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // last 7 days
-        const rows = await db
-          .select()
-          .from(matchResultsTable)
-          .where(
-            and(
-              sql`${matchResultsTable.sport} = 'tennis'`,
-              gte(matchResultsTable.finishedAt, cutoff),
-            ),
-          )
-          .limit(500);
-
-        for (const row of rows) {
-          if (finishedMatchResults.has(row.matchId)) continue;
-          if (typeof row.home !== "number" || typeof row.away !== "number") continue;
-          finishedMatchResults.set(row.matchId, {
-            home: row.home,
-            away: row.away,
-            homeTeam: row.homeTeam ?? "",
-            awayTeam: row.awayTeam ?? "",
-            status: row.status ?? "finished",
-            extras: row.extras ?? undefined,
-            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
-          });
-          // Re-enqueue so the settlement worker picks it up for any pending bets
-          await enqueueMatchSettlement({
-            matchId: row.matchId,
-            jobId: buildMatchSettlementJobId({ matchId: row.matchId, home: row.home, away: row.away }),
-          });
-        }
-      } catch (dbErr) {
-        logger.warn({ err: dbErr }, "scanTennisV1ForFinished: DB recovery failed");
-      }
-    }
-
-    _pruneFinishedResults();
-  } catch (err) {
-    logger.error({ err }, "scanTennisV1ForFinished failed");
   }
 }
 
@@ -9044,254 +8571,6 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
   }
 }
 
-// ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
-// A Statpal rate-limit (429) backoff routinely outlasts 30s, and wiping the
-// live cache to empty during that window causes the live section to go
-// completely blank until it recovers — worse, any match that first turns
-// live during the outage then reads as "already stale" once the feed comes
-// back (see the evAgeSeconds > 20min gate below), permanently excluding it.
-// Ride out longer outages with stale-but-present data instead.
-const V2_LIVE_MAX_STALE_MS = 5 * 60_000;
-const WS_PREFERRED_MAX_STALE_MS = 10_000;
-
-/** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
-// V1 live game shape (football / basketball) — different from V2
-type V1LiveGame = {
-  id: number;
-  competitionDisplayName?: string;
-  competitionId?: number;
-  startTime?: string;
-  statusGroup?: number;
-  statusText?: string;
-  gameTime?: number;
-  homeCompetitor?: {
-    id?: number;
-    name?: string;
-    score?: number;
-    imageVersion?: number | string;
-  };
-  awayCompetitor?: {
-    id?: number;
-    name?: string;
-    score?: number;
-    imageVersion?: number | string;
-  };
-};
-
-// SportKey is still used as a parameter type by many still-alive V2 helpers
-// below (getScheduleV2, getUpcomingEventsV2, getV2TournamentIds, etc.), and
-// WS_DOMAINS still resolves the SportsAPI Pro V2 host per sport for those
-// helpers' direct fetch calls.
-type SportKey = "football" | "basketball" | "hockey" | "baseball" | "tennis";
-const WS_DOMAINS: Record<SportKey, string> = {
-  football: "v2.football.sportsapipro.com",
-  basketball: "v2.basketball.sportsapipro.com",
-  hockey: "v2.hockey.sportsapipro.com",
-  baseball: "v2.baseball.sportsapipro.com",
-  tennis: "v2.tennis.sportsapipro.com",
-};
-
-// ─── V2 /api/schedule/:date — multi-day upcoming events ──────────────────────
-
-// Per-(sport,date) cache — schedule data for future days changes rarely (30min TTL)
-type ScheduleV2Entry = { events: SAPIV2Event[]; fetchedAt: number };
-const scheduleV2Cache = new Map<string, ScheduleV2Entry>();
-const SCHEDULE_V2_TTL = 30 * 60_000;
-
-/** Fetch all events scheduled for `date` (YYYY-MM-DD) from the given sport. */
-async function getScheduleV2(
-  sport: SportKey,
-  date: string,
-): Promise<SAPIV2Event[]> {
-  const cacheKey = `${sport}:${date}`;
-  const cached = scheduleV2Cache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < SCHEDULE_V2_TTL)
-    return cached.events;
-  const domain = WS_DOMAINS[sport]; // "v2.football.sportsapipro.com" etc.
-  const todayStr = new Date().toISOString().slice(0, 10);
-  try {
-    const resp = await fetch(`https://${domain}/api/schedule/${date}`, {
-      signal: AbortSignal.timeout(9000),
-      headers: sapiHeaders(),
-    });
-    if (!resp.ok) {
-      // Fallback to /api/today when schedule endpoint fails, but only for today's date
-      if (date === todayStr) {
-        const todayResp = await fetch(`https://${domain}/api/today`, {
-          signal: AbortSignal.timeout(6000),
-          headers: sapiHeaders(),
-        }).catch(() => null);
-        if (todayResp?.ok) {
-          const todayData = (await todayResp.json()) as {
-            success?: boolean;
-            data?: { events?: SAPIV2Event[] };
-            events?: SAPIV2Event[];
-          };
-          const todayEvents =
-            todayData.data?.events ?? (todayData as any).events ?? [];
-          if (todayEvents.length > 0) {
-            scheduleV2Cache.set(cacheKey, {
-              events: todayEvents,
-              fetchedAt: Date.now(),
-            });
-            return todayEvents;
-          }
-        }
-      }
-      return cached?.events ?? [];
-    }
-    const data = (await resp.json()) as {
-      success?: boolean;
-      data?: { events?: SAPIV2Event[] };
-    };
-    // Only cache non-empty successful responses
-    if (data.success === false) return cached?.events ?? [];
-    const events = data.data?.events ?? [];
-    if (events.length > 0)
-      scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
-    return events.length > 0 ? events : (cached?.events ?? []);
-  } catch {
-    return cached?.events ?? [];
-  }
-}
-
-/**
- * Returns upcoming (not-yet-started) events across the next `days` calendar days
- * for the given sport, sorted by startTimestamp ascending.
- * Filters out events with status.type === "finished" and startTimestamp <= now.
- */
-async function getUpcomingEventsV2(
-  sport: SportKey,
-  days = 7,
-  graceSec = 5 * 60,
-): Promise<SAPIV2Event[]> {
-  const dates: string[] = [];
-  const nowMs = Date.now();
-  for (let i = 0; i < days; i++) {
-    const d = new Date(nowMs + i * 86_400_000);
-    dates.push(d.toISOString().slice(0, 10));
-  }
-  const allDays = await Promise.all(
-    dates.map((dt) =>
-      getScheduleV2(sport, dt).catch(() => [] as SAPIV2Event[]),
-    ),
-  );
-  const nowSec = nowMs / 1000;
-  return allDays
-    .flat()
-    .filter((ev) => {
-      if (!ev.startTimestamp || ev.startTimestamp < nowSec - graceSec)
-        return false;
-      // Exclude already-finished events that the schedule may still list
-      const st = ev.status;
-      if (!st) return true;
-      const statusType = typeof st === "object" ? (st.type ?? "") : "";
-      const statusStr = typeof st === "string" ? st.toLowerCase() : "";
-      // Exclude live/inprogress events — they belong in the live feed only
-      if (
-        statusType === "inprogress" ||
-        statusStr === "inprogress" ||
-        statusStr === "live" ||
-        statusStr === "in progress"
-      )
-        return false;
-      if (typeof st === "object" && statusType === "finished") return false;
-      return true;
-    })
-    .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
-}
-
-/**
- * Like getUpcomingEventsV2 but filtered to the primary competition for this sport:
- * NBA (basketball), NHL (hockey), MLB (baseball), ATP/WTA main draw (tennis).
- * Also deduplicates by event ID (same event may appear in multiple days' schedules).
- */
-async function getUpcomingLeagueEventsV2(
-  sport: SportKey,
-  days = 7,
-): Promise<SAPIV2Event[]> {
-  const events = await getUpcomingEventsV2(sport, days);
-  const seen = new Set<number>();
-  const filtered: SAPIV2Event[] = [];
-  for (const ev of events) {
-    if (seen.has(ev.id)) continue;
-    seen.add(ev.id);
-    if (
-      sport !== "football" &&
-      !isMainLeagueEventRaw(sport, ev as unknown as Record<string, unknown>)
-    )
-      continue;
-    filtered.push(ev);
-  }
-  return filtered;
-}
-
-// ─── V2 Pre-Match Odds ─────────────────────────────────────────────────────────
-
-type V2RawMarket = {
-  marketName: string;
-  marketGroup: string;
-  choices: Array<{ name: string; fractionalValue: string }>;
-};
-
-type V2PreMatchOdds = {
-  home: number;
-  draw: number;
-  away: number;
-  bttsYes?: number;
-  bttsNo?: number;
-  over25?: number;
-  under25?: number;
-  firstSetHome?: number;
-  firstSetAway?: number;
-  score1st?: Array<{ label: string; odds: number }>;
-  score2nd?: Array<{ label: string; odds: number }>;
-  score3rd?: Array<{ label: string; odds: number }>;
-};
-
-function fractionalToDecimal(frac: string): number {
-  const parts = frac.split("/");
-  if (parts.length !== 2) return 0;
-  const num = parseFloat(parts[0]!);
-  const den = parseFloat(parts[1]!);
-  if (!den || isNaN(num) || isNaN(den)) return 0;
-  return Math.round((num / den + 1) * 100) / 100;
-}
-
-function normalizeOddsMarketText(value: string): string {
-  return String(value ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function parseTennisSetOrdinal(value: string): number | null {
-  const normalized = normalizeOddsMarketText(value);
-  const numeric = normalized.match(/(?:^|\b)set\s*(\d)(?:\b|[^0-9])/);
-  if (numeric) return Number(numeric[1]);
-  if (
-    normalized.includes("first set") ||
-    normalized.includes("1st set") ||
-    normalized.includes("set one")
-  )
-    return 1;
-  if (
-    normalized.includes("second set") ||
-    normalized.includes("2nd set") ||
-    normalized.includes("set two")
-  )
-    return 2;
-  if (
-    normalized.includes("third set") ||
-    normalized.includes("3rd set") ||
-    normalized.includes("set three")
-  )
-    return 3;
-  return null;
-}
-
 function canonicalTennisSetScoreOrder(
   entries: Array<{ label: string; odds: number }>,
 ): Array<{ label: string; odds: number }> {
@@ -9314,173 +8593,6 @@ function canonicalTennisSetScoreOrder(
   return [...entries].sort(
     (a, b) => (order.get(a.label) ?? 999) - (order.get(b.label) ?? 999),
   );
-}
-
-function parseTennisSetCorrectScoreChoices(
-  choices: Array<{ name: string; fractionalValue: string }>,
-): Array<{ label: string; odds: number }> {
-  const out: Array<{ label: string; odds: number }> = [];
-  for (const choice of choices) {
-    const score = String(choice?.name ?? "").replace(/\s+/g, "");
-    if (!/^\d-\d$/.test(score)) continue;
-    const [homeGames, awayGames] = score.split("-").map(Number);
-    const maxGames = Math.max(homeGames, awayGames);
-    const minGames = Math.min(homeGames, awayGames);
-    const valid =
-      (maxGames === 6 && minGames <= 4) ||
-      (homeGames === 7 && awayGames === 5) ||
-      (homeGames === 7 && awayGames === 6) ||
-      (awayGames === 7 && homeGames === 5) ||
-      (awayGames === 7 && homeGames === 6);
-    if (!valid) continue;
-    const odds = fractionalToDecimal(choice.fractionalValue);
-    if (!(odds > 1.001)) continue;
-    out.push({
-      label: `${homeGames}-${awayGames}`,
-      odds: clampTennisSetCorrectScoreOdd(odds),
-    });
-  }
-  return canonicalTennisSetScoreOrder(out);
-}
-
-function parseV2PreMatchOdds(markets: V2RawMarket[]): V2PreMatchOdds | null {
-  let home = 0,
-    draw = 0,
-    away = 0;
-  let bttsYes = 0,
-    bttsNo = 0,
-    over25 = 0,
-    under25 = 0;
-  let firstSetHome = 0,
-    firstSetAway = 0;
-  let score1st: Array<{ label: string; odds: number }> = [];
-  let score2nd: Array<{ label: string; odds: number }> = [];
-  let score3rd: Array<{ label: string; odds: number }> = [];
-
-  for (const mkt of markets) {
-    const grp = mkt.marketGroup ?? "";
-    const name = mkt.marketName ?? "";
-    const choices = mkt.choices ?? [];
-    const combinedText = `${grp} ${name}`;
-    const normalizedText = normalizeOddsMarketText(combinedText);
-
-    if (grp === "1X2" && name === "Full time") {
-      for (const c of choices) {
-        const v = fractionalToDecimal(c.fractionalValue);
-        if (c.name === "1") home = v;
-        else if (c.name === "X") draw = v;
-        else if (c.name === "2") away = v;
-      }
-    }
-    if (grp === "Home/Away" && name === "Full time") {
-      for (const c of choices) {
-        const v = fractionalToDecimal(c.fractionalValue);
-        if (c.name === "1") home = v;
-        else if (c.name === "2") away = v;
-      }
-    }
-    if (name === "Both teams to score") {
-      for (const c of choices) {
-        if (c.name === "Yes") bttsYes = fractionalToDecimal(c.fractionalValue);
-        else if (c.name === "No")
-          bttsNo = fractionalToDecimal(c.fractionalValue);
-      }
-    }
-    if (name.includes("2.5")) {
-      for (const c of choices) {
-        const v = fractionalToDecimal(c.fractionalValue);
-        if (c.name?.startsWith("Over")) over25 = v;
-        else if (c.name?.startsWith("Under")) under25 = v;
-      }
-    }
-    if (name === "First set winner") {
-      for (const c of choices) {
-        const v = fractionalToDecimal(c.fractionalValue);
-        if (c.name === "1") firstSetHome = v;
-        else if (c.name === "2") firstSetAway = v;
-      }
-    }
-
-    const looksLikeSetCorrectScore =
-      (normalizedText.includes("correct score") ||
-        normalizedText.includes("exact score") ||
-        normalizedText.includes("set score")) &&
-      normalizedText.includes("set");
-    if (looksLikeSetCorrectScore) {
-      const parsedChoices = parseTennisSetCorrectScoreChoices(choices);
-      if (parsedChoices.length > 0) {
-        const setNum = parseTennisSetOrdinal(combinedText);
-        if (setNum === 1) score1st = parsedChoices;
-        else if (setNum === 2) score2nd = parsedChoices;
-        else if (setNum === 3) score3rd = parsedChoices;
-      }
-    }
-  }
-
-  const hasAny =
-    home > 0 ||
-    draw > 0 ||
-    away > 0 ||
-    bttsYes > 0 ||
-    bttsNo > 0 ||
-    over25 > 0 ||
-    under25 > 0 ||
-    firstSetHome > 0 ||
-    firstSetAway > 0 ||
-    score1st.length > 0 ||
-    score2nd.length > 0 ||
-    score3rd.length > 0;
-  if (!hasAny) return null;
-  return {
-    home,
-    draw,
-    away,
-    bttsYes,
-    bttsNo,
-    over25,
-    under25,
-    firstSetHome,
-    firstSetAway,
-    ...(score1st.length > 0 ? { score1st } : {}),
-    ...(score2nd.length > 0 ? { score2nd } : {}),
-    ...(score3rd.length > 0 ? { score3rd } : {}),
-  };
-}
-
-type PreMatchOddsEntry = { odds: V2PreMatchOdds; fetchedAt: number };
-const preMatchOddsV2Cache = new Map<string, PreMatchOddsEntry>();
-const PRE_MATCH_ODDS_TTL = 15 * 60_000;
-
-async function getPreMatchOddsV2(
-  sport: SportKey,
-  matchId: number,
-): Promise<V2PreMatchOdds | null> {
-  const key = `${sport}:${matchId}`;
-  const cached = preMatchOddsV2Cache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < PRE_MATCH_ODDS_TTL)
-    return cached.odds;
-  const domain = WS_DOMAINS[sport];
-  try {
-    const resp = await fetch(
-      `https://${domain}/api/match/${matchId}/odds/pre-match`,
-      {
-        signal: AbortSignal.timeout(5000),
-        headers: sapiHeaders(),
-      },
-    );
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as {
-      success?: boolean;
-      data?: { markets?: V2RawMarket[] };
-    };
-    if (!data.success || !data.data?.markets?.length) return null;
-    const parsed = parseV2PreMatchOdds(data.data.markets);
-    if (parsed)
-      preMatchOddsV2Cache.set(key, { odds: parsed, fetchedAt: Date.now() });
-    return parsed;
-  } catch {
-    return null;
-  }
 }
 
 // ─── League Filters ────────────────────────────────────────────────────────────
@@ -9603,117 +8715,6 @@ function isAllowedFootballLeague(name: string): boolean {
   );
 }
 
-// ─── V2 /api/today fetch helpers ──────────────────────────────────────────────
-
-async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
-  const now = Date.now();
-  if (tennisTodayV2Cache && now - tennisTodayV2FetchedAt < TODAY_V2_TTL)
-    return tennisTodayV2Cache;
-  try {
-    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, {
-      signal: AbortSignal.timeout(3000),
-      headers: sapiHeaders(),
-    });
-    if (!resp.ok) return tennisTodayV2Cache ?? [];
-    const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    tennisTodayV2Cache = data.events ?? [];
-    tennisTodayV2FetchedAt = now;
-    return tennisTodayV2Cache;
-  } catch {
-    return tennisTodayV2Cache ?? [];
-  }
-}
-
-// ─── V1 Tennis: native API (v1.tennis.sportsapipro.com) ───────────────────────
-// Tennis uses a completely different API schema from other sports (no v2 live/today).
-// The /all endpoint returns all today+tomorrow games; /live returns in-progress ones.
-
-async function getTennisAllV1(): Promise<V1TennisGame[]> {
-  const now = Date.now();
-  if (_tennisAllV1Cache && now - _tennisAllV1FetchedAt < TODAY_V2_TTL)
-    return _tennisAllV1Cache;
-  try {
-    const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/all`, {
-      signal: AbortSignal.timeout(9000),
-      headers: sapiHeaders(),
-    });
-    if (!resp.ok) return _tennisAllV1Cache ?? [];
-    const data = (await resp.json()) as { data?: { games?: V1TennisGame[] } };
-    _tennisAllV1Cache = data.data?.games ?? [];
-    _tennisAllV1FetchedAt = now;
-    return _tennisAllV1Cache;
-  } catch {
-    return _tennisAllV1Cache ?? [];
-  }
-}
-
-// Tennis is point-by-point, so keep the V1 live cache tight.
-// The SSE/broadcast layer already smooths fan-out; this TTL must stay tight
-// enough that our scoreboard does not trail the large books by several seconds.
-// This same constant gates TWO independent, stacked caching layers — the raw
-// getTennisLiveV1() fetch (_tennisLiveV1Cache) AND the state-building wrapper
-// on top of it (buildTennisLiveV1Cached's _tennisLiveV1StateCache) — so the
-// worst case is roughly double this value before a point change is even
-// picked up, before the live-payload cache (1.5s) and SSE broadcast (1s) add
-// their own delay on top. Lowered from 1000ms after a reported ~5s lag
-// suspending at 40/Advantage — this halves the two-layer contribution to
-// that stacked delay.
-const TENNIS_LIVE_V1_TTL = 500;
-let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null =
-  null;
-let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
-
-async function fetchTennisLiveV1(): Promise<V1TennisGame[]> {
-  try {
-    const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/live`, {
-      signal: AbortSignal.timeout(4000),
-      headers: sapiHeaders(),
-    });
-    if (!resp.ok) return [];
-    const data = (await resp.json()) as { data?: { games?: V1TennisGame[] } };
-    return data.data?.games ?? [];
-  } catch {
-    return [];
-  }
-}
-
-async function getTennisLiveV1(): Promise<V1TennisGame[]> {
-  const now = Date.now();
-  if (
-    _tennisLiveV1Cache &&
-    now - _tennisLiveV1Cache.fetchedAt < TENNIS_LIVE_V1_TTL
-  )
-    return _tennisLiveV1Cache.games;
-  if (_tennisLiveV1Cache) {
-    if (!_tennisLiveV1InFlight) {
-      _tennisLiveV1InFlight = fetchTennisLiveV1()
-        .then((games) => {
-          _tennisLiveV1Cache = { games, fetchedAt: Date.now() };
-          return games;
-        })
-        .finally(() => {
-          _tennisLiveV1InFlight = null;
-        });
-    }
-    return (
-      (await Promise.race([
-        _tennisLiveV1InFlight,
-        waitMs(700).then(() => null),
-      ])) ?? _tennisLiveV1Cache.games
-    );
-  }
-  if (!_tennisLiveV1InFlight) {
-    _tennisLiveV1InFlight = fetchTennisLiveV1()
-      .then((games) => {
-        _tennisLiveV1Cache = { games, fetchedAt: Date.now() };
-        return games;
-      })
-      .finally(() => {
-        _tennisLiveV1InFlight = null;
-      });
-  }
-  return _tennisLiveV1InFlight;
-}
 
 // Shared helper: convert a SAPIV2Event startTimestamp to date/time strings (Europe/Lisbon)
 /** Calendar-day key (YYYY-MM-DD) for a unix-seconds timestamp, in Europe/Lisbon. */
@@ -9757,118 +8758,6 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   };
 }
 
-// ─── V2 Tournament/Season ID Cache ────────────────────────────────────────────
-const v2TournIdCache = new Map<
-  string,
-  { tid: number; sid: number; fetchedAt: number }
->();
-const V2_TOURN_ID_TTL = 30 * 60_000;
-
-/** Resolves the dominant tournament+season IDs for a sport from V2 live or schedule. */
-async function getV2TournamentIds(
-  sport: SportKey,
-): Promise<{ tid: number; sid: number } | null> {
-  const cached = v2TournIdCache.get(sport);
-  if (cached && Date.now() - cached.fetchedAt < V2_TOURN_ID_TTL) return cached;
-  const domain = WS_DOMAINS[sport];
-
-  const extractIds = (
-    events: unknown[],
-  ): { tid: number; sid: number } | null => {
-    const countMap = new Map<string, { tid: number; sid: number; n: number }>();
-    for (const ev of events) {
-      const e = ev as Record<string, unknown>;
-      // Only count events that belong to the primary league for this sport
-      if (!isMainLeagueEventRaw(sport, e)) continue;
-      const tourn = e["tournament"] as Record<string, unknown> | undefined;
-      const uniq = tourn?.["uniqueTournament"] as
-        | Record<string, unknown>
-        | undefined;
-      const tid = Number(
-        e["tournamentId"] ?? uniq?.["id"] ?? tourn?.["id"] ?? 0,
-      );
-      const season = e["season"] as Record<string, unknown> | undefined;
-      const sid = Number(e["seasonId"] ?? season?.["id"] ?? 0);
-      if (!tid || !sid) continue;
-      const key = `${tid}:${sid}`;
-      const ex = countMap.get(key);
-      if (ex) ex.n++;
-      else countMap.set(key, { tid, sid, n: 1 });
-    }
-    let best: { tid: number; sid: number } | null = null;
-    let bestN = 0;
-    for (const entry of countMap.values()) {
-      if (entry.n > bestN) {
-        bestN = entry.n;
-        best = { tid: entry.tid, sid: entry.sid };
-      }
-    }
-    return best;
-  };
-
-  // Try V2 live first (flat event structure)
-  try {
-    const r = await fetch(`https://${domain}/api/live`, {
-      signal: AbortSignal.timeout(7000),
-      headers: sapiHeaders(),
-    });
-    if (r.ok) {
-      const d = (await r.json()) as Record<string, unknown>;
-      const evts = (d["events"] ??
-        (d["data"] as Record<string, unknown>)?.["events"] ??
-        []) as unknown[];
-      const ids = extractIds(evts);
-      if (ids) {
-        v2TournIdCache.set(sport, { ...ids, fetchedAt: Date.now() });
-        return ids;
-      }
-    }
-  } catch {}
-
-  // Fall back to today's schedule (nested data.events structure)
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const scheduleEvts = await getScheduleV2(sport, todayStr).catch(
-    () => [] as SAPIV2Event[],
-  );
-  const ids2 = extractIds(scheduleEvts as unknown[]);
-  if (ids2) {
-    v2TournIdCache.set(sport, { ...ids2, fetchedAt: Date.now() });
-    return ids2;
-  }
-  return cached ?? null;
-}
-
-// ─── V2 Events/Last Cache ──────────────────────────────────────────────────────
-const v2EventsLastMap = new Map<
-  string,
-  { events: unknown[]; fetchedAt: number }
->();
-const V2_EVENTS_LAST_TTL = 5 * 60_000;
-
-async function getV2EventsLast(sport: SportKey, n = 30): Promise<unknown[]> {
-  const ids = await getV2TournamentIds(sport);
-  if (!ids) return [];
-  const cacheKey = `${sport}:${ids.tid}:${ids.sid}:${n}`;
-  const cached = v2EventsLastMap.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < V2_EVENTS_LAST_TTL)
-    return cached.events;
-  const domain = WS_DOMAINS[sport];
-  try {
-    const resp = await fetch(
-      `https://${domain}/api/tournament/${ids.tid}/season/${ids.sid}/events/last/${n}`,
-      { signal: AbortSignal.timeout(9000), headers: sapiHeaders() },
-    );
-    if (!resp.ok) return cached?.events ?? [];
-    const d = (await resp.json()) as Record<string, unknown>;
-    const events = ((d["data"] as Record<string, unknown>)?.["events"] ??
-      []) as unknown[];
-    v2EventsLastMap.set(cacheKey, { events, fetchedAt: Date.now() });
-    return events;
-  } catch {
-    return cached?.events ?? [];
-  }
-}
-
 // ─── Match builders ────────────────────────────────────────────────────────────
 
 // Additional FINISHED statuses Statpal may return when slow to update
@@ -9894,268 +8783,17 @@ const SAPI_FINISHED_STATUSES = new Set([
   "Susp.",
 ]);
 
-// Fetch window wide enough to cover the "?range=month" filter; the default
-// prematch view narrows this back down to today + 7 days for priority
-// leagues (see GET /upcoming). Fetches are per-day-cached (SCHEDULE_V2_TTL),
-// so widening this doesn't multiply live request volume.
-const FOOTBALL_UPCOMING_FETCH_DAYS = 30;
-// Bounds how many priority-league fixtures we carry through odds enrichment;
-// generous enough for a full month of top leagues worldwide.
-const FOOTBALL_UPCOMING_PRIORITY_CAP = 400;
-// Non-priority ("fallback") leagues only ever show for today, so this just
-// bounds how many today-only small-league fixtures we carry.
-const FOOTBALL_UPCOMING_FALLBACK_TODAY_CAP = 60;
-
+// buildUpcomingMatches() used to build its own football-upcoming list via
+// SportsAPI Pro V2's schedule endpoint (getUpcomingEventsV2), falling back to
+// its V1 endpoint (buildFootballUpcomingV1) when V2 came back empty — both
+// removed with the rest of SportsAPI Pro. It now just delegates to
+// buildFootballUpcomingFromSportMonks(), the same SportMonks-backed builder
+// that already serves football's real upcoming list (refreshUpcomingTop() /
+// GET /upcoming below) — kept as a thin named wrapper so predictions.ts's
+// dynamic import("./matches.js") (see its by-matchId upcoming lookup)
+// doesn't need to change.
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  const events = await getUpcomingEventsV2(
-    "football",
-    FOOTBALL_UPCOMING_FETCH_DAYS,
-  );
-  if (events.length === 0) return buildFootballUpcomingV1();
-  // Capture ground-truth scheduled kickoff for every fixture seen here, before
-  // any league/team filtering — this is our only trustworthy source, since it
-  // comes from the schedule feed rather than the live feed's self-reported time.
-  for (const ev of events) {
-    if (ev.startTimestamp) footballScheduledKickoffSec.set(ev.id, ev.startTimestamp);
-  }
-  const todayKey = lisbonDateKey(Date.now() / 1000);
-  const seen = new Set<string>();
-  const priorityIds = new Set<number>();
-  const primary: SAPIV2Event[] = [];
-  const fallback: SAPIV2Event[] = [];
-
-  for (const ev of events) {
-    const home = v2TeamName(ev.homeTeam);
-    const away = v2TeamName(ev.awayTeam);
-    if (home === "Unknown" || away === "Unknown") continue;
-    const countryRaw = v2TournCountry(ev);
-    const countryKey = normalizeCountryKey(countryRaw);
-    const leagueRaw = countryKey
-      ? `${countryKey}: ${v2TournName(ev.tournament)}`
-      : v2TournName(ev.tournament);
-    const leagueName = normalizeLeagueName(leagueRaw, countryKey);
-    if (isBlockedLeague(`${leagueName} ${home} ${away}`)) continue;
-    const key = `${home}|${away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (footballLeagueAllowedStrict(countryRaw, leagueName)) {
-      if (primary.length < FOOTBALL_UPCOMING_PRIORITY_CAP) {
-        priorityIds.add(ev.id);
-        primary.push(ev);
-      }
-    } else if (!isLeagueUniversallyBlocked(`${leagueName} ${home} ${away}`)) {
-      // Small/non-priority leagues: now shown up to 7 days ahead by default
-      // (user request 2026-08-13). Previously only today was shown to avoid
-      // flooding the prematch view with minor-league fixtures weeks out; the
-      // 7-day window still keeps it manageable while giving users visibility
-      // into upcoming regional/small-league fixtures.
-      const evStartMs = (ev.startTimestamp ?? 0) * 1000;
-      const daysAhead = Math.floor(
-        (evStartMs - Date.now()) / (24 * 60 * 60 * 1000),
-      );
-      if (
-        fallback.length < FOOTBALL_UPCOMING_FALLBACK_TODAY_CAP &&
-        daysAhead >= 0 &&
-        daysAhead <= 7
-      )
-        fallback.push(ev);
-    }
-  }
-  // Combine and re-sort chronologically — priority leagues can span the full
-  // fetch window, today-only fallback leagues interleave with them.
-  const filtered = [...primary, ...fallback].sort(
-    (a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0),
-  );
-
-  const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-    filtered.length,
-  ).fill(null);
-  const maxOddsLookups = Math.min(filtered.length, 30);
-  const batchSize = 10;
-  for (let i = 0; i < maxOddsLookups; i += batchSize) {
-    const slice = filtered.slice(i, i + batchSize);
-    const out = await Promise.all(
-      slice.map((ev) => getPreMatchOddsV2("football", ev.id).catch(() => null)),
-    );
-    for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
-  }
-
-  // ── Statpal league-level prematch odds (DC, BTTS, O/U, HT, DNB) ──────────
-  // Fetch by league in parallel — one request covers all matches in that league.
-  const leagueIds = [
-    ...new Set(
-      filtered
-        .map((ev) => (ev.tournamentId ? String(ev.tournamentId) : null))
-        .filter((id): id is string => id != null),
-    ),
-  ];
-  const statpalLeagueOdds = new Map<string, FootballOddsEntry[]>();
-  await Promise.all(
-    leagueIds.map(async (leagueId) => {
-      try {
-        const { odds } = await getFootballLeagueOdds(leagueId);
-        statpalLeagueOdds.set(leagueId, odds);
-      } catch {
-        /* skip leagues where prematch odds are unavailable */
-      }
-    }),
-  );
-
-  /** Normalise a team name for fuzzy matching across providers. */
-  const normTeam = (s: string) =>
-    String(s ?? "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9 ]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  const results: UpcomingMatch[] = [];
-  for (let i = 0; i < filtered.length; i++) {
-    const ev = filtered[i]!;
-    const home = v2TeamName(ev.homeTeam);
-    const away = v2TeamName(ev.awayTeam);
-    const countryRaw = v2TournCountry(ev);
-    const countryKey = normalizeCountryKey(countryRaw);
-    const leagueRaw = countryKey
-      ? `${countryKey}: ${v2TournName(ev.tournament)}`
-      : v2TournName(ev.tournament);
-    const leagueName = normalizeLeagueName(leagueRaw, countryKey);
-    const { date, time } = v2EventDateTime(ev);
-    const realOdds = oddsResults[i] ?? null;
-    const isWomens = isWomensLeague(v2TournName(ev.tournament));
-
-    let odds: { home: number; draw: number; away: number };
-    let markets: AdvancedMarkets;
-    let hasRealOdds: boolean;
-
-    const baseOdds = makeOddsFromTeams(home, away);
-    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    markets = {
-      ...baseMarkets,
-      ...(realOdds?.bttsYes
-        ? {
-            bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 },
-          }
-        : {}),
-      ...(realOdds?.over25
-        ? {
-            totalGoals: {
-              ...baseMarkets.totalGoals,
-              over25: realOdds.over25,
-              under25: realOdds.under25 ?? 0,
-            },
-          }
-        : {}),
-    };
-    const hasFull1x2 = !!(
-      realOdds &&
-      realOdds.home > 0 &&
-      realOdds.draw > 0 &&
-      realOdds.away > 0
-    );
-    odds = hasFull1x2
-      ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away }
-      : baseOdds;
-    hasRealOdds = hasFull1x2;
-
-    // ── Enrich with Statpal league prematch odds ───────────────────────────
-    // Supplements the per-match SportsAPI odds with Double Chance, BTTS,
-    // Over/Under lines, Half Time, Draw No Bet, and Asian Handicap from the
-    // Statpal prematch feed.  Also provides 1x2 as a fallback.
-    const leagueIdStr = ev.tournamentId ? String(ev.tournamentId) : null;
-    if (leagueIdStr) {
-      const leagueEntries = statpalLeagueOdds.get(leagueIdStr) ?? [];
-      const normHome = normTeam(home);
-      const normAway = normTeam(away);
-      const statpalMatch = leagueEntries.find(
-        (e) =>
-          normTeam(e.homeTeam.name) === normHome ||
-          normTeam(e.awayTeam.name) === normAway ||
-          (normTeam(e.homeTeam.name).includes(normHome.split(" ")[0]!) &&
-            normTeam(e.awayTeam.name).includes(normAway.split(" ")[0]!)),
-      );
-      if (statpalMatch) {
-        // 1x2 fallback when SportsAPI didn't supply it
-        if (
-          !hasRealOdds &&
-          statpalMatch.homeOdds > 0 &&
-          statpalMatch.drawOdds > 0 &&
-          statpalMatch.awayOdds > 0
-        ) {
-          odds = {
-            home: statpalMatch.homeOdds,
-            draw: statpalMatch.drawOdds,
-            away: statpalMatch.awayOdds,
-          };
-          hasRealOdds = true;
-        }
-        // Merge enriched markets — Statpal data wins when no existing value
-        if (statpalMatch.markets) {
-          const sm = statpalMatch.markets;
-          if (sm.doubleChance?.homeOrDraw && !markets.doubleChance?.homeOrDraw)
-            markets = { ...markets, doubleChance: sm.doubleChance };
-          if (sm.bothTeamsScore?.yes && !markets.bothTeamsScore?.yes)
-            markets = { ...markets, bothTeamsScore: sm.bothTeamsScore };
-          if (sm.halfTime?.home && !markets.halfTime?.home)
-            markets = { ...markets, halfTime: sm.halfTime };
-          if (sm.drawNoBet?.home && !markets.drawNoBet?.home)
-            markets = { ...markets, drawNoBet: sm.drawNoBet };
-          if (sm.asianHandicap?.home && !markets.asianHandicap?.home)
-            markets = { ...markets, asianHandicap: sm.asianHandicap };
-          if (sm.firstGoal?.home && !markets.firstGoal?.home)
-            markets = { ...markets, firstGoal: sm.firstGoal };
-          // Merge O/U lines individually — Statpal may fill lines SportsAPI missed
-          if (sm.totalGoals) {
-            const tg = markets.totalGoals;
-            markets = {
-              ...markets,
-              totalGoals: {
-                ...tg,
-                ...(sm.totalGoals.over05 && !tg.over05
-                  ? { over05: sm.totalGoals.over05, under05: sm.totalGoals.under05 }
-                  : {}),
-                ...(sm.totalGoals.over15 && !tg.over15
-                  ? { over15: sm.totalGoals.over15, under15: sm.totalGoals.under15 }
-                  : {}),
-                ...(sm.totalGoals.over25 && !tg.over25
-                  ? { over25: sm.totalGoals.over25, under25: sm.totalGoals.under25 }
-                  : {}),
-                ...(sm.totalGoals.over35 && !tg.over35
-                  ? { over35: sm.totalGoals.over35, under35: sm.totalGoals.under35 }
-                  : {}),
-                ...(sm.totalGoals.over45 && !tg.over45
-                  ? { over45: sm.totalGoals.over45, under45: sm.totalGoals.under45 }
-                  : {}),
-              },
-            };
-          }
-        }
-      }
-    }
-
-    results.push({
-      id: `fb-v2-${ev.id}`,
-      home,
-      away,
-      homeTeamId: ev.homeTeamId != null ? String(ev.homeTeamId) : undefined,
-      awayTeamId: ev.awayTeamId != null ? String(ev.awayTeamId) : undefined,
-      league: leagueName,
-      country: countryRaw,
-      time,
-      date,
-      sport: "football",
-      hasRealOdds,
-      odds,
-      markets,
-      isWomens,
-      leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
-      isPriorityLeague: priorityIds.has(ev.id),
-    });
-  }
-
-  return results;
+  return buildFootballUpcomingFromSportMonks();
 }
 
 /**
@@ -12679,17 +11317,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // migrated to PulseScore individually (needs a real authenticated live
   // sample per sport first — same discipline football/tennis went through,
   // not guessed). Football and tennis are unaffected, both already 100%
-  // PulseScore. getTennisTodayV2() is kept — it only feeds prematch tennis
-  // league labels, unrelated to live data or Statpal/SportsAPI.
-  const tennisTodayEvents = await getTennisTodayV2();
-  // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
-  if (tennisTodayEvents && tennisTodayEvents.length > 0) {
-    refreshTennisV2LeagueCache(tennisTodayEvents);
-  }
-  // Fire-and-forget prematch odds cache warmers — unrelated to the live
-  // pipeline above (these feed prematch tennis/baseball listings, which
-  // weren't part of today's live-only removal), don't block the broadcast path
-  getTennisOdds().catch(() => {});
+  // PulseScore. Prematch tennis league labels come from PulseScore's own
+  // league field now (buildTennisUpcomingFromPulseScore) — SportsAPI Pro's
+  // getTennisTodayV2()/refreshTennisV2LeagueCache enrichment was removed.
+  // Fire-and-forget prematch odds cache warmer — unrelated to the live
+  // pipeline above (feeds the prematch baseball listing, which wasn't part
+  // of today's live-only removal), don't block the broadcast path
   getMLBOdds().catch(() => {});
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
@@ -13652,89 +12285,6 @@ router.get("/live-stream", (req: Request, res: Response) => {
     sseClients.delete(res);
   });
 });
-
-// ─── V1 upcoming builders (fallback when V2 schedule/today is degraded) ──────
-
-async function buildFootballUpcomingV1(): Promise<UpcomingMatch[]> {
-  try {
-    const fetchGames = async (path: string): Promise<V1LiveGame[]> => {
-      const resp = await fetch(`${SAPI_V1_FOOTBALL}/${path}`, {
-        signal: AbortSignal.timeout(8000),
-        headers: sapiHeaders(),
-      });
-      if (!resp.ok) return [];
-      const j = (await resp.json()) as { data?: { games?: V1LiveGame[] } };
-      return j.data?.games ?? [];
-    };
-    const [currentGames, allGames] = await Promise.all([
-      fetchGames("current").catch(() => [] as V1LiveGame[]),
-      fetchGames("all").catch(() => [] as V1LiveGame[]),
-    ]);
-    const seen = new Set<number>();
-    const results: UpcomingMatch[] = [];
-    for (const g of [...currentGames, ...allGames]) {
-      if (!g.id || seen.has(g.id)) continue;
-      seen.add(g.id);
-      if ((g.statusGroup ?? 0) !== 2) continue;
-      const home = g.homeCompetitor?.name?.trim() ?? "";
-      const away = g.awayCompetitor?.name?.trim() ?? "";
-      if (!home || !away || home === "Unknown" || away === "Unknown") continue;
-      if (isBlockedLeague(`${g.competitionDisplayName ?? ""} ${home} ${away}`))
-        continue;
-      const league = g.competitionDisplayName ?? "Football";
-      const startMs = g.startTime
-        ? new Date(g.startTime).getTime()
-        : Date.now() + 3_600_000;
-      if (startMs < Date.now() - 5 * 60_000) continue;
-      const { date, time } = v2EventDateTime({
-        startTimestamp: startMs / 1000,
-      } as SAPIV2Event);
-      if (!date) continue;
-      results.push({
-        id: `fb-v1-${g.id}`,
-        home,
-        away,
-        homeTeamId:
-          g.homeCompetitor?.id != null
-            ? String(g.homeCompetitor.id)
-            : undefined,
-        awayTeamId:
-          g.awayCompetitor?.id != null
-            ? String(g.awayCompetitor.id)
-            : undefined,
-        homeImageVersion:
-          g.homeCompetitor?.imageVersion != null
-            ? String(g.homeCompetitor.imageVersion)
-            : undefined,
-        awayImageVersion:
-          g.awayCompetitor?.imageVersion != null
-            ? String(g.awayCompetitor.imageVersion)
-            : undefined,
-        league,
-        country: "",
-        date,
-        time,
-        sport: "football" as const,
-        hasRealOdds: false,
-        odds: makeOddsFromTeams(home, away),
-        markets: makeAdvancedMarketsFromTeams(home, away),
-      } as UpcomingMatch);
-      if (results.length >= 40) break;
-    }
-    results.sort((a, b) => {
-      const ta = new Date(
-        `${a.date.split(".").reverse().join("-")}T${a.time}`,
-      ).getTime();
-      const tb = new Date(
-        `${b.date.split(".").reverse().join("-")}T${b.time}`,
-      ).getTime();
-      return ta - tb;
-    });
-    return results;
-  } catch {
-    return [];
-  }
-}
 
 // ─── Top-level upcoming cache — 60s TTL so repeated 30s polls are instant ─────
 type UpcomingTopCache = {
@@ -16200,64 +14750,9 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
     }
   }
 
-  try {
-    const events = await getV2EventsLast("hockey", 20);
-    const yd = new Date(Date.now() - 86400000);
-    const ydStr = `${String(yd.getUTCDate()).padStart(2, "0")}.${String(yd.getUTCMonth() + 1).padStart(2, "0")}.${yd.getUTCFullYear()}`;
-    const results: HockeyDailyResult[] = [];
-    for (const raw of events) {
-      const ev = raw as Record<string, unknown>;
-      const st =
-        (ev["status"] as Record<string, unknown> | undefined)?.["type"] ??
-        ev["status"];
-      if (typeof st === "string" && st !== "finished") continue;
-      const ts = ev["startTimestamp"] as number | undefined;
-      if (!ts) continue;
-      const { date, time } = v2EventDateTime({
-        startTimestamp: ts,
-      } as SAPIV2Event);
-      if (date !== ydStr) continue;
-      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
-      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
-      const homeScore = Number(hs?.["current"] ?? 0);
-      const awayScore = Number(as_?.["current"] ?? 0);
-      const periods: Array<[number, number]> = [];
-      for (const p of [
-        "period1",
-        "period2",
-        "period3",
-        "overtime",
-        "shootout",
-      ]) {
-        const hv = hs?.[p];
-        const av = as_?.[p];
-        if (hv != null && av != null) periods.push([Number(hv), Number(av)]);
-      }
-      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
-      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
-      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
-      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
-      if (!home || !away) continue;
-      results.push({
-        id: String(ev["id"] ?? ""),
-        home,
-        away,
-        homeScore,
-        awayScore,
-        periods,
-        homeWon: ev["winnerCode"] === 1,
-        league: "NHL",
-        country: "usa",
-        date,
-        time,
-      });
-    }
-    hockeyResultsCache = results;
-    hockeyResultsFetchedAt = now;
-    return results;
-  } catch {
-    return hockeyResultsCache ?? [];
-  }
+  // SportsAPI Pro V2 fallback (getV2EventsLast) removed with the rest of
+  // SportsAPI Pro — StatPal above is this function's only source now.
+  return hockeyResultsCache ?? [];
 }
 
 async function getMLBDailyResults(): Promise<MLBDailyResult[]> {
@@ -16319,76 +14814,9 @@ async function getMLBDailyResults(): Promise<MLBDailyResult[]> {
     }
   }
 
-  try {
-    const events = await getV2EventsLast("baseball", 20);
-    const yd = new Date(Date.now() - 86400000);
-    const ydStr = `${String(yd.getUTCDate()).padStart(2, "0")}.${String(yd.getUTCMonth() + 1).padStart(2, "0")}.${yd.getUTCFullYear()}`;
-    const results: MLBDailyResult[] = [];
-    for (const raw of events) {
-      const ev = raw as Record<string, unknown>;
-      const st =
-        (ev["status"] as Record<string, unknown> | undefined)?.["type"] ??
-        ev["status"];
-      if (typeof st === "string" && st !== "finished") continue;
-      const ts = ev["startTimestamp"] as number | undefined;
-      if (!ts) continue;
-      const { date, time } = v2EventDateTime({
-        startTimestamp: ts,
-      } as SAPIV2Event);
-      if (date !== ydStr) continue;
-      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
-      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
-      const homeScore = Number(hs?.["current"] ?? 0);
-      const awayScore = Number(as_?.["current"] ?? 0);
-      const innings: Array<[number | null, number | null]> = [];
-      for (let inn = 1; inn <= 9; inn++) {
-        const key = `period${inn}`;
-        const hv = hs?.[key];
-        const av = as_?.[key];
-        if (hv == null && av == null) break;
-        innings.push([
-          hv != null ? Number(hv) : null,
-          av != null ? Number(av) : null,
-        ]);
-      }
-      const hOT = hs?.["overtime"];
-      const aOT = as_?.["overtime"];
-      const hasExtra = hOT != null || aOT != null;
-      if (hasExtra)
-        innings.push([
-          hOT != null ? Number(hOT) : null,
-          aOT != null ? Number(aOT) : null,
-        ]);
-      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
-      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
-      const home = String(homeTeam?.["name"] ?? "");
-      const away = String(awayTeam?.["name"] ?? "");
-      if (!home || !away) continue;
-      results.push({
-        id: String(ev["id"] ?? ""),
-        home,
-        away,
-        homeScore,
-        awayScore,
-        homeHits: 0,
-        awayHits: 0,
-        homeErrors: 0,
-        awayErrors: 0,
-        innings,
-        hasExtra,
-        homeWon: ev["winnerCode"] === 1,
-        league: "MLB",
-        country: "usa",
-        date,
-        time,
-      });
-    }
-    mlbResultsCache = results;
-    mlbResultsFetchedAt = now;
-    return results;
-  } catch {
-    return mlbResultsCache ?? [];
-  }
+  // SportsAPI Pro V2 fallback (getV2EventsLast) removed with the rest of
+  // SportsAPI Pro — StatPal above is this function's only source now.
+  return mlbResultsCache ?? [];
 }
 
 async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
@@ -16452,64 +14880,9 @@ async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
     }
   }
 
-  try {
-    const events = await getV2EventsLast("basketball", 20);
-    const yd = new Date(Date.now() - 86400000);
-    const ydStr = `${String(yd.getUTCDate()).padStart(2, "0")}.${String(yd.getUTCMonth() + 1).padStart(2, "0")}.${yd.getUTCFullYear()}`;
-    const results: BasketballDailyResult[] = [];
-    for (const raw of events) {
-      const ev = raw as Record<string, unknown>;
-      const st =
-        (ev["status"] as Record<string, unknown> | undefined)?.["type"] ??
-        ev["status"];
-      if (typeof st === "string" && st !== "finished") continue;
-      const ts = ev["startTimestamp"] as number | undefined;
-      if (!ts) continue;
-      const { date, time } = v2EventDateTime({
-        startTimestamp: ts,
-      } as SAPIV2Event);
-      if (date !== ydStr) continue;
-      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
-      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
-      const homeScore = Number(hs?.["current"] ?? 0);
-      const awayScore = Number(as_?.["current"] ?? 0);
-      const quarters: Array<[number, number]> = [];
-      for (const p of [
-        "period1",
-        "period2",
-        "period3",
-        "period4",
-        "overtime",
-      ]) {
-        const hv = hs?.[p];
-        const av = as_?.[p];
-        if (hv != null && av != null) quarters.push([Number(hv), Number(av)]);
-      }
-      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
-      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
-      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
-      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
-      if (!home || !away) continue;
-      results.push({
-        id: String(ev["id"] ?? ""),
-        home,
-        away,
-        homeScore,
-        awayScore,
-        quarters,
-        homeWon: ev["winnerCode"] === 1,
-        league: "NBA",
-        country: "usa",
-        date,
-        time,
-      });
-    }
-    basketballResultsCache = results;
-    basketballResultsFetchedAt = now;
-    return results;
-  } catch {
-    return basketballResultsCache ?? [];
-  }
+  // SportsAPI Pro V2 fallback (getV2EventsLast) removed with the rest of
+  // SportsAPI Pro — StatPal above is this function's only source now.
+  return basketballResultsCache ?? [];
 }
 
 // ─── Tournament detail cache ──────────────────────────────────────────────────
@@ -17468,23 +15841,6 @@ router.get("/volleyball-schedule/:id", async (req: Request, res: Response) => {
   }
 });
 
-// ─── Tennis pre-match odds ────────────────────────────────────────────────────
-type TennisOddsPlayer = { id: string; name: string };
-type TennisOddsEntry = {
-  matchId: string;
-  date: string;
-  time: string;
-  tournamentName: string;
-  status?: string;
-  players: [TennisOddsPlayer, TennisOddsPlayer];
-  matchOdds: [number, number];
-  set1Odds: [number, number] | null;
-  markets?: unknown;
-};
-let tennisOddsCache: TennisOddsEntry[] | null = null;
-let tennisOddsFetchedAt = 0;
-const TENNIS_ODDS_TTL = 20 * 1000; // 20s — odds fluctuate rapidly
-
 // ─── Volleyball pre-match odds ────────────────────────────────────────────────
 type VolleyOddsOdd = { id?: string; name?: string; value?: string };
 type VolleyOddsTotal = {
@@ -17756,57 +16112,15 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
     if (!nbaOddsInFlight) {
       nbaOddsInFlight = (async () => {
         try {
-          // Try Statpal first (1 request) before N per-match SportsAPI V2 calls
+          // SportsAPI Pro V2 per-match fallback removed with the rest of
+          // SportsAPI Pro — Statpal is this function's only source now.
           const statpalResults = await fetchStatpalNBAOdds();
           if (statpalResults) {
             nbaOddsCache = statpalResults;
             nbaOddsFetchedAt = Date.now();
             return statpalResults;
           }
-          const events = (
-            await getUpcomingLeagueEventsV2("basketball", 7)
-          ).slice(0, 20);
-          const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-            events.length,
-          ).fill(null);
-          const batchSize = 10;
-          for (let i = 0; i < events.length; i += batchSize) {
-            const slice = events.slice(i, i + batchSize);
-            const out = await Promise.all(
-              slice.map((ev) =>
-                getPreMatchOddsV2("basketball", ev.id).catch(() => null),
-              ),
-            );
-            for (let j = 0; j < out.length; j++)
-              oddsResults[i + j] = out[j] ?? null;
-          }
-          const results: NBAOddsEntry[] = [];
-          for (let i = 0; i < events.length; i++) {
-            const ev = events[i]!;
-            const realOdds = oddsResults[i];
-            if (!realOdds || realOdds.home <= 0 || realOdds.away <= 0) continue;
-            const homeName = v2TeamName(ev.homeTeam);
-            const awayName = v2TeamName(ev.awayTeam);
-            const { date, time } = v2EventDateTime(ev);
-            const mkt = makeBasketballMarketsFromTeams(
-              homeName,
-              awayName,
-            ) as Record<string, unknown>;
-            mkt["odds"] = { home: realOdds.home, draw: 0, away: realOdds.away };
-            results.push({
-              matchId: String(ev.id),
-              date,
-              time,
-              homeTeam: { id: "", name: homeName },
-              awayTeam: { id: "", name: awayName },
-              homeOdds: realOdds.home,
-              awayOdds: realOdds.away,
-              markets: mkt,
-            });
-          }
-          nbaOddsCache = results;
-          nbaOddsFetchedAt = Date.now();
-          return results;
+          return nbaOddsCache ?? [];
         } catch {
           return nbaOddsCache ?? [];
         }
@@ -17816,7 +16130,8 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
     }
     return nbaOddsCache;
   }
-  // Cold-start: try Statpal first (1 request), fall back to SportsAPI V2
+  // Cold-start: Statpal is this function's only source now (SportsAPI Pro V2
+  // fallback removed with the rest of SportsAPI Pro).
   try {
     const statpalResults = await fetchStatpalNBAOdds();
     if (statpalResults) {
@@ -17827,54 +16142,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   } catch {
     /* fall through */
   }
-  try {
-    const events = (await getUpcomingLeagueEventsV2("basketball", 7)).slice(
-      0,
-      20,
-    );
-    const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-      events.length,
-    ).fill(null);
-    const batchSize = 10;
-    for (let i = 0; i < events.length; i += batchSize) {
-      const slice = events.slice(i, i + batchSize);
-      const out = await Promise.all(
-        slice.map((ev) =>
-          getPreMatchOddsV2("basketball", ev.id).catch(() => null),
-        ),
-      );
-      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
-    }
-    const results: NBAOddsEntry[] = [];
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i]!;
-      const realOdds = oddsResults[i];
-      if (!realOdds || realOdds.home <= 0 || realOdds.away <= 0) continue;
-      const homeName = v2TeamName(ev.homeTeam);
-      const awayName = v2TeamName(ev.awayTeam);
-      const { date, time } = v2EventDateTime(ev);
-      const mkt = makeBasketballMarketsFromTeams(homeName, awayName) as Record<
-        string,
-        unknown
-      >;
-      mkt["odds"] = { home: realOdds.home, draw: 0, away: realOdds.away };
-      results.push({
-        matchId: String(ev.id),
-        date,
-        time,
-        homeTeam: { id: "", name: homeName },
-        awayTeam: { id: "", name: awayName },
-        homeOdds: realOdds.home,
-        awayOdds: realOdds.away,
-        markets: mkt,
-      });
-    }
-    nbaOddsCache = results;
-    nbaOddsFetchedAt = now;
-    return results;
-  } catch {
-    return nbaOddsCache ?? [];
-  }
+  return nbaOddsCache ?? [];
 }
 
 router.get("/basketball-odds", async (_req: Request, res: Response) => {
@@ -17929,7 +16197,6 @@ export type HockeyOddsEntry = {
 let hockeyOddsCache: HockeyOddsEntry[] | null = null;
 let hockeyOddsFetchedAt = 0;
 const HOCKEY_ODDS_TTL = 60 * 1000;
-let hockeyOddsInFlight: Promise<HockeyOddsEntry[]> | null = null;
 
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
@@ -18017,115 +16284,9 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
       logger.warn({ err, provider: "statpal" }, "NHL odds provider failed; falling back");
     }
   }
-  if (hockeyOddsCache) {
-    if (!hockeyOddsInFlight) {
-      hockeyOddsInFlight = (async () => {
-        try {
-          const events = (await getUpcomingLeagueEventsV2("hockey", 7)).slice(
-            0,
-            20,
-          );
-          const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-            events.length,
-          ).fill(null);
-          const batchSize = 10;
-          for (let i = 0; i < events.length; i += batchSize) {
-            const slice = events.slice(i, i + batchSize);
-            const out = await Promise.all(
-              slice.map((ev) =>
-                getPreMatchOddsV2("hockey", ev.id).catch(() => null),
-              ),
-            );
-            for (let j = 0; j < out.length; j++)
-              oddsResults[i + j] = out[j] ?? null;
-          }
-          const results: HockeyOddsEntry[] = [];
-          for (let i = 0; i < events.length; i++) {
-            const ev = events[i]!;
-            const realOdds = oddsResults[i];
-            if (!realOdds || realOdds.home <= 0) continue;
-            const homeName = v2TeamName(ev.homeTeam);
-            const awayName = v2TeamName(ev.awayTeam);
-            const { date, time } = v2EventDateTime(ev);
-            const mkt = makeHockeyMarketsFromTeams(
-              homeName,
-              awayName,
-            ) as Record<string, unknown>;
-            const h = realOdds.home;
-            const d = realOdds.draw || 0;
-            const a = realOdds.away;
-            mkt["odds"] = { home: h, draw: d, away: a };
-            results.push({
-              matchId: String(ev.id),
-              date,
-              time,
-              homeTeam: { id: "", name: homeName },
-              awayTeam: { id: "", name: awayName },
-              homeOdds: h,
-              drawOdds: d,
-              awayOdds: a,
-              markets: mkt,
-            });
-          }
-          hockeyOddsCache = results;
-          hockeyOddsFetchedAt = Date.now();
-          return results;
-        } catch {
-          return hockeyOddsCache ?? [];
-        }
-      })().finally(() => {
-        hockeyOddsInFlight = null;
-      });
-    }
-    return hockeyOddsCache;
-  }
-  try {
-    const events = (await getUpcomingLeagueEventsV2("hockey", 7)).slice(0, 20);
-    const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-      events.length,
-    ).fill(null);
-    const batchSize = 10;
-    for (let i = 0; i < events.length; i += batchSize) {
-      const slice = events.slice(i, i + batchSize);
-      const out = await Promise.all(
-        slice.map((ev) => getPreMatchOddsV2("hockey", ev.id).catch(() => null)),
-      );
-      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
-    }
-    const results: HockeyOddsEntry[] = [];
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i]!;
-      const realOdds = oddsResults[i];
-      if (!realOdds || realOdds.home <= 0) continue;
-      const homeName = v2TeamName(ev.homeTeam);
-      const awayName = v2TeamName(ev.awayTeam);
-      const { date, time } = v2EventDateTime(ev);
-      const mkt = makeHockeyMarketsFromTeams(homeName, awayName) as Record<
-        string,
-        unknown
-      >;
-      const h = realOdds.home;
-      const d = realOdds.draw || 0;
-      const a = realOdds.away;
-      mkt["odds"] = { home: h, draw: d, away: a };
-      results.push({
-        matchId: String(ev.id),
-        date,
-        time,
-        homeTeam: { id: "", name: homeName },
-        awayTeam: { id: "", name: awayName },
-        homeOdds: h,
-        drawOdds: d,
-        awayOdds: a,
-        markets: mkt,
-      });
-    }
-    hockeyOddsCache = results;
-    hockeyOddsFetchedAt = now;
-    return results;
-  } catch {
-    return hockeyOddsCache ?? [];
-  }
+  // SportsAPI Pro V2 per-match fallback removed with the rest of SportsAPI
+  // Pro — Statpal above is this function's only source now.
+  return hockeyOddsCache ?? [];
 }
 
 router.get("/hockey-odds", async (_req: Request, res: Response) => {
@@ -18250,7 +16411,8 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
     if (!mlbOddsInFlight) {
       mlbOddsInFlight = (async () => {
         try {
-          // Try Statpal first (1 request) before falling back to per-match SportsAPI V2
+          // SportsAPI Pro V2 per-match fallback removed with the rest of
+          // SportsAPI Pro — Statpal is this function's only source now.
           const statpalResults = await fetchStatpalMLBOdds();
           if (statpalResults) {
             for (const r of statpalResults) {
@@ -18263,47 +16425,7 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
             mlbOddsFetchedAt = Date.now();
             return statpalResults;
           }
-          const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(
-            0,
-            20,
-          );
-          const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-            events.length,
-          ).fill(null);
-          const batchSize = 10;
-          for (let i = 0; i < events.length; i += batchSize) {
-            const slice = events.slice(i, i + batchSize);
-            const out = await Promise.all(
-              slice.map((ev) =>
-                getPreMatchOddsV2("baseball", ev.id).catch(() => null),
-              ),
-            );
-            for (let j = 0; j < out.length; j++)
-              oddsResults[i + j] = out[j] ?? null;
-          }
-          const results: MLBOddsEntry[] = [];
-          for (let i = 0; i < events.length; i++) {
-            const ev = events[i]!;
-            const realOdds = oddsResults[i];
-            if (!realOdds || realOdds.home <= 0) continue;
-            const homeName = v2TeamName(ev.homeTeam);
-            const awayName = v2TeamName(ev.awayTeam);
-            const { date, time } = v2EventDateTime(ev);
-            results.push({
-              matchId: String(ev.id),
-              date,
-              time,
-              homeTeam: { id: "", name: homeName },
-              awayTeam: { id: "", name: awayName },
-              homeOdds: realOdds.home,
-              drawOdds: realOdds.draw || 0,
-              awayOdds: realOdds.away,
-              markets: makeAdvancedMarketsFromTeams(homeName, awayName),
-            });
-          }
-          mlbOddsCache = results;
-          mlbOddsFetchedAt = Date.now();
-          return results;
+          return mlbOddsCache ?? [];
         } catch {
           return mlbOddsCache ?? [];
         }
@@ -18313,7 +16435,8 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
     }
     return mlbOddsCache;
   }
-  // Cold-start: try Statpal first (1 request), fall back to SportsAPI V2 (N requests)
+  // Cold-start: Statpal is this function's only source now (SportsAPI Pro V2
+  // fallback removed with the rest of SportsAPI Pro).
   try {
     const statpalResults = await fetchStatpalMLBOdds();
     if (statpalResults) {
@@ -18328,64 +16451,9 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
       return statpalResults;
     }
   } catch {
-    /* fall through to SportsAPI V2 */
+    /* fall through */
   }
-  try {
-    const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(
-      0,
-      20,
-    );
-    const oddsResults: Array<V2PreMatchOdds | null> = new Array(
-      events.length,
-    ).fill(null);
-    const batchSize = 10;
-    for (let i = 0; i < events.length; i += batchSize) {
-      const slice = events.slice(i, i + batchSize);
-      const out = await Promise.all(
-        slice.map((ev) =>
-          getPreMatchOddsV2("baseball", ev.id).catch(() => null),
-        ),
-      );
-      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
-    }
-    const results: MLBOddsEntry[] = [];
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i]!;
-      const realOdds = oddsResults[i];
-      if (!realOdds || realOdds.home <= 0) continue;
-      const homeName = v2TeamName(ev.homeTeam);
-      const awayName = v2TeamName(ev.awayTeam);
-      const { date, time } = v2EventDateTime(ev);
-      results.push({
-        matchId: String(ev.id),
-        date,
-        time,
-        homeTeam: { id: "", name: homeName },
-        awayTeam: { id: "", name: awayName },
-        homeOdds: realOdds.home,
-        drawOdds: 0,
-        awayOdds: realOdds.away,
-        markets: makeMLBMarketsFromTeams(
-          homeName,
-          awayName,
-          realOdds.home,
-          realOdds.away,
-        ),
-      });
-    }
-    // Populate raw odds map for live match building
-    for (const r of results) {
-      const normH = r.homeTeam.name.toLowerCase().trim();
-      const normA = r.awayTeam.name.toLowerCase().trim();
-      mlbRawOddsMap.set(`${normH}|${normA}`, { h: r.homeOdds, a: r.awayOdds });
-      mlbRawOddsMap.set(`${normA}|${normH}`, { h: r.awayOdds, a: r.homeOdds });
-    }
-    mlbOddsCache = results;
-    mlbOddsFetchedAt = now;
-    return results;
-  } catch {
-    return mlbOddsCache ?? [];
-  }
+  return mlbOddsCache ?? [];
 }
 
 /** Merges real onexbet baseball odds (extractBaseballOverride, new
@@ -18483,116 +16551,12 @@ router.get("/mlb-odds", async (_req: Request, res: Response) => {
   }
 });
 
-async function getTennisOdds(): Promise<TennisOddsEntry[]> {
-  const now = Date.now();
-  if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL)
-    return tennisOddsCache;
-  try {
-    const events = await getUpcomingLeagueEventsV2("tennis", 7);
-    // Populate V1 league label cache from these V2 events (they have ATP/WTA category info)
-    refreshTennisV2LeagueCache(events);
-    const oddsResults = await Promise.all(
-      events.map((ev) => getPreMatchOddsV2("tennis", ev.id).catch(() => null)),
-    );
-    const results: TennisOddsEntry[] = [];
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i]!;
-      const realOdds = oddsResults[i];
-      if (!realOdds || realOdds.home <= 0) continue;
-      const p0Name = v2TeamName(ev.homeTeam);
-      const p1Name = v2TeamName(ev.awayTeam);
-      const { date, time } = v2EventDateTime(ev);
-      const h = realOdds.home;
-      const a = realOdds.away;
-      if (p0Name && p1Name) {
-        const pairKey = _tennisPairKey(p0Name, p1Name);
-        _tennisPreMatchOdds.set(pairKey, { home: h, away: a });
-        _tennisPreMatchSetScoreOdds.set(pairKey, {
-          ...(Array.isArray(realOdds.score1st) && realOdds.score1st.length > 0
-            ? { score1st: realOdds.score1st }
-            : {}),
-          ...(Array.isArray(realOdds.score2nd) && realOdds.score2nd.length > 0
-            ? { score2nd: realOdds.score2nd }
-            : {}),
-          ...(Array.isArray(realOdds.score3rd) && realOdds.score3rd.length > 0
-            ? { score3rd: realOdds.score3rd }
-            : {}),
-        });
-      }
-      const pHome = h > 0 && a > 0 ? 1 / h / (1 / h + 1 / a) : 0.5;
-      const set1H = realOdds.firstSetHome ?? 0;
-      const set1A = realOdds.firstSetAway ?? 0;
-      const tExtra = {
-        ...computeTennisExtras(pHome, {
-          set1H: set1H > 0 ? set1H : undefined,
-          set1A: set1A > 0 ? set1A : undefined,
-        }),
-        ...(Array.isArray(realOdds.score1st) && realOdds.score1st.length > 0
-          ? { score1st: realOdds.score1st }
-          : {}),
-        ...(Array.isArray(realOdds.score2nd) && realOdds.score2nd.length > 0
-          ? { score2nd: realOdds.score2nd }
-          : {}),
-      };
-      results.push({
-        matchId: String(ev.id),
-        date,
-        time,
-        tournamentName: tennisTournLabel(ev.tournament),
-        status: "Not Started",
-        players: [
-          { id: "", name: p0Name },
-          { id: "", name: p1Name },
-        ],
-        matchOdds: [h, a],
-        set1Odds: set1H > 0 && set1A > 0 ? [set1H, set1A] : null,
-        markets: {
-          doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-          bothTeamsScore: { yes: 0, no: 0 },
-          totalGoals: {
-            over05: 0,
-            under05: 0,
-            over15: 0,
-            under15: 0,
-            over25: 0,
-            under25: 0,
-            over35: 0,
-            under35: 0,
-            over45: 0,
-            under45: 0,
-            over55: 0,
-            under55: 0,
-            over65: 0,
-            under65: 0,
-          },
-          handicap: {
-            homeMinusOne: 0,
-            awayPlusOne: 0,
-            homeMinusOneHalf: 0,
-            awayPlusOneHalf: 0,
-          },
-          halfTime: { home: 0, draw: 0, away: 0 },
-          firstGoal: { home: 0, noGoal: 0, away: 0 },
-          tennisExtra: tExtra,
-        },
-      });
-    }
-    tennisOddsCache = results;
-    tennisOddsFetchedAt = now;
-    return results;
-  } catch {
-    return tennisOddsCache ?? [];
-  }
-}
-
-router.get("/tennis-odds", async (_req: Request, res: Response) => {
-  try {
-    const odds = await getTennisOdds();
-    res.json({ odds });
-  } catch {
-    res.status(500).json({ error: "Odds de ténis indisponíveis" });
-  }
-});
+// getTennisOdds() (SportsAPI Pro V2 getUpcomingLeagueEventsV2/getPreMatchOddsV2
+// tennis odds + /tennis-odds route) and refreshTennisV2LeagueCache were
+// removed with the rest of SportsAPI Pro. Tennis prematch odds now come
+// exclusively from PulseScore (buildTennisUpcomingFromPulseScore /
+// extractTennisOverride) — makeTennisBaseOdds' _tennisPreMatchOdds cache
+// simply never gets a hit any more and falls through to its neutral default.
 
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
