@@ -7133,7 +7133,8 @@ export default function Home({
   const fetchUpcoming = useCallback(
     async (showSpinner = false) => {
       if (document.visibilityState === "hidden") return;
-      if (isIdleRef.current || isLockedRef.current) return;
+      if ((isIdleRef.current && activeTab !== "live") || isLockedRef.current)
+        return;
       if (showSpinner) setUpcomingLoading(true);
       const params = new URLSearchParams();
       if (selectedSport !== "all") params.set("sport", selectedSport);
@@ -7202,7 +7203,7 @@ export default function Home({
         if (showSpinner) setUpcomingLoading(false);
       }
     },
-    [selectedSport, upcomingRange, upcomingSnapshotKey, writeSnapshot],
+    [selectedSport, upcomingRange, upcomingSnapshotKey, writeSnapshot, activeTab],
   );
 
   useEffect(() => {
@@ -7222,7 +7223,7 @@ export default function Home({
       );
       setUpcomingLoading(false);
     }
-    if (activeTab !== "sports") return;
+    if (activeTab !== "sports" && activeTab !== "live") return;
     fetchUpcoming(!canUseSnap);
     const id = setInterval(() => fetchUpcoming(false), 15_000);
     return () => clearInterval(id);
@@ -7507,7 +7508,8 @@ export default function Home({
   const fetchLive = useCallback(
     async (showSpinner = false): Promise<"success" | "skipped" | "failed"> => {
       if (document.visibilityState === "hidden") return "skipped";
-      if (isIdleRef.current || isLockedRef.current) return "skipped";
+      if ((isIdleRef.current && activeTab !== "live") || isLockedRef.current)
+        return "skipped";
       if (liveFetchInFlightRef.current) return "skipped";
       if (showSpinner) setLiveLoading(true);
       let ctrl: AbortController | null = null;
@@ -7544,7 +7546,7 @@ export default function Home({
         if (showSpinner) setLiveLoading(false);
       }
     },
-    [browserOnline, processLiveData, liveSnapshotKey, writeSnapshot],
+    [browserOnline, processLiveData, liveSnapshotKey, writeSnapshot, activeTab],
   );
 
   const refreshLiveMatchById = useCallback(

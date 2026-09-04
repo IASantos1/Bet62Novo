@@ -7637,6 +7637,20 @@ function convertRawFixtureToLiveMatchState(
     ...(existing?._liveExtra ?? {}),
     phase,
   };
+  if (Number.isFinite(fx.liveClockSec) && Number(fx.liveClockSec) >= 0) {
+    liveExtra.clockSec = Number(fx.liveClockSec);
+    liveExtra.clockAtMs = Date.now();
+  }
+  if (typeof fx.liveClockStr === "string" && fx.liveClockStr.trim()) {
+    liveExtra.clockStr = fx.liveClockStr.trim();
+  } else if (minute > 0) {
+    liveExtra.clockStr = `${minute}'`;
+  }
+  if (typeof fx.liveRunning === "boolean") {
+    liveExtra.clockRunning = fx.liveRunning;
+  } else if (status === "LIVE") {
+    liveExtra.clockRunning = true;
+  }
 
   return {
     id: fx.matchId,
@@ -12036,8 +12050,10 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   const now = Date.now();
   const filtered = matches.filter(
     (m) =>
-      m.odds?.home > 0 &&
-      m.odds?.away > 0 &&
+      ((m.hasRealOdds ?? false) ||
+        (m.odds?.home ?? 0) > 0 ||
+        (m.odds?.draw ?? 0) > 0 ||
+        (m.odds?.away ?? 0) > 0) &&
       !isPlaceholderTeamName(m.home) &&
       !isPlaceholderTeamName(m.away) &&
       !finishedMatchResults.has(String(m.id)) &&

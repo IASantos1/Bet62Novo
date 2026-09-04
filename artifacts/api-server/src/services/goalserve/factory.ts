@@ -68,6 +68,33 @@ function stateIdFromGoalServe(raw: any): 0 | 1 | 2 | 3 | 5 | 22 | 99 {
   return 1;
 }
 
+function parseGoalServeLiveClock(raw: unknown): {
+  minute?: number;
+  clockSec?: number;
+  clockStr?: string;
+} {
+  if (raw == null) return {};
+  const text = String(raw).trim();
+  if (!text) return {};
+  const mmss = text.match(/(\d{1,3})\s*:\s*(\d{1,2})/);
+  if (mmss) {
+    const mins = Number(mmss[1]);
+    const secs = Number(mmss[2]);
+    if (Number.isFinite(mins) && Number.isFinite(secs) && secs >= 0 && secs < 60) {
+      return {
+        minute: mins,
+        clockSec: mins * 60 + secs,
+        clockStr: `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`,
+      };
+    }
+  }
+  const numeric = Number(text.replace(/[^\d]+/g, ""));
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return { minute: numeric, clockSec: numeric * 60, clockStr: `${numeric}'` };
+  }
+  return {};
+}
+
 export function isUpcomingFixtureByStateOrKickoff(fx: {
   stateId?: number;
   kickoffTimestamp?: number;
@@ -96,6 +123,8 @@ function mapScoresCategory(
   | "stateId"
   | "score"
   | "liveMinute"
+  | "liveClockSec"
+  | "liveClockStr"
   | "livePeriod"
   | "liveRunning"
   | "providerId"
@@ -167,12 +196,7 @@ function mapScoresCategory(
   const score =
     Number.isFinite(hs) && Number.isFinite(as) ? { home: hs!, away: as! } : undefined;
   const minuteRaw = m?.minute ?? m?.timer ?? m?.clock ?? m?.elapsed ?? null;
-  const liveMinute =
-    minuteRaw == null || String(minuteRaw) === ""
-      ? undefined
-      : typeof minuteRaw === "number"
-      ? minuteRaw
-      : Number(String(minuteRaw).replace(/\D/g, "")) || undefined;
+  const parsedClock = parseGoalServeLiveClock(minuteRaw);
   const livePeriod = m?.period ?? m?.half ?? m?.stage ?? m?.current_period ?? undefined;
   const liveRunning = m?.running ?? m?.inplay ?? m?.live ?? m?.in_play ?? undefined;
   return {
@@ -185,7 +209,9 @@ function mapScoresCategory(
     kickoffTimestamp: parsed.tsSec,
     stateId,
     score,
-    liveMinute,
+    liveMinute: parsedClock.minute,
+    liveClockSec: parsedClock.clockSec,
+    liveClockStr: parsedClock.clockStr,
     livePeriod: livePeriod == null ? undefined : String(livePeriod),
     liveRunning: typeof liveRunning === "boolean" ? liveRunning : undefined,
     rawHomeId: homeId,
@@ -333,6 +359,8 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
       stateId: isLive && core.stateId === 0 ? 22 : core.stateId,
       score: core.score,
       liveMinute: core.liveMinute,
+    liveClockSec: core.liveClockSec,
+    liveClockStr: core.liveClockStr,
       livePeriod: core.livePeriod,
       liveRunning: core.liveRunning,
       homeTeamId: core.rawHomeId,
