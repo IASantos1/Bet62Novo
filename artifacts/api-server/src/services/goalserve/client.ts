@@ -8,6 +8,7 @@
 import zlib from "node:zlib";
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
+import { stripBom } from "./normalize.js";
 
 export const GOALSERVE_SETTLE_SPORTID: Record<string, number> = {
   soccer: 4,
@@ -173,7 +174,8 @@ async function goalServeFetchRaw<T>(
     throw new Error(`[goalserve] ${resp.status} on ${url.replace(goalServeKey(), "<KEY>")}`);
   }
   const buf = await gunzipIfNeeded(resp);
-  const text = buf.toString("utf8");
+  const raw = buf.toString("utf8");
+  const text = stripBom(raw);
   let data: T;
   try {
     data = JSON.parse(text);

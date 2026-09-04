@@ -1,6 +1,97 @@
 import { logger } from "../../lib/logger.js";
 import type { ProviderRawOddsSelection, GoalServeCanonicalOutcome } from "./types.js";
 
+export function stripBom(text: string): string {
+  if (!text) return "";
+  if (text.charCodeAt(0) === 0xfeff) return text.slice(1);
+  if (text.startsWith("\\ufeff")) return text.slice(6);
+  if (text.length >= 3 && text.charCodeAt(0) === 0xef && text.charCodeAt(1) === 0xbb && text.charCodeAt(2) === 0xbf) {
+    return text.slice(3);
+  }
+  return text;
+}
+
+export function flattenAtAttributes(obj: any): any {
+  if (obj == null) return obj;
+  if (Array.isArray(obj)) return obj.map(flattenAtAttributes);
+  if (typeof obj !== "object") return obj;
+  const out: any = {};
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (k.startsWith("@")) {
+      const nk = k.slice(1);
+      if (!(nk in out)) out[nk] = typeof v === "string" ? v : flattenAtAttributes(v);
+    } else {
+      out[k] = flattenAtAttributes(v);
+    }
+  }
+  return out;
+}
+
+export type GoalServeUnpackedRoot = {
+  categories: any[];
+  ts?: string | number;
+  sport?: string;
+};
+
+export function unpackGoalServeRoot(rawRoot: any): GoalServeUnpackedRoot {
+  const step1 = rawRoot?.scores ?? rawRoot?.score ?? rawRoot?.odds ?? rawRoot?.data ?? rawRoot;
+  const step2 = flattenAtAttributes(step1 ?? {});
+  const categoriesRaw = step2?.category ?? step2?.league ?? step2?.leagues ?? step2?.odds ?? step2?.tournaments ?? step2;
+  const catsList = coerceArray<any>(categoriesRaw);
+  const flat: any[] = [];
+  for (const cat of catsList) {
+    flat.push(flattenAtAttributes(cat));
+  }
+  return {
+    categories: flat,
+    ts: (rawRoot?.scores ?? rawRoot)?.ts ?? (rawRoot?.scores ?? rawRoot)?.["@ts"] ?? step2?.ts ?? step2?.updated_ts ?? undefined,
+    sport: step2?.sport ?? (rawRoot?.scores && rawRoot.scores["@sport"]) ?? undefined,
+  };
+}
+
+export function extractMatchesFromCategory(cat: any): any[] {
+  const c = flattenAtAttributes(cat ?? {});
+  const candidates: any[] = [];
+  const matchesBox = c?.matches ?? c?.match ?? c?.games ?? c?.events;
+  if (Array.isArray(matchesBox)) {
+    for (const m of matchesBox) candidates.push(flattenAtAttributes(m));
+  } else if (matchesBox && typeof matchesBox === "object") {
+    const inner = matchesBox?.match ?? matchesBox?.matches ?? matchesBox?.game ?? matchesBox?.event;
+    for (const m of coerceArray<any>(inner)) candidates.push(flattenAtAttributes(m));
+  }
+  const league = c?.name ?? c?.league ?? c?.league_name ?? c?.category ?? "";
+  const country = c?.country ?? c?.country_name ?? "";
+  const gid = c?.gid ? String(c.gid) : undefined;
+  const lid = c?.id ? String(c.id) : undefined;
+  if (!league && !country) return candidates;
+  return candidates.map((m) => ({
+    ...m,
+    league: m?.league ?? league,
+    country: m?.country ?? country,
+    ...(gid && !m?.league_gid ? { league_gid: gid } : {}),
+    ...(lid && !m?.league_id ? { league_id: lid } : {}),
+  }));
+}
+
+export function pickTeamName(raw: any): string {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw.trim();
+  if (typeof raw !== "object") return String(raw ?? "").trim();
+  const o = flattenAtAttributes(raw);
+  const n = o?.name ?? o?.Name ?? o?.title ?? o?.team_name ?? o?.team ?? o?.club;
+  if (typeof n === "string") return n.trim();
+  return "";
+}
+
+export function pickTeamId(raw: any): string | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw !== "object") return undefined;
+  const o = flattenAtAttributes(raw);
+  const id = o?.id ?? o?.team_id ?? o?.Id ?? undefined;
+  return id === undefined || id === null || String(id).trim() === "" ? undefined : String(id);
+}
+
 export function looksOkOddString(raw: string | number | undefined | null): boolean {
   if (raw === undefined || raw === null) return false;
   const s = String(raw).trim();

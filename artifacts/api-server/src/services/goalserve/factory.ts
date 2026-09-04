@@ -16,6 +16,11 @@ import {
   parseISO8601Any,
   extractLineNumberFromLabel,
   formatCorrectScoreKey,
+  unpackGoalServeRoot,
+  extractMatchesFromCategory,
+  pickTeamName,
+  pickTeamId,
+  flattenAtAttributes,
 } from "./normalize.js";
 import type { ProviderRawFixture, ProviderRawOddsSelection } from "./types.js";
 
@@ -62,53 +67,53 @@ function mapScoresCategory(
   | "liveRunning"
   | "providerId"
 > & { rawHomeId?: string; rawAwayId?: string } {
+  const m = flattenAtAttributes(matchElement ?? {});
   const rawId = String(
-    matchElement?.id ?? matchElement?.static_id ?? matchElement?.alternate_id ?? "",
+    m?.id ?? m?.static_id ?? m?.alternate_id ?? m?.fix_id ?? m?.match_id ?? "",
   );
-  const league = String(
-    matchElement?.league ?? matchElement?.league_name ?? matchElement?.category ?? "",
-  );
-  const country = String(matchElement?.country ?? matchElement?.country_name ?? "");
-  const localTeam = matchElement?.localteam ?? matchElement?.local ?? matchElement?.home ?? {};
-  const visitorTeam = matchElement?.visitorteam ?? matchElement?.visitor ?? matchElement?.away ?? {};
-  const home = String(localTeam?.name ?? localTeam ?? "").trim();
-  const away = String(visitorTeam?.name ?? visitorTeam ?? "").trim();
-  const homeId = localTeam?.id ? String(localTeam.id) : undefined;
-  const awayId = visitorTeam?.id ? String(visitorTeam.id) : undefined;
-  const date = matchElement?.date ?? matchElement?.formatted_date ?? matchElement?.date_start ?? null;
-  const time = matchElement?.time ?? matchElement?.time_start ?? null;
+  const league = String(m?.league ?? m?.league_name ?? m?.category ?? "");
+  const country = String(m?.country ?? m?.country_name ?? "");
+  const home = pickTeamName(m?.localteam ?? m?.local ?? m?.home ?? m?.localTeam ?? m?.homeTeam);
+  const away = pickTeamName(m?.visitorteam ?? m?.visitor ?? m?.away ?? m?.visitorTeam ?? m?.awayTeam);
+  const homeId = pickTeamId(m?.localteam ?? m?.local ?? m?.home ?? m?.localTeam ?? m?.homeTeam);
+  const awayId = pickTeamId(m?.visitorteam ?? m?.visitor ?? m?.away ?? m?.visitorTeam ?? m?.awayTeam);
+  const date = m?.date ?? m?.formatted_date ?? m?.date_start ?? null;
+  const time = m?.time ?? m?.time_start ?? null;
   const parsed =
     parseGoalServeDDMMYYYY(date, time) ??
     parseISO8601Any(
-      matchElement?.date_start_iso ?? matchElement?.starting_at ?? matchElement?.kickoff ?? null,
+      m?.date_start_iso ?? m?.starting_at ?? m?.kickoff ?? null,
     ) ?? { iso: new Date(0).toISOString(), tsSec: 0 };
-  const status = matchElement?.status ?? matchElement?.state ?? matchElement?.status_long ?? null;
+  const status = m?.status ?? m?.state ?? m?.status_long ?? m?.match_status ?? null;
   const stateId = stateIdFromGoalServe(status);
   const homeScoreRaw =
-    matchElement?.localteam_score ?? matchElement?.local_score ?? matchElement?.home_score ?? null;
+    m?.localteam_score ?? m?.local_score ?? m?.home_score ?? m?.localteam?.goals ?? m?.home?.goals ?? null;
   const awayScoreRaw =
-    matchElement?.visitorteam_score ??
-    matchElement?.visitor_score ??
-    matchElement?.away_score ?? null;
+    m?.visitorteam_score ??
+    m?.visitor_score ??
+    m?.away_score ??
+    m?.visitorteam?.goals ??
+    m?.away?.goals ??
+    null;
   const hs =
-    homeScoreRaw === null || homeScoreRaw === undefined || homeScoreRaw === ""
+    homeScoreRaw === null || homeScoreRaw === undefined || homeScoreRaw === "" || homeScoreRaw === "?"
       ? undefined
       : Number(homeScoreRaw);
   const as =
-    awayScoreRaw === null || awayScoreRaw === undefined || awayScoreRaw === ""
+    awayScoreRaw === null || awayScoreRaw === undefined || awayScoreRaw === "" || awayScoreRaw === "?"
       ? undefined
       : Number(awayScoreRaw);
   const score =
     Number.isFinite(hs) && Number.isFinite(as) ? { home: hs!, away: as! } : undefined;
-  const minuteRaw = matchElement?.minute ?? matchElement?.timer ?? matchElement?.clock ?? null;
+  const minuteRaw = m?.minute ?? m?.timer ?? m?.clock ?? null;
   const liveMinute =
     minuteRaw == null || String(minuteRaw) === ""
       ? undefined
       : typeof minuteRaw === "number"
       ? minuteRaw
       : Number(String(minuteRaw).replace(/\D/g, "")) || undefined;
-  const livePeriod = matchElement?.period ?? matchElement?.half ?? undefined;
-  const liveRunning = matchElement?.running ?? matchElement?.inplay ?? matchElement?.live ?? undefined;
+  const livePeriod = m?.period ?? m?.half ?? undefined;
+  const liveRunning = m?.running ?? m?.inplay ?? m?.live ?? undefined;
   return {
     providerId: rawId,
     home,
@@ -282,9 +287,9 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
         const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 12000 });
         if (!resp) return [];
         const matches: any[] = [];
-        const root = resp?.scores ?? resp?.score ?? resp;
-        for (const cat of coerceArray<any>(root?.category ?? root?.league ?? [])) {
-          for (const m of coerceArray<any>(cat?.match ?? cat?.matches ?? [])) {
+        const unpacked = unpackGoalServeRoot(resp);
+        for (const cat of unpacked.categories) {
+          for (const m of extractMatchesFromCategory(cat)) {
             const fx = buildRawFixtureFromScoreMatch(m, false);
             if (fx) matches.push(fx);
           }
@@ -327,15 +332,15 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
     const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 8000 });
     if (!resp) return [];
     const out: ProviderRawFixture[] = [];
-    const root = resp?.scores ?? resp?.score ?? resp?.data ?? resp;
-    for (const cat of coerceArray<any>(root?.category ?? root?.league ?? root ?? [])) {
-      for (const m of coerceArray<any>(cat?.match ?? cat?.matches ?? [])) {
+    const unpacked = unpackGoalServeRoot(resp);
+    for (const cat of unpacked.categories) {
+      for (const m of extractMatchesFromCategory(cat)) {
         const fx = buildRawFixtureFromScoreMatch(m, true);
         if (fx) out.push(fx);
       }
     }
-    if (out.length === 0 && Array.isArray(root)) {
-      for (const m of root) {
+    if (out.length === 0 && Array.isArray(resp)) {
+      for (const m of resp) {
         const fx = buildRawFixtureFromScoreMatch(m, true);
         if (fx) out.push(fx);
       }
@@ -384,15 +389,20 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
       ? new Map(oddsCache.byId)
       : new Map<string, ProviderRawOddsSelection[]>();
     if (!resp) return byId;
-    const root = resp?.scores ?? resp?.odds ?? resp;
-    const ts = root?.ts ?? root?._ts ?? undefined;
-    const leagues = coerceArray<any>(root?.category ?? root?.league ?? root?.odds ?? []);
-    for (const league of leagues) {
-      for (const m of coerceArray<any>(league?.match ?? league?.matches ?? [])) {
-        const id = String(m?.id ?? m?.alternate_id ?? "");
+    const unpacked = unpackGoalServeRoot(resp);
+    const ts =
+      (resp as any)?.ts ??
+      (resp as any)?._ts ??
+      (unpacked as any)?.ts ??
+      undefined;
+    for (const league of unpacked.categories) {
+      for (const m of extractMatchesFromCategory(league)) {
+        const flat = flattenAtAttributes(m ?? {});
+        const id = String(flat?.id ?? flat?.alternate_id ?? flat?.fix_id ?? "");
         if (!id) continue;
         const perMatch: ProviderRawOddsSelection[] = [];
-        for (const t of coerceArray<any>(m?.odds?.type ?? m?.odds ?? m?.markets ?? [])) {
+        const oddsContainer = flattenAtAttributes(flat?.odds ?? flat ?? {});
+        for (const t of coerceArray<any>(oddsContainer?.type ?? oddsContainer?.market ?? [])) {
           const typeName = String(t?.name ?? t?.type_name ?? "");
           for (const bm of coerceArray<any>(t?.bookmaker ?? t?.bookmakers ?? t)) {
             perMatch.push(...parseOddsBookmakerOdds(typeName, bm));
