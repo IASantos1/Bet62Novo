@@ -35,6 +35,12 @@ export type SportOpts = {
   oddsCategory: string;
   upcomingFeeds: string[];
   liveFilterFromUpcoming?: boolean;
+  // Some GoalServe sports (e.g. mma: /mma/schedule vs /mma/live) split
+  // upcoming and live status across two distinct same-provider feeds
+  // instead of exposing live status inline on the schedule feed. When set,
+  // this is fetched as `${scoresFeedPrefix}/${liveFeedPath}` and used
+  // instead of deriving live matches from the cached upcoming fixtures.
+  liveFeedPath?: string;
 };
 
 const PREGAME_TTL_MS = 2 * 60 * 1000;
@@ -131,8 +137,13 @@ function mapScoresCategory(
   | "providerId"
 > & { rawHomeId?: string; rawAwayId?: string } {
   const m = flattenAtAttributes(matchElement ?? {});
+  // static_id first — see football.ts's mapScoresCategory for why (GoalServe
+  // docs: static_id is the stable primary key across every feed; the bare
+  // "id" field changes on reschedule/cancellation). Most non-soccer sports'
+  // feeds only ever carry a single "id" (no static_id at all per their own
+  // docs), so this fallback chain is a no-op for them — harmless either way.
   const rawId = String(
-    m?.id ?? m?.static_id ?? m?.alternate_id ?? m?.fix_id ?? m?.match_id ?? "",
+    m?.static_id ?? m?.id ?? m?.alternate_id ?? m?.fix_id ?? m?.match_id ?? "",
   );
   const matchLeague = String(
     m?.league ?? m?.league_name ?? m?.category ?? m?.tournament_name ?? m?.tournament ?? "",
@@ -220,7 +231,19 @@ function mapScoresCategory(
   };
 }
 
+// GoalServe marks a suspended/inactive price with stop="True" at up to 3
+// independent levels (market <type>, <bookmaker>, and each individual
+// <total>/<handicap> line) — none of these were being checked, so a bettor
+// could be offered a price the bookmaker itself had already pulled. JSON
+// serialization of the XML bool isn't confirmed from a live sample, so this
+// accepts every representation seen for GoalServe's other bool flags in this
+// codebase (native boolean, "True"/"true", "1").
+function isGoalServeStopped(v: unknown): boolean {
+  return v === true || v === "true" || v === "True" || v === "1" || v === 1;
+}
+
 function parseOddsBookmakerOdds(typeName: string, bm: any): ProviderRawOddsSelection[] {
+  if (isGoalServeStopped(bm?.stop)) return [];
   const out: ProviderRawOddsSelection[] = [];
   const bookmakerName = String(bm?.name ?? bm?.id ?? "unknown");
   for (const odd of coerceArray<any>(bm?.odd ?? [])) {
@@ -253,6 +276,7 @@ function parseOddsBookmakerOdds(typeName: string, bm: any): ProviderRawOddsSelec
     out.push(selection);
   }
   for (const total of coerceArray<any>(bm?.total ?? [])) {
+    if (isGoalServeStopped(total?.stop)) continue;
     const typeMarket = total?.name ?? typeName;
     const hint = guessMarketFromGoalServeNames(typeMarket, "");
     const line = hint.lineMaybe ?? extractLineNumberFromLabel(total?.stop ?? total?.name ?? "");
@@ -279,6 +303,7 @@ function parseOddsBookmakerOdds(typeName: string, bm: any): ProviderRawOddsSelec
     }
   }
   for (const h of coerceArray<any>(bm?.handicap ?? [])) {
+    if (isGoalServeStopped(h?.stop)) continue;
     const typeMarket = h?.name ?? typeName;
     const hint = guessMarketFromGoalServeNames(typeMarket, "");
     const line = hint.lineMaybe ?? extractLineNumberFromLabel(h?.stop ?? h?.name ?? "");
@@ -319,6 +344,7 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
     oddsCategory,
     upcomingFeeds,
     liveFilterFromUpcoming = true,
+    liveFeedPath,
   } = opts;
 
   const logTag = `[goalserve/${sport}]`;
@@ -377,7 +403,13 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
   async function fetchUpcoming(): Promise<ProviderRawFixture[]> {
     const results = await Promise.all(
       upcomingFeeds.map(async (sub) => {
-        const url = goalServeFeedUrl(`${scoresFeedPrefix}/${sub}`);
+        // Most sports' feeds live under one folder (scoresFeedPrefix/sub).
+        // A few (amfootball: NFL under football/, XFL under its own xfl/
+        // folder) span multiple top-level GoalServe folders — an entry
+        // that already contains a "/" is treated as a full path and used
+        // as-is instead of being joined to scoresFeedPrefix.
+        const feedPath = sub.includes("/") ? sub : `${scoresFeedPrefix}/${sub}`;
+        const url = goalServeFeedUrl(feedPath);
         const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 12000 });
         if (!resp) return [];
         const matches: any[] = [];
@@ -447,8 +479,25 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
     return upcoming.filter((fx) => fx.stateId >= 2);
   }
 
+  async function fetchLiveFromFeed(): Promise<ProviderRawFixture[]> {
+    if (!liveFeedPath) return [];
+    const url = goalServeFeedUrl(`${scoresFeedPrefix}/${liveFeedPath}`);
+    const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 8000 });
+    if (!resp) return [];
+    const out: ProviderRawFixture[] = [];
+    const unpacked = unpackGoalServeRoot(resp);
+    for (const cat of unpacked.categories) {
+      for (const m of extractMatchesFromCategory(cat)) {
+        const fx = buildRawFixtureFromScoreMatch(m, true);
+        if (fx) out.push(fx);
+      }
+    }
+    return out;
+  }
+
   async function fetchLive(): Promise<ProviderRawFixture[]> {
     if (useDedicatedLivescoreAPI) return fetchLiveDedicated();
+    if (liveFeedPath) return fetchLiveFromFeed();
     if (liveFilterFromUpcoming) return fetchLiveFromUpcoming();
     return [];
   }
@@ -492,11 +541,15 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
     for (const league of unpacked.categories) {
       for (const m of extractMatchesFromCategory(league)) {
         const flat = flattenAtAttributes(m ?? {});
-        const id = String(flat?.id ?? flat?.alternate_id ?? flat?.fix_id ?? "");
+        // static_id first — same identity-stability reasoning as
+        // mapScoresCategory above; keeps the odds map's key scheme
+        // consistent with the fixture matchId it needs to join against.
+        const id = String(flat?.static_id ?? flat?.id ?? flat?.alternate_id ?? flat?.fix_id ?? "");
         if (!id) continue;
         const perMatch: ProviderRawOddsSelection[] = [];
         const oddsContainer = flattenAtAttributes(flat?.odds ?? flat ?? {});
         for (const t of coerceArray<any>(oddsContainer?.type ?? oddsContainer?.market ?? [])) {
+          if (isGoalServeStopped(t?.stop)) continue;
           const typeName = String(t?.name ?? t?.type_name ?? "");
           for (const bm of coerceArray<any>(t?.bookmaker ?? t?.bookmakers ?? t)) {
             perMatch.push(...parseOddsBookmakerOdds(typeName, bm));

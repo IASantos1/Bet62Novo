@@ -100,8 +100,15 @@ function mapScoresCategory(
   matchElement: any,
 ): Pick<ProviderRawFixture, "home" | "away" | "league" | "country" | "kickoffISO" | "kickoffTimestamp" | "stateId" | "score" | "liveMinute" | "liveClockSec" | "liveClockStr" | "livePeriod" | "liveRunning" | "providerId"> & { rawHomeId?: string; rawAwayId?: string } {
   const m = flattenAtAttributes(matchElement ?? {});
+  // static_id first: per GoalServe docs it "never change[s] and [is] used as a
+  // primary key" across every feed (livescore/stats/odds), while the bare
+  // "id" field is explicitly "NOT static and CHANGE[s] if game date is
+  // changed" (fixtures feed) / "if game cancelled/rescheduled" (livescore/
+  // odds feeds). Building matchId off "id" would silently orphan a live
+  // match's state and any bet's matchId reference the moment a fixture gets
+  // rescheduled — static_id is the one guaranteed stable across polls.
   const rawId = String(
-    m?.id ?? m?.static_id ?? m?.alternate_id ?? m?.fix_id ?? m?.match_id ?? "",
+    m?.static_id ?? m?.id ?? m?.alternate_id ?? m?.fix_id ?? m?.match_id ?? "",
   );
   const matchLeague = String(
     m?.league ?? m?.league_name ?? m?.category ?? m?.tournament_name ?? m?.tournament ?? "",
@@ -303,10 +310,22 @@ export async function getGoalServeFootballLiveRaw(): Promise<ProviderRawFixture[
   return liveInFlight;
 }
 
+// GoalServe marks a suspended/inactive price with stop="True" at up to 3
+// independent levels (market <type>, <bookmaker>, and each individual
+// <total>/<handicap> line) — none of these were being checked, so a bettor
+// could be offered a price the bookmaker itself had already pulled. JSON
+// serialization of the XML bool isn't confirmed from a live sample, so this
+// accepts every representation seen for GoalServe's other bool flags in this
+// codebase (native boolean, "True"/"true", "1").
+function isGoalServeStopped(v: unknown): boolean {
+  return v === true || v === "true" || v === "True" || v === "1" || v === 1;
+}
+
 function parseOddsBookmakerOdds(
   typeName: string,
   bm: any,
 ): ProviderRawOddsSelection[] {
+  if (isGoalServeStopped(bm?.stop)) return [];
   const out: ProviderRawOddsSelection[] = [];
   const bookmakerName = String(bm?.name ?? bm?.id ?? "unknown");
   for (const odd of coerceArray<any>(bm?.odd ?? [])) {
@@ -337,6 +356,7 @@ function parseOddsBookmakerOdds(
     out.push(selection);
   }
   for (const total of coerceArray<any>(bm?.total ?? [])) {
+    if (isGoalServeStopped(total?.stop)) continue;
     const typeMarket = total?.name ?? typeName;
     const hint = guessMarketFromGoalServeNames(typeMarket, "");
     const line = hint.lineMaybe ?? extractLineNumberFromLabel(total?.stop ?? total?.name ?? "");
@@ -361,6 +381,7 @@ function parseOddsBookmakerOdds(
     }
   }
   for (const h of coerceArray<any>(bm?.handicap ?? [])) {
+    if (isGoalServeStopped(h?.stop)) continue;
     const typeMarket = h?.name ?? typeName;
     const hint = guessMarketFromGoalServeNames(typeMarket, "");
     const line = hint.lineMaybe ?? extractLineNumberFromLabel(h?.stop ?? h?.name ?? "");
@@ -401,11 +422,15 @@ async function fetchOdds(): Promise<Map<string, ProviderRawOddsSelection[]>> {
   for (const league of unpacked.categories) {
     for (const m of extractMatchesFromCategory(league)) {
       const flat = flattenAtAttributes(m ?? {});
-      const id = String(flat?.id ?? flat?.alternate_id ?? flat?.fix_id ?? "");
+      // static_id first — same identity-stability reasoning as
+      // mapScoresCategory above; keeps the odds map's key scheme consistent
+      // with the fixture matchId it needs to join against.
+      const id = String(flat?.static_id ?? flat?.id ?? flat?.alternate_id ?? flat?.fix_id ?? "");
       if (!id) continue;
       const perMatch: ProviderRawOddsSelection[] = [];
       const oddsContainer = flattenAtAttributes(flat?.odds ?? flat ?? {});
       for (const t of coerceArray<any>(oddsContainer?.type ?? oddsContainer?.market ?? [])) {
+        if (isGoalServeStopped(t?.stop)) continue;
         const typeName = String(t?.name ?? t?.type_name ?? "");
         for (const bm of coerceArray<any>(t?.bookmaker ?? t?.bookmakers ?? t)) {
           perMatch.push(...parseOddsBookmakerOdds(typeName, bm));
