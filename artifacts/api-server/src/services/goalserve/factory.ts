@@ -35,6 +35,12 @@ export type SportOpts = {
   oddsCategory: string;
   upcomingFeeds: string[];
   liveFilterFromUpcoming?: boolean;
+  // Some GoalServe sports (e.g. mma: /mma/schedule vs /mma/live) split
+  // upcoming and live status across two distinct same-provider feeds
+  // instead of exposing live status inline on the schedule feed. When set,
+  // this is fetched as `${scoresFeedPrefix}/${liveFeedPath}` and used
+  // instead of deriving live matches from the cached upcoming fixtures.
+  liveFeedPath?: string;
 };
 
 const PREGAME_TTL_MS = 2 * 60 * 1000;
@@ -338,6 +344,7 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
     oddsCategory,
     upcomingFeeds,
     liveFilterFromUpcoming = true,
+    liveFeedPath,
   } = opts;
 
   const logTag = `[goalserve/${sport}]`;
@@ -396,7 +403,13 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
   async function fetchUpcoming(): Promise<ProviderRawFixture[]> {
     const results = await Promise.all(
       upcomingFeeds.map(async (sub) => {
-        const url = goalServeFeedUrl(`${scoresFeedPrefix}/${sub}`);
+        // Most sports' feeds live under one folder (scoresFeedPrefix/sub).
+        // A few (amfootball: NFL under football/, XFL under its own xfl/
+        // folder) span multiple top-level GoalServe folders — an entry
+        // that already contains a "/" is treated as a full path and used
+        // as-is instead of being joined to scoresFeedPrefix.
+        const feedPath = sub.includes("/") ? sub : `${scoresFeedPrefix}/${sub}`;
+        const url = goalServeFeedUrl(feedPath);
         const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 12000 });
         if (!resp) return [];
         const matches: any[] = [];
@@ -466,8 +479,25 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
     return upcoming.filter((fx) => fx.stateId >= 2);
   }
 
+  async function fetchLiveFromFeed(): Promise<ProviderRawFixture[]> {
+    if (!liveFeedPath) return [];
+    const url = goalServeFeedUrl(`${scoresFeedPrefix}/${liveFeedPath}`);
+    const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 8000 });
+    if (!resp) return [];
+    const out: ProviderRawFixture[] = [];
+    const unpacked = unpackGoalServeRoot(resp);
+    for (const cat of unpacked.categories) {
+      for (const m of extractMatchesFromCategory(cat)) {
+        const fx = buildRawFixtureFromScoreMatch(m, true);
+        if (fx) out.push(fx);
+      }
+    }
+    return out;
+  }
+
   async function fetchLive(): Promise<ProviderRawFixture[]> {
     if (useDedicatedLivescoreAPI) return fetchLiveDedicated();
+    if (liveFeedPath) return fetchLiveFromFeed();
     if (liveFilterFromUpcoming) return fetchLiveFromUpcoming();
     return [];
   }
