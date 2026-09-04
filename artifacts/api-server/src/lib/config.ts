@@ -26,14 +26,23 @@ const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
 // ── Kill-switches (suspensão sem apagar código; rollback 1 clique) ─────────
-// GoalServe = fornecedor ativo por defeito. Desativar em Railway/Replit = volta
-// a SportMonks + PulseScore automaticamente (matches.ts decide por flag).
+// Default revertido 2026-09-04: GoalServe exige GOALSERVE_API_KEY configurada
+// manualmente em Railway/Replit (nunca commitada) — sem ela, todo builder
+// GoalServe retorna [] silenciosamente (fail-close), e como o "tri-fallback"
+// em matches.ts só cai para SportMonks/PulseScore quando o respetivo
+// ENABLE_* também está true, um deploy com os 3 defaults antigos
+// (GOALSERVE=true, SPORTMONKS=false, PULSESCORE=false) e sem a key
+// configurada deixava pré-jogo inteiro vazio e Ao Vivo sem atualizar —
+// exatamente o que aconteceu em produção. SportMonks + PulseScore (já
+// verificados como a stack funcional desta sessão) voltam a ser o default;
+// GoalServe fica default-off até alguém configurar a key e re-habilitar
+// explicitamente via ENABLE_GOALSERVE=true no Railway/Replit.
 const ENABLE_GOALSERVE =
-  (process.env["ENABLE_GOALSERVE"] ?? "true").trim().toLowerCase() === "true";
+  (process.env["ENABLE_GOALSERVE"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_SPORTMONKS =
-  (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
+  (process.env["ENABLE_SPORTMONKS"] ?? "true").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
-  (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
+  (process.env["ENABLE_PULSESCORE"] ?? "true").trim().toLowerCase() === "true";
 
 // GoalServe — NOVO fornecedor multi-desporto.
 // - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
