@@ -70,11 +70,40 @@ export function goalServeLivescoreUrl(
 export function goalServeOddsUrl(
   sportCategory: string,
   params?: Record<string, string | number | undefined | null>,
+  appendSuffix10: boolean = true,
 ): string {
+  const suffix = appendSuffix10 ? "_10" : "";
   const base = `${CONFIG.GOALSERVE_BASE_URL}/${encodeURIComponent(
     goalServeKey(),
-  )}/getodds/soccer?cat=${encodeURIComponent(sportCategory)}_10`;
+  )}/getodds/soccer?cat=${encodeURIComponent(sportCategory)}${suffix}`;
   return appendQuery(base, params ?? {});
+}
+
+export function goalServeOddsCandidateUrls(
+  preferredCategory: string,
+  params?: Record<string, string | number | undefined | null>,
+): string[] {
+  const primaries = new Set<string>();
+  primaries.add(preferredCategory?.trim?.() ?? "soccer");
+  primaries.add("soccer");
+  primaries.add("all");
+  primaries.add("football");
+  primaries.add("basket");
+  primaries.add("tennis");
+  const suffixes: boolean[] = [true, false];
+  const out: string[] = [];
+  for (const prim of primaries) {
+    if (!prim) continue;
+    for (const suf of suffixes) {
+      out.push(goalServeOddsUrl(prim, params, suf));
+    }
+  }
+  const seen = new Set<string>();
+  return out.filter((u) => {
+    if (seen.has(u)) return false;
+    seen.add(u);
+    return true;
+  });
 }
 
 export function goalServeSettlementsUrl(opts: {
@@ -219,6 +248,51 @@ export async function goalServeGetWithRetry<T>(
       }
       await new Promise((r) => setTimeout(r, baseDelay * (attempt + 1)));
     }
+  }
+  return null;
+}
+
+export async function goalServeGetWithRetryCandidates<T>(
+  candidateUrls: string[],
+  opts?: { timeoutMs?: number; retriesPerCandidate?: number; retryDelayMsPerCandidate?: number; stopOnStatus403?: boolean },
+): Promise<T | null> {
+  if (!CONFIG.ENABLE_GOALSERVE) return null;
+  if (!candidateUrls || candidateUrls.length === 0) return null;
+  const retriesPer = opts?.retriesPerCandidate ?? 1;
+  const baseDelay = opts?.retryDelayMsPerCandidate ?? 1000;
+  let lastErr: any = null;
+  for (const url of candidateUrls) {
+    for (let attempt = 0; attempt <= retriesPer; attempt++) {
+      try {
+        const got = await goalServeGet<T>(url, opts?.timeoutMs);
+        if (got == null) continue;
+        return got;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message ?? err).toLowerCase();
+        if (opts?.stopOnStatus403 !== false) {
+          if (msg.includes(" 403 ")) return null;
+        }
+        if (msg.includes(" 429 ")) {
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        if (attempt === retriesPer) {
+          logger.debug(
+            { url: url.replace(goalServeKey(), "<KEY>"), err },
+            "[goalserve] odds candidate failed, moving to next candidate",
+          );
+          break;
+        }
+        await new Promise((r) => setTimeout(r, baseDelay * (attempt + 1)));
+      }
+    }
+  }
+  if (lastErr) {
+    logger.warn(
+      { err: lastErr, urls: candidateUrls.slice(0, 3).map((u) => u.replace(goalServeKey(), "<KEY>")) },
+      "[goalserve] giving up after all odds candidates",
+    );
   }
   return null;
 }

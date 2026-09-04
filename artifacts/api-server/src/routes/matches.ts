@@ -9007,7 +9007,11 @@ async function buildVolleyballLiveFromPulseScore(): Promise<LiveMatchState[]> {
 
 async function buildFootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeFootballUpcomingRaw();
-  fixtures = await attachGoalServeFootballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeFootballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] football odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9021,7 +9025,11 @@ async function buildFootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildFootballLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeFootballLiveRaw();
-  fixtures = await attachGoalServeFootballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeFootballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] football odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9035,7 +9043,11 @@ async function buildFootballLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildTennisUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeTennisUpcomingRaw();
-  fixtures = await attachGoalServeTennisOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeTennisOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] tennis odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9049,7 +9061,11 @@ async function buildTennisUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildTennisLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeTennisLiveRaw();
-  fixtures = await attachGoalServeTennisOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeTennisOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] tennis odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9063,7 +9079,11 @@ async function buildTennisLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildBasketballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeBasketballUpcomingRaw();
-  fixtures = await attachGoalServeBasketballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeBasketballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] basketball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9077,7 +9097,11 @@ async function buildBasketballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> 
 
 async function buildBasketballLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeBasketballLiveRaw();
-  fixtures = await attachGoalServeBasketballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeBasketballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] basketball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9091,7 +9115,11 @@ async function buildBasketballLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildHockeyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeHockeyUpcomingRaw();
-  fixtures = await attachGoalServeHockeyOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeHockeyOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] hockey odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9105,7 +9133,11 @@ async function buildHockeyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildHockeyLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeHockeyLiveRaw();
-  fixtures = await attachGoalServeHockeyOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeHockeyOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] hockey odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9119,7 +9151,11 @@ async function buildHockeyLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildBaseballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeBaseballUpcomingRaw();
-  fixtures = await attachGoalServeBaseballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeBaseballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] baseball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9133,7 +9169,11 @@ async function buildBaseballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildBaseballLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeBaseballLiveRaw();
-  fixtures = await attachGoalServeBaseballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeBaseballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] baseball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9147,7 +9187,11 @@ async function buildBaseballLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildVolleyballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeVolleyballUpcomingRaw();
-  fixtures = await attachGoalServeVolleyballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeVolleyballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] volleyball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9161,7 +9205,11 @@ async function buildVolleyballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> 
 
 async function buildVolleyballLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeVolleyballLiveRaw();
-  fixtures = await attachGoalServeVolleyballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeVolleyballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] volleyball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9175,7 +9223,11 @@ async function buildVolleyballLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildMmaUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeMmaUpcomingRaw();
-  fixtures = await attachGoalServeMmaOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeMmaOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] mma odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9189,7 +9241,11 @@ async function buildMmaUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildMmaLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeMmaLiveRaw();
-  fixtures = await attachGoalServeMmaOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeMmaOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] mma odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9203,7 +9259,11 @@ async function buildMmaLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildHandballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeHandballUpcomingRaw();
-  fixtures = await attachGoalServeHandballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeHandballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] handball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9217,7 +9277,11 @@ async function buildHandballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildHandballLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeHandballLiveRaw();
-  fixtures = await attachGoalServeHandballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeHandballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] handball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9231,7 +9295,11 @@ async function buildHandballLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildCricketUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeCricketUpcomingRaw();
-  fixtures = await attachGoalServeCricketOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeCricketOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] cricket odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9245,7 +9313,11 @@ async function buildCricketUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildCricketLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeCricketLiveRaw();
-  fixtures = await attachGoalServeCricketOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeCricketOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] cricket odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9259,7 +9331,11 @@ async function buildCricketLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildRugbyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeRugbyUpcomingRaw();
-  fixtures = await attachGoalServeRugbyOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeRugbyOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] rugby odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9273,7 +9349,11 @@ async function buildRugbyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildRugbyLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeRugbyLiveRaw();
-  fixtures = await attachGoalServeRugbyOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeRugbyOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] rugby odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9287,7 +9367,11 @@ async function buildRugbyLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildEsportsUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeEsportsUpcomingRaw();
-  fixtures = await attachGoalServeEsportsOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeEsportsOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] esports odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9301,7 +9385,11 @@ async function buildEsportsUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
 
 async function buildEsportsLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeEsportsLiveRaw();
-  fixtures = await attachGoalServeEsportsOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeEsportsOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] esports odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {
@@ -9315,7 +9403,11 @@ async function buildEsportsLiveFromGoalServe(): Promise<LiveMatchState[]> {
 
 async function buildAmfootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   let fixtures = await getGoalServeAmfootballUpcomingRaw();
-  fixtures = await attachGoalServeAmfootballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeAmfootballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] amfootball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: UpcomingMatch[] = [];
   for (const fx of fixtures) {
@@ -9329,7 +9421,11 @@ async function buildAmfootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> 
 
 async function buildAmfootballLiveFromGoalServe(): Promise<LiveMatchState[]> {
   let fixtures = await getGoalServeAmfootballLiveRaw();
-  fixtures = await attachGoalServeAmfootballOdds(fixtures);
+  try {
+    fixtures = await attachGoalServeAmfootballOdds(fixtures);
+  } catch (err) {
+    logger.warn({ err }, "[builder] amfootball odds attach failed — fixtures served without odds");
+  }
   const seen = new Set<string>();
   const results: LiveMatchState[] = [];
   for (const fx of fixtures) {

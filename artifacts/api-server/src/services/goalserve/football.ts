@@ -5,6 +5,8 @@ import {
   goalServeLivescoreUrl,
   goalServeGetWithRetry,
   goalServeOddsUrl,
+  goalServeOddsCandidateUrls,
+  goalServeGetWithRetryCandidates,
 } from "./client.js";
 import {
   parseCorrectScoreFromLabel,
@@ -360,8 +362,8 @@ function parseOddsBookmakerOdds(
 async function fetchOdds(): Promise<Map<string, ProviderRawOddsSelection[]>> {
   const params: Record<string, string | number> = {};
   if (oddsCache?.lastTs != null) params.ts = String(oddsCache.lastTs);
-  const url = goalServeOddsUrl("soccer", params);
-  const resp = await goalServeGetWithRetry<any>(url, { timeoutMs: 20000 });
+  const candidates = goalServeOddsCandidateUrls("soccer", params);
+  const resp = await goalServeGetWithRetryCandidates<any>(candidates, { timeoutMs: 18000, retriesPerCandidate: 0 });
   const byId = oddsCache?.byId ? new Map(oddsCache.byId) : new Map<string, ProviderRawOddsSelection[]>();
   if (!resp) return byId;
   const unpacked = unpackGoalServeRoot(resp);
