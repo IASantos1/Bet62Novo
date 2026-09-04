@@ -37,6 +37,7 @@ router.get("/version", (_req, res) => {
 // Rota não validada (mesmo espírito que /version) para não tocar no
 // contrato zod gerado por orval.
 router.get("/health-data-providers", (_req, res) => {
+  const g = globalThis as any;
   res.json({
     flags: {
       ENABLE_GOALSERVE: CONFIG.ENABLE_GOALSERVE,
@@ -49,16 +50,41 @@ router.get("/health-data-providers", (_req, res) => {
       PULSESCORE_API_KEY_SET: CONFIG.PULSESCORE_API_KEY.length > 0,
     },
     lastSuccessfulFetch: {
-      goalserve: (globalThis as any).__lastFetchTs?.goalserve ?? null,
-      sportmonks: (globalThis as any).__lastFetchTs?.sportmonks ?? null,
-      pulsescore: (globalThis as any).__lastFetchTs?.pulsescore ?? null,
+      goalserve: g.__lastFetchTs?.goalserve ?? null,
+      sportmonks: g.__lastFetchTs?.sportmonks ?? null,
+      pulsescore: g.__lastFetchTs?.pulsescore ?? null,
     },
+    providerQualityDebug: g.__providerQualityDebug ?? null,
+    livePayloadDebug: g.__livePayloadDebug ?? null,
+  });
+});
+
+router.get("/debug-provider-quality", (_req, res) => {
+  const g = globalThis as any;
+  res.json({
+    updatedAt: g.__providerQualityDebug?.updatedAt ?? null,
+    upcoming: g.__providerQualityDebug?.upcoming ?? {},
+    live: g.__providerQualityDebug?.live ?? {},
+    livePayload: g.__livePayloadDebug ?? null,
   });
 });
 
 router.get("/debug-goalserve", async (_req, res) => {
   function summarize(
-    fixtures: { providerId?: string; matchId?: string; home?: string; away?: string; league?: string; stateId?: number; kickoffTimestamp?: number }[],
+    fixtures: {
+      providerId?: string;
+      matchId?: string;
+      home?: string;
+      away?: string;
+      league?: string;
+      stateId?: number;
+      kickoffTimestamp?: number;
+      liveMinute?: number;
+      liveClockSec?: number;
+      liveClockStr?: string;
+      score?: { home: number; away: number };
+      odds?: unknown[];
+    }[],
     label: string,
   ) {
     const total = fixtures.length;
@@ -67,6 +93,9 @@ router.get("/debug-goalserve", async (_req, res) => {
     let emptyAway = 0;
     let emptyLeague = 0;
     let passedGsUpcoming = 0;
+    let withClock = 0;
+    let withScore = 0;
+    let withOdds = 0;
     const topEmpty: Array<{ id: string; where: "home" | "away" | "league"; raw: any }> = [];
     for (const f of fixtures) {
       const sid = String(f?.stateId ?? "undefined");
@@ -84,6 +113,23 @@ router.get("/debug-goalserve", async (_req, res) => {
         if (topEmpty.length < 10) topEmpty.push({ id: f?.matchId ?? f?.providerId ?? "", where: "league", raw: f });
       }
       if (gsIsUpcoming({ stateId: f.stateId, kickoffTimestamp: f.kickoffTimestamp })) passedGsUpcoming++;
+      if (
+        Number.isFinite(Number(f?.liveClockSec)) ||
+        !!f?.liveClockStr ||
+        Number(f?.liveMinute ?? 0) > 0
+      ) {
+        withClock++;
+      }
+      if (
+        f?.score &&
+        Number.isFinite(Number(f.score.home)) &&
+        Number.isFinite(Number(f.score.away))
+      ) {
+        withScore++;
+      }
+      if (Array.isArray(f?.odds) && f.odds.length > 0) {
+        withOdds++;
+      }
     }
     return {
       label,
@@ -93,6 +139,9 @@ router.get("/debug-goalserve", async (_req, res) => {
       emptyAway,
       emptyLeague,
       passedGsUpcomingFilter: passedGsUpcoming,
+      withClock,
+      withScore,
+      withOdds,
       topEmptySamples: topEmpty,
     };
   }

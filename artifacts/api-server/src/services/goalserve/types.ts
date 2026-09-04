@@ -51,6 +51,8 @@ export type ProviderRawFixture = {
   stateId: 0 | 1 | 2 | 3 | 5 | 22 | 99;
   score?: { home: number; away: number };
   liveMinute?: number;
+  liveClockSec?: number;
+  liveClockStr?: string;
   livePeriod?: string;
   liveRunning?: boolean;
   homeTeamId?: string;
