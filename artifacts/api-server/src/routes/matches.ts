@@ -7638,8 +7638,13 @@ function convertRawFixtureToLiveMatchState(
     phase,
   };
   if (Number.isFinite(fx.liveClockSec) && Number(fx.liveClockSec) >= 0) {
-    liveExtra.clockSec = Number(fx.liveClockSec);
-    liveExtra.clockAtMs = Date.now();
+    const nextClockSec = Number(fx.liveClockSec);
+    const prevClockSec = Number(existing?._liveExtra?.clockSec);
+    liveExtra.clockSec = nextClockSec;
+    liveExtra.clockAtMs =
+      Number.isFinite(prevClockSec) && prevClockSec === nextClockSec
+        ? (existing?._liveExtra?.clockAtMs ?? Date.now())
+        : Date.now();
   }
   if (typeof fx.liveClockStr === "string" && fx.liveClockStr.trim()) {
     liveExtra.clockStr = fx.liveClockStr.trim();
@@ -10902,9 +10907,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const DEFAULT_SOON_WINDOW = 3; // ≤ 3 min antes do início para todos os desportos
   const startingSoonCandidates = allUpcoming
     .filter((m) => {
+      const hasVisibleOdds =
+        !!m.hasRealOdds ||
+        (m.odds?.home ?? 0) > 0 ||
+        (m.odds?.draw ?? 0) > 0 ||
+        (m.odds?.away ?? 0) > 0;
       // Tennis always has computed odds even without a real bookmaker price — allow all.
-      // Other sports require real odds to avoid showing matches with no betting context.
-      if (m.sport !== "tennis" && !m.hasRealOdds) return false;
+      if (m.sport !== "tennis" && !hasVisibleOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
       const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
       return (

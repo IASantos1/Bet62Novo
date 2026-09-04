@@ -6401,6 +6401,11 @@ export default function Home({
     if (matches.length === 0) return matches;
 
     const now = Date.now();
+    const liveIds = new Set(
+      liveMatchesRef.current
+        .filter((match) => !!match.isLive && !isFinishedMatchStatus(match.status))
+        .map((match) => String(match.id)),
+    );
     const liveIdentityKeys = new Set(
       liveMatchesRef.current
         .filter((match) => !!match.isLive && !isFinishedMatchStatus(match.status))
@@ -6410,7 +6415,11 @@ export default function Home({
     let changed = false;
 
     const filtered = matches.filter((match) => {
-      if (liveIdentityKeys.has(getLiveMatchIdentityKey(match))) {
+      const sameLiveMatch =
+        liveIds.has(String(match.id)) ||
+        (activeTab !== "live" &&
+          liveIdentityKeys.has(getLiveMatchIdentityKey(match)));
+      if (sameLiveMatch) {
         changed = true;
         return false;
       }
@@ -6430,7 +6439,44 @@ export default function Home({
     });
 
     return changed ? filtered : matches;
-  }, []);
+  }, [activeTab]);
+
+  const hasPlayableMarketOdds = (
+    value: unknown,
+    key?: string,
+  ): boolean => {
+    if (typeof value === "number") {
+      if (
+        key === "line" ||
+        key === "_spread" ||
+        key === "_total" ||
+        key === "_total1H" ||
+        key === "_spreadLine" ||
+        key === "currentSetNum"
+      ) {
+        return false;
+      }
+      return Number.isFinite(value) && value > 1.01;
+    }
+    if (Array.isArray(value)) {
+      return value.some((item) => hasPlayableMarketOdds(item));
+    }
+    if (value && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).some(([childKey, childValue]) =>
+        hasPlayableMarketOdds(childValue, childKey),
+      );
+    }
+    return false;
+  };
+
+  const matchHasPlayableOdds = (match: Pick<Match, "hasRealOdds" | "odds" | "markets">): boolean =>
+    !!(
+      match.hasRealOdds ||
+      (match.odds?.home ?? 0) > 0 ||
+      (match.odds?.draw ?? 0) > 0 ||
+      (match.odds?.away ?? 0) > 0 ||
+      hasPlayableMarketOdds(match.markets)
+    );
 
   const dedupeLiveMatches = (matches: Match[]) => {
     const byIdentity = new Map<string, Match>();
@@ -10365,10 +10411,7 @@ export default function Home({
     const isPenShootout =
       match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const canShowOdds = !!(
-      match.hasRealOdds ||
-      (match.odds.home > 0 && match.odds.away > 0)
-    );
+    const canShowOdds = matchHasPlayableOdds(match);
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) =>
       e.stopPropagation();
     const oddsRow =
@@ -10739,10 +10782,7 @@ export default function Home({
       match.isLive &&
       (match.marketSuspension?.["result"] != null &&
         match.marketSuspension["result"] > Date.now());
-    const canShowOdds = !!(
-      match.hasRealOdds ||
-      (match.odds.home > 0 && match.odds.away > 0)
-    );
+    const canShowOdds = matchHasPlayableOdds(match);
     const OddsRow = () => {
       // ── Formula 1: race winner driver buttons ────────────────────────────────
       if (sport === "formula1") {
@@ -12793,9 +12833,8 @@ export default function Home({
     // OR when the match has computed markets (V1-built football with doubleChance/totalGoals)
     const hasTennisMarkets =
       match.sport === "tennis" && !!m?.tennisExtra?.firstSet?.home;
-    const hasComputedMarkets =
-      !!m?.doubleChance?.homeOrDraw || !!m?.totalGoals?.over25;
-    if (!match.hasRealOdds && !hasTennisMarkets && !hasComputedMarkets) {
+    const hasComputedMarkets = hasPlayableMarketOdds(m);
+    if (!matchHasPlayableOdds(match) && !hasTennisMarkets && !hasComputedMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
