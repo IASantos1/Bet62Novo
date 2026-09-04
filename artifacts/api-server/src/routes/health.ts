@@ -71,7 +71,20 @@ router.get("/debug-provider-quality", (_req, res) => {
 
 router.get("/debug-goalserve", async (_req, res) => {
   function summarize(
-    fixtures: { providerId?: string; matchId?: string; home?: string; away?: string; league?: string; stateId?: number; kickoffTimestamp?: number }[],
+    fixtures: {
+      providerId?: string;
+      matchId?: string;
+      home?: string;
+      away?: string;
+      league?: string;
+      stateId?: number;
+      kickoffTimestamp?: number;
+      liveMinute?: number;
+      liveClockSec?: number;
+      liveClockStr?: string;
+      score?: { home: number; away: number };
+      odds?: unknown[];
+    }[],
     label: string,
   ) {
     const total = fixtures.length;
@@ -80,6 +93,9 @@ router.get("/debug-goalserve", async (_req, res) => {
     let emptyAway = 0;
     let emptyLeague = 0;
     let passedGsUpcoming = 0;
+    let withClock = 0;
+    let withScore = 0;
+    let withOdds = 0;
     const topEmpty: Array<{ id: string; where: "home" | "away" | "league"; raw: any }> = [];
     for (const f of fixtures) {
       const sid = String(f?.stateId ?? "undefined");
@@ -97,6 +113,23 @@ router.get("/debug-goalserve", async (_req, res) => {
         if (topEmpty.length < 10) topEmpty.push({ id: f?.matchId ?? f?.providerId ?? "", where: "league", raw: f });
       }
       if (gsIsUpcoming({ stateId: f.stateId, kickoffTimestamp: f.kickoffTimestamp })) passedGsUpcoming++;
+      if (
+        Number.isFinite(Number(f?.liveClockSec)) ||
+        !!f?.liveClockStr ||
+        Number(f?.liveMinute ?? 0) > 0
+      ) {
+        withClock++;
+      }
+      if (
+        f?.score &&
+        Number.isFinite(Number(f.score.home)) &&
+        Number.isFinite(Number(f.score.away))
+      ) {
+        withScore++;
+      }
+      if (Array.isArray(f?.odds) && f.odds.length > 0) {
+        withOdds++;
+      }
     }
     return {
       label,
@@ -106,6 +139,9 @@ router.get("/debug-goalserve", async (_req, res) => {
       emptyAway,
       emptyLeague,
       passedGsUpcomingFilter: passedGsUpcoming,
+      withClock,
+      withScore,
+      withOdds,
       topEmptySamples: topEmpty,
     };
   }

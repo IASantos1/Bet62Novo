@@ -40,6 +40,7 @@ export type SportOpts = {
 const PREGAME_TTL_MS = 2 * 60 * 1000;
 const LIVE_TTL_MS = 3 * 1000;
 const ODDS_TTL_MS = 30 * 1000;
+const LAST_GOOD_ODDS_TTL_MS = 60 * 1000;
 
 function stateIdFromGoalServe(raw: any): 0 | 1 | 2 | 3 | 5 | 22 | 99 {
   if (raw == null) return 1;
@@ -341,6 +342,10 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
   };
   let oddsCache: OddsCached | null = null;
   let oddsInFlight: Promise<Map<string, ProviderRawOddsSelection[]>> | null = null;
+  let lastGoodOddsById = new Map<
+    string,
+    { odds: ProviderRawOddsSelection[]; savedAt: number }
+  >();
 
   function buildRawFixtureFromScoreMatch(m: any, isLive = false): ProviderRawFixture | null {
     const core = mapScoresCategory(m);
@@ -500,6 +505,10 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
         if (perMatch.length === 0) continue;
         const key = `${matchIdPrefix}${id}`;
         byId.set(key, perMatch);
+        lastGoodOddsById.set(key, {
+          odds: perMatch,
+          savedAt: Date.now(),
+        });
       }
     }
     oddsCache = { byId, fetchedAt: Date.now(), lastTs: ts };
@@ -526,9 +535,27 @@ export function makeGoalServeSportAdapter(opts: SportOpts): SportAdapter {
   async function attachOdds(fixtures: ProviderRawFixture[]): Promise<ProviderRawFixture[]> {
     if (!CONFIG.ENABLE_GOALSERVE || fixtures.length === 0) return fixtures;
     const oddsById = await getOddsByMatchId();
+    const now = Date.now();
+    for (const [key, entry] of Array.from(lastGoodOddsById.entries())) {
+      if (now - entry.savedAt > LAST_GOOD_ODDS_TTL_MS) {
+        lastGoodOddsById.delete(key);
+      }
+    }
     return fixtures.map((fx) => {
-      const odds = oddsById.get(fx.matchId);
+      const freshOdds = oddsById.get(fx.matchId);
+      const cachedOdds = lastGoodOddsById.get(fx.matchId);
+      const odds =
+        freshOdds ??
+        (cachedOdds && now - cachedOdds.savedAt <= LAST_GOOD_ODDS_TTL_MS
+          ? cachedOdds.odds
+          : undefined);
       if (!odds || odds.length === 0) return fx;
+      if (!freshOdds && cachedOdds) {
+        logger.debug(
+          { matchId: fx.matchId },
+          `${logTag} attachOdds reused cached last-good odds`,
+        );
+      }
       return { ...fx, odds: [...(fx.odds ?? []), ...odds] };
     });
   }
