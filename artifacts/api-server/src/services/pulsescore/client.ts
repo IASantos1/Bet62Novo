@@ -64,7 +64,11 @@ export async function pulseScoreGet<T>(
   if (!resp.ok) {
     throw new Error(`[pulsescore] ${resp.status} on ${path}`);
   }
-  return (await resp.json()) as T;
+  const json = (await resp.json()) as T;
+  const gt = (globalThis as any).__lastFetchTs ?? {};
+  gt.pulsescore = Date.now();
+  (globalThis as any).__lastFetchTs = gt;
+  return json;
 }
 
 // Football/tennis live pollers hit bet365 at ~1 req/s continuously, which is

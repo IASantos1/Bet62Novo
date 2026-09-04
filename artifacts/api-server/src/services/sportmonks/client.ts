@@ -52,6 +52,9 @@ export async function sportMonksGet<T>(
   if (json && typeof json === "object" && json.rate_limit) {
     lastKnownRateLimit = json.rate_limit;
   }
+  const gt = (globalThis as any).__lastFetchTs ?? {};
+  gt.sportmonks = Date.now();
+  (globalThis as any).__lastFetchTs = gt;
   return json;
 }
 
