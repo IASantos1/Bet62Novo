@@ -60,13 +60,14 @@ export function extractMatchesFromCategory(cat: any): any[] {
     const inner = matchesBox?.match ?? matchesBox?.matches ?? matchesBox?.game ?? matchesBox?.event;
     for (const m of coerceArray<any>(inner)) candidates.push(flattenAtAttributes(m));
   }
-  const league = c?.name ?? c?.league ?? c?.league_name ?? c?.category ?? "";
-  const country = c?.country ?? c?.country_name ?? "";
+  const league = c?.name ?? c?.league ?? c?.league_name ?? c?.category ?? c?.title ?? "";
+  const country = c?.country ?? c?.country_name ?? c?.nation ?? "";
   const gid = c?.gid ? String(c.gid) : undefined;
   const lid = c?.id ? String(c.id) : undefined;
-  if (!league && !country) return candidates;
   return candidates.map((m) => ({
     ...m,
+    _categoryName: league,
+    _categoryCountry: country,
     league: m?.league ?? league,
     country: m?.country ?? country,
     ...(gid && !m?.league_gid ? { league_gid: gid } : {}),
@@ -79,17 +80,76 @@ export function pickTeamName(raw: any): string {
   if (typeof raw === "string") return raw.trim();
   if (typeof raw !== "object") return String(raw ?? "").trim();
   const o = flattenAtAttributes(raw);
-  const n = o?.name ?? o?.Name ?? o?.title ?? o?.team_name ?? o?.team ?? o?.club;
-  if (typeof n === "string") return n.trim();
+  const candidates: any[] = [
+    o?.name,
+    o?.Name,
+    o?.title,
+    o?.team_name,
+    o?.teamname,
+    o?.team,
+    o?.club,
+    o?.full_name,
+    o?.fullname,
+    o?.long_name,
+    o?.longname,
+    o?.short_name,
+    o?.shortname,
+    o?.display_name,
+    o?.displayname,
+    o?.common_name,
+    o?.commonname,
+    o?.abbreviation,
+    o?.abbr,
+    o?.code,
+    o?.short_code,
+    o?.shortcode,
+    o?.nickname,
+    o?.nick,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string") {
+      const t = c.trim();
+      if (t) return t;
+    }
+  }
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (v && typeof v === "object") {
+      const inner = pickTeamName(v);
+      if (inner) return inner;
+    }
+  }
+  const textNode = (o as any)?.["#text"] ?? (o as any)?.$t ?? (raw as any)?.["#text"];
+  if (typeof textNode === "string") return textNode.trim();
   return "";
 }
 
 export function pickTeamId(raw: any): string | undefined {
   if (raw == null) return undefined;
+  if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
   if (typeof raw !== "object") return undefined;
   const o = flattenAtAttributes(raw);
-  const id = o?.id ?? o?.team_id ?? o?.Id ?? undefined;
-  return id === undefined || id === null || String(id).trim() === "" ? undefined : String(id);
+  const candidates: any[] = [
+    o?.id,
+    o?.team_id,
+    o?.teamId,
+    o?.Id,
+    o?.ID,
+    o?.static_id,
+    o?.fix_id,
+    o?.alternate_id,
+    o?.uuid,
+    o?.gid,
+    o?.key,
+    o?.api_id,
+  ];
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const s = String(c).trim();
+    if (s) return s;
+  }
+  return undefined;
 }
 
 export function looksOkOddString(raw: string | number | undefined | null): boolean {

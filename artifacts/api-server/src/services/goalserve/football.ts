@@ -25,7 +25,7 @@ import {
 import type { ProviderRawFixture, ProviderRawOddsSelection } from "./types.js";
 
 const PREGAME_TTL_MS = 2 * 60 * 1000;
-const LIVE_TTL_MS = 15 * 1000;
+const LIVE_TTL_MS = 3 * 1000;
 const ODDS_TTL_MS = 30 * 1000;
 
 type UpcomingCached = { fixtures: ProviderRawFixture[]; fetchedAt: number; lastTs?: string | number };
@@ -58,48 +58,76 @@ function mapScoresCategory(
   const rawId = String(
     m?.id ?? m?.static_id ?? m?.alternate_id ?? m?.fix_id ?? m?.match_id ?? "",
   );
-  const league = String(m?.league ?? m?.league_name ?? m?.category ?? "");
-  const country = String(m?.country ?? m?.country_name ?? "");
-  const home = pickTeamName(m?.localteam ?? m?.local ?? m?.home ?? m?.localTeam ?? m?.homeTeam);
-  const away = pickTeamName(m?.visitorteam ?? m?.visitor ?? m?.away ?? m?.visitorTeam ?? m?.awayTeam);
+  const matchLeague = String(
+    m?.league ?? m?.league_name ?? m?.category ?? m?.tournament_name ?? m?.tournament ?? "",
+  );
+  const categoryLeague = String(m?._categoryName ?? m?.category_name ?? m?.leagueFromCategory ?? "");
+  const league = categoryLeague || matchLeague;
+  const matchCountry = String(m?.country ?? m?.country_name ?? m?.nation ?? "");
+  const categoryCountry = String(m?._categoryCountry ?? m?.countryFromCategory ?? "");
+  const country = categoryCountry || matchCountry;
+  let home = pickTeamName(m?.localteam ?? m?.local ?? m?.home ?? m?.localTeam ?? m?.homeTeam);
+  if (!home && typeof m?.localteam === "string") home = m.localteam.trim();
+  if (!home && typeof m?.home === "string") home = m.home.trim();
+  let away = pickTeamName(m?.visitorteam ?? m?.visitor ?? m?.away ?? m?.visitorTeam ?? m?.awayTeam);
+  if (!away && typeof m?.visitorteam === "string") away = m.visitorteam.trim();
+  if (!away && typeof m?.away === "string") away = m.away.trim();
   const homeId = pickTeamId(m?.localteam ?? m?.local ?? m?.home ?? m?.localTeam ?? m?.homeTeam);
   const awayId = pickTeamId(m?.visitorteam ?? m?.visitor ?? m?.away ?? m?.visitorTeam ?? m?.awayTeam);
-  const date = m?.date ?? m?.formatted_date ?? m?.date_start ?? null;
-  const time = m?.time ?? m?.time_start ?? null;
+  const date = m?.date ?? m?.formatted_date ?? m?.date_start ?? m?.starting_date ?? null;
+  const time = m?.time ?? m?.time_start ?? m?.starting_time ?? null;
   const parsed =
     parseGoalServeDDMMYYYY(date, time) ??
-    parseISO8601Any(m?.date_start_iso ?? m?.starting_at ?? m?.kickoff ?? null) ??
-    { iso: new Date(0).toISOString(), tsSec: 0 };
-  const status = m?.status ?? m?.state ?? m?.status_long ?? m?.match_status ?? null;
+    parseISO8601Any(
+      m?.date_start_iso ?? m?.starting_at ?? m?.kickoff ?? m?.start_at ?? m?.start_time ?? null,
+    ) ?? { iso: new Date(0).toISOString(), tsSec: 0 };
+  const status =
+    m?.status ?? m?.state ?? m?.status_long ?? m?.match_status ?? m?.match_state ?? m?.stage ?? null;
   const stateId = stateIdFromGoalServe(status);
   const homeScoreRaw =
-    m?.localteam_score ?? m?.local_score ?? m?.home_score ?? m?.localteam?.goals ?? m?.home?.goals ?? null;
+    m?.localteam_score ??
+    m?.local_score ??
+    m?.home_score ??
+    m?.localteam?.goals ??
+    m?.home?.goals ??
+    m?.localteam_goals ??
+    m?.home_goals ??
+    m?.home_team_score ??
+    null;
   const awayScoreRaw =
     m?.visitorteam_score ??
     m?.visitor_score ??
     m?.away_score ??
     m?.visitorteam?.goals ??
     m?.away?.goals ??
+    m?.visitorteam_goals ??
+    m?.away_goals ??
+    m?.away_team_score ??
     null;
   const hs =
-    homeScoreRaw === null || homeScoreRaw === undefined || homeScoreRaw === "" || homeScoreRaw === "?"
+    homeScoreRaw === null ||
+    homeScoreRaw === undefined ||
+    homeScoreRaw === "" ||
+    String(homeScoreRaw) === "?"
       ? undefined
       : Number(homeScoreRaw);
   const as =
-    awayScoreRaw === null || awayScoreRaw === undefined || awayScoreRaw === "" || awayScoreRaw === "?"
+    awayScoreRaw === null ||
+    awayScoreRaw === undefined ||
+    awayScoreRaw === "" ||
+    String(awayScoreRaw) === "?"
       ? undefined
       : Number(awayScoreRaw);
-  const score =
-    Number.isFinite(hs) && Number.isFinite(as) ? { home: hs!, away: as! } : undefined;
-  const minuteRaw = m?.minute ?? m?.timer ?? m?.clock ?? null;
+  const score = Number.isFinite(hs) && Number.isFinite(as) ? { home: hs!, away: as! } : undefined;
+  const minuteRaw = m?.minute ?? m?.timer ?? m?.clock ?? m?.elapsed ?? null;
   const liveMinute =
     minuteRaw == null || String(minuteRaw) === ""
       ? undefined
       : typeof minuteRaw === "number"
       ? minuteRaw
       : Number(String(minuteRaw).replace(/\D/g, "")) || undefined;
-  const livePeriod = m?.period ?? m?.half ?? undefined;
-  const liveRunning = m?.running ?? m?.inplay ?? m?.live ?? undefined;
+  const livePeriod = m?.period ?? m?.half ?? m?.stage ?? m?.current_period ?? undefined;
+  const liveRunning = m?.running ?? m?.inplay ?? m?.live ?? m?.in_play ?? undefined;
   return {
     providerId: rawId,
     home,
