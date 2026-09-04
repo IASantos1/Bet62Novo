@@ -37,6 +37,7 @@ router.get("/version", (_req, res) => {
 // Rota não validada (mesmo espírito que /version) para não tocar no
 // contrato zod gerado por orval.
 router.get("/health-data-providers", (_req, res) => {
+  const g = globalThis as any;
   res.json({
     flags: {
       ENABLE_GOALSERVE: CONFIG.ENABLE_GOALSERVE,
@@ -49,10 +50,22 @@ router.get("/health-data-providers", (_req, res) => {
       PULSESCORE_API_KEY_SET: CONFIG.PULSESCORE_API_KEY.length > 0,
     },
     lastSuccessfulFetch: {
-      goalserve: (globalThis as any).__lastFetchTs?.goalserve ?? null,
-      sportmonks: (globalThis as any).__lastFetchTs?.sportmonks ?? null,
-      pulsescore: (globalThis as any).__lastFetchTs?.pulsescore ?? null,
+      goalserve: g.__lastFetchTs?.goalserve ?? null,
+      sportmonks: g.__lastFetchTs?.sportmonks ?? null,
+      pulsescore: g.__lastFetchTs?.pulsescore ?? null,
     },
+    providerQualityDebug: g.__providerQualityDebug ?? null,
+    livePayloadDebug: g.__livePayloadDebug ?? null,
+  });
+});
+
+router.get("/debug-provider-quality", (_req, res) => {
+  const g = globalThis as any;
+  res.json({
+    updatedAt: g.__providerQualityDebug?.updatedAt ?? null,
+    upcoming: g.__providerQualityDebug?.upcoming ?? {},
+    live: g.__providerQualityDebug?.live ?? {},
+    livePayload: g.__livePayloadDebug ?? null,
   });
 });
 
