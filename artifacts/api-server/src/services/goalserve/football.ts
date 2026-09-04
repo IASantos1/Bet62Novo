@@ -41,14 +41,30 @@ let oddsCache: OddsCached | null = null;
 let oddsInFlight: Promise<Map<string, ProviderRawOddsSelection[]>> | null = null;
 
 function stateIdFromGoalServe(raw: any): 0 | 1 | 2 | 3 | 5 | 22 | 99 {
-  if (raw == null) return 0;
-  const s = String(raw).toLowerCase();
-  if (["not started", "ns", "scheduled", "upcoming"].includes(s)) return 1;
-  if (s.includes("1st") || s === "1h" || s === "1st half") return 2;
-  if (["ht", "half time", "halftime"].includes(s)) return 3;
-  if (s.includes("2nd") || s === "2h" || s === "2nd half" || s.includes("live")) return 22;
-  if (["finished", "ft", "final", "ended", "full time"].includes(s)) return 5;
-  return 99;
+  if (raw == null) return 1;
+  const s = String(raw).toLowerCase().trim();
+  if (!s) return 1;
+  if ([
+    "not started", "ns", "scheduled", "upcoming",
+    "pre-match", "prematch", "pregame", "pre game",
+    "fixture", "waiting", "tbd", "to be determined",
+    "to be announced", "tba", "to be confirmed", "tbc",
+    "delayed", "postponed", "suspend", "suspended",
+    "ap", "a decorrer", "nao iniciado", "não iniciado",
+    "nao começado", "não começado", "programado",
+    "antes do jogo", "prejogo", "pré-jogo",
+  ].includes(s)) return 1;
+  if (["ended", "finalizado", "terminado", "completed", "complete", "closed"].includes(s)) return 5;
+  if (s.includes("1st") || s === "1h" || s === "1st half" || s.startsWith("primeiro") || s.startsWith("1 º") || s.startsWith("1º")) return 2;
+  if (["ht", "half time", "halftime", "intervalo", "descanso"].includes(s)) return 3;
+  if (
+    s.includes("2nd") || s === "2h" || s === "2nd half" ||
+    s.includes("live") || s.includes("in play") || s.includes("inplay") ||
+    s.includes("em jogo") || s.includes("a decorrer") || s.includes("live score") ||
+    s.startsWith("segundo") || s.startsWith("2 º") || s.startsWith("2º")
+  ) return 22;
+  if (["finished", "ft", "final", "ended", "full time", "terminado", "completo", "encerrado"].includes(s)) return 5;
+  return 1;
 }
 
 function mapScoresCategory(

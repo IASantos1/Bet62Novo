@@ -40,14 +40,45 @@ const LIVE_TTL_MS = 3 * 1000;
 const ODDS_TTL_MS = 30 * 1000;
 
 function stateIdFromGoalServe(raw: any): 0 | 1 | 2 | 3 | 5 | 22 | 99 {
-  if (raw == null) return 0;
-  const s = String(raw).toLowerCase();
-  if (["not started", "ns", "scheduled", "upcoming"].includes(s)) return 1;
-  if (s.includes("1st") || s === "1h" || s === "1st half") return 2;
-  if (["ht", "half time", "halftime"].includes(s)) return 3;
-  if (s.includes("2nd") || s === "2h" || s === "2nd half" || s.includes("live")) return 22;
-  if (["finished", "ft", "final", "ended", "full time"].includes(s)) return 5;
-  return 99;
+  if (raw == null) return 1;
+  const s = String(raw).toLowerCase().trim();
+  if (!s) return 1;
+  if ([
+    "not started", "ns", "scheduled", "upcoming",
+    "pre-match", "prematch", "pregame", "pre game",
+    "fixture", "waiting", "tbd", "to be determined",
+    "to be announced", "tba", "to be confirmed", "tbc",
+    "delayed", "postponed", "suspend", "suspended",
+    "ap", "a decorrer", "nao iniciado", "não iniciado",
+    "nao começado", "não começado", "programado",
+    "antes do jogo", "prejogo", "pré-jogo",
+  ].includes(s)) return 1;
+  if (["ended", "finalizado", "terminado", "completed", "complete", "closed"].includes(s)) return 5;
+  if (s.includes("1st") || s === "1h" || s === "1st half" || s.startsWith("primeiro") || s.startsWith("1 º") || s.startsWith("1º")) return 2;
+  if (["ht", "half time", "halftime", "intervalo", "descanso"].includes(s)) return 3;
+  if (
+    s.includes("2nd") || s === "2h" || s === "2nd half" ||
+    s.includes("live") || s.includes("in play") || s.includes("inplay") ||
+    s.includes("em jogo") || s.includes("a decorrer") || s.includes("live score") ||
+    s.startsWith("segundo") || s.startsWith("2 º") || s.startsWith("2º")
+  ) return 22;
+  if (["finished", "ft", "final", "ended", "full time", "terminado", "completo", "encerrado"].includes(s)) return 5;
+  return 1;
+}
+
+export function isUpcomingFixtureByStateOrKickoff(fx: {
+  stateId?: number;
+  kickoffTimestamp?: number;
+}): boolean {
+  const sid = fx?.stateId ?? 0;
+  if (sid === 5) return false;
+  if (sid === 2 || sid === 3 || sid === 22) return false;
+  const tsSec = Number(fx?.kickoffTimestamp ?? 0);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const twoHoursAgo = nowSec - 7200;
+  if (!Number.isFinite(tsSec) || tsSec <= 0) return sid === 1 || sid === 0 || sid === 99;
+  if (tsSec >= twoHoursAgo) return true;
+  return sid === 1 || sid === 0 || sid === 99;
 }
 
 function mapScoresCategory(

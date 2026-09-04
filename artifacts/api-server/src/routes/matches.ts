@@ -109,6 +109,7 @@ import { getGoalServeCricketUpcomingRaw, getGoalServeCricketLiveRaw, attachGoalS
 import { getGoalServeRugbyUpcomingRaw, getGoalServeRugbyLiveRaw, attachGoalServeRugbyOdds } from "../services/goalserve/rugby.js";
 import { getGoalServeEsportsUpcomingRaw, getGoalServeEsportsLiveRaw, attachGoalServeEsportsOdds } from "../services/goalserve/esports.js";
 import { getGoalServeAmfootballUpcomingRaw, getGoalServeAmfootballLiveRaw, attachGoalServeAmfootballOdds } from "../services/goalserve/amfootball.js";
+import { isUpcomingFixtureByStateOrKickoff as gsIsUpcoming } from "../services/goalserve/factory.js";
 
 const router: IRouter = Router();
 
@@ -9012,7 +9013,7 @@ async function buildFootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9040,7 +9041,7 @@ async function buildTennisUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9068,7 +9069,7 @@ async function buildBasketballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> 
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9096,7 +9097,7 @@ async function buildHockeyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9124,7 +9125,7 @@ async function buildBaseballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9152,7 +9153,7 @@ async function buildVolleyballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> 
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9180,7 +9181,7 @@ async function buildMmaUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9208,7 +9209,7 @@ async function buildHandballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9236,7 +9237,7 @@ async function buildCricketUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9264,7 +9265,7 @@ async function buildRugbyUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9292,7 +9293,7 @@ async function buildEsportsUpcomingFromGoalServe(): Promise<UpcomingMatch[]> {
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
@@ -9320,7 +9321,7 @@ async function buildAmfootballUpcomingFromGoalServe(): Promise<UpcomingMatch[]> 
   for (const fx of fixtures) {
     if (seen.has(fx.matchId)) continue;
     seen.add(fx.matchId);
-    if (fx.stateId !== 1) continue;
+    if (!gsIsUpcoming(fx)) continue;
     results.push(convertRawFixtureToUpcomingMatch(fx));
   }
   return results;
