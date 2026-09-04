@@ -63,18 +63,19 @@ const GOALSERVE_ODDSSETTLE_BASE =
 // PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
 //   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
 //   - NÃO FAZ: Estatísticas detalhadas, H2H, rankings, logos, play-by-play.
-// SUSPENSO POR DEFEITO (ENABLE_PULSESCORE=false). Guardas em cada função
-// pública de services/pulsescore/*.ts garantem 0 rede enquanto desligado.
+// LIGADO POR DEFEITO (ENABLE_PULSESCORE=true) — ver comentário acima do
+// bloco ENABLE_*. Guardas em cada função pública de services/pulsescore/*.ts
+// garantem 0 rede caso alguém desligue via ENABLE_PULSESCORE=false.
 const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
 const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
 const PULSESCORE_BOOKMAKER =
   process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
 
-// SportMonks Football API v3 — SUSPENSO POR DEFEITO (ENABLE_SPORTMONKS=false).
-// Antigo fornecedor principal de futebol: fixtures, odds bet365, livescore.
+// SportMonks Football API v3 — LIGADO POR DEFEITO (ENABLE_SPORTMONKS=true).
+// Fornecedor principal de futebol: fixtures, odds bet365, livescore.
 // Guardas em cada função pública de services/sportmonks/*.ts garantem 0 rede
-// enquanto a flag estiver OFF.
+// caso alguém desligue via ENABLE_SPORTMONKS=false.
 const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
