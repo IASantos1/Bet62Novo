@@ -26,23 +26,25 @@ const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
 // ── Kill-switches (suspensão sem apagar código; rollback 1 clique) ─────────
-// Default revertido 2026-09-04: GoalServe exige GOALSERVE_API_KEY configurada
-// manualmente em Railway/Replit (nunca commitada) — sem ela, todo builder
-// GoalServe retorna [] silenciosamente (fail-close), e como o "tri-fallback"
-// em matches.ts só cai para SportMonks/PulseScore quando o respetivo
-// ENABLE_* também está true, um deploy com os 3 defaults antigos
-// (GOALSERVE=true, SPORTMONKS=false, PULSESCORE=false) e sem a key
-// configurada deixava pré-jogo inteiro vazio e Ao Vivo sem atualizar —
-// exatamente o que aconteceu em produção. SportMonks + PulseScore (já
-// verificados como a stack funcional desta sessão) voltam a ser o default;
-// GoalServe fica default-off até alguém configurar a key e re-habilitar
-// explicitamente via ENABLE_GOALSERVE=true no Railway/Replit.
+// TODOS OS TRÊS default-off a partir de 2026-09-05 — decisão explícita do
+// usuário após uma sessão inteira de debug em cima de SportMonks/bet365
+// (repreçagem lenta em várias ligas, sem solução de código possível — é
+// comportamento real da casa de apostas) e do conflito SportMonks/PulseScore
+// para futebol: "Desativa todas as duas APIs sportmonks e pulsescore vamos
+// usar outra após para testar." Efeito: TODO esporte (não só futebol) fica
+// sem pré-jogo/ao vivo até um novo provedor ser escolhido e integrado —
+// intencional, não é o mesmo bug do apagão de 2026-09-04 (aquele era
+// GoalServe ligado sem key configurada; este é os três desligados de
+// propósito). Reabilitar via ENABLE_SPORTMONKS=true / ENABLE_PULSESCORE=true
+// / ENABLE_GOALSERVE=true no Railway/Replit quando o novo provedor estiver
+// pronto, ou apagar esta seção inteira quando o novo provedor substituir
+// SportMonks/PulseScore/GoalServe de vez no código.
 const ENABLE_GOALSERVE =
   (process.env["ENABLE_GOALSERVE"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_SPORTMONKS =
-  (process.env["ENABLE_SPORTMONKS"] ?? "true").trim().toLowerCase() === "true";
+  (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
-  (process.env["ENABLE_PULSESCORE"] ?? "true").trim().toLowerCase() === "true";
+  (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
 
 // GoalServe — NOVO fornecedor multi-desporto.
 // - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
@@ -63,19 +65,19 @@ const GOALSERVE_ODDSSETTLE_BASE =
 // PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
 //   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
 //   - NÃO FAZ: Estatísticas detalhadas, H2H, rankings, logos, play-by-play.
-// LIGADO POR DEFEITO (ENABLE_PULSESCORE=true) — ver comentário acima do
+// DESLIGADO POR DEFEITO (ENABLE_PULSESCORE=false) — ver comentário acima do
 // bloco ENABLE_*. Guardas em cada função pública de services/pulsescore/*.ts
-// garantem 0 rede caso alguém desligue via ENABLE_PULSESCORE=false.
+// garantem 0 rede enquanto desligado.
 const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
 const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
 const PULSESCORE_BOOKMAKER =
   process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
 
-// SportMonks Football API v3 — LIGADO POR DEFEITO (ENABLE_SPORTMONKS=true).
-// Fornecedor principal de futebol: fixtures, odds bet365, livescore.
+// SportMonks Football API v3 — DESLIGADO POR DEFEITO (ENABLE_SPORTMONKS=false).
+// Fornecedor de futebol: fixtures, odds bet365, livescore.
 // Guardas em cada função pública de services/sportmonks/*.ts garantem 0 rede
-// caso alguém desligue via ENABLE_SPORTMONKS=false.
+// enquanto desligado.
 const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
