@@ -149,6 +149,22 @@ export type SportMonksEvent = {
 // (previously missed PENALTY entirely — audit finding, 2026-08-29: a real
 // penalty goal moved the scoreboard but never appeared in the events feed
 // shown to users, since the filter only knew about GOAL).
+//
+// The 6 below this line (YELLOWREDCARD, MISSED_PENALTY, VAR_CARD,
+// GOAL_DISALLOWED, GOAL_UNDER_REVIEW, GOAL_CONFIRMED) are NOT confirmed
+// against a real live sample the way everything above is — this codebase's
+// own account genuinely has never had a VAR incident or missed penalty
+// occur in any live match checked so far. They're taken from SportMonks'
+// own public v3 docs instead (developer_name spelled out in their events/
+// changelog pages, 2026-09-05) after the user reported VAR review/missed
+// penalty suspension "not working" and pointed out SportMonks documents
+// exactly this data. Included here on the working assumption doc value ==
+// real value (matches this codebase's other confirmed developer_names,
+// which are also plain upper-snake-case English words) — if the user's
+// SportMonks plan doesn't include VAR data (Sportmonks gates some advanced
+// features like ballCoordinates by plan tier; unconfirmed whether VAR
+// events are similarly gated), these simply never appear in fixture.events
+// and nothing here fires, same as today.
 const FOOTBALL_LIVE_DISPLAY_EVENT_TYPES = new Set([
   "GOAL",
   "PENALTY",
@@ -156,6 +172,24 @@ const FOOTBALL_LIVE_DISPLAY_EVENT_TYPES = new Set([
   "SUBSTITUTION",
   "YELLOWCARD",
   "REDCARD",
+  "YELLOWREDCARD",
+  "MISSED_PENALTY",
+  "VAR_CARD",
+  "GOAL_DISALLOWED",
+  "GOAL_UNDER_REVIEW",
+  "GOAL_CONFIRMED",
+]);
+
+// Doc-derived (see FOOTBALL_LIVE_DISPLAY_EVENT_TYPES comment above) VAR
+// event types worth SUSPENDING markets over — a review in progress
+// (GOAL_UNDER_REVIEW/VAR_CARD) or a missed penalty (a real near-miss
+// bettors could exploit a stale price on, same class of risk as a goal).
+// GOAL_DISALLOWED/GOAL_CONFIRMED are display-only (the review that already
+// happened) — not suspension triggers themselves.
+const FOOTBALL_VAR_SUSPENSION_EVENT_TYPES = new Set([
+  "GOAL_UNDER_REVIEW",
+  "VAR_CARD",
+  "MISSED_PENALTY",
 ]);
 
 export function isFootballLiveDisplayEvent(developerName: string | undefined | null): boolean {
@@ -1737,7 +1771,11 @@ export function isSportMonksFixtureFinished(fixture: SportMonksFixture): boolean
 
 /** Count of real REDCARD events for one side (confirmed real developer_name,
  * 2026-08-29) — used to detect a NEW red card tick-to-tick, straight off
- * SportMonks' own events (no second cross-referenced provider needed). */
+ * SportMonks' own events (no second cross-referenced provider needed).
+ * Also counts YELLOWREDCARD (second yellow → red) — doc-derived, not
+ * live-confirmed (see FOOTBALL_LIVE_DISPLAY_EVENT_TYPES's comment above);
+ * a second-yellow sending-off is a real red card for suspension purposes
+ * either way, so it belongs in the same count as a straight REDCARD. */
 export function countSportMonksRedCards(
   fixture: SportMonksFixture,
   side: "home" | "away",
@@ -1745,7 +1783,23 @@ export function countSportMonksRedCards(
   const participant = fixture.participants?.find((p) => p.meta?.location === side);
   if (!participant) return 0;
   return (fixture.events ?? []).filter(
-    (e) => e.type?.developer_name === "REDCARD" && e.participant_id === participant.id,
+    (e) =>
+      (e.type?.developer_name === "REDCARD" || e.type?.developer_name === "YELLOWREDCARD") &&
+      e.participant_id === participant.id,
+  ).length;
+}
+
+/** Count of doc-derived VAR-review-worthy events (GOAL_UNDER_REVIEW,
+ * VAR_CARD, MISSED_PENALTY — see FOOTBALL_LIVE_DISPLAY_EVENT_TYPES's
+ * comment above for why these aren't "confirmed real" like the rest of
+ * this file) across the whole fixture, both sides — used the same way
+ * countSportMonksRedCards is, to detect a NEW one tick-to-tick and trigger
+ * a market suspension. Not split by side: unlike a red card, which side
+ * committed a VAR-reviewed foul or missed a penalty doesn't change that
+ * betting markets need to freeze either way. */
+export function countSportMonksVarEvents(fixture: SportMonksFixture): number {
+  return (fixture.events ?? []).filter(
+    (e) => e.type?.developer_name && FOOTBALL_VAR_SUSPENSION_EVENT_TYPES.has(e.type.developer_name),
   ).length;
 }
 

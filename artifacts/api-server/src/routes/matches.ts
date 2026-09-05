@@ -39,6 +39,7 @@ import {
   isSportMonksFixtureLive,
   isSportMonksFixtureFinished,
   countSportMonksRedCards,
+  countSportMonksVarEvents,
   getSportMonksFixtureCornersCards,
   getSportMonksFixtureById,
   getSportMonksTeamUpcoming,
@@ -548,6 +549,10 @@ export type LiveMatchState = {
     yellowCardsAway?: number;
     redCardsHomeCount?: number;
     redCardsAwayCount?: number;
+    // Doc-derived VAR-review-worthy event count (see countSportMonksVarEvents'
+    // own comment) — tracked tick-to-tick to detect a NEW one and trigger a
+    // market suspension the same way redCardsHomeCount/redCardsAwayCount do.
+    varEventCount?: number;
     offsidesHome?: number;
     offsidesAway?: number;
     savesHome?: number;
@@ -10460,6 +10465,14 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
 
     const redCardsHome = countSportMonksRedCards(fx, "home");
     const redCardsAway = countSportMonksRedCards(fx, "away");
+    // Doc-derived, not live-confirmed (see countSportMonksVarEvents' own
+    // comment) — a VAR review in progress, a card issued after VAR, or a
+    // missed penalty. Same new-vs-existing-tick comparison pattern as
+    // newRedCard below, since fixture.events only ever grows during a live
+    // match (SportMonks never removes an event once emitted).
+    const varEventCount = countSportMonksVarEvents(fx);
+    const newVarEvent =
+      !!existing && varEventCount > (existing._liveExtra?.varEventCount ?? 0);
     const newGoal =
       !!existing && (score.home > existing.homeScore || score.away > existing.awayScore);
     const newRedCard =
@@ -10483,6 +10496,12 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
         FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
       );
       suspensionReason = "CARTÃO VERMELHO";
+    } else if (newVarEvent) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(
+        FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]),
+      );
+      suspensionReason = "REVISÃO VAR";
     } else if (bookmakerSuspended) {
       const now = Date.now();
       marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + 5_000]));
@@ -10553,6 +10572,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
             : {}),
           redCardsHomeCount: redCardsHome,
           redCardsAwayCount: redCardsAway,
+          varEventCount,
         },
       },
     });
