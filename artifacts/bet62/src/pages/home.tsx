@@ -9591,11 +9591,21 @@ export default function Home({
       return null;
     }
 
-    // Tennis excluded: this heuristic exists to hide football's "obvious
-    // blowout" late-game prices, but a low live tennis price for a big
-    // favorite is a legitimate, bettable market — hiding it just disables
-    // real markets.
-    if (odd < 1.15 && market === "result" && match.sport !== "tennis") {
+    // Football-only: this heuristic exists to hide football's "obvious
+    // blowout" late-game prices (90-minute clock, goal-difference score).
+    // Was previously "!== tennis" (excluding only tennis), which let it
+    // wrongly fire on every other sport too — worst confirmed case,
+    // volleyball: match.homeScore/awayScore are SETS won (0-3), a long
+    // match's elapsed minutes easily clear 70-85 real minutes, and
+    // match.odds.draw is ALWAYS <=0 (volleyball has no draw market), so a
+    // tied 2-2 near-coin-flip decisive set — nothing "obvious" about it —
+    // trivially satisfied the "late draw with extreme odds" branch below
+    // and replaced BOTH team's real prices with "Aposta Já" buttons
+    // (user-reported, CBV Duo Masters Moçambique v Holanda, 2-2 in sets,
+    // set 6 at 2-2 in points). A low live price for a big favorite is a
+    // legitimate, bettable market in every sport, not just tennis —
+    // hiding it just disables real markets.
+    if (odd < 1.15 && market === "result" && match.sport === "football") {
       return (
         <div
           className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white") : "bg-zinc-800/40 border-zinc-700/30"}`}
@@ -9617,7 +9627,7 @@ export default function Home({
     const isObviousResult =
       match.isLive &&
       market === "result" &&
-      match.sport !== "tennis" &&
+      match.sport === "football" &&
       (() => {
         if (odd <= 1.05) return true;
         const min = getDisplayMinute(match);
