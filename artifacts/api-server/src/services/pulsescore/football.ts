@@ -68,17 +68,21 @@ const FOOTBALL_BOOKMAKER = "bwin";
 
 // 2026-08-28: football's PulseScore/bwin feed (prematch, live REST, and the
 // WS overlay in footballWs.ts) was disabled while switching football to
-// SportMonks. RE-ENABLED 2026-08-30 (explicit user report/decision): bet365
-// via SportMonks turned out correct but slow to reprice several live
-// leagues (confirmed via /api/matches/debug/football-live-odds — fetch
-// itself fresh every ~2s, but bet365's own price frozen for many minutes
-// on lower-tier fixtures), unlike bwin's confirmed ~1s live cadence used
-// here before the migration ("estava a funcionar perfeitamente ontem").
-// Prematch football STAYS on SportMonks/1xbet (unaffected, not blocked by
-// this flag's callers below) — only the LIVE REST fetch is consumed again,
-// by buildFootballLiveFromSportMonks in matches.ts, as a real-time 1X2
-// overlay on top of SportMonks' own score/clock/events/corners/cards data.
-const FOOTBALL_PULSESCORE_BLOCKED = false;
+// SportMonks. Briefly RE-ENABLED 2026-08-30 to overlay bwin's faster
+// repricing on top of SportMonks/bet365's occasionally-slow one — but the
+// SAME day's "bet365 is AUTORITATIVO, bwin only fills a side bet365 has
+// NEVER quoted" merge rule in matches.ts's buildFootballLiveFromSportMonks
+// meant that overlay almost never actually fired (bet365 almost always has
+// SOME historical value for a side, so the bwin fallback condition rarely
+// triggered) — the two decisions quietly cancelled each other out, and
+// production kept showing the exact staleness the overlay was meant to
+// fix. RE-DISABLED 2026-09-05, explicit final user decision: "Futebol não
+// pode ter nada a ver com pulsescore" — football is SportMonks/bet365-
+// only now, full stop, staleness included, rather than half-heartedly
+// patching it with a fallback that wasn't working anyway. matches.ts's
+// buildFootballLiveFromSportMonks no longer calls getPulseScoreFootballLive
+// or references this flag's callers at all.
+const FOOTBALL_PULSESCORE_BLOCKED = true;
 
 // Bug report 2026-08-14: a whole league (2. Bundesliga, but "several
 // leagues" per the report) showing only a handful of its real live matches
