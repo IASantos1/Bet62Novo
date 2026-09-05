@@ -19,9 +19,7 @@ import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
 import {
-  getPulseScoreFootballLive,
   extractFootballOverride,
-  findPulseScoreFootballOverride,
   pulseScoreEventScore,
   pulseScoreEventMinute,
   pulseScoreEventClockSec,
@@ -10276,17 +10274,22 @@ async function buildBaseballLiveFromPulseScore(): Promise<LiveMatchState[]> {
  * doesn't cover).
  */
 async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
-  // pulseScoreEvents: real-time bwin 1X2 overlay (RE-ENABLED 2026-08-30 —
-  // see FOOTBALL_PULSESCORE_BLOCKED's header in pulsescore/football.ts).
-  // ONE fetch per tick, matched per-fixture below via findPulseScoreFootballOverride
-  // (an O(n) scan per fixture — safe here since this loop's fixture count
-  // is the small SportMonks-covered live set, not PulseScore's own full
-  // live list, unlike the O(n²) incident that motivated the per-event
-  // design elsewhere in this file).
-  const [fixtures, pulseScoreEvents] = await Promise.all([
-    getSportMonksFootballLive(),
-    getPulseScoreFootballLive(),
-  ]);
+  // Football is SportMonks/bet365-ONLY — explicit user decision, 2026-09-05
+  // ("Futebol não pode ter nada a ver com pulsescore"), superseding the
+  // 2026-08-30 bwin overlay (FOOTBALL_PULSESCORE_BLOCKED=false at the time).
+  // That overlay was re-enabled specifically because bet365 was found slow
+  // to reprice some live leagues, but the very same day's "bet365 is
+  // AUTORITATIVO, bwin only fills a side bet365 has NEVER quoted" merge
+  // rule (see the 1X2 priority chain below) meant bwin's fresher price was
+  // essentially never actually used in practice — bet365 almost always has
+  // SOME historical value for a side, so the fallback condition (`sm?.side
+  // == null`) almost never triggered. The two decisions quietly cancelled
+  // each other out. Rather than build staleness-detection to make the
+  // overlay actually do something, the user's call is simpler and final:
+  // football takes bet365/SportMonks's price as-is, staleness included, and
+  // never touches PulseScore at all. See FOOTBALL_PULSESCORE_BLOCKED in
+  // pulsescore/football.ts (now back to true).
+  const fixtures = await getSportMonksFootballLive();
   // Per-fixture odds (confirmed real, 2026-08-29 — see getSportMonksLiveOddsByFixture's
   // header for how this replaced the dead-end /odds/inplay general list),
   // fanned out across every fixture this tick regardless of live/NS/FT —
@@ -10544,56 +10547,31 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
       override,
       lastKnownReal,
     );
-    // Real-time 1X2 preference: BET365/SportMonks (EXCLUSIVE PER USER 2026-08-30
-    // VERBATIM rule: "SPORTMONKS NAO ESTA DISPONIVEM PARA ME A 1XBET E SIM SO A
-    // BET365 PARA PRE JOGOS E AO VIVO. NAO MISTURAR BOOKMAKERS DA SPORTMONKS
-    // DEPENDECIA SO DA BET365.") is the PRIMARY 1X2 source. bwin/PulseScore
-    // (FOOTBALL_PULSESCORE_BLOCKED=false in pulsescore/football.ts, re-enabled
-    // 2026-08-30 for slow-reprice lower-tier league overlays) is ONLY a FALLBACK
-    // — it fills sides where bet365 is momentarily absent (null/undefined during
-    // a reprice), but a real bet365 quote (sm?.side != null) ALWAYS wins.
-    //
-    // Root cause of the user's "mesmos jogos com duplicação quando atualiza as
-    // odds" bug (screenshot: Casa Pia odds 41.00 live AFTER the 0:1 goal → then
-    // the SAME match card showed 2.60/3.00/2.87 PRE-GOAL stale values): pulse-
-    // Score's own cached bwin quote (stale ~30s out of date) was being placed
-    // HIGHER than bet365's current live quote in the per-side priority chain
-    // below. Because the two providers reprice on different cadences, a stale
-    // bwin value arriving in one tick would overwrite a FRESH bet365 value that
-    // had been correctly shown the previous tick, making the same card appear
-    // with two different price sets in back-to-back polls — indistinguishable
-    // from a "duplicated match" to the user scrolling the live list. Reversing
-    // the order (bet365 first) eliminates that class of oscillations entirely,
-    // while still keeping bwin as a safety net for matches where bet365 hasn't
-    // published live odds yet.
-    //
-    // SportMonks stays authoritative for score/clock/events/corners/cards and
-    // every advanced market regardless — this only affects 1X2 side ordering.
-    const pulseOverride = findPulseScoreFootballOverride(home, away, pulseScoreEvents);
+    // Real-time 1X2: SportMonks/bet365 ONLY — explicit user decision,
+    // 2026-09-05 ("Futebol não pode ter nada a ver com pulsescore"). No
+    // PulseScore/bwin fallback of any kind for football anymore (see this
+    // function's own header comment for the full history of why the prior
+    // bwin overlay existed and was removed again).
     const baseOdds = makeOddsFromTeams(home, away);
 
     // ── Real 1X2 AO VIVO: NUNCA misturar odds reais com FAKE Poisson ──
     // User explicit 2026-08-30: "1x2 NAO duplicado com odds facks".
     // Resolve priority chain por LADO (cada lado é independente):
-    //   1. override? (SportMonks BET365 — AUTORITATIVO user rule)
-    //   2. pulseOverride? (bwin/PulseScore — FALLBACK apenas se bet365
-    //      não cotar este lado neste tick; NUNCA sobrescreve cotação real bet365)
-    //   3. existing?.odds[side] último valor REAL gravado em liveMatchState
+    //   1. override? (SportMonks BET365 — única fonte de futebol)
+    //   2. existing?.odds[side] último valor REAL gravado em liveMatchState
     //      (proteção para re-preço momentâneo durante golo — não deixar
     //       cair para 0/"--" se um lado sumir por 300ms durante atualização)
-    //   4. 0 (zero, sinal "não disponível" → frontend --).
+    //   3. 0 (zero, sinal "não disponível" → frontend --).
     // baseOdds (FAKE Poisson) NUNCA é utilizado aqui — cai no zero.
     const prevOdds = existing?.odds ?? { home: 0, draw: 0, away: 0 };
     const sm = override.odds ?? null;
-    const ps = pulseOverride?.odds ?? null;
-    const h = (sm?.home as number | undefined) ?? (ps?.home as number | undefined) ?? prevOdds.home ?? 0;
-    const d = (sm?.draw as number | undefined) ?? (ps?.draw as number | undefined) ?? prevOdds.draw ?? 0;
-    const a = (sm?.away as number | undefined) ?? (ps?.away as number | undefined) ?? prevOdds.away ?? 0;
+    const h = (sm?.home as number | undefined) ?? prevOdds.home ?? 0;
+    const d = (sm?.draw as number | undefined) ?? prevOdds.draw ?? 0;
+    const a = (sm?.away as number | undefined) ?? prevOdds.away ?? 0;
     const odds = { home: h, draw: d, away: a };
     const smHasAny = !!(sm && (sm.home != null || sm.draw != null || sm.away != null));
-    const psHasAny = !!(ps && (ps.home != null || ps.draw != null || ps.away != null));
     const prevAnyReal = prevOdds.home > 0 || prevOdds.draw > 0 || prevOdds.away > 0;
-    const hasAnyRealNow = smHasAny || psHasAny || prevAnyReal;
+    const hasAnyRealNow = smHasAny || prevAnyReal;
     const hasFullNow = odds.home > 0 && odds.draw > 0 && odds.away > 0;
     // hasRealOddsNow: true apenas se ODDS ATUAL contiver 3/3 lados válidos
     // (não aceita parcial "verdadeiro" que engane a UI).
