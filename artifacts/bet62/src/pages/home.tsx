@@ -10499,6 +10499,14 @@ export default function Home({
               )
             ) : null}
           </div>
+          {!isLiveSuspended && !isPenShootout && !match.hasRealOdds && (
+            <div className="flex items-center justify-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span className="text-[9px] font-semibold tracking-wide text-zinc-500">
+                ODDS ESTIMADAS — SEM COTAÇÃO AO VIVO
+              </span>
+            </div>
+          )}
         </div>
       ) : null;
 
