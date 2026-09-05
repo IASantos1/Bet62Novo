@@ -553,6 +553,13 @@ export type LiveMatchState = {
     // own comment) — tracked tick-to-tick to detect a NEW one and trigger a
     // market suspension the same way redCardsHomeCount/redCardsAwayCount do.
     varEventCount?: number;
+    // Persisted last-known-real football market cache — see
+    // SportMonksLiveRealMarketsCache's own comment (defined further down in
+    // this file, near applySportMonksFootballOverride) for why this exists:
+    // prevents a bet365 line that's stopped being quoted mid-match (e.g. an
+    // already-decided Over/Under) from silently reverting to a fabricated
+    // synthetic Poisson value.
+    smRealMarkets?: SportMonksLiveRealMarketsCache;
     offsidesHome?: number;
     offsidesAway?: number;
     savesHome?: number;
@@ -8103,51 +8110,172 @@ function nonNullPatch<T extends Record<string, number | null | undefined>>(
   return out;
 }
 
+/** Persisted per-match, per-sub-key "last known REAL" cache for every
+ * football market field applySportMonksFootballOverride touches — see that
+ * function's own comment for why this exists. Stored in
+ * LiveMatchState._liveExtra.smRealMarkets, read back in as `lastKnownReal`
+ * on the next tick by buildFootballLiveFromSportMonks. Not used by the
+ * prematch builder (buildFootballUpcomingFromSportMonks) — there is no
+ * tick-to-tick state to persist across before kickoff, and a missing line
+ * pre-match is a legitimate "not priced yet", not a bookmaker suspending an
+ * already-decided market. */
+type SportMonksLiveRealMarketsCache = {
+  doubleChance?: Partial<Record<string, number>>;
+  totalGoals?: Partial<Record<string, number>>;
+  corners?: Partial<Record<string, number>>;
+  cards?: Partial<Record<string, number>>;
+  bothTeamsScore?: Partial<Record<string, number>>;
+  drawNoBet?: Partial<Record<string, number>>;
+  halfTime?: Partial<Record<string, number>>;
+  secondHalf?: Partial<Record<string, number>>;
+  correctScore?: Partial<Record<string, number>>;
+  htft?: Partial<Record<string, number>>;
+  goalOddEven?: Partial<Record<string, number>>;
+  teamGoals?: Partial<Record<string, number>>;
+  btts1H?: Partial<Record<string, number>>;
+  btts2H?: Partial<Record<string, number>>;
+  highestScoringHalf?: Partial<Record<string, number>>;
+};
+
+/** Merges `fresh` (this tick's real bet365 data for one market field,
+ * possibly partial/null-bearing) into the running last-known-real cache for
+ * that field, then returns `{...base, ...merged}` — the synthetic Poisson
+ * `base` value is used ONLY for a sub-key that has NEVER been real.
+ *
+ * Root cause this fixes (user-reported, live match at 4-0 still showing
+ * Over 2.5 = 2.10): bet365 suspends/drops an Over/Under (or other) line
+ * once the match has made it moot — there is no more betting value in
+ * "Over 2.5" once the score is already 4-0, so bet365 often stops sending
+ * that specific line entirely rather than repricing it near 1.01. The OLD
+ * merge (`{...base, ...override}`) treated "override doesn't have this
+ * line THIS tick" as "fall back to the fake Poisson-model baseline" —
+ * which happily invents an odds value like 2.10 with zero awareness of the
+ * actual live score, indistinguishable from a real price to the user. Once
+ * a sub-key is confirmed real even once, it now stays real (frozen at its
+ * last known bet365 value, never a fabricated one) until bet365 sends a
+ * fresh price for it again. */
+function mergeRealOverBase<T extends Record<string, number>>(
+  base: T,
+  cache: Partial<Record<keyof T, number>> | undefined,
+  fresh: Partial<Record<keyof T, number | null | undefined>> | undefined,
+  writeCache: (next: Partial<Record<keyof T, number>>) => void,
+): T {
+  const cleanFresh = nonNullPatch(fresh);
+  if (Object.keys(cleanFresh).length === 0) {
+    if (!cache || Object.keys(cache).length === 0) return base;
+    return { ...base, ...cache } as T;
+  }
+  const merged = { ...(cache ?? {}), ...cleanFresh } as Partial<Record<keyof T, number>>;
+  writeCache(merged);
+  return { ...base, ...merged } as T;
+}
+
 /** Merges a SportMonksFootballOverride onto an already-synthetic
  * AdvancedMarkets object (mutates and returns `markets`) — shared between
  * the prematch and live SportMonks builders so the two never drift. Real
  * data only ever patches the specific sub-fields it actually priced,
  * leaving the Poisson-model baseline in place everywhere else — a
- * "real data patches synthetic" pattern. */
+ * "real data patches synthetic" pattern.
+ *
+ * `lastKnownReal`, when passed (live builder only — see that type's own
+ * comment), is mutated in place with each field's updated real-value cache
+ * so the caller can persist it for the next tick. */
 function applySportMonksFootballOverride(
   markets: AdvancedMarkets,
   baseMarkets: AdvancedMarkets,
   override: SportMonksFootballOverride,
+  lastKnownReal?: SportMonksLiveRealMarketsCache,
 ): AdvancedMarkets {
-  markets.doubleChance = { ...baseMarkets.doubleChance, ...nonNullPatch(override.doubleChance) };
-  markets.totalGoals = override.totalGoals
-    ? { ...baseMarkets.totalGoals, ...override.totalGoals }
-    : baseMarkets.totalGoals;
-  markets.corners = override.corners ? { ...baseMarkets.corners, ...override.corners } : baseMarkets.corners;
-  markets.cards = override.cards ? { ...baseMarkets.cards, ...override.cards } : baseMarkets.cards;
-  if (override.bothTeamsScore) markets.bothTeamsScore = override.bothTeamsScore;
-  if (override.drawNoBet?.home != null && override.drawNoBet?.away != null) {
-    markets.drawNoBet = { home: override.drawNoBet.home, away: override.drawNoBet.away };
-  }
-  if (override.halfTime) {
-    markets.halfTime = { ...baseMarkets.halfTime, ...nonNullPatch(override.halfTime) };
-  }
-  if (override.secondHalf) {
-    markets.secondHalf = { ...(baseMarkets.secondHalf ?? { home: 0, draw: 0, away: 0 }), ...nonNullPatch(override.secondHalf) };
-  }
-  if (override.correctScore) {
-    markets.correctScore = { ...(markets.correctScore ?? {}), ...override.correctScore };
-  }
-  if (override.htft) {
-    markets.htft = { ...(baseMarkets.htft ?? {}), ...override.htft } as AdvancedMarkets["htft"];
-  }
-  if (override.goalOddEven) markets.goalOddEven = override.goalOddEven;
-  if (override.teamGoals) {
-    markets.teamGoals = { ...(markets.teamGoals ?? {}), ...override.teamGoals } as AdvancedMarkets["teamGoals"];
-  }
-  if (override.btts1H) markets.btts1H = override.btts1H;
-  if (override.btts2H) markets.btts2H = override.btts2H;
-  if (override.highestScoringHalf) {
-    markets.highestScoringHalf = {
-      ...(baseMarkets.highestScoringHalf ?? { first: 0, second: 0, equal: 0 }),
-      ...nonNullPatch(override.highestScoringHalf),
-    };
-  }
+  markets.doubleChance = mergeRealOverBase(
+    baseMarkets.doubleChance,
+    lastKnownReal?.doubleChance,
+    override.doubleChance,
+    (v) => { if (lastKnownReal) lastKnownReal.doubleChance = v; },
+  );
+  markets.totalGoals = mergeRealOverBase(
+    baseMarkets.totalGoals,
+    lastKnownReal?.totalGoals,
+    override.totalGoals,
+    (v) => { if (lastKnownReal) lastKnownReal.totalGoals = v; },
+  );
+  markets.corners = mergeRealOverBase(
+    baseMarkets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 },
+    lastKnownReal?.corners,
+    override.corners,
+    (v) => { if (lastKnownReal) lastKnownReal.corners = v; },
+  );
+  markets.cards = mergeRealOverBase(
+    baseMarkets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 },
+    lastKnownReal?.cards,
+    override.cards,
+    (v) => { if (lastKnownReal) lastKnownReal.cards = v; },
+  );
+  markets.bothTeamsScore = mergeRealOverBase(
+    baseMarkets.bothTeamsScore,
+    lastKnownReal?.bothTeamsScore,
+    override.bothTeamsScore,
+    (v) => { if (lastKnownReal) lastKnownReal.bothTeamsScore = v; },
+  );
+  markets.drawNoBet = mergeRealOverBase(
+    baseMarkets.drawNoBet ?? { home: 0, away: 0 },
+    lastKnownReal?.drawNoBet,
+    override.drawNoBet,
+    (v) => { if (lastKnownReal) lastKnownReal.drawNoBet = v; },
+  );
+  markets.halfTime = mergeRealOverBase(
+    baseMarkets.halfTime,
+    lastKnownReal?.halfTime,
+    override.halfTime,
+    (v) => { if (lastKnownReal) lastKnownReal.halfTime = v; },
+  );
+  markets.secondHalf = mergeRealOverBase(
+    baseMarkets.secondHalf ?? { home: 0, draw: 0, away: 0 },
+    lastKnownReal?.secondHalf,
+    override.secondHalf,
+    (v) => { if (lastKnownReal) lastKnownReal.secondHalf = v; },
+  );
+  markets.correctScore = mergeRealOverBase(
+    baseMarkets.correctScore ?? {},
+    lastKnownReal?.correctScore,
+    override.correctScore,
+    (v) => { if (lastKnownReal) lastKnownReal.correctScore = v; },
+  );
+  markets.htft = mergeRealOverBase(
+    baseMarkets.htft ?? { hh: 0, hd: 0, ha: 0, dh: 0, dd: 0, da: 0, ah: 0, ad: 0, aa: 0 },
+    lastKnownReal?.htft,
+    override.htft,
+    (v) => { if (lastKnownReal) lastKnownReal.htft = v; },
+  ) as AdvancedMarkets["htft"];
+  markets.goalOddEven = mergeRealOverBase(
+    baseMarkets.goalOddEven ?? { odd: 0, even: 0 },
+    lastKnownReal?.goalOddEven,
+    override.goalOddEven,
+    (v) => { if (lastKnownReal) lastKnownReal.goalOddEven = v; },
+  );
+  markets.teamGoals = mergeRealOverBase(
+    baseMarkets.teamGoals ?? {},
+    lastKnownReal?.teamGoals,
+    override.teamGoals,
+    (v) => { if (lastKnownReal) lastKnownReal.teamGoals = v; },
+  ) as AdvancedMarkets["teamGoals"];
+  markets.btts1H = mergeRealOverBase(
+    baseMarkets.btts1H ?? { yes: 0, no: 0 },
+    lastKnownReal?.btts1H,
+    override.btts1H,
+    (v) => { if (lastKnownReal) lastKnownReal.btts1H = v; },
+  );
+  markets.btts2H = mergeRealOverBase(
+    baseMarkets.btts2H ?? { yes: 0, no: 0 },
+    lastKnownReal?.btts2H,
+    override.btts2H,
+    (v) => { if (lastKnownReal) lastKnownReal.btts2H = v; },
+  );
+  markets.highestScoringHalf = mergeRealOverBase(
+    baseMarkets.highestScoringHalf ?? { first: 0, second: 0, equal: 0 },
+    lastKnownReal?.highestScoringHalf,
+    override.highestScoringHalf,
+    (v) => { if (lastKnownReal) lastKnownReal.highestScoringHalf = v; },
+  );
   return markets;
 }
 
@@ -10403,10 +10531,18 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     // but spelling it out documents the expectation).
     const override = extractSportMonksFootballOverride({ ...fx, odds: liveFixtureOdds }, 2);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    // Shallow copy — mutated in place by applySportMonksFootballOverride,
+    // then persisted below into this tick's _liveExtra.smRealMarkets so the
+    // NEXT tick's `existing` carries it forward (see
+    // SportMonksLiveRealMarketsCache's own comment).
+    const lastKnownReal: SportMonksLiveRealMarketsCache = {
+      ...(existing?._liveExtra?.smRealMarkets ?? {}),
+    };
     const markets: AdvancedMarkets = applySportMonksFootballOverride(
       { ...baseMarkets },
       baseMarkets,
       override,
+      lastKnownReal,
     );
     // Real-time 1X2 preference: BET365/SportMonks (EXCLUSIVE PER USER 2026-08-30
     // VERBATIM rule: "SPORTMONKS NAO ESTA DISPONIVEM PARA ME A 1XBET E SIM SO A
@@ -10573,6 +10709,7 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
           redCardsHomeCount: redCardsHome,
           redCardsAwayCount: redCardsAway,
           varEventCount,
+          smRealMarkets: lastKnownReal,
         },
       },
     });
