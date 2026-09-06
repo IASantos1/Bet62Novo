@@ -12,6 +12,7 @@ import { getGoalServeHockeyUpcomingRaw, getGoalServeHockeyLiveRaw } from "../ser
 import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "../services/goalserve/baseball.js";
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
+import { rundownGetDebug, RundownApiError } from "../services/rundown/client.js";
 
 const router: IRouter = Router();
 
@@ -223,6 +224,44 @@ router.get("/debug-goalserve", async (_req, res) => {
       error: String(err?.message ?? err),
       stack: String(err?.stack ?? "").slice(0, 800),
     });
+  }
+});
+
+// Manual pass-through to TheRundown API — lets the integration being
+// explored (services/rundown/*) be checked from a plain browser URL against
+// REAL responses, without needing a terminal or a header-capable HTTP
+// client on the tester's device. Not part of any live integration yet: no
+// matches.ts code path calls this. Works even while ENABLE_RUNDOWN is off
+// (rundownGetDebug bypasses that killswitch) — only RUNDOWN_API_KEY needs
+// to be configured. `path` must start with "/", e.g.
+// /api/debug-rundown?path=/sports — every other query param is forwarded
+// to TheRundown as-is.
+router.get("/debug-rundown", async (req, res) => {
+  if (!CONFIG.RUNDOWN_API_KEY) {
+    res.status(200).json({ error: "RUNDOWN_API_KEY não configurada" });
+    return;
+  }
+  const path = String(req.query["path"] ?? "");
+  if (!path.startsWith("/")) {
+    res.status(400).json({
+      error: 'query param "path" é obrigatório e deve começar com "/", ex: /sports',
+    });
+    return;
+  }
+  const params: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.query)) {
+    if (key === "path") continue;
+    if (typeof value === "string") params[key] = value;
+  }
+  try {
+    const data = await rundownGetDebug<unknown>(path, params, 12_000);
+    res.status(200).json(data);
+  } catch (err) {
+    if (err instanceof RundownApiError) {
+      res.status(err.status).json({ error: err.message, body: err.body });
+      return;
+    }
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
 

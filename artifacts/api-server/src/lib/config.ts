@@ -45,6 +45,13 @@ const ENABLE_SPORTMONKS =
   (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
   (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
+// TheRundown — candidate replacement chosen 2026-09-06 after Statyx turned
+// out to have no game-level (moneyline/spread/total) market for soccer at
+// all, only player props. Default-off until RUNDOWN_API_KEY is configured
+// and the integration is verified against real responses — see
+// services/rundown/client.ts's own header comment.
+const ENABLE_RUNDOWN =
+  (process.env["ENABLE_RUNDOWN"] ?? "false").trim().toLowerCase() === "true";
 
 // GoalServe — NOVO fornecedor multi-desporto.
 // - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
@@ -81,6 +88,16 @@ const PULSESCORE_BOOKMAKER =
 const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
+
+// TheRundown — read-only HTTPS/JSON sports odds API (therundown.io). Only
+// the /v2/sports endpoint has been confirmed so far (2026-09-06, user-
+// pasted docs) — auth via a `key` HEADER (not Bearer, not query param).
+// Everything else (events/schedule endpoints, the actual moneyline/spread/
+// total odds shape) is still unverified; do not assume field names beyond
+// what services/rundown/client.ts documents as confirmed.
+const RUNDOWN_API_KEY = process.env["RUNDOWN_API_KEY"]?.trim() ?? "";
+const RUNDOWN_BASE_URL =
+  process.env["RUNDOWN_BASE_URL"]?.trim() || "https://therundown.io/api/v2";
 
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
@@ -133,6 +150,7 @@ export const CONFIG = {
   ENABLE_GOALSERVE,
   ENABLE_SPORTMONKS,
   ENABLE_PULSESCORE,
+  ENABLE_RUNDOWN,
   GOALSERVE_API_KEY,
   GOALSERVE_BASE_URL,
   GOALSERVE_LIVESCORE_BASE,
@@ -142,6 +160,8 @@ export const CONFIG = {
   PULSESCORE_BOOKMAKER,
   SPORTMONKS_API_KEY,
   SPORTMONKS_BASE_URL,
+  RUNDOWN_API_KEY,
+  RUNDOWN_BASE_URL,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
