@@ -182,8 +182,11 @@ export async function getStatyxFootballFixtures(params: {
 // ── Teams (full-catalog cache — no per-id or reliable per-competition
 // lookup exists, see StatyxFootballTeam's own comment) ─────────────────────
 const TEAMS_TTL_MS = 6 * 60 * 60 * 1000; // team rosters/colors change rarely
-const TEAMS_PAGE_SIZE = 500;
-const TEAMS_MAX_PAGES = 40; // 40 * 500 = 20,000 teams — generous ceiling, not a real expectation
+// Confirmed real (GET /v1/football/teams?limit=500 → 422 VALIDATION_ERROR
+// "Number must be less than or equal to 200") — 200 is the API's own max
+// page size, not a value picked for our own convenience.
+const TEAMS_PAGE_SIZE = 200;
+const TEAMS_MAX_PAGES = 100; // 100 * 200 = 20,000 teams — generous ceiling, not a real expectation
 let teamsCache: { byId: Map<number, StatyxFootballTeam>; fetchedAt: number } | null = null;
 let teamsInFlight: Promise<Map<number, StatyxFootballTeam>> | null = null;
 
@@ -236,7 +239,9 @@ let oddsBoardInFlight: Promise<StatyxOddsBoardRow[]> | null = null;
 
 async function fetchStatyxSoccerOddsBoard(): Promise<StatyxOddsBoardRow[]> {
   const rows: StatyxOddsBoardRow[] = [];
-  const limit = 500;
+  // 200 = the API's own max page size (confirmed real, see
+  // TEAMS_PAGE_SIZE's comment — same limit applies across endpoints).
+  const limit = 200;
   // Best-effort pagination — /v1/odds/sports reported 2192 rows for soccer
   // at last check (2026-09-06); capped well above that so a real-world
   // growth in row count doesn't silently truncate the board.
