@@ -12,6 +12,7 @@ import { getGoalServeHockeyUpcomingRaw, getGoalServeHockeyLiveRaw } from "../ser
 import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "../services/goalserve/baseball.js";
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
+import { bet365SoftGetDebug, Bet365SoftApiError } from "../services/bet365soft/client.js";
 
 const router: IRouter = Router();
 
@@ -223,6 +224,46 @@ router.get("/debug-goalserve", async (_req, res) => {
       error: String(err?.message ?? err),
       stack: String(err?.stack ?? "").slice(0, 800),
     });
+  }
+});
+
+// Manual pass-through to the Bet365Soft API (host w7api.com) — lets the
+// integration being explored (services/bet365soft/*) be checked from a
+// plain browser URL against REAL responses, without needing a terminal or
+// a header-capable HTTP client on the tester's device. Not part of any
+// live integration yet: no matches.ts code path calls this. Works even
+// while ENABLE_BET365SOFT is off (bet365SoftGetDebug bypasses that
+// killswitch) — only BET365SOFT_API_KEY needs to be configured. `path`
+// must start with "/" and include the directory prefix, e.g.
+// /api/debug-bet365soft?path=/api/v2/sports or
+// /api/debug-bet365soft?path=/history/v2/summary&id=123 — every other
+// query param is forwarded to Bet365Soft as-is.
+router.get("/debug-bet365soft", async (req, res) => {
+  if (!CONFIG.BET365SOFT_API_KEY) {
+    res.status(200).json({ error: "BET365SOFT_API_KEY não configurada" });
+    return;
+  }
+  const path = String(req.query["path"] ?? "");
+  if (!path.startsWith("/")) {
+    res.status(400).json({
+      error: 'query param "path" é obrigatório e deve começar com "/", ex: /api/v2/sports',
+    });
+    return;
+  }
+  const params: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.query)) {
+    if (key === "path") continue;
+    if (typeof value === "string") params[key] = value;
+  }
+  try {
+    const data = await bet365SoftGetDebug<unknown>(path, params, 12_000);
+    res.status(200).json(data);
+  } catch (err) {
+    if (err instanceof Bet365SoftApiError) {
+      res.status(err.status).json({ error: err.message, body: err.body });
+      return;
+    }
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
 

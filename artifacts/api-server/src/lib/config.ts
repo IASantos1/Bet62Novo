@@ -45,6 +45,16 @@ const ENABLE_SPORTMONKS =
   (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
   (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
+// Bet365Soft (host w7api.com) — third candidate replacement after Statyx
+// (player-props only, no game-level soccer market) and TheRundown (dropped
+// before any endpoint beyond /sports was confirmed). Unlike those two,
+// Bet365Soft's own docs show a real Settlement API with per-market bid/mid
+// codes (Match Result, Handicap, Totals, BTTS, Double Chance, etc.) — the
+// exact piece Statyx never had. Default-off until BET365SOFT_API_KEY is
+// configured and real endpoint responses are confirmed — see
+// services/bet365soft/client.ts's own header comment.
+const ENABLE_BET365SOFT =
+  (process.env["ENABLE_BET365SOFT"] ?? "false").trim().toLowerCase() === "true";
 
 // GoalServe — NOVO fornecedor multi-desporto.
 // - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
@@ -81,6 +91,17 @@ const PULSESCORE_BOOKMAKER =
 const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
+
+// Bet365Soft — read-only HTTPS/JSON sportsbook API + a real bet-settlement
+// endpoint, host w7api.com (2026-09-06, user-pasted docs). Auth via an
+// `apikey` QUERY PARAM (not header, not Bearer — different from every other
+// provider in this codebase so far). Three separate directories share the
+// same host+key: sportsbook (/api/v2), history (/history/v2), settlement
+// (/settle). Nothing beyond the documented endpoint LIST has been verified
+// against a real response yet — see services/bet365soft/client.ts.
+const BET365SOFT_API_KEY = process.env["BET365SOFT_API_KEY"]?.trim() ?? "";
+const BET365SOFT_BASE_URL =
+  process.env["BET365SOFT_BASE_URL"]?.trim() || "https://w7api.com/sports";
 
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
@@ -133,6 +154,7 @@ export const CONFIG = {
   ENABLE_GOALSERVE,
   ENABLE_SPORTMONKS,
   ENABLE_PULSESCORE,
+  ENABLE_BET365SOFT,
   GOALSERVE_API_KEY,
   GOALSERVE_BASE_URL,
   GOALSERVE_LIVESCORE_BASE,
@@ -142,6 +164,8 @@ export const CONFIG = {
   PULSESCORE_BOOKMAKER,
   SPORTMONKS_API_KEY,
   SPORTMONKS_BASE_URL,
+  BET365SOFT_API_KEY,
+  BET365SOFT_BASE_URL,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
