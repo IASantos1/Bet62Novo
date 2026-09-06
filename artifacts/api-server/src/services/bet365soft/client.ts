@@ -12,6 +12,18 @@
 //   sportsbook: {BASE}/api/v2/{endpoint}      e.g. /api/v2/sports
 //   history:    {BASE}/history/v2/{endpoint}  e.g. /history/v2/summary
 //   settlement: {BASE}/settle/{endpoint}      e.g. /settle/result (POST)
+//
+// v2 over v1: same endpoints/params/auth on both (their own migration guide
+// calls v2 "backward compatible" with v1 — only the /v1/ → /v2/ path
+// segment changes), v2 just adds pagination, player stats in event
+// payloads, structured error detail, and a smaller/faster response. No
+// reason to touch v1 for a new integration — using v2 throughout.
+//
+// One real sample IS in the docs (from the v1 page, but per the above,
+// v2 is a superset of this shape): GET /sports →
+// { "success": true, "data": [ { "id": 1, "name": "Soccer", "icon": "soccer" }, ... ] }
+// Nothing else (inplay/prematchEvent/leagues/etc. response shapes) is
+// confirmed yet.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 
