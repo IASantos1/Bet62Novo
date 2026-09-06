@@ -13,6 +13,11 @@ import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "..
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
 import { bet365SoftGetDebug, Bet365SoftApiError } from "../services/bet365soft/client.js";
+import {
+  getBet365SoftFootballLeagues,
+  getBet365SoftFootballPrematch,
+  extractResultOdds,
+} from "../services/bet365soft/football.js";
 
 const router: IRouter = Router();
 
@@ -263,6 +268,43 @@ router.get("/debug-bet365soft", async (req, res) => {
       res.status(err.status).json({ error: err.message, body: err.body });
       return;
     }
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// Exercises services/bet365soft/football.ts's actual typed fetchers +
+// extractResultOdds mapping against real data — distinct from
+// /debug-bet365soft's raw pass-through above. Requires ENABLE_BET365SOFT=
+// true (these fetchers all check the killswitch themselves, same as every
+// other provider) in addition to BET365SOFT_API_KEY. Not wired into any
+// live matches.ts code path yet.
+router.get("/debug-bet365soft-football", async (_req, res) => {
+  try {
+    const leagues = await getBet365SoftFootballLeagues();
+    // A few known-real league ids from manual exploration, spanning what we
+    // already confirmed has real events: Champions League, Copa
+    // Libertadores, Brazil Série B (Série A itself has no coverage — see
+    // football.ts's header comment).
+    const sampleLeagueIds = [118587, 142091, 57265];
+    const perLeague = await Promise.all(
+      sampleLeagueIds.map(async (lid) => {
+        const events = await getBet365SoftFootballPrematch(lid);
+        return {
+          leagueId: lid,
+          leagueName: leagues.find((l) => l.id === lid)?.name ?? null,
+          eventCount: events.length,
+          sample: events.slice(0, 3).map((ev) => ({
+            eventId: ev.eventId,
+            home: ev.home,
+            away: ev.away,
+            eventStart: ev.eventStart,
+            result: extractResultOdds(ev.odds),
+          })),
+        };
+      }),
+    );
+    res.status(200).json({ leaguesLoaded: leagues.length, perLeague });
+  } catch (err) {
     res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
