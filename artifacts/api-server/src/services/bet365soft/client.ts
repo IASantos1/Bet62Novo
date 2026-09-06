@@ -19,11 +19,18 @@
 // payloads, structured error detail, and a smaller/faster response. No
 // reason to touch v1 for a new integration — using v2 throughout.
 //
-// One real sample IS in the docs (from the v1 page, but per the above,
-// v2 is a superset of this shape): GET /sports →
-// { "success": true, "data": [ { "id": 1, "name": "Soccer", "icon": "soccer" }, ... ] }
-// Nothing else (inplay/prematchEvent/leagues/etc. response shapes) is
-// confirmed yet.
+// The docs' own sample response for /sports is WRONG — confirmed real
+// (GET /api/v2/sports, 2026-09-06): it does NOT return the documented
+// { success, data: [{id,name,icon}] } envelope at all. The real shape is a
+// flat { "<SportName>": <id> } map, e.g.:
+//   {"Football":1,"Ice Hockey":2,"Basketball":3,"Tennis":4,"Baseball":5,
+//    "Volleyball":6,"Rugby League":7,"Handball":8,"Boxing":9,
+//    "Table Tennis":10,"American Footbal":13,"Badminton":16,"Snooker":30,
+//    "Cricket":66}
+// (sic: "American Footbal" — one "l", straight from the API). Football's
+// sport id is confirmed 1. Treat EVERY other documented shape in this file
+// as unverified until checked the same way — this API's docs cannot be
+// trusted at face value.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 
