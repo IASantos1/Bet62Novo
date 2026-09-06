@@ -13,6 +13,12 @@ import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "..
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
 import { statyxGetDebug, StatyxApiError } from "../services/statyx/client.js";
+import {
+  getStatyxFootballFixtures,
+  getStatyxFootballTeamsById,
+  getStatyxSoccerOddsBoard,
+  groupPlayerPropsByGame,
+} from "../services/statyx/football.js";
 
 const router: IRouter = Router();
 
@@ -261,6 +267,37 @@ router.get("/debug-statyx", async (req, res) => {
       res.status(err.status).json({ error: err.message, code: err.code, details: err.details });
       return;
     }
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// Exercises services/statyx/football.ts's actual mapping/grouping logic
+// (American-odds→decimal conversion, per-game player-prop grouping) against
+// real Statyx data — distinct from /debug-statyx's raw pass-through above.
+// Requires ENABLE_STATYX=true (these fetchers all check the killswitch
+// themselves, same as every other provider) in addition to STATYX_API_KEY.
+// Not wired into any live matches.ts code path yet.
+router.get("/debug-statyx-football", async (_req, res) => {
+  try {
+    const [fixtures, teamsById, oddsRows] = await Promise.all([
+      getStatyxFootballFixtures({ status_group: 1, limit: 20 }),
+      getStatyxFootballTeamsById(),
+      getStatyxSoccerOddsBoard(),
+    ]);
+    const propGames = groupPlayerPropsByGame(oddsRows);
+    const fixturesWithNames = fixtures.map((fx) => ({
+      ...fx,
+      home_name: teamsById.get(fx.home_competitor_id)?.name ?? null,
+      away_name: teamsById.get(fx.away_competitor_id)?.name ?? null,
+    }));
+    res.status(200).json({
+      teamsLoaded: teamsById.size,
+      fixturesSample: fixturesWithNames,
+      oddsBoardRowCount: oddsRows.length,
+      propGamesCount: propGames.size,
+      propGamesSample: Array.from(propGames.values()).slice(0, 5),
+    });
+  } catch (err) {
     res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
