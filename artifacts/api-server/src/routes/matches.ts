@@ -89,12 +89,6 @@ import {
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
-import {
-  getStatyxSoccerOddsBoard,
-  groupPlayerPropsByGame,
-  findPlayerPropsForFixture,
-  type PlayerPropSelection,
-} from "../services/statyx/football.js";
 
 import type { ProviderRawFixture, ProviderRawOddsSelection } from "../services/goalserve/types.js";
 
@@ -651,13 +645,6 @@ export type UpcomingMatch = {
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
-  /** Football only — real Statyx player-prop selections for this fixture
-   * (goals/assists/shots-on-target/fouls, over/under a line). Statyx has no
-   * game-level (1X2/moneyline) market for soccer at all — this is additive
-   * to the odds/markets fields above, which stay Poisson-synthetic (or
-   * SportMonks-real, when present) exactly as before; absent when Statyx
-   * simply has no props posted yet for this match. */
-  footballPlayerProps?: PlayerPropSelection[];
 };
 
 type ProviderQualitySnapshot = {
@@ -8313,12 +8300,6 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
 
-  // Statyx player props (see findPlayerPropsForFixture's own comment for why
-  // this needs a fuzzy team-name + kickoff-time join rather than an id one).
-  // getStatyxSoccerOddsBoard() is a no-op returning [] while ENABLE_STATYX
-  // is false, so this costs nothing until the killswitch is flipped on.
-  const statyxPropGames = groupPlayerPropsByGame(await getStatyxSoccerOddsBoard());
-
   for (const { league, fixtures } of leagueResults) {
     const leagueName = league?.name || "";
     const countryName = league?.country?.name || "";
@@ -8381,13 +8362,6 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
         new Date(fx.starting_at_timestamp * 1000).toISOString(),
       );
 
-      const footballPlayerProps = findPlayerPropsForFixture(
-        home,
-        away,
-        fx.starting_at_timestamp * 1000,
-        statyxPropGames,
-      );
-
       results.push({
         id: `sportmonks-football-${fx.id}`,
         home,
@@ -8407,7 +8381,6 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
         isPriorityLeague: true,
         homeLogoUrl: homeP.image_path,
         awayLogoUrl: awayP.image_path,
-        ...(footballPlayerProps ? { footballPlayerProps } : {}),
       });
     }
   }

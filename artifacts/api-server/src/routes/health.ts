@@ -12,13 +12,6 @@ import { getGoalServeHockeyUpcomingRaw, getGoalServeHockeyLiveRaw } from "../ser
 import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "../services/goalserve/baseball.js";
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
-import { statyxGetDebug, StatyxApiError } from "../services/statyx/client.js";
-import {
-  getStatyxFootballFixtures,
-  getStatyxFootballTeamsById,
-  getStatyxSoccerOddsBoard,
-  groupPlayerPropsByGame,
-} from "../services/statyx/football.js";
 
 const router: IRouter = Router();
 
@@ -230,75 +223,6 @@ router.get("/debug-goalserve", async (_req, res) => {
       error: String(err?.message ?? err),
       stack: String(err?.stack ?? "").slice(0, 800),
     });
-  }
-});
-
-// Manual pass-through to the Statyx API — lets the integration being built
-// (services/statyx/*) be explored/verified from a plain browser URL against
-// REAL responses, without needing a terminal or a header-capable HTTP
-// client on the tester's device. Not part of the integration itself: no
-// live matches.ts code path calls this. Works even while ENABLE_STATYX is
-// off (statyxGetDebug bypasses that killswitch) — only STATYX_API_KEY needs
-// to be configured. `path` must start with "/", e.g.
-// /api/debug-statyx?path=/football/fixtures&limit=1 — every other query
-// param is forwarded to Statyx as-is.
-router.get("/debug-statyx", async (req, res) => {
-  if (!CONFIG.STATYX_API_KEY) {
-    res.status(200).json({ error: "STATYX_API_KEY não configurada" });
-    return;
-  }
-  const path = String(req.query["path"] ?? "");
-  if (!path.startsWith("/")) {
-    res.status(400).json({
-      error: 'query param "path" é obrigatório e deve começar com "/", ex: /football/fixtures',
-    });
-    return;
-  }
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.query)) {
-    if (key === "path") continue;
-    if (typeof value === "string") params[key] = value;
-  }
-  try {
-    const data = await statyxGetDebug<unknown>(path, params, 12_000);
-    res.status(200).json(data);
-  } catch (err) {
-    if (err instanceof StatyxApiError) {
-      res.status(err.status).json({ error: err.message, code: err.code, details: err.details });
-      return;
-    }
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
-  }
-});
-
-// Exercises services/statyx/football.ts's actual mapping/grouping logic
-// (American-odds→decimal conversion, per-game player-prop grouping) against
-// real Statyx data — distinct from /debug-statyx's raw pass-through above.
-// Requires ENABLE_STATYX=true (these fetchers all check the killswitch
-// themselves, same as every other provider) in addition to STATYX_API_KEY.
-// Not wired into any live matches.ts code path yet.
-router.get("/debug-statyx-football", async (_req, res) => {
-  try {
-    const [fixtures, teamsById, oddsRows] = await Promise.all([
-      getStatyxFootballFixtures({ status_group: 1, limit: 20 }),
-      getStatyxFootballTeamsById(),
-      getStatyxSoccerOddsBoard(),
-    ]);
-    const propGames = groupPlayerPropsByGame(oddsRows);
-    const fixturesWithNames = fixtures.map((fx) => ({
-      ...fx,
-      home_name: teamsById.get(fx.home_competitor_id)?.name ?? null,
-      away_name: teamsById.get(fx.away_competitor_id)?.name ?? null,
-    }));
-    res.status(200).json({
-      teamsLoaded: teamsById.size,
-      fixturesSample: fixturesWithNames,
-      oddsBoardRowCount: oddsRows.length,
-      propGamesCount: propGames.size,
-      propGamesSample: Array.from(propGames.values()).slice(0, 5),
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
 
