@@ -45,13 +45,6 @@ const ENABLE_SPORTMONKS =
   (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
   (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
-// Statyx — the new provider chosen 2026-09-06 to replace SportMonks/
-// PulseScore/GoalServe. Default-off until STATYX_API_KEY is configured in
-// Railway/Replit and the integration is verified — see statyx/client.ts's
-// own header comment for scope (football/MLB/NBA/WNBA only; no tennis/
-// hockey/volleyball/MMA data exists in this provider at all).
-const ENABLE_STATYX =
-  (process.env["ENABLE_STATYX"] ?? "false").trim().toLowerCase() === "true";
 
 // GoalServe — NOVO fornecedor multi-desporto.
 // - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
@@ -88,16 +81,6 @@ const PULSESCORE_BOOKMAKER =
 const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
-
-// Statyx — read-only HTTPS/JSON API (2026-09-06 docs). Reference data,
-// stats, computed hit-rates, player-prop odds and analytics for NFL, NBA,
-// MLB, Soccer and WNBA — see services/statyx/client.ts for the endpoint
-// shapes actually consumed. Auth via `x-api-key` header (NOT Bearer, unlike
-// SportMonks/GoalServe) — see goalServeKey()-style helpers in
-// statyx/client.ts. NÃO colocar a KEY real hardcodada.
-const STATYX_API_KEY = process.env["STATYX_API_KEY"]?.trim() ?? "";
-const STATYX_BASE_URL =
-  process.env["STATYX_BASE_URL"]?.trim() || "https://api.statyx.io/v1";
 
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
@@ -150,7 +133,6 @@ export const CONFIG = {
   ENABLE_GOALSERVE,
   ENABLE_SPORTMONKS,
   ENABLE_PULSESCORE,
-  ENABLE_STATYX,
   GOALSERVE_API_KEY,
   GOALSERVE_BASE_URL,
   GOALSERVE_LIVESCORE_BASE,
@@ -160,8 +142,6 @@ export const CONFIG = {
   PULSESCORE_BOOKMAKER,
   SPORTMONKS_API_KEY,
   SPORTMONKS_BASE_URL,
-  STATYX_API_KEY,
-  STATYX_BASE_URL,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

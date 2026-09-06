@@ -3815,20 +3815,6 @@ type Match = {
       draw?: number;
     };
   };
-  /** Football only — real Statyx player-prop selections for this fixture
-   * (goals/assists/shots-on-target/fouls, over/under a line). No game-level
-   * (1X2) market exists in Statyx for soccer, so this is additive to the
-   * odds/markets fields above, which stay as-is; absent when Statyx has no
-   * props posted yet for this match. */
-  footballPlayerProps?: Array<{
-    player: string;
-    playerId: number | null;
-    market: string;
-    line: number;
-    side: "over" | "under";
-    odd: number;
-    book: string;
-  }>;
 };
 
 type BetSelection = {
@@ -12845,10 +12831,6 @@ export default function Home({
                         { key: "htft", label: "HT/FT" },
                         { key: "placar", label: "Placar Exato" },
                         { key: "marcadores", label: "Marcadores" },
-                        ...(match.footballPlayerProps &&
-                        match.footballPlayerProps.length > 0
-                          ? [{ key: "props", label: "Props Reais" }]
-                          : []),
                         { key: "escanteios", label: "Escanteios" },
                         { key: "cartoes", label: "Cartões" },
                         { key: "asiatico", label: "Asiático" },
@@ -15668,121 +15650,6 @@ export default function Home({
                 (!m.anytimeGoalscorer || m.anytimeGoalscorer.length === 0) &&
                 (!m.firstGoalscorer || m.firstGoalscorer.length === 0) &&
                 (!m.lastGoalscorer || m.lastGoalscorer.length === 0) && (
-                  <div className="text-center text-zinc-600 py-6 text-sm">
-                    Mercado não disponível para esta partida.
-                  </div>
-                )}
-
-              {/* ── FUTEBOL: PROPS REAIS (Statyx) ──────────────────────────
-                  Display-only for now: Statyx never returned a confirmed
-                  live/finished status_group in any real sample gathered
-                  during this integration, so there is no verified way to
-                  settle a bet on these markets yet. Shown as real reference
-                  odds (goals/assists/shots-on-target/fouls per player,
-                  over/under a line) with no bet button until a settlement
-                  source is confirmed — user decision 2026-09-06. ── */}
-              {isFootball &&
-                !showET &&
-                !showPen &&
-                !isLateGame &&
-                modalTab === "props" &&
-                match.footballPlayerProps &&
-                match.footballPlayerProps.length > 0 &&
-                (() => {
-                  const PROP_MARKET_LABELS: Record<string, string> = {
-                    goals: "Gols do Jogador",
-                    assists: "Assistências",
-                    shots_on_target: "Chutes no Alvo",
-                    fouls_committed: "Faltas Cometidas",
-                  };
-                  const byMarket = new Map<
-                    string,
-                    NonNullable<Match["footballPlayerProps"]>
-                  >();
-                  for (const p of match.footballPlayerProps) {
-                    const list = byMarket.get(p.market) ?? [];
-                    list.push(p);
-                    byMarket.set(p.market, list);
-                  }
-                  return (
-                    <>
-                      <div className="mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-400">
-                        Odds reais de props de jogador (Statyx). Apenas
-                        informativo por enquanto — apostas nesses mercados
-                        ainda não estão disponíveis.
-                      </div>
-                      {Array.from(byMarket.entries()).map(
-                        ([marketKey, props]) => {
-                          const byPlayerLine = new Map<
-                            string,
-                            { player: string; line: number; over?: number; under?: number }
-                          >();
-                          for (const p of props) {
-                            const k = `${p.player}|${p.line}`;
-                            const entry = byPlayerLine.get(k) ?? {
-                              player: p.player,
-                              line: p.line,
-                            };
-                            if (p.side === "over") entry.over = p.odd;
-                            else entry.under = p.odd;
-                            byPlayerLine.set(k, entry);
-                          }
-                          const rows = Array.from(byPlayerLine.values()).sort(
-                            (a, b) =>
-                              a.player.localeCompare(b.player) ||
-                              a.line - b.line,
-                          );
-                          return (
-                            <MarketAccordionSection
-                              key={marketKey}
-                              title={PROP_MARKET_LABELS[marketKey] ?? marketKey}
-                              defaultOpen={false}
-                              count={rows.length}
-                            >
-                              <div className="space-y-1.5">
-                                {rows.map((r) => (
-                                  <div
-                                    key={`${marketKey}:${r.player}:${r.line}`}
-                                    className="flex items-center justify-between gap-2 rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2"
-                                  >
-                                    <span className="font-bold text-sm truncate min-w-0">
-                                      {r.player}
-                                    </span>
-                                    <div className="shrink-0 flex items-center gap-3 text-[11px] tabular-nums text-zinc-300">
-                                      {r.over != null && (
-                                        <span>
-                                          +{r.line}:{" "}
-                                          <b className="text-red-500">
-                                            {r.over.toFixed(2)}
-                                          </b>
-                                        </span>
-                                      )}
-                                      {r.under != null && (
-                                        <span>
-                                          -{r.line}:{" "}
-                                          <b className="text-red-500">
-                                            {r.under.toFixed(2)}
-                                          </b>
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </MarketAccordionSection>
-                          );
-                        },
-                      )}
-                    </>
-                  );
-                })()}
-              {isFootball &&
-                !showET &&
-                !showPen &&
-                !isLateGame &&
-                modalTab === "props" &&
-                (!match.footballPlayerProps ||
-                  match.footballPlayerProps.length === 0) && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
