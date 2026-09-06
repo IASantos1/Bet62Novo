@@ -6,6 +6,7 @@
 // comment for exactly which sample confirmed it.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
+import { teamNamesMatch } from "../pulsescore/teamMatch.js";
 import { statyxGet, statyxGetWithRetry } from "./client.js";
 
 // Confirmed real (GET /v1/football/fixtures?limit=1 and ?date=2026-09-06):
@@ -359,4 +360,35 @@ export function groupPlayerPropsByGame(rows: StatyxOddsBoardRow[]): Map<string, 
     }
   }
   return games;
+}
+
+// Statyx's soccer odds-board game_id lives in a completely different id
+// space than SportMonks's fixture id (see StatyxOddsBoardRow's own comment)
+// and home_team_id/away_team_id are frequently null on this board, so the
+// only reliable join back to a SportMonks fixture is team names (via the
+// same fuzzy teamNamesMatch already used to reconcile PulseScore/SportMonks
+// team-name spelling differences elsewhere) plus a kickoff-time window wide
+// enough to absorb rounding/timezone slack between the two providers'
+// commence_time values, never observed to exceed a few minutes in samples
+// so far but given generous headroom here.
+const PROP_GAME_KICKOFF_TOLERANCE_MS = 3 * 60 * 60 * 1000;
+
+/** Finds the Statyx player-prop game (if any) matching a fixture's teams
+ * and kickoff time. Returns undefined when Statyx simply has no props for
+ * that match yet (most fixtures — the board only covers a subset of
+ * upcoming games at any given moment), not an error. */
+export function findPlayerPropsForFixture(
+  home: string,
+  away: string,
+  kickoffMs: number,
+  propGames: Map<string, PlayerPropGame>,
+): PlayerPropSelection[] | undefined {
+  for (const game of propGames.values()) {
+    if (!teamNamesMatch(home, game.homeTeam) || !teamNamesMatch(away, game.awayTeam)) continue;
+    const gameMs = Date.parse(game.commenceTimeISO);
+    if (!Number.isFinite(gameMs)) continue;
+    if (Math.abs(gameMs - kickoffMs) > PROP_GAME_KICKOFF_TOLERANCE_MS) continue;
+    return game.props;
+  }
+  return undefined;
 }
