@@ -19,11 +19,40 @@
 // payloads, structured error detail, and a smaller/faster response. No
 // reason to touch v1 for a new integration — using v2 throughout.
 //
-// One real sample IS in the docs (from the v1 page, but per the above,
-// v2 is a superset of this shape): GET /sports →
-// { "success": true, "data": [ { "id": 1, "name": "Soccer", "icon": "soccer" }, ... ] }
-// Nothing else (inplay/prematchEvent/leagues/etc. response shapes) is
-// confirmed yet.
+// This API's docs cannot be trusted at face value — every envelope shape
+// below is confirmed against a REAL response (2026-09-06), not copied from
+// the docs, because the docs got /sports wrong (see below).
+//
+// GET /api/v2/sports → flat { "<SportName>": <id> } map, NOT the documented
+// {success,data:[{id,name,icon}]}. Football = 1.
+//   {"Football":1,"Ice Hockey":2,"Basketball":3,"Tennis":4,"Baseball":5,
+//    "Volleyball":6,"Rugby League":7,"Handball":8,"Boxing":9,
+//    "Table Tennis":10,"American Footbal":13,"Badminton":16,"Snooker":30,
+//    "Cricket":66}
+// (sic: "American Footbal" — one "l", straight from the API).
+//
+// GET /api/v2/leagues?sid=1 → { success, sportId, leagues: [{id, cid,
+// country, name, icon?}] } — 221 football leagues confirmed real, covering
+// every major European league, Libertadores/Sudamericana, etc. `icon` is
+// absent (not null) on many entries — check with `in`/`?.`, not falsy.
+// IMPORTANT GAP: Brazil's top flight ("Campeonato Brasileiro Série A") is
+// NOT in this list — only Série B/C, state cups and women's leagues are.
+// Confirmed twice (filtered by country and by name across all countries)
+// and ruled out as a search-only omission via GET /api/v2/search — this
+// provider genuinely does not carry Brazil's own top division.
+//
+// GET /api/v2/search?status=Line&text=<query> → { success, events: [{
+// eventId, appId, gameId, sportId, sportName, leagueId, leagueName,
+// country, vs, home, away, venue, homeIcon, awayIcon, homeScore, awayScore
+// (both "" pre-match), eventStart (unix seconds), odds: [{ id: "1",
+// name: "Result", markets: [{id:1,name:<home>,status:"Show",rate:<decimal>},
+// {id:2,name:"Draw",...},{id:3,name:<away>,...}] }] }] } — REAL game-level
+// 1X2 odds, already decimal (no American-odds conversion needed, unlike
+// Statyx). markets[].id is positional (1=home,2=draw,3=away), not a global
+// outcome id — matches the Settlement API's documented bid=1 "Match
+// Result" market. Only the "Result" odds group has been seen so far; other
+// bid types (handicap, totals, BTTS, etc. per the Settlement docs) are
+// unconfirmed for this endpoint.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 
