@@ -96,8 +96,12 @@ export class StatyxApiError extends Error {
   }
 }
 
-async function statyxFetch<T>(url: string, timeoutMs: number): Promise<T> {
-  if (!CONFIG.ENABLE_STATYX) {
+async function statyxFetch<T>(
+  url: string,
+  timeoutMs: number,
+  opts?: { skipKillswitch?: boolean },
+): Promise<T> {
+  if (!CONFIG.ENABLE_STATYX && !opts?.skipKillswitch) {
     throw new Error("[statyx] killswitch ENABLE_STATYX=false — no network");
   }
   const resp = await fetch(url, {
@@ -134,6 +138,19 @@ export async function statyxGet<T>(
   timeoutMs = 8000,
 ): Promise<T> {
   return statyxFetch<T>(statyxUrl(path, params), timeoutMs);
+}
+
+// Bypasses the ENABLE_STATYX killswitch — used ONLY by the manual
+// /api/debug-statyx route (routes/health.ts) so the integration can be
+// explored/verified against real responses while the feature itself is
+// still off in production. Still requires STATYX_API_KEY to be set; never
+// wired into any live matches.ts code path.
+export async function statyxGetDebug<T>(
+  path: string,
+  params?: Record<string, string | number | undefined | null>,
+  timeoutMs = 8000,
+): Promise<T> {
+  return statyxFetch<T>(statyxUrl(path, params), timeoutMs, { skipKillswitch: true });
 }
 
 export async function statyxGetWithRetry<T>(
