@@ -89,6 +89,11 @@ import {
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
+import {
+  getPropLineFootballOddsAllLeagues,
+  extractPropLineResultOdds,
+  PROPLINE_FOOTBALL_LEAGUE_TITLES,
+} from "../services/propline/football.js";
 
 import type { ProviderRawFixture, ProviderRawOddsSelection } from "../services/goalserve/types.js";
 
@@ -8390,6 +8395,73 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
 }
 
 /**
+ * Football prematch from PropLine (api.prop-line.com), built from a curated
+ * soccer sport_key allowlist (PROPLINE_FOOTBALL_SPORT_KEYS). Confirmed real
+ * 2026-09-07: soccer_brasileirao alone returned 21 upcoming Série A
+ * fixtures, every one with a real 1X2 (h2h) market from 1-9 real
+ * bookmakers. Only pré-jogo events are used here (ev.live === false) —
+ * PropLine's own docs say soccer never gets a live score/clock update
+ * mid-match (only MLB/WNBA/NFL/NCAAF/NBA/NHL do), so a live event from this
+ * source has real odds but nothing to show a live match card with.
+ * Real 1X2 odds only — same "never mix real with fake Poisson" rule as
+ * every other provider here: hasRealOdds is true only when all 3 sides of
+ * the Result market are present; otherwise falls back to synthetic odds
+ * with hasRealOdds:false.
+ */
+async function buildFootballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const perLeague = await getPropLineFootballOddsAllLeagues();
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+
+  for (const { sportKey, events } of perLeague) {
+    const leagueTitle = PROPLINE_FOOTBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const isWomens = isWomensLeague(leagueTitle);
+
+    for (const ev of events) {
+      if (ev.live) continue;
+      const home = stripGenderTeamSuffix(ev.home_team);
+      const away = stripGenderTeamSuffix(ev.away_team);
+      if (!home || !away) continue;
+
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const resultOdds = extractPropLineResultOdds(ev.bookmakers, ev.home_team, ev.away_team);
+      const baseOdds = makeOddsFromTeams(home, away);
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+      const odds = resultOdds ?? baseOdds;
+      const hasRealOdds = !!resultOdds;
+
+      const { date, time } = pulseScoreEventDateTime(ev.commence_time);
+
+      results.push({
+        id: `propline-football-${ev.id}`,
+        home,
+        away,
+        league: leagueTitle,
+        country: sportKey === "soccer_brasileirao" ? "Brasil" : "Internacional",
+        time,
+        date,
+        sport: "football",
+        hasRealOdds,
+        odds,
+        markets: baseMarkets,
+        isWomens,
+        isPriorityLeague: true,
+        // PropLine doesn't return a crest/logo field at all — falls through
+        // to the generic badge placeholder, same as Bet365Soft's bare icon
+        // filenames did.
+      });
+    }
+  }
+
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+/**
  * Tennis prematch, sourced entirely from PulseScore (getPulseScoreTennisUpcoming).
  * Confirmed against a real GET /api/v3/bet365/tennis/leagues sample (2026-08-07) —
  * same envelope as football's /leagues, league format "Tour||League" (e.g.
@@ -9854,6 +9926,10 @@ async function rebuildUpcomingCache(): Promise<void> {
       if (CONFIG.ENABLE_SPORTMONKS) {
         const sm = await buildFootballUpcomingFromSportMonks();
         candidates.push({ provider: "sportmonks", matches: sm });
+      }
+      if (CONFIG.ENABLE_PROPLINE) {
+        const pl = await buildFootballUpcomingFromPropLine();
+        candidates.push({ provider: "propline", matches: pl });
       }
       football = chooseUpcomingProvider("football", candidates);
       _lastGoodFootballUpcoming = football;
@@ -12254,6 +12330,9 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     }
     if (CONFIG.ENABLE_SPORTMONKS && football.length === 0) {
       football = await buildFootballUpcomingFromSportMonks();
+    }
+    if (CONFIG.ENABLE_PROPLINE && football.length === 0) {
+      football = await buildFootballUpcomingFromPropLine();
     }
   } catch (err) {
     logger.error(
