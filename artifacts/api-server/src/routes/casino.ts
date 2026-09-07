@@ -280,7 +280,19 @@ router.get("/banners", async (req: Request, res: Response) => {
   const allGameIds = [
     ...new Set(banners.flatMap((b) => (Array.isArray(b.gameIds) ? (b.gameIds as number[]) : []))),
   ];
-  const games = allGameIds.length
+  type BannerGameRow = {
+    pk: number;
+    id: string;
+    name: string;
+    provider: string;
+    vendorCode: number | null;
+    category: string;
+    img: string | null;
+    source: string;
+  };
+  // The ternary's `[]` empty-array branch collapses the select's row type to
+  // `{}` — annotate explicitly rather than rely on inference here.
+  const games: BannerGameRow[] = allGameIds.length
     ? await db
         .select({
           pk: casinoGamesTable.id,
@@ -297,7 +309,7 @@ router.get("/banners", async (req: Request, res: Response) => {
         .from(casinoGamesTable)
         .where(and(inArray(casinoGamesTable.id, allGameIds), eq(casinoGamesTable.isActive, true)))
     : [];
-  const gamesByPk = new Map(games.map((g) => [g.pk, g]));
+  const gamesByPk = new Map(games.map((g): [number, typeof g] => [g.pk, g]));
 
   const result = banners
     .map((b) => {

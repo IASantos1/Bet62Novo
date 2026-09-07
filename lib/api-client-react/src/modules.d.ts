@@ -33,28 +33,6 @@ declare module "react-dom" {
   export default function(...args: any[]): any;
   export const createPortal: any; export const flushSync: any; export const version: any;
 }
-declare module "@tanstack/react-query" {
-  export default function(...args: any[]): any;
-  export class QueryClient { constructor(opts?: any); setQueryData: any; getQueryData: any; invalidateQueries: any; resetQueries: any; refetchQueries: any; fetchQuery: any; prefetchQuery: any; }
-  export const QueryClientProvider: any; export const HydrationBoundary: any;
-  export const useQueryClient: any; export const useQuery: any;
-  export const useMutation: any; export const useMutationState: any;
-  export const useInfiniteQuery: any; export const useSuspenseQuery: any;
-  export const keepPreviousData: any; export const skipToken: any;
-  export const dehydrate: any; export const hydrate: any;
-  export const MutationCache: any; export const QueryCache: any;
-  export const onlineManager: any; export const hashKey: any;
-  export type UseQueryResult<T> = any; export type UseMutationResult<TData, TError, TVariables> = any;
-  export type QueryKey = any; export type QueryClientConfig = any;
-  export type UseQueryOptions = any; export type UseMutationOptions = any;
-}
-declare module "@tanstack/query-core" {
-  export default function(...args: any[]): any;
-  export class QueryClient { constructor(opts?: any); }
-  export const MutationObserver: any; export const QueryObserver: any;
-  export const QueryCache: any; export const MutationCache: any;
-  export const hashKey: any;
-}
 declare module "zod" {
   export default function(...args: any[]): any;
   export const z: any; export const ZodError: any; export type ZodSchema = any;

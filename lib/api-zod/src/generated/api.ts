@@ -5,12 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import * as zod from "zod";
+import { z } from "zod";
 
 /**
  * Returns server health status
  * @summary Health check
  */
-export const HealthCheckResponse = zod.object({
-  status: zod.string(),
+export const HealthCheckResponse = z.object({
+  status: z.string(),
 });

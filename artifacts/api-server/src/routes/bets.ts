@@ -1612,7 +1612,7 @@ function cashoutCalcForBet(args: {
       anyLive = true;
       const suspended =
         (liveSt.marketSuspension != null &&
-          Object.values(liveSt.marketSuspension).some((ts) => ts > now)) ||
+          Object.values(liveSt.marketSuspension).some((ts: any) => ts > now)) ||
         !!liveSt._suspensionReason;
       if (suspended && !suspendedReason)
         suspendedReason = liveSt._suspensionReason ?? "LANCE CRÍTICO";
