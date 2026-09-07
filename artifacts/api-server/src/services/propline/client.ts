@@ -78,14 +78,19 @@ async function propLineFetch<T>(
   path: string,
   params: Record<string, string | number | undefined | null> | undefined,
   timeoutMs: number,
-  opts?: { skipKillswitch?: boolean },
+  opts?: { skipKillswitch?: boolean; method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown },
 ): Promise<T> {
   if (!CONFIG.ENABLE_PROPLINE && !opts?.skipKillswitch) {
     throw new Error("[propline] killswitch ENABLE_PROPLINE=false — no network");
   }
   const url = propLineUrl(path, params);
   const resp = await fetch(url, {
-    headers: { "X-API-Key": propLineKey() },
+    method: opts?.method ?? "GET",
+    headers: {
+      "X-API-Key": propLineKey(),
+      ...(opts?.body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: opts?.body ? JSON.stringify(opts.body) : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   });
 
@@ -126,6 +131,14 @@ export async function propLineGet<T>(
   timeoutMs = 10_000,
 ): Promise<T> {
   return propLineFetch<T>(path, params, timeoutMs);
+}
+
+export async function propLinePost<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = 10_000,
+): Promise<T> {
+  return propLineFetch<T>(path, undefined, timeoutMs, { method: "POST", body });
 }
 
 // Bypasses ENABLE_PROPLINE — used only by a manual debug route so the
