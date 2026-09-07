@@ -91,6 +91,8 @@ import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 import {
   getPropLineFootballOddsAllLeagues,
+  getPropLineFootballOdds,
+  getPropLineFootballLiveAllLeagues,
   extractPropLineResultOdds,
   PROPLINE_FOOTBALL_LEAGUE_TITLES,
 } from "../services/propline/football.js";
@@ -8461,6 +8463,123 @@ async function buildFootballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+const PROPLINE_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/**
+ * Football live from PropLine — cross-references GET .../scores
+ * (status==="in_progress", real home_score/away_score) with the already-
+ * cached GET .../odds (real 1X2 for ev.live===true events) by event id.
+ *
+ * IMPORTANT CAVEAT (2026-09-07): PropLine's own docs say near-real-time
+ * (~90s) score/stat updates during play only apply to MLB/WNBA/NFL/NCAAF/
+ * NBA/NHL — every other sport, soccer included, is documented to update
+ * "quando o jogo termina" (only once the game ends). No real in-progress
+ * soccer sample has been seen to confirm or refute this either way (every
+ * real /scores check so far landed on a moment with no live soccer match).
+ * Confirmed real for soccer: the schema itself (status/home_score/
+ * away_score/period all present) and that FINISHED soccer games do carry a
+ * real final score. Given that uncertainty, this deliberately does NOT
+ * parse `period` into a minute (unlike Bet365Soft's confirmed "1st half"/
+ * "2nd half"/"Half-time" vocabulary) — it's shown to the user as-is. If it
+ * turns out /scores never actually updates mid-match for soccer, matches
+ * built here will just look frozen until they disappear/finalize — worth
+ * re-checking against a real live soccer match once one is happening.
+ */
+async function buildFootballLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const perLeague = await getPropLineFootballLiveAllLeagues();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const { sportKey, events } of perLeague) {
+    if (events.length === 0) continue;
+    const leagueTitle = PROPLINE_FOOTBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const oddsEvents = await getPropLineFootballOdds(sportKey);
+
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      if (sc.home_score == null || sc.away_score == null) continue;
+
+      const id = `propline-football-${sc.id}`;
+      currentIds.add(id);
+      const existing = liveMatchState.get(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractPropLineResultOdds(oddsEv.bookmakers, home, away) : null;
+      const baseOdds = makeOddsFromTeams(home, away);
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+      let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+        ? { ...existing.marketSuspension }
+        : undefined;
+      if (marketSuspension) {
+        const active = Object.fromEntries(
+          Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+        );
+        marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+      }
+      let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+      const goalScored =
+        !!existing &&
+        (sc.home_score !== existing.homeScore || sc.away_score !== existing.awayScore);
+      if (goalScored) {
+        const now = Date.now();
+        marketSuspension = {
+          result: now + 8_000,
+          handicap: now + 8_000,
+          totalGoals: now + 8_000,
+          doubleChance: now + 8_000,
+          goalOddEven: now + 8_000,
+        };
+        suspensionReason = "GOL!";
+      }
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: leagueTitle,
+        country: sportKey === "soccer_brasileirao" ? "Brasil" : "Internacional",
+        sport: "football",
+        homeScore: sc.home_score,
+        awayScore: sc.away_score,
+        minute: 0,
+        status: sc.period || "Ao vivo",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? baseOdds,
+        markets: baseMarkets,
+        events: [],
+        _lastSeenAt: Date.now(),
+        marketSuspension,
+        _suspensionReason: suspensionReason,
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_FOOTBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] football finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 /**
  * Tennis prematch, sourced entirely from PulseScore (getPulseScoreTennisUpcoming).
  * Confirmed against a real GET /api/v3/bet365/tennis/leagues sample (2026-08-07) —
@@ -11174,6 +11293,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     if (CONFIG.ENABLE_SPORTMONKS) {
       const sm = await buildFootballLiveFromSportMonks();
       candidates.push({ provider: "sportmonks", matches: sm });
+    }
+    if (CONFIG.ENABLE_PROPLINE) {
+      const pl = await buildFootballLiveFromPropLine();
+      candidates.push({ provider: "propline", matches: pl });
     }
     footballLiveRaw = chooseLiveProvider("football", candidates);
   } catch (err) {
