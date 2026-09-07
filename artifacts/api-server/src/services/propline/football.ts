@@ -149,6 +149,79 @@ export async function getPropLineFootballOdds(sportKey: string): Promise<PropLin
   return promise;
 }
 
+// GET /v1/sports/{sportKey}/scores?days_from=N — free tier, no markets
+// involved. Confirmed real shape (2026-09-07, tested against baseball_mlb
+// AND soccer_epl): {id, sport_key, home_team, away_team, commence_time,
+// live, status: "upcoming"|"in_progress"|"final", home_score, away_score,
+// period}. For MLB, a real in-progress sample showed home_score/away_score
+// populated live and period as a human string ("Bot 3rd") — confirmed
+// updating in real time. No in-progress soccer sample has been seen yet
+// (nothing was live at test time) — the schema is identical and finished
+// soccer games do carry a real final score, but whether `period` (or the
+// score itself) actually updates mid-match for soccer specifically is
+// UNCONFIRMED; PropLine's own docs hedge this ("outros esportes atualizam
+// as estatísticas quando o jogo termina"). Treated defensively below: the
+// raw `period` string is shown as-is, never parsed into a minute.
+export type PropLineScoreEvent = {
+  id: string;
+  sport_key: string;
+  home_team: string;
+  away_team: string;
+  commence_time: string;
+  live: boolean;
+  status: "upcoming" | "in_progress" | "final" | string;
+  home_score: number | null;
+  away_score: number | null;
+  period: string | null;
+};
+
+const SCORES_TTL_MS = 30 * 1000;
+const scoresCache = new Map<string, { events: PropLineScoreEvent[]; fetchedAt: number }>();
+const scoresInFlight = new Map<string, Promise<PropLineScoreEvent[]>>();
+
+export async function getPropLineFootballScores(sportKey: string): Promise<PropLineScoreEvent[]> {
+  if (!CONFIG.ENABLE_PROPLINE) return [];
+  if (!CONFIG.PROPLINE_API_KEY) return [];
+  const now = Date.now();
+  const cached = scoresCache.get(sportKey);
+  if (cached && now - cached.fetchedAt < SCORES_TTL_MS) return cached.events;
+  const inFlight = scoresInFlight.get(sportKey);
+  if (inFlight) return inFlight;
+  const promise = propLineGet<PropLineScoreEvent[]>(`/sports/${sportKey}/scores`, {
+    days_from: 1,
+  })
+    .then((events) => {
+      scoresCache.set(sportKey, { events: events ?? [], fetchedAt: Date.now() });
+      return events ?? [];
+    })
+    .catch((err) => {
+      logger.warn({ err, sportKey }, "[propline] football scores fetch failed");
+      return scoresCache.get(sportKey)?.events ?? [];
+    })
+    .finally(() => {
+      scoresInFlight.delete(sportKey);
+    });
+  scoresInFlight.set(sportKey, promise);
+  return promise;
+}
+
+export type PropLineFootballLeagueScores = { sportKey: string; events: PropLineScoreEvent[] };
+
+export async function getPropLineFootballLiveAllLeagues(): Promise<PropLineFootballLeagueScores[]> {
+  if (!CONFIG.ENABLE_PROPLINE) return [];
+  if (!CONFIG.PROPLINE_API_KEY) return [];
+  const perLeague = await Promise.all(
+    PROPLINE_FOOTBALL_SPORT_KEYS.map(async (sportKey) => ({
+      sportKey,
+      events: await getPropLineFootballScores(sportKey),
+    })),
+  );
+  return perLeague.map(({ sportKey, events }) => ({
+    sportKey,
+    events: events.filter((e) => e.status === "in_progress"),
+  }));
+}
+
 export type PropLineFootballLeagueOdds = { sportKey: string; events: PropLineEvent[] };
 
 /** Fetches every curated league in parallel. Each returned event still
