@@ -13,6 +13,7 @@ import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "..
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
 import { propLineGetDebug, PropLineApiError, propLineQuota } from "../services/propline/client.js";
+import { propLineWebSocketStatus } from "../services/propline/websocket.js";
 
 const router: IRouter = Router();
 
@@ -263,6 +264,13 @@ router.get("/debug-propline", async (req, res) => {
     }
     res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
+});
+
+// Quick visibility into the PropLine websocket connection (services/propline/
+// websocket.ts) without needing to grep server logs — public read-only
+// status, no key required to view (the key itself is never exposed here).
+router.get("/debug-propline-ws", (_req, res) => {
+  res.status(200).json(propLineWebSocketStatus());
 });
 
 export default router;

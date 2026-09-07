@@ -73,6 +73,17 @@ const ODDS_TTL_MS = 90 * 1000;
 const oddsCache = new Map<string, { events: PropLineEvent[]; fetchedAt: number }>();
 const oddsInFlight = new Map<string, Promise<PropLineEvent[]>>();
 
+/** Drops the cached /odds entry for a sportKey (every `markets` variant),
+ * so the NEXT call re-fetches instead of serving a stale value for up to
+ * ODDS_TTL_MS. Used by websocket.ts on a real line_movement push so a push
+ * notification actually shortens the wait instead of just sitting there
+ * until the poll cache happens to expire on its own. */
+export function invalidatePropLineOddsCache(sportKey: string): void {
+  for (const key of oddsCache.keys()) {
+    if (key.startsWith(`${sportKey}:`)) oddsCache.delete(key);
+  }
+}
+
 /** One call per sportKey returns every event for it — upcoming AND live
  * together (see `live` per event). 90s cache: cheap per sport/league, but
  * the account's real daily quota is unconfirmed (free tier) — see
