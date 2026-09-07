@@ -1,6 +1,6 @@
 import { pgTable, text, serial, timestamp, integer, jsonb, decimal } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
+import type { output } from "zod/v4/core";
 import { usersTable } from "./users.js";
 
 export const betsTable = pgTable("bets", {
@@ -35,5 +35,5 @@ export const insertBetSchema = createInsertSchema(betsTable).omit({
   createdAt: true,
 });
 
-export type InsertBet = z.infer<typeof insertBetSchema>;
+export type InsertBet = output<typeof insertBetSchema>;
 export type Bet = typeof betsTable.$inferSelect;

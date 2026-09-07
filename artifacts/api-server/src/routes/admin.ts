@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Response, type Request } from "express";
-import jwt from "jsonwebtoken";
+import * as jwt from "jsonwebtoken";
 import { db } from "@workspace/db";
 import {
   kycDocumentsTable,
@@ -444,16 +444,23 @@ router.get(
         .from(usersTable)
         .orderBy(desc(usersTable.createdAt));
 
-      const betCounts = await db
+      // Drizzle's type inference collapses to `unknown` for this particular
+      // combination of a plain column + two aggregates in the same select —
+      // the runtime shape is exactly this, so annotate it explicitly.
+      const betCounts = (await db
         .select({
           userId: betsTable.userId,
           count: count(),
           totalStaked: sum(betsTable.stake),
         })
         .from(betsTable)
-        .groupBy(betsTable.userId);
+        .groupBy(betsTable.userId)) as Array<{
+        userId: number;
+        count: number;
+        totalStaked: string | null;
+      }>;
 
-      const betMap = new Map(betCounts.map((b) => [b.userId, b]));
+      const betMap = new Map(betCounts.map((b): [number, typeof b] => [b.userId, b]));
 
       const result = users.map((u) => ({
         ...u,

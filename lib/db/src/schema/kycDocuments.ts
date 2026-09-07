@@ -1,4 +1,9 @@
-import { pgTable, text, serial, timestamp, integer, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
+// customType is imported from its own subpath, not the "drizzle-orm/pg-core"
+// barrel — under this project's moduleResolution:"bundler" setting, TS fails
+// to resolve `customType` through that barrel's long export* chain even
+// though it resolves fine under node10/nodenext (a bundler-resolution quirk).
+import { customType } from "drizzle-orm/pg-core/columns/custom";
 import { usersTable } from "./users.js";
 
 const bytea = customType<{ data: Buffer | null; driverData: Buffer | null }>({

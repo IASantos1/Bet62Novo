@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
+import type { output } from "zod/v4/core";
 
 export const matchResultsTable = pgTable("match_results", {
   matchId: text("match_id").primaryKey(),
@@ -22,5 +22,5 @@ export const matchResultsTable = pgTable("match_results", {
 });
 
 export const insertMatchResultSchema = createInsertSchema(matchResultsTable).omit({ createdAt: true, updatedAt: true });
-export type InsertMatchResult = z.infer<typeof insertMatchResultSchema>;
+export type InsertMatchResult = output<typeof insertMatchResultSchema>;
 export type MatchResult = typeof matchResultsTable.$inferSelect;
