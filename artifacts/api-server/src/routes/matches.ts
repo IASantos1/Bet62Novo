@@ -91,6 +91,7 @@ import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
 import {
   getBet365SoftFootballUpcomingAllLeagues,
+  getBet365SoftFootballInplay,
   extractResultOdds as extractBet365SoftResultOdds,
   type Bet365SoftEvent,
 } from "../services/bet365soft/football.js";
@@ -8459,6 +8460,156 @@ async function buildFootballUpcomingFromBet365Soft(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+const BET365SOFT_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+function mapBet365SoftLivePeriod(
+  live: string,
+): { status: "LIVE" | "HT"; clockRunning: boolean; phase: "1H" | "2H" | "HT" } {
+  const l = (live || "").toLowerCase();
+  if (l.includes("half-time") || l.includes("halftime") || l === "ht") {
+    return { status: "HT", clockRunning: false, phase: "HT" };
+  }
+  if (l.includes("1st")) return { status: "LIVE", clockRunning: true, phase: "1H" };
+  if (l.includes("2nd")) return { status: "LIVE", clockRunning: true, phase: "2H" };
+  // Unrecognized value (extra time? never observed in a real sample) — safe
+  // default: still LIVE with the clock running, just no specific half badge.
+  return { status: "LIVE", clockRunning: true, phase: "2H" };
+}
+
+/**
+ * Football live from Bet365Soft (host w7api.com) — GET /api/v2/inplay,
+ * confirmed real 2026-09-07. A SINGLE global call covers every league at
+ * once (services/bet365soft/football.ts's getBet365SoftFootballInplay owns
+ * the polling cadence/rate-limit budget), unlike /prematch's per-league
+ * calls.
+ *
+ * Same id scheme as buildFootballUpcomingFromBet365Soft
+ * (`bet365soft-football-${eventId}`) so a match keeps the same id across
+ * its pré-jogo → ao vivo transition — required for existing bets on it to
+ * keep resolving to the same match.
+ *
+ * No explicit "finished" signal has ever been observed on this feed (every
+ * real sample seen so far shows current.live as "1st half"/"2nd half"/
+ * "Half-time" only) — unlike SportMonks/PulseScore football, which get an
+ * explicit FT signal within the SAME tick a match ends. So this follows the
+ * disappearance-based finalize pattern every other disappearance-only sport
+ * in this file already uses (tennis/basketball/volleyball/hockey/baseball):
+ * once an id drops out of the inplay list for
+ * BET365SOFT_FOOTBALL_DISAPPEAR_GRACE_MS, the last known live score is
+ * handed to finalizeStaleLiveMatch(), which persists it as the final result
+ * and enqueues settlement — the same mechanism every other live-sourced
+ * sport in this file already relies on, so no separate "get the final
+ * score" endpoint from Bet365Soft turned out to be necessary for 1X2
+ * settlement.
+ *
+ * Real data: 1X2 (`odds`/hasRealOdds) only — every other market
+ * (`markets`) is still the synthetic Poisson baseline, same as
+ * buildFootballUpcomingFromBet365Soft (Bet365Soft's own sub-markets are
+ * only available per-match via a separate detail call, not in this bulk
+ * list — a rate-limit/architecture tradeoff still to be decided).
+ */
+async function buildFootballLiveFromBet365Soft(): Promise<LiveMatchState[]> {
+  const events = await getBet365SoftFootballInplay();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+
+    const homeScore = Number(ev.homeScore);
+    const awayScore = Number(ev.awayScore);
+    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
+
+    const id = `bet365soft-football-${ev.eventId}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const { status, clockRunning, phase } = mapBet365SoftLivePeriod(ev.current?.live ?? "");
+    const rawMinute = Number(ev.current?.minute);
+    const minute = existing
+      ? Math.max(Number.isFinite(rawMinute) ? rawMinute : 0, existing.minute)
+      : Number.isFinite(rawMinute)
+        ? rawMinute
+        : 0;
+
+    const resultOdds = extractBet365SoftResultOdds(ev.odds);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+      ? { ...existing.marketSuspension }
+      : undefined;
+    if (marketSuspension) {
+      const active = Object.fromEntries(
+        Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+      );
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+    const goalScored =
+      !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+    if (goalScored) {
+      const now = Date.now();
+      marketSuspension = {
+        result: now + 8_000,
+        handicap: now + 8_000,
+        totalGoals: now + 8_000,
+        doubleChance: now + 8_000,
+        goalOddEven: now + 8_000,
+      };
+      suspensionReason = "GOL!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: normalizeBrazilLeagueDisplayName(
+        ev.leagueName,
+        ev.country.toLowerCase() === "brazil" ? "brazil" : null,
+      ),
+      country: ev.country || "Internacional",
+      sport: "football",
+      homeScore,
+      awayScore,
+      minute,
+      status,
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? baseOdds,
+      markets: baseMarkets,
+      events: [],
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+      _liveExtra: { phase, clockRunning },
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("bet365soft-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > BET365SOFT_FOOTBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[bet365soft] football finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 /**
  * Tennis prematch, sourced entirely from PulseScore (getPulseScoreTennisUpcoming).
  * Confirmed against a real GET /api/v3/bet365/tennis/leagues sample (2026-08-07) —
@@ -11172,6 +11323,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     if (CONFIG.ENABLE_SPORTMONKS) {
       const sm = await buildFootballLiveFromSportMonks();
       candidates.push({ provider: "sportmonks", matches: sm });
+    }
+    if (CONFIG.ENABLE_BET365SOFT) {
+      const b365 = await buildFootballLiveFromBet365Soft();
+      candidates.push({ provider: "bet365soft", matches: b365 });
     }
     footballLiveRaw = chooseLiveProvider("football", candidates);
   } catch (err) {
