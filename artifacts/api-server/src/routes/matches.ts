@@ -89,6 +89,11 @@ import {
 import { pulseScoreHockey, pulseScoreBaseball } from "../services/pulsescore/genericSportLive.js";
 import { teamNamesMatch } from "../services/pulsescore/teamMatch.js";
 import type { PulseScoreEvent } from "../services/pulsescore/client.js";
+import {
+  getBet365SoftFootballUpcomingAllLeagues,
+  extractResultOdds as extractBet365SoftResultOdds,
+  type Bet365SoftEvent,
+} from "../services/bet365soft/football.js";
 
 import type { ProviderRawFixture, ProviderRawOddsSelection } from "../services/goalserve/types.js";
 
@@ -8390,6 +8395,71 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
 }
 
 /**
+ * Football prematch from Bet365Soft (host w7api.com), built from a curated
+ * league allowlist (BET365SOFT_FOOTBALL_LEAGUE_IDS) — see that constant's
+ * own comment for why: this account exposes 227 leagues total, most of
+ * them obscure lower/youth/reserve divisions, and it does NOT cover
+ * Brazil's own top flight (Campeonato Brasileiro Série A) at all, confirmed
+ * across 4 separate real checks during this integration (2026-09-06).
+ * Real 1X2 odds only — same "never mix real with fake Poisson" rule as
+ * every other provider here: hasRealOdds is true only when all 3 sides of
+ * the Result market are present; otherwise falls back to synthetic odds
+ * with hasRealOdds:false.
+ */
+async function buildFootballUpcomingFromBet365Soft(): Promise<UpcomingMatch[]> {
+  const events = await getBet365SoftFootballUpcomingAllLeagues();
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+
+  for (const ev of events) {
+    const home = stripGenderTeamSuffix(ev.home);
+    const away = stripGenderTeamSuffix(ev.away);
+    if (!home || !away) continue;
+
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const isWomens = isWomensLeague(ev.leagueName);
+    const resultOdds = extractBet365SoftResultOdds(ev.odds);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+    const odds = resultOdds ?? baseOdds;
+    const hasRealOdds = !!resultOdds;
+
+    const { date, time } = pulseScoreEventDateTime(new Date(ev.eventStart * 1000).toISOString());
+
+    results.push({
+      id: `bet365soft-football-${ev.eventId}`,
+      home,
+      away,
+      league: normalizeBrazilLeagueDisplayName(
+        ev.leagueName,
+        ev.country.toLowerCase() === "brazil" ? "brazil" : null,
+      ),
+      country: ev.country || "Internacional",
+      time,
+      date,
+      sport: "football",
+      hasRealOdds,
+      odds,
+      markets: baseMarkets,
+      isWomens,
+      isPriorityLeague: true,
+      // ev.homeIcon/awayIcon are bare filenames (e.g. "2bbc98939...d.png") —
+      // no base image URL for them has been confirmed real yet, so they are
+      // NOT used to build a logo URL here (guessing one would just produce
+      // a broken image). Falls through to the generic badge placeholder,
+      // same as every other sport without a confirmed crest CDN.
+    });
+  }
+
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+/**
  * Tennis prematch, sourced entirely from PulseScore (getPulseScoreTennisUpcoming).
  * Confirmed against a real GET /api/v3/bet365/tennis/leagues sample (2026-08-07) —
  * same envelope as football's /leagues, league format "Tour||League" (e.g.
@@ -9854,6 +9924,10 @@ async function rebuildUpcomingCache(): Promise<void> {
       if (CONFIG.ENABLE_SPORTMONKS) {
         const sm = await buildFootballUpcomingFromSportMonks();
         candidates.push({ provider: "sportmonks", matches: sm });
+      }
+      if (CONFIG.ENABLE_BET365SOFT) {
+        const b365 = await buildFootballUpcomingFromBet365Soft();
+        candidates.push({ provider: "bet365soft", matches: b365 });
       }
       football = chooseUpcomingProvider("football", candidates);
       _lastGoodFootballUpcoming = football;
@@ -12254,6 +12328,9 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     }
     if (CONFIG.ENABLE_SPORTMONKS && football.length === 0) {
       football = await buildFootballUpcomingFromSportMonks();
+    }
+    if (CONFIG.ENABLE_BET365SOFT && football.length === 0) {
+      football = await buildFootballUpcomingFromBet365Soft();
     }
   } catch (err) {
     logger.error(
