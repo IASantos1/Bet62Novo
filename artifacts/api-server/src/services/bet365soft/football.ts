@@ -98,6 +98,22 @@ export type Bet365SoftMarketGroup = {
   markets: Bet365SoftMarketOutcome[];
 };
 
+// Live period/clock, only present on events returned by GET /api/v2/inplay —
+// confirmed real 2026-09-07 ("1st half"/"2nd half"/"Half-time" seen so far;
+// what (if anything) `live` reads at full-time, right before the event drops
+// out of the inplay list entirely, has never been observed — no finished
+// match has been seen in a real /inplay sample yet, so
+// buildFootballLiveFromBet365Soft() treats disappearance from this list as
+// the only trustworthy "match over" signal, same as every other
+// disappearance-finalized sport in this file (tennis/basketball/volleyball/
+// hockey/baseball), rather than trusting a specific `live` string value.
+export type Bet365SoftLiveClock = {
+  live: string;
+  minute: number;
+  second: string;
+  title: string;
+};
+
 export type Bet365SoftEvent = {
   eventId: number;
   appId: string;
@@ -112,12 +128,14 @@ export type Bet365SoftEvent = {
   home: string;
   away: string;
   venue?: string;
+  match?: string; // seen as e.g. "2x10" on one amateur/friendly-looking fixture — meaning unconfirmed, not used
   homeIcon?: string;
   awayIcon?: string;
-  homeScore: string; // "" pre-match, confirmed real
+  homeScore: string; // "" pre-match, real (numeric-as-string) once live — confirmed real
   awayScore: string;
   eventStart: number; // unix seconds
   odds: Bet365SoftMarketGroup[];
+  current?: Bet365SoftLiveClock; // present on /inplay events only
 };
 
 type Bet365SoftPrematchResponse = {
@@ -133,6 +151,18 @@ type Bet365SoftPrematchEventResponse = {
   event: Omit<Bet365SoftEvent, "odds">;
   group: Array<{ id: number; name: string }>; // sub-period groupings (1st half, corners, players' stats, ...) — not yet consumed
   odds: Bet365SoftMarketGroup[];
+};
+
+// GET /api/v2/inplay?sid=1 — confirmed real 2026-09-07. Unlike /prematch,
+// this is a SINGLE GLOBAL call across every league at once (no `lid`), and
+// each event already carries the live score (homeScore/awayScore, now
+// populated) plus `current` (period/minute/second). `odds` can be `[]` on a
+// live event with no quoted market right now (confirmed real — suspended or
+// temporarily unpriced), same as a missing "Result" group elsewhere: treat
+// as no real odds this tick, not an error.
+type Bet365SoftInplayResponse = {
+  success: true;
+  events: Bet365SoftEvent[];
 };
 
 // ── Leagues ──────────────────────────────────────────────────────────────
@@ -195,6 +225,39 @@ export async function getBet365SoftFootballPrematch(leagueId: number): Promise<B
     });
   prematchInFlight.set(leagueId, promise);
   return promise;
+}
+
+// ── Live (in-play) — single global call, every league at once ─────────────
+// 5s TTL: cheap to poll relative to Bet365Soft's documented 5,000 req/hour
+// cap (≈720 req/hour at this rate) while still keeping the live score/clock
+// fresh — buildLivePayload()'s own 700ms tick just reads this in-memory
+// cache almost every time instead of hitting the real endpoint.
+const INPLAY_TTL_MS = 5 * 1000;
+let inplayCache: { events: Bet365SoftEvent[]; fetchedAt: number } | null = null;
+let inplayInFlight: Promise<Bet365SoftEvent[]> | null = null;
+
+export async function getBet365SoftFootballInplay(): Promise<Bet365SoftEvent[]> {
+  if (!CONFIG.ENABLE_BET365SOFT) return [];
+  if (!CONFIG.BET365SOFT_API_KEY) return [];
+  const now = Date.now();
+  if (inplayCache && now - inplayCache.fetchedAt < INPLAY_TTL_MS) return inplayCache.events;
+  if (inplayInFlight) return inplayInFlight;
+  inplayInFlight = bet365SoftGet<Bet365SoftInplayResponse>("/api/v2/inplay", {
+    sid: BET365SOFT_SPORT_ID_FOOTBALL,
+  })
+    .then((resp) => {
+      const events = resp.events ?? [];
+      inplayCache = { events, fetchedAt: Date.now() };
+      return events;
+    })
+    .catch((err) => {
+      logger.warn({ err }, "[bet365soft] football inplay fetch failed");
+      return inplayCache?.events ?? [];
+    })
+    .finally(() => {
+      inplayInFlight = null;
+    });
+  return inplayInFlight;
 }
 
 // ── Full per-event market detail ────────────────────────────────────────
