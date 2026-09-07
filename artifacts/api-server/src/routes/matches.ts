@@ -8487,6 +8487,25 @@ async function buildFootballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
 
 const PROPLINE_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
 
+/** Best-effort football clock, derived from the one real timestamp PropLine
+ * always gives us (commence_time) since it never returns a minute/period
+ * for soccer (confirmed — see the header below). Not fabricated data: it's
+ * genuine wall-clock time elapsed since the real, confirmed kickoff,
+ * exactly the same kind of clock estimation this file already does for
+ * SportMonks (getSportMonksFixtureClockSec) — just without a live source
+ * to correct it against, so this is necessarily an approximation (doesn't
+ * know about stoppage time). Modeled as 45' first half, a 15' break, 45'
+ * second half; clamped so it never overshoots into "finished" territory —
+ * a stuck match still gets cleaned up by the disappearance-based
+ * finalize loop below, not by this clock reaching some end value.
+ */
+function estimatePropLineFootballClock(commenceTime: string): { minute: number; status: "LIVE" | "HT" } {
+  const elapsedMin = Math.max(0, (Date.now() - Date.parse(commenceTime)) / 60_000);
+  if (elapsedMin < 45) return { minute: Math.floor(elapsedMin), status: "LIVE" };
+  if (elapsedMin < 60) return { minute: 45, status: "HT" };
+  return { minute: Math.min(105, Math.floor(elapsedMin - 15)), status: "LIVE" };
+}
+
 /**
  * Football live from PropLine — cross-references GET .../scores
  * (status==="in_progress", real home_score/away_score) with the already-
@@ -8500,12 +8519,14 @@ const PROPLINE_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
  * real /scores check so far landed on a moment with no live soccer match).
  * Confirmed real for soccer: the schema itself (status/home_score/
  * away_score/period all present) and that FINISHED soccer games do carry a
- * real final score. Given that uncertainty, this deliberately does NOT
- * parse `period` into a minute (unlike Bet365Soft's confirmed "1st half"/
- * "2nd half"/"Half-time" vocabulary) — it's shown to the user as-is. If it
- * turns out /scores never actually updates mid-match for soccer, matches
- * built here will just look frozen until they disappear/finalize — worth
- * re-checking against a real live soccer match once one is happening.
+ * real final score. `period` has been confirmed real but always null for
+ * every live soccer match seen so far, so the displayed minute/HT badge
+ * comes from estimatePropLineFootballClock() (elapsed time since the real
+ * commence_time) instead — see that function's own header. If it turns out
+ * /scores never actually updates the SCORE mid-match for soccer, matches
+ * built here will still show a running (estimated) clock but a frozen
+ * score until they disappear/finalize — worth re-checking against a real
+ * live soccer match once one is happening.
  */
 async function buildFootballLiveFromPropLine(): Promise<LiveMatchState[]> {
   const perLeague = await getPropLineFootballLiveAllLeagues();
@@ -8557,6 +8578,9 @@ async function buildFootballLiveFromPropLine(): Promise<LiveMatchState[]> {
         suspensionReason = "GOL!";
       }
 
+      const clock = estimatePropLineFootballClock(sc.commence_time);
+      const minute = existing ? Math.max(clock.minute, existing.minute) : clock.minute;
+
       const state: LiveMatchState = {
         id,
         home,
@@ -8566,8 +8590,8 @@ async function buildFootballLiveFromPropLine(): Promise<LiveMatchState[]> {
         sport: "football",
         homeScore: sc.home_score,
         awayScore: sc.away_score,
-        minute: 0,
-        status: sc.period || "Ao vivo",
+        minute,
+        status: sc.period || clock.status,
         hasRealOdds: !!resultOdds,
         odds: resultOdds ?? baseOdds,
         markets: baseMarkets,
