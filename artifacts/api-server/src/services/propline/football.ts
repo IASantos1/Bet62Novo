@@ -1,10 +1,21 @@
 // PropLine football (soccer) — one /odds call per league returns every
 // upcoming AND live event for that league (each event carries its own
-// `live` boolean), bookmakers embedded. Every shape below is confirmed
-// against a REAL response fetched through the debug route (2026-09-07).
+// `live` boolean), bookmakers embedded. Every shape is confirmed against a
+// REAL response fetched through the debug route (2026-09-07), and this
+// provider is the first candidate this session to have real Brasileirão
+// Série A coverage (21 real upcoming fixtures, real 1X2 odds from up to 9
+// bookmakers per match — see services/propline/common.ts for the shared
+// fetch/cache/extract logic every PropLine sport module builds on).
 import { CONFIG } from "../../lib/config.js";
-import { logger } from "../../lib/logger.js";
-import { propLineGet, americanToDecimal } from "./client.js";
+import {
+  getPropLineOdds,
+  getPropLineScores,
+  extractPropLineH2HOdds,
+  type PropLineEvent,
+  type PropLineScoreEvent,
+} from "./common.js";
+
+export type { PropLineEvent, PropLineScoreEvent, PropLineBookmaker, PropLineMarket, PropLineOutcome, PropLineResultOdds } from "./common.js";
 
 // Confirmed real via GET /v1/sports (2026-09-07) — every soccer_* key that
 // account returned, prioritized the same way BET365SOFT_FOOTBALL_LEAGUE_IDS
@@ -69,160 +80,19 @@ export const PROPLINE_FOOTBALL_LEAGUE_TITLES: Record<string, string> = {
   soccer_fifa_world_cup: "FIFA World Cup",
 };
 
-export type PropLineOutcome = {
-  name: string;
-  description: string;
-  price: number; // American odds — always, confirmed real
-  point: number | null;
-  book_updated_at?: string | null;
-  last_change_at?: string;
-  last_seen_at?: string;
-  payout_multiplier?: number | null;
-  dfs_odds_type?: "standard" | "goblin" | "demon" | null;
-};
-
-export type PropLineMarket = {
-  key: string; // "h2h" | "spreads" | "totals" | ...
-  description?: string;
-  team?: string | null;
-  last_update: string;
-  suspended_at?: string | null;
-  outcomes: PropLineOutcome[];
-};
-
-export type PropLineBookmaker = {
-  key: string;
-  title: string;
-  markets: PropLineMarket[];
-};
-
-export type PropLineEvent = {
-  id: string;
-  sport_key: string;
-  home_team: string;
-  away_team: string;
-  home_team_key?: string | null;
-  away_team_key?: string | null;
-  home_team_id?: string | null;
-  away_team_id?: string | null;
-  commence_time: string;
-  live: boolean;
-  last_update?: string;
-  merged_from_event_ids?: string[] | null;
-  // Null on /events (no odds there); populated on /odds. Confirmed real:
-  // an event can have zero bookmakers too (line not open yet).
-  bookmakers: PropLineBookmaker[] | null;
-};
-
-const ODDS_TTL_MS = 90 * 1000;
-const oddsCache = new Map<string, { events: PropLineEvent[]; fetchedAt: number }>();
-const oddsInFlight = new Map<string, Promise<PropLineEvent[]>>();
-
-/** GET /v1/sports/{sportKey}/odds?markets=h2h,spreads,totals — every event
- * for that league, upcoming AND live together (see `live` per event). 90s
- * cache: cheap per league (one call), but PROPLINE_FOOTBALL_SPORT_KEYS has
- * 24 entries and the account's real daily quota is still unconfirmed (free
- * tier) — see client.ts's propLineQuota for the live budget read-back. */
-export async function getPropLineFootballOdds(sportKey: string): Promise<PropLineEvent[]> {
-  if (!CONFIG.ENABLE_PROPLINE) return [];
-  if (!CONFIG.PROPLINE_API_KEY) return [];
-  const now = Date.now();
-  const cached = oddsCache.get(sportKey);
-  if (cached && now - cached.fetchedAt < ODDS_TTL_MS) return cached.events;
-  const inFlight = oddsInFlight.get(sportKey);
-  if (inFlight) return inFlight;
-  const promise = propLineGet<PropLineEvent[]>(`/sports/${sportKey}/odds`, {
-    markets: "h2h,spreads,totals",
-  })
-    .then((events) => {
-      oddsCache.set(sportKey, { events: events ?? [], fetchedAt: Date.now() });
-      return events ?? [];
-    })
-    .catch((err) => {
-      logger.warn({ err, sportKey }, "[propline] football odds fetch failed");
-      return oddsCache.get(sportKey)?.events ?? [];
-    })
-    .finally(() => {
-      oddsInFlight.delete(sportKey);
-    });
-  oddsInFlight.set(sportKey, promise);
-  return promise;
-}
-
-// GET /v1/sports/{sportKey}/scores?days_from=N — free tier, no markets
-// involved. Confirmed real shape (2026-09-07, tested against baseball_mlb
-// AND soccer_epl): {id, sport_key, home_team, away_team, commence_time,
-// live, status: "upcoming"|"in_progress"|"final", home_score, away_score,
-// period}. For MLB, a real in-progress sample showed home_score/away_score
-// populated live and period as a human string ("Bot 3rd") — confirmed
-// updating in real time. No in-progress soccer sample has been seen yet
-// (nothing was live at test time) — the schema is identical and finished
-// soccer games do carry a real final score, but whether `period` (or the
-// score itself) actually updates mid-match for soccer specifically is
-// UNCONFIRMED; PropLine's own docs hedge this ("outros esportes atualizam
-// as estatísticas quando o jogo termina"). Treated defensively below: the
-// raw `period` string is shown as-is, never parsed into a minute.
-export type PropLineScoreEvent = {
-  id: string;
-  sport_key: string;
-  home_team: string;
-  away_team: string;
-  commence_time: string;
-  live: boolean;
-  status: "upcoming" | "in_progress" | "final" | string;
-  home_score: number | null;
-  away_score: number | null;
-  period: string | null;
-};
-
-const SCORES_TTL_MS = 30 * 1000;
-const scoresCache = new Map<string, { events: PropLineScoreEvent[]; fetchedAt: number }>();
-const scoresInFlight = new Map<string, Promise<PropLineScoreEvent[]>>();
-
-export async function getPropLineFootballScores(sportKey: string): Promise<PropLineScoreEvent[]> {
-  if (!CONFIG.ENABLE_PROPLINE) return [];
-  if (!CONFIG.PROPLINE_API_KEY) return [];
-  const now = Date.now();
-  const cached = scoresCache.get(sportKey);
-  if (cached && now - cached.fetchedAt < SCORES_TTL_MS) return cached.events;
-  const inFlight = scoresInFlight.get(sportKey);
-  if (inFlight) return inFlight;
-  const promise = propLineGet<PropLineScoreEvent[]>(`/sports/${sportKey}/scores`, {
-    days_from: 1,
-  })
-    .then((events) => {
-      scoresCache.set(sportKey, { events: events ?? [], fetchedAt: Date.now() });
-      return events ?? [];
-    })
-    .catch((err) => {
-      logger.warn({ err, sportKey }, "[propline] football scores fetch failed");
-      return scoresCache.get(sportKey)?.events ?? [];
-    })
-    .finally(() => {
-      scoresInFlight.delete(sportKey);
-    });
-  scoresInFlight.set(sportKey, promise);
-  return promise;
-}
-
-export type PropLineFootballLeagueScores = { sportKey: string; events: PropLineScoreEvent[] };
-
-export async function getPropLineFootballLiveAllLeagues(): Promise<PropLineFootballLeagueScores[]> {
-  if (!CONFIG.ENABLE_PROPLINE) return [];
-  if (!CONFIG.PROPLINE_API_KEY) return [];
-  const perLeague = await Promise.all(
-    PROPLINE_FOOTBALL_SPORT_KEYS.map(async (sportKey) => ({
-      sportKey,
-      events: await getPropLineFootballScores(sportKey),
-    })),
-  );
-  return perLeague.map(({ sportKey, events }) => ({
-    sportKey,
-    events: events.filter((e) => e.status === "in_progress"),
-  }));
+export function extractPropLineResultOdds(
+  bookmakers: PropLineEvent["bookmakers"],
+  home: string,
+  away: string,
+) {
+  return extractPropLineH2HOdds(bookmakers, home, away, true);
 }
 
 export type PropLineFootballLeagueOdds = { sportKey: string; events: PropLineEvent[] };
+
+export async function getPropLineFootballOdds(sportKey: string): Promise<PropLineEvent[]> {
+  return getPropLineOdds(sportKey);
+}
 
 /** Fetches every curated league in parallel. Each returned event still
  * carries its own sport_key so callers can look up the league title. */
@@ -232,62 +102,27 @@ export async function getPropLineFootballOddsAllLeagues(): Promise<PropLineFootb
   return Promise.all(
     PROPLINE_FOOTBALL_SPORT_KEYS.map(async (sportKey) => ({
       sportKey,
-      events: await getPropLineFootballOdds(sportKey),
+      events: await getPropLineOdds(sportKey),
     })),
   );
 }
 
-export type PropLineResultOdds = { home: number; draw: number; away: number };
+export type PropLineFootballLeagueScores = { sportKey: string; events: PropLineScoreEvent[] };
 
-/** Extracts real 1X2 (h2h market) decimal odds, picking the sharpest
- * available book (Pinnacle first — confirmed present and real for
- * soccer_brasileirao — falling back to whichever real book quoted all 3
- * sides). Only returns a result when all three sides are present, same
- * "never mix real with fake Poisson" rule as every other provider here. */
-export function extractPropLineResultOdds(
-  bookmakers: PropLineBookmaker[] | null,
-  home: string,
-  away: string,
-): PropLineResultOdds | null {
-  if (!bookmakers || bookmakers.length === 0) return null;
-  const preferredOrder = ["pinnacle", "bovada", "betmgm", "kalshi", "betonlineag", "lowvig"];
-  const ordered = [...bookmakers].sort((a, b) => {
-    const ai = preferredOrder.indexOf(a.key);
-    const bi = preferredOrder.indexOf(b.key);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-  for (const bm of ordered) {
-    const market = bm.markets.find((m) => m.key === "h2h");
-    if (!market) continue;
-    let homePrice: number | null = null;
-    let awayPrice: number | null = null;
-    let drawPrice: number | null = null;
-    for (const o of market.outcomes) {
-      const name = (o.name || "").toLowerCase();
-      if (name === "draw") drawPrice = o.price;
-      else if (name === home.toLowerCase() || o.name === home) homePrice = o.price;
-      else if (name === away.toLowerCase() || o.name === away) awayPrice = o.price;
-    }
-    // Team-name matching can miss on a spelling mismatch between PropLine's
-    // event-level name and a book's own outcome name (documented real
-    // behavior — books write their own spelling) — positional fallback:
-    // h2h outcomes are ordered home, away, draw per PropLine's own
-    // documented ordering guarantee ("Mercados de equipes — primeiro em
-    // casa, depois fora e, por fim, empate").
-    if ((homePrice == null || awayPrice == null || drawPrice == null) && market.outcomes.length === 3) {
-      const [h, a, d] = market.outcomes;
-      if (h && a && d) {
-        homePrice ??= h.price;
-        awayPrice ??= a.price;
-        drawPrice ??= d.price;
-      }
-    }
-    if (homePrice == null || awayPrice == null || drawPrice == null) continue;
-    return {
-      home: americanToDecimal(homePrice),
-      draw: americanToDecimal(drawPrice),
-      away: americanToDecimal(awayPrice),
-    };
-  }
-  return null;
+/** Live (in_progress) events only, per league — see common.ts's
+ * PropLineScoreEvent header for the soccer live-update caveat: confirmed
+ * real schema, unconfirmed whether it updates mid-match for soccer. */
+export async function getPropLineFootballLiveAllLeagues(): Promise<PropLineFootballLeagueScores[]> {
+  if (!CONFIG.ENABLE_PROPLINE) return [];
+  if (!CONFIG.PROPLINE_API_KEY) return [];
+  const perLeague = await Promise.all(
+    PROPLINE_FOOTBALL_SPORT_KEYS.map(async (sportKey) => ({
+      sportKey,
+      events: await getPropLineScores(sportKey),
+    })),
+  );
+  return perLeague.map(({ sportKey, events }) => ({
+    sportKey,
+    events: events.filter((e) => e.status === "in_progress"),
+  }));
 }
