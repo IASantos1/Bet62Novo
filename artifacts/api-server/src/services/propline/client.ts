@@ -143,6 +143,6 @@ export async function propLineGetDebug<T>(
 // (confirmed real — e.g. +120/+230/+220, -148), same convention as
 // Statyx used to require.
 export function americanToDecimal(american: number): number {
-  if (american > 0) return 1 + american / 100;
-  return 1 + 100 / Math.abs(american);
+  const decimal = american > 0 ? 1 + american / 100 : 1 + 100 / Math.abs(american);
+  return Math.round(decimal * 100) / 100;
 }
