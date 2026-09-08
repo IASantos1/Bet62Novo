@@ -44,6 +44,17 @@ testem.log
 !.env.example
 !.env.*.example
 
+# Credenciais / anexos locais / material de referência — NUNCA versionar
+attached_assets/
+*.crt
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Arquivos de configuração de IDE local
+.replit.local
+
 # System Files
 .DS_Store
 Thumbs.db

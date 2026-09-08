@@ -42,10 +42,10 @@ The frontend proxies `/api` and `/ws` to the API server at port 8080.
 | `SMTP_PASS` | Email delivery password | ✅ Configured |
 
 **Set as env vars (non-secret):**
-- `ADMIN_USERNAME=Israel`
-- `ADMIN_EMAIL=suportebet62@gmail.com`
+- `ADMIN_USERNAME=admin`
+- `ADMIN_EMAIL=admin@example.com`
 - `SMTP_PORT=587`
-- `SMTP_FROM=suportebet62@gmail.com`
+- `SMTP_FROM=noreply@example.com`
 - `FOOTBALL_LIVE_PROVIDER=statpal`
 - `FOOTBALL_DAILY_PROVIDER=statpal`
 - `NODE_ENV=development`

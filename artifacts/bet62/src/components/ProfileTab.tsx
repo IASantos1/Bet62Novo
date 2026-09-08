@@ -675,7 +675,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                           Excluído até: <strong>{selfExcludedUntil?.toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" })}</strong>
                         </div>
                         <div className="text-xs text-zinc-500 mt-1">
-                          Para cancelar, contacte: suportebet62@gmail.com
+                          Para cancelar, contacte: suporte@seudominio.com
                         </div>
                       </div>
                     </div>
@@ -860,7 +860,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="space-y-3">
               {[
-                { icon: <Mail size={16} className="text-red-400" />, label: "Email de suporte", value: "suportebet62@gmail.com", sub: "Resposta em até 24 horas úteis" },
+                { icon: <Mail size={16} className="text-red-400" />, label: "Email de suporte", value: "suporte@seudominio.com", sub: "Resposta em até 24 horas úteis" },
                 { icon: <Phone size={16} className="text-red-400" />, label: "Linha de apoio", value: "+351 800 000 000", sub: "Chamada gratuita · 24h / 7 dias" },
                 { icon: <Clock size={16} className="text-red-400" />, label: "Horário de atendimento", value: "24 horas, 7 dias por semana", sub: "Chat ao vivo disponível" },
               ].map(item => (
