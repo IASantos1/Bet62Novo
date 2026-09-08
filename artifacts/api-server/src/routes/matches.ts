@@ -8806,7 +8806,17 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
       let setsWonAway = existing?.awayScore ?? 0;
       let sets: Array<[number, number]>;
       if (prevSets.length === 0) {
-        sets = [[sc.home_score, sc.away_score]];
+        // First time we're seeing this match — if it's already past set 1
+        // (very common: PropLine only becomes the active source once
+        // PulseScore/GoalServe fail, which can happen mid-match), pad with
+        // [0,0] placeholders for the sets we never observed instead of
+        // writing the current set's real score into the "S1" column, which
+        // would mislabel it as an earlier set than it actually is.
+        const placeholders: Array<[number, number]> = Array.from(
+          { length: Math.max(0, currentSetNum - 1) },
+          () => [0, 0],
+        );
+        sets = [...placeholders, [sc.home_score, sc.away_score]];
       } else if (currentSetNum > prevSets.length) {
         const finished = prevSets[prevSets.length - 1]!;
         if (finished[0] > finished[1]) setsWonHome++;
@@ -8897,7 +8907,14 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
       let setsWonAway = existing?.awayScore ?? 0;
       let vollSets: Array<[number, number]>;
       if (prevSets.length === 0) {
-        vollSets = [[sc.home_score, sc.away_score]];
+        // Same first-sighting-mid-match caveat as tennis's builder — pad
+        // with [0,0] placeholders so the current set's real score lands in
+        // the correct column instead of being mislabeled as set 1.
+        const placeholders: Array<[number, number]> = Array.from(
+          { length: Math.max(0, currentSetNum - 1) },
+          () => [0, 0],
+        );
+        vollSets = [...placeholders, [sc.home_score, sc.away_score]];
       } else if (currentSetNum > prevSets.length) {
         const finished = prevSets[prevSets.length - 1]!;
         if (finished[0] > finished[1]) setsWonHome++;
