@@ -71,18 +71,19 @@ let sinceSeq = 0;
 // connection failure is visible without needing to grep Railway logs.
 let lastError: { at: string; stage: string; message: string; detail?: unknown } | null = null;
 
-/** Finds an existing websocket subscription for our sport-key filter, or
- * creates one. Idempotent across restarts as long as the filter string
- * stays byte-identical — if the curated sport-key lists change, a NEW
- * subscription is created (old one just sits unused; PropLine's own docs
- * don't document a "find or update" primitive here, only PATCH by id,
- * which needs the id we're trying to discover in the first place). */
+/** Finds an existing websocket subscription, or creates one. No
+ * `filter_sport_key` is sent — PropLine caps that field at 300 characters
+ * (confirmed via a real 422: `string_too_long`, max_length 300) and our
+ * joined WATCHED_SPORT_KEYS list is well over that (32 keys). Omitting it
+ * subscribes to every sport on the account instead of just ours; that's
+ * safe because handleEvent() below already discards any event whose
+ * sport_key isn't in WATCHED_SPORT_KEYS before invalidating a cache entry —
+ * we just receive (and ignore) a few extra event types. */
 async function ensureWebhookSubscription(): Promise<number | null> {
-  const filterSportKey = WATCHED_SPORT_KEYS.join(",");
   try {
     const existing = await propLineGet<PropLineWebhook[]>("/webhooks");
     const match = existing.find(
-      (w) => w.transport === "websocket" && w.active && w.filter_sport_key === filterSportKey,
+      (w) => w.transport === "websocket" && w.active && !w.filter_sport_key,
     );
     if (match) return match.id;
   } catch (err) {
@@ -94,7 +95,6 @@ async function ensureWebhookSubscription(): Promise<number | null> {
     const created = await propLinePost<{ id: number }>("/webhooks", {
       transport: "websocket",
       events: ["line_movement", "market_suspended", "resolution"],
-      filter_sport_key: filterSportKey,
       batch_max: 50,
     });
     logger.info({ id: created.id }, "[propline] created websocket subscription");

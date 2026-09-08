@@ -5,7 +5,7 @@
 // don't each re-duplicate the same cache/fetch logic).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { propLineGet, americanToDecimal } from "./client.js";
+import { propLineGet, americanToDecimal, PropLineApiError } from "./client.js";
 
 export type PropLineOutcome = {
   name: string;
@@ -120,6 +120,18 @@ const SCORES_TTL_MS = 30 * 1000;
 const scoresCache = new Map<string, { events: PropLineScoreEvent[]; fetchedAt: number }>();
 const scoresInFlight = new Map<string, Promise<PropLineScoreEvent[]>>();
 
+// Per-sportKey record of the last /scores failure — the catch below used to
+// swallow errors silently (falling back to a possibly-empty cache), which
+// made a rate-limited or quota-exhausted league indistinguishable from one
+// that genuinely has zero live matches right now. Surfaced via
+// getPropLineScoresLastErrors() / GET /api/debug-propline-live-status so
+// "only 1 football match live" can be diagnosed without server log access.
+const scoresLastError = new Map<string, { at: string; status: number | null; message: string }>();
+
+export function getPropLineScoresLastErrors(): Record<string, { at: string; status: number | null; message: string }> {
+  return Object.fromEntries(scoresLastError);
+}
+
 export async function getPropLineScores(sportKey: string): Promise<PropLineScoreEvent[]> {
   if (!CONFIG.ENABLE_PROPLINE) return [];
   if (!CONFIG.PROPLINE_API_KEY) return [];
@@ -131,9 +143,12 @@ export async function getPropLineScores(sportKey: string): Promise<PropLineScore
   const promise = propLineGet<PropLineScoreEvent[]>(`/sports/${sportKey}/scores`, { days_from: 1 })
     .then((events) => {
       scoresCache.set(sportKey, { events: events ?? [], fetchedAt: Date.now() });
+      scoresLastError.delete(sportKey);
       return events ?? [];
     })
     .catch((err) => {
+      const status = err instanceof PropLineApiError ? err.status : null;
+      scoresLastError.set(sportKey, { at: new Date().toISOString(), status, message: String(err) });
       logger.warn({ err, sportKey }, "[propline] scores fetch failed");
       return scoresCache.get(sportKey)?.events ?? [];
     })
