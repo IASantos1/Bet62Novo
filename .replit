@@ -62,10 +62,12 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-ADMIN_EMAIL = "suportebet62@gmail.com"
-ADMIN_USERNAME = "Israel"
+ADMIN_EMAIL = "admin@example.com"
+ADMIN_USERNAME = "admin"
+FOOTBALL_DAILY_PROVIDER = "statpal"
+FOOTBALL_LIVE_PROVIDER = "statpal"
 NODE_ENV = "development"
-SMTP_FROM = "suportebet62@gmail.com"
+SMTP_FROM = "noreply@example.com"
 SMTP_PORT = "587"
 VITE_STRIPE_PUBLISHABLE_KEY = "pk_live_placeholder"
 # ── Kill-switches providers esportivos (rollback 1 clique) ────────────────
