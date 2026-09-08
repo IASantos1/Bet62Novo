@@ -24,7 +24,7 @@
 // directly; worth revisiting once a real line_movement sample is seen.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { propLineGet, propLinePost } from "./client.js";
+import { propLineGet, propLinePost, PropLineApiError } from "./client.js";
 import { invalidatePropLineOddsCache } from "./common.js";
 import { PROPLINE_FOOTBALL_SPORT_KEYS } from "./football.js";
 import { PROPLINE_BASKETBALL_SPORT_KEYS } from "./basketball.js";
@@ -67,6 +67,9 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let startedOnce = false;
 let lastFrameAt = 0;
 let sinceSeq = 0;
+// Surfaced via propLineWebSocketStatus() / GET /api/debug-propline-ws so a
+// connection failure is visible without needing to grep Railway logs.
+let lastError: { at: string; stage: string; message: string; detail?: unknown } | null = null;
 
 /** Finds an existing websocket subscription for our sport-key filter, or
  * creates one. Idempotent across restarts as long as the filter string
@@ -83,6 +86,8 @@ async function ensureWebhookSubscription(): Promise<number | null> {
     );
     if (match) return match.id;
   } catch (err) {
+    const detail = err instanceof PropLineApiError ? err.detail : undefined;
+    lastError = { at: new Date().toISOString(), stage: "list_webhooks", message: String(err), detail };
     logger.warn({ err }, "[propline] failed to list existing webhooks — will try creating one");
   }
   try {
@@ -95,7 +100,9 @@ async function ensureWebhookSubscription(): Promise<number | null> {
     logger.info({ id: created.id }, "[propline] created websocket subscription");
     return created.id;
   } catch (err) {
-    logger.error({ err }, "[propline] failed to create websocket subscription");
+    const detail = err instanceof PropLineApiError ? err.detail : undefined;
+    lastError = { at: new Date().toISOString(), stage: "create_webhook", message: String(err), detail };
+    logger.error({ err, detail }, "[propline] failed to create websocket subscription");
     return null;
   }
 }
@@ -139,7 +146,8 @@ function connect(): void {
   let ws: WebSocket;
   try {
     ws = new WebSocket("wss://ws.prop-line.com/v1/stream");
-  } catch {
+  } catch (err) {
+    lastError = { at: new Date().toISOString(), stage: "open_socket", message: String(err) };
     scheduleReconnect();
     return;
   }
@@ -180,6 +188,16 @@ function connect(): void {
         }
         return;
       }
+      if (msg.type === "error") {
+        lastError = {
+          at: new Date().toISOString(),
+          stage: "ws_message",
+          message: String(msg.message ?? msg.reason ?? "unknown websocket error frame"),
+          detail: msg,
+        };
+        logger.error({ msg }, "[propline] websocket sent an error frame");
+        return;
+      }
       // "ping" or anything else — just counts as a liveness signal.
       lastFrameAt = Date.now();
     } catch {
@@ -190,21 +208,24 @@ function connect(): void {
   ws.addEventListener("close", (evt) => {
     connected = false;
     socket = null;
-    const code = (evt as { code?: number }).code;
+    const code = (evt as { code?: number; reason?: string }).code;
+    const reason = (evt as { code?: number; reason?: string }).reason;
     // 4401/4403/4404/4429 are documented as non-retryable (bad key, tier/
     // paused, subscription doesn't exist, connection cap).
     const nonRetryable = code !== undefined && [4401, 4403, 4404, 4429].includes(code);
+    lastError = { at: new Date().toISOString(), stage: "ws_close", message: `closed code=${code} reason=${reason ?? ""}` };
     if (nonRetryable) {
-      logger.error({ code }, "[propline] websocket closed (non-retryable)");
+      logger.error({ code, reason }, "[propline] websocket closed (non-retryable)");
       return;
     }
-    logger.warn({ code, retryMs: retryDelayMs }, "[propline] websocket closed — reconnecting");
+    logger.warn({ code, reason, retryMs: retryDelayMs }, "[propline] websocket closed — reconnecting");
     scheduleReconnect();
   });
 
-  ws.addEventListener("error", () => {
+  ws.addEventListener("error", (evt) => {
     connected = false;
     socket = null;
+    lastError = { at: new Date().toISOString(), stage: "ws_error", message: String((evt as { message?: string }).message ?? evt) };
   });
 }
 
@@ -221,11 +242,13 @@ export function propLineWebSocketStatus(): {
   webhookId: number | null;
   lastFrameAgeMs: number | null;
   sinceSeq: number;
+  lastError: typeof lastError;
 } {
   return {
     connected,
     webhookId,
     lastFrameAgeMs: lastFrameAt > 0 ? Date.now() - lastFrameAt : null,
     sinceSeq,
+    lastError,
   };
 }
