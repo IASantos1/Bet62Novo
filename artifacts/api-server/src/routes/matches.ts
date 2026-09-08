@@ -8799,11 +8799,21 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
       const resultOdds = oddsEv ? extractPropLineTennisOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
-      const setMatch = /Set\s*(\d+)/i.exec(sc.period ?? "");
-      const currentSetNum = setMatch ? parseInt(setMatch[1], 10) : 1;
+      // Real sample confirmed 2026-09-08: period can be "Set 2 · sets 1-0" —
+      // PropLine DOES embed the completed-sets score in this string (not
+      // just the current set number). When present, that's authoritative
+      // real data — use it directly instead of inferring sets won from
+      // game-score comparisons, which is only a fallback for the plainer
+      // "Set N" form seen on some matches.
+      const setMatch = /Set\s*(\d+)(?:\s*[·.]?\s*sets\s*(\d+)\s*-\s*(\d+))?/i.exec(sc.period ?? "");
+      const currentSetNum = setMatch ? parseInt(setMatch[1]!, 10) : 1;
+      const realPriorSets: [number, number] | null =
+        setMatch && setMatch[2] !== undefined && setMatch[3] !== undefined
+          ? [parseInt(setMatch[2], 10), parseInt(setMatch[3], 10)]
+          : null;
       const prevSets = existing?._liveExtra?.sets ?? [];
-      let setsWonHome = existing?.homeScore ?? 0;
-      let setsWonAway = existing?.awayScore ?? 0;
+      let setsWonHome = realPriorSets ? realPriorSets[0] : (existing?.homeScore ?? 0);
+      let setsWonAway = realPriorSets ? realPriorSets[1] : (existing?.awayScore ?? 0);
       let sets: Array<[number, number]>;
       if (prevSets.length === 0) {
         // First time we're seeing this match — if it's already past set 1
@@ -8818,9 +8828,11 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
         );
         sets = [...placeholders, [sc.home_score, sc.away_score]];
       } else if (currentSetNum > prevSets.length) {
-        const finished = prevSets[prevSets.length - 1]!;
-        if (finished[0] > finished[1]) setsWonHome++;
-        else if (finished[1] > finished[0]) setsWonAway++;
+        if (!realPriorSets) {
+          const finished = prevSets[prevSets.length - 1]!;
+          if (finished[0] > finished[1]) setsWonHome++;
+          else if (finished[1] > finished[0]) setsWonAway++;
+        }
         sets = [...prevSets, [sc.home_score, sc.away_score]];
       } else {
         sets = [...prevSets.slice(0, -1), [sc.home_score, sc.away_score]];
@@ -8900,11 +8912,20 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
       const resultOdds = oddsEv ? extractPropLineVolleyballOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
-      const setMatch = /Set\s*(\d+)/i.exec(sc.period ?? "");
-      const currentSetNum = setMatch ? parseInt(setMatch[1], 10) : 1;
+      // Same "Set N · sets H-A" real embedded score confirmed for tennis
+      // (2026-09-08) — applying the same parsing here in case volleyball's
+      // period string ever carries it too, once PropLine actually starts
+      // populating real volleyball scores (see getPropLineVolleyballLive's
+      // header — it doesn't yet, as of this same date).
+      const setMatch = /Set\s*(\d+)(?:\s*[·.]?\s*sets\s*(\d+)\s*-\s*(\d+))?/i.exec(sc.period ?? "");
+      const currentSetNum = setMatch ? parseInt(setMatch[1]!, 10) : 1;
+      const realPriorSets: [number, number] | null =
+        setMatch && setMatch[2] !== undefined && setMatch[3] !== undefined
+          ? [parseInt(setMatch[2], 10), parseInt(setMatch[3], 10)]
+          : null;
       const prevSets = existing?._liveExtra?.vollSets ?? [];
-      let setsWonHome = existing?.homeScore ?? 0;
-      let setsWonAway = existing?.awayScore ?? 0;
+      let setsWonHome = realPriorSets ? realPriorSets[0] : (existing?.homeScore ?? 0);
+      let setsWonAway = realPriorSets ? realPriorSets[1] : (existing?.awayScore ?? 0);
       let vollSets: Array<[number, number]>;
       if (prevSets.length === 0) {
         // Same first-sighting-mid-match caveat as tennis's builder — pad
@@ -8916,9 +8937,11 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
         );
         vollSets = [...placeholders, [sc.home_score, sc.away_score]];
       } else if (currentSetNum > prevSets.length) {
-        const finished = prevSets[prevSets.length - 1]!;
-        if (finished[0] > finished[1]) setsWonHome++;
-        else if (finished[1] > finished[0]) setsWonAway++;
+        if (!realPriorSets) {
+          const finished = prevSets[prevSets.length - 1]!;
+          if (finished[0] > finished[1]) setsWonHome++;
+          else if (finished[1] > finished[0]) setsWonAway++;
+        }
         vollSets = [...prevSets, [sc.home_score, sc.away_score]];
       } else {
         vollSets = [...prevSets.slice(0, -1), [sc.home_score, sc.away_score]];
