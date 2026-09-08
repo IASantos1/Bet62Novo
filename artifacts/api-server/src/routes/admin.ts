@@ -2950,10 +2950,16 @@ router.get("/propline-player-trends", adminMiddleware, async (req: AdminRequest,
   }
 });
 
-router.get("/propline/raw/:path*", adminMiddleware, async (req: AdminRequest, res) => {
+// Wildcard debug endpoint that forwards ANY raw sub-path directly to
+// PropLine's upstream API. Avoids Express/router path-to-regexp v8 wildcard
+// syntax (path: "*", "param*" modifiers are removed in v8) by reading the
+// sub-path from the `path` query parameter instead of a dynamic route
+// segment. Usage: GET /api/admin/propline/raw?path=/sports (or
+// /odds/ev, /scores, etc.). All other query params are forwarded verbatim.
+router.get("/propline/raw", adminMiddleware, async (req: AdminRequest, res) => {
   if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const rawPath = (req.params as any)["path"] as string | undefined;
-  const wild = rawPath ?? "";
+  const rawPath = typeof req.query["path"] === "string" ? req.query["path"] : "";
+  const wild = rawPath.startsWith("/") ? rawPath.slice(1) : rawPath;
   const params: Record<string, any> = {};
   for (const [k, v] of Object.entries(req.query)) {
     if (k === "path") continue;
