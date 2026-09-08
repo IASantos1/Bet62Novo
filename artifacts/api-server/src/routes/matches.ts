@@ -8761,7 +8761,23 @@ const PROPLINE_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
  * updates: the same blanket caveat proved wrong for football, so this is
  * added as a tri-fallback candidate (see the tennis live block below) and
  * left for chooseLiveProvider/real production data to judge on quality,
- * not assumed correct or incorrect up front. */
+ * not assumed correct or incorrect up front.
+ *
+ * IMPORTANT (confirmed real 2026-09-08): PropLine's home_score/away_score
+ * for tennis are GAMES in the CURRENT set, not sets won — e.g. a real
+ * in-progress sample read {home_score:5, away_score:2, period:"Set 1"},
+ * meaning 5-2 in games during set 1, not "5 sets to 2". `period` is a plain
+ * "Set N" string with no historical per-set breakdown and no point-level
+ * (15/30/40/AD) score anywhere in this schema — PropLine simply doesn't
+ * expose that granularity (unlike PulseScore's dedicated tennis feed).
+ * Sets won is inferred here from real observed data across ticks (when
+ * `period`'s set number advances, the previous tick's game score is kept
+ * as that set's final score and its leader credited the set) — same kind
+ * of honest derivation as estimatePropLineFootballClock, not fabrication.
+ * currentPoints/serving are left unset (PropLine has nothing for them);
+ * the frontend already has a graceful "not available" fallback for those
+ * (see buildTennisLiveFromPulseScore's header on computeLiveTennisExtras
+ * being computed on-demand, not fabricated live). */
 async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
   const events = await getPropLineTennisLive();
   const currentIds = new Set<string>();
@@ -8777,10 +8793,28 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
 
       const id = `propline-tennis-${sc.id}`;
       currentIds.add(id);
+      const existing = liveMatchState.get(id);
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractPropLineTennisOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+      const setMatch = /Set\s*(\d+)/i.exec(sc.period ?? "");
+      const currentSetNum = setMatch ? parseInt(setMatch[1], 10) : 1;
+      const prevSets = existing?._liveExtra?.sets ?? [];
+      let setsWonHome = existing?.homeScore ?? 0;
+      let setsWonAway = existing?.awayScore ?? 0;
+      let sets: Array<[number, number]>;
+      if (prevSets.length === 0) {
+        sets = [[sc.home_score, sc.away_score]];
+      } else if (currentSetNum > prevSets.length) {
+        const finished = prevSets[prevSets.length - 1]!;
+        if (finished[0] > finished[1]) setsWonHome++;
+        else if (finished[1] > finished[0]) setsWonAway++;
+        sets = [...prevSets, [sc.home_score, sc.away_score]];
+      } else {
+        sets = [...prevSets.slice(0, -1), [sc.home_score, sc.away_score]];
+      }
 
       const state: LiveMatchState = {
         id,
@@ -8789,15 +8823,16 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
         league: "Tênis",
         country: "Internacional",
         sport: "tennis",
-        homeScore: sc.home_score,
-        awayScore: sc.away_score,
+        homeScore: setsWonHome,
+        awayScore: setsWonAway,
         minute: 0,
-        status: sc.period || "Ao vivo",
+        status: tennisSetLabel(Math.max(1, currentSetNum)),
         hasRealOdds: !!resultOdds,
         odds: resultOdds ?? makeTennisBaseOdds(home, away),
         markets: baseMarkets,
         events: [],
         _lastSeenAt: Date.now(),
+        _liveExtra: { sets },
       };
       liveMatchState.set(id, state);
       results.push(state);
@@ -8827,7 +8862,13 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
 
 const PROPLINE_VOLLEYBALL_DISAPPEAR_GRACE_MS = 15_000;
 
-/** Volleyball live from PropLine — same pattern/caveat as tennis above. */
+/** Volleyball live from PropLine — same pattern/caveat as tennis above.
+ * Same schema limitation confirmed for tennis applies here too: PropLine's
+ * home_score/away_score are POINTS in the current set, not sets won, and
+ * `period` is a plain "Set N" string with no per-set history — so sets won
+ * and the per-set score breakdown (vollSets) are inferred here the same
+ * way tennis's builder does it (real data observed across ticks), not
+ * fabricated. */
 async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
   const events = await getPropLineVolleyballLive();
   const currentIds = new Set<string>();
@@ -8843,10 +8884,28 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
 
       const id = `propline-volleyball-${sc.id}`;
       currentIds.add(id);
+      const existing = liveMatchState.get(id);
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractPropLineVolleyballOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+      const setMatch = /Set\s*(\d+)/i.exec(sc.period ?? "");
+      const currentSetNum = setMatch ? parseInt(setMatch[1], 10) : 1;
+      const prevSets = existing?._liveExtra?.vollSets ?? [];
+      let setsWonHome = existing?.homeScore ?? 0;
+      let setsWonAway = existing?.awayScore ?? 0;
+      let vollSets: Array<[number, number]>;
+      if (prevSets.length === 0) {
+        vollSets = [[sc.home_score, sc.away_score]];
+      } else if (currentSetNum > prevSets.length) {
+        const finished = prevSets[prevSets.length - 1]!;
+        if (finished[0] > finished[1]) setsWonHome++;
+        else if (finished[1] > finished[0]) setsWonAway++;
+        vollSets = [...prevSets, [sc.home_score, sc.away_score]];
+      } else {
+        vollSets = [...prevSets.slice(0, -1), [sc.home_score, sc.away_score]];
+      }
 
       const state: LiveMatchState = {
         id,
@@ -8855,15 +8914,16 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
         league: "Voleibol",
         country: "Internacional",
         sport: "volleyball",
-        homeScore: sc.home_score,
-        awayScore: sc.away_score,
+        homeScore: setsWonHome,
+        awayScore: setsWonAway,
         minute: 0,
-        status: sc.period || "Ao vivo",
+        status: `Set ${Math.max(1, currentSetNum)}`,
         hasRealOdds: !!resultOdds,
         odds: resultOdds ?? { home: 1.85, draw: 0, away: 1.85 },
         markets: baseMarkets,
         events: [],
         _lastSeenAt: Date.now(),
+        _liveExtra: { vollSets, currentPts: [sc.home_score, sc.away_score] },
       };
       liveMatchState.set(id, state);
       results.push(state);
