@@ -523,6 +523,14 @@ export type LiveMatchState = {
     realExtra?: PulseScoreTennisLiveExtra;
     currentPts?: [number, number]; // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>; // volleyball: completed set scores [[25,18],[22,25]]
+    // PropLine tennis/volleyball: home_score/away_score in its /scores
+    // response are CUMULATIVE match-wide games/points, not the current
+    // set's score (confirmed real 2026-09-08 — values like 9-9 showed up
+    // for a match still in set 2, impossible as a single-set tennis score,
+    // max is 7). This is the cumulative total at the moment the current
+    // set began, so (cumulative - this) = the real current-set delta. See
+    // buildTennisLiveFromPropLine/buildVolleyballLiveFromPropLine.
+    propLineSetBaseGames?: [number, number];
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
     periods?: Array<[number, number]>; // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
     quarters?: Array<[number, number]>; // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
@@ -8821,32 +8829,51 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
         setMatch && setMatch[2] !== undefined && setMatch[3] !== undefined
           ? [parseInt(setMatch[2], 10), parseInt(setMatch[3], 10)]
           : null;
+      // home_score/away_score are CUMULATIVE match-wide games, not the
+      // current set's score (confirmed real 2026-09-08: values like 9-9
+      // showed up for a match still in set 2 — impossible as a single-set
+      // score, max is 7). Track a rolling baseline (the cumulative total at
+      // the moment the current set began) so the displayed set score is the
+      // real delta since then, never the raw cumulative number.
+      const cumulative: [number, number] = [sc.home_score, sc.away_score];
+      const prevBase = existing?._liveExtra?.propLineSetBaseGames ?? null;
       const prevSets = existing?._liveExtra?.sets ?? [];
       let setsWonHome = realPriorSets ? realPriorSets[0] : (existing?.homeScore ?? 0);
       let setsWonAway = realPriorSets ? realPriorSets[1] : (existing?.awayScore ?? 0);
+      let base: [number, number];
       let sets: Array<[number, number]>;
-      if (prevSets.length === 0) {
-        // First time we're seeing this match — if it's already past set 1
-        // (common: PropLine only becomes the active source once PulseScore/
-        // GoalServe fail, which can happen mid-match), do NOT pad earlier
-        // columns with [0,0]: a tennis set can never actually end 0-0, so
-        // that placeholder reads as a real (wrong) score rather than "no
-        // data" — reported in production as "placar de sets errado". A
-        // single real column (mislabeled "S1" even when it's really set 2+,
-        // since the frontend labels columns by position) is honest data in
-        // the wrong slot, not a fabricated number — strictly better. The
-        // status badge (tennisSetLabel below) still shows the true set
-        // number regardless of this table's column count.
-        sets = [[sc.home_score, sc.away_score]];
+      if (prevBase === null) {
+        // First time we're seeing this match — we don't know how many
+        // games of the current set were already played before we started
+        // watching, so start the delta at 0-0 from here rather than
+        // showing the cumulative total (which would look like an
+        // impossible single-set score). A single real column (mislabeled
+        // "S1" even when it's really set 2+, since the frontend labels
+        // columns by position) is still honest — the status badge
+        // (tennisSetLabel below) shows the true set number regardless.
+        base = cumulative;
+        sets = [[0, 0]];
       } else if (currentSetNum > prevSets.length) {
+        // Set transition: roll the baseline forward by the finished set's
+        // tracked delta, then compute the new set's delta from there.
+        const finishedDelta = prevSets[prevSets.length - 1] ?? [0, 0];
         if (!realPriorSets) {
-          const finished = prevSets[prevSets.length - 1]!;
-          if (finished[0] > finished[1]) setsWonHome++;
-          else if (finished[1] > finished[0]) setsWonAway++;
+          if (finishedDelta[0] > finishedDelta[1]) setsWonHome++;
+          else if (finishedDelta[1] > finishedDelta[0]) setsWonAway++;
         }
-        sets = [...prevSets, [sc.home_score, sc.away_score]];
+        base = [prevBase[0] + finishedDelta[0], prevBase[1] + finishedDelta[1]];
+        const delta: [number, number] = [
+          Math.max(0, cumulative[0] - base[0]),
+          Math.max(0, cumulative[1] - base[1]),
+        ];
+        sets = [...prevSets, delta];
       } else {
-        sets = [...prevSets.slice(0, -1), [sc.home_score, sc.away_score]];
+        base = prevBase;
+        const delta: [number, number] = [
+          Math.max(0, cumulative[0] - base[0]),
+          Math.max(0, cumulative[1] - base[1]),
+        ];
+        sets = [...prevSets.slice(0, -1), delta];
       }
 
       const state: LiveMatchState = {
@@ -8865,7 +8892,7 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
         markets: baseMarkets,
         events: [],
         _lastSeenAt: Date.now(),
-        _liveExtra: { sets },
+        _liveExtra: { sets, propLineSetBaseGames: base },
       };
       liveMatchState.set(id, state);
       results.push(state);
@@ -8936,25 +8963,42 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
         setMatch && setMatch[2] !== undefined && setMatch[3] !== undefined
           ? [parseInt(setMatch[2], 10), parseInt(setMatch[3], 10)]
           : null;
+      // Same cumulative-vs-current-set confusion confirmed for tennis
+      // (2026-09-08) applies defensively here too — home_score/away_score
+      // may be match-wide cumulative points rather than the current set's,
+      // so track a rolling baseline and display the delta, never the raw
+      // number, even though no real live volleyball sample has confirmed
+      // this either way yet (getPropLineVolleyballLive currently never
+      // returns anything with a real score at all).
+      const cumulative: [number, number] = [sc.home_score, sc.away_score];
+      const prevBase = existing?._liveExtra?.propLineSetBaseGames ?? null;
       const prevSets = existing?._liveExtra?.vollSets ?? [];
       let setsWonHome = realPriorSets ? realPriorSets[0] : (existing?.homeScore ?? 0);
       let setsWonAway = realPriorSets ? realPriorSets[1] : (existing?.awayScore ?? 0);
+      let base: [number, number];
       let vollSets: Array<[number, number]>;
-      if (prevSets.length === 0) {
-        // Same first-sighting-mid-match reasoning as tennis's builder — no
-        // [0,0] padding (a set can't really end 0-0, so that placeholder
-        // read as a wrong real score, not "no data"). A single real column,
-        // even mislabeled positionally, is honest data in the wrong slot.
-        vollSets = [[sc.home_score, sc.away_score]];
+      if (prevBase === null) {
+        base = cumulative;
+        vollSets = [[0, 0]];
       } else if (currentSetNum > prevSets.length) {
+        const finishedDelta = prevSets[prevSets.length - 1] ?? [0, 0];
         if (!realPriorSets) {
-          const finished = prevSets[prevSets.length - 1]!;
-          if (finished[0] > finished[1]) setsWonHome++;
-          else if (finished[1] > finished[0]) setsWonAway++;
+          if (finishedDelta[0] > finishedDelta[1]) setsWonHome++;
+          else if (finishedDelta[1] > finishedDelta[0]) setsWonAway++;
         }
-        vollSets = [...prevSets, [sc.home_score, sc.away_score]];
+        base = [prevBase[0] + finishedDelta[0], prevBase[1] + finishedDelta[1]];
+        const delta: [number, number] = [
+          Math.max(0, cumulative[0] - base[0]),
+          Math.max(0, cumulative[1] - base[1]),
+        ];
+        vollSets = [...prevSets, delta];
       } else {
-        vollSets = [...prevSets.slice(0, -1), [sc.home_score, sc.away_score]];
+        base = prevBase;
+        const delta: [number, number] = [
+          Math.max(0, cumulative[0] - base[0]),
+          Math.max(0, cumulative[1] - base[1]),
+        ];
+        vollSets = [...prevSets.slice(0, -1), delta];
       }
 
       const state: LiveMatchState = {
@@ -8973,7 +9017,7 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
         markets: baseMarkets,
         events: [],
         _lastSeenAt: Date.now(),
-        _liveExtra: { vollSets, currentPts: [sc.home_score, sc.away_score] },
+        _liveExtra: { vollSets, currentPts: vollSets[vollSets.length - 1]!, propLineSetBaseGames: base },
       };
       liveMatchState.set(id, state);
       results.push(state);
