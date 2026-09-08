@@ -8816,6 +8816,7 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractPropLineTennisOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+      const preMatchOdds = makeTennisBaseOdds(home, away);
 
       // Real sample confirmed 2026-09-08: period can be "Set 2 · sets 1-0" —
       // PropLine DOES embed the completed-sets score in this string (not
@@ -8876,6 +8877,25 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
         sets = [...prevSets.slice(0, -1), delta];
       }
 
+      // "Odds não estão calculada diretamente" (reported 2026-09-08): a
+      // flat resultOdds ?? preMatchOdds fallback showed the same unmoving
+      // pré-jogo price regardless of who's actually ahead in games/sets —
+      // e.g. two players tied 4-4 both showing 4.25 is fine, but a player
+      // leading 5-2 still showing the pré-jogo price is not "calculated"
+      // from the live state at all. PulseScore's tennis builder already
+      // solves this with computeTennisLiveOdds (a score-aware model that
+      // still prefers a real bookmaker price when one is matched) — reused
+      // here instead of a static fallback.
+      const liveOddsState = computeTennisLiveOdds(
+        preMatchOdds,
+        sets,
+        setsWonHome,
+        setsWonAway,
+        undefined,
+        undefined,
+        resultOdds ?? undefined,
+      );
+
       const state: LiveMatchState = {
         id,
         home,
@@ -8887,8 +8907,8 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
         awayScore: setsWonAway,
         minute: 0,
         status: tennisSetLabel(Math.max(1, currentSetNum)),
-        hasRealOdds: !!resultOdds,
-        odds: resultOdds ?? makeTennisBaseOdds(home, away),
+        hasRealOdds: liveOddsState.hasRealOdds,
+        odds: liveOddsState.odds,
         markets: baseMarkets,
         events: [],
         _lastSeenAt: Date.now(),
