@@ -25,22 +25,6 @@ const PALACE_CASINO_API_TOKEN = process.env["PALACE_CASINO_API_TOKEN"] ?? "";
 const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
-// ── Kill-switches (suspensão sem apagar código; rollback 1 clique) ─────────
-const ENABLE_PULSESCORE =
-  (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
-
-// PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
-//   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
-//   - NÃO FAZ: Estatísticas detalhadas, H2H, rankings, logos, play-by-play.
-// DESLIGADO POR DEFEITO (ENABLE_PULSESCORE=false) — ver comentário acima do
-// bloco ENABLE_*. Guardas em cada função pública de services/pulsescore/*.ts
-// garantem 0 rede enquanto desligado.
-const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
-const PULSESCORE_BASE_URL =
-  process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
-const PULSESCORE_BOOKMAKER =
-  process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
-
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
 // deterministic template when unset. Kept separate from the AI_AGENTS_*
@@ -73,15 +57,6 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
-// ── BET62 Live ──
-//
-//  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
-//    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
-//      polling para futebol e tênis; WebSocket (~1s) dedicado ao futebol
-//      mas ainda não consumido no payload ao vivo (só observação — ver
-//      footballWs.ts).
-//    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
-
 export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
@@ -89,10 +64,6 @@ export const CONFIG = {
   PALACE_CASINO_BASE_URL,
   PALACE_CASINO_API_TOKEN,
   PALACE_CASINO_CALLBACK_TOKEN,
-  ENABLE_PULSESCORE,
-  PULSESCORE_API_KEY,
-  PULSESCORE_BASE_URL,
-  PULSESCORE_BOOKMAKER,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

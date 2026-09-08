@@ -20,22 +20,6 @@ import {
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, applyFreebetBalanceDelta } from "../lib/ledger.js";
-import {
-  getPulseScoreFootballLive,
-  getPulseScoreFootballUsage,
-} from "../services/pulsescore/football.js";
-import {
-  getPulseScoreTennisLive,
-  getPulseScoreTennisUsage,
-} from "../services/pulsescore/tennis.js";
-import { pulseScoreFootballWsStatus } from "../services/pulsescore/footballWs.js";
-import {
-  pulseScoreBasketball,
-  pulseScoreHockey,
-  pulseScoreBaseball,
-  pulseScoreVolleyball,
-} from "../services/pulsescore/genericSportLive.js";
-import { pulseScoreRestUrl } from "../services/pulsescore/client.js";
 import { CONFIG } from "../lib/config.js";
 import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
 import { timingSafeEqualString } from "../lib/security.js";
@@ -43,8 +27,6 @@ import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
-import { countryForLeagueName } from "./matches.js";
-import { pulseScoreFetchFootballLeagues } from "../services/pulsescore/leagues.js";
 import {
   getPalaceCasinoProviders,
   getPalaceCasinoAgentInfo,
@@ -2163,169 +2145,6 @@ router.get(
   },
 );
 
-// Read-only diagnostic for the PulseScore integration (real bookmaker odds).
-// Each sport's live odds are built directly from this same feed by its own
-// buildXLiveFromPulseScore function in matches.ts (buildFootballLive.../
-// buildTennisLive.../buildBasketballLive.../buildHockeyLive.../
-// buildBaseballLive.../buildVolleyballLive...) — there is no separate
-// "overlay" step. All six come from a fresh REST fetch each tick. Bookmaker
-// pin per sport (confirmed against real samples, not a fixed convention —
-// verify against the actual *.ts extraction file before relying on this):
-// tennis=bet365, football/basketball/hockey=bwin, volleyball=unibetau.
-// Hockey and baseball currently have no LIVE builder wired into the public
-// feed (prematch/upcoming only) — this debug route still fetches their raw
-// live data for diagnostic purposes.
-router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PULSESCORE_API_KEY) {
-    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-    return;
-  }
-  try {
-    const [football, tennis, basketball, hockey, baseball, volleyball] =
-      await Promise.all([
-        getPulseScoreFootballLive(),
-        getPulseScoreTennisLive(),
-        pulseScoreBasketball.getLive(),
-        pulseScoreHockey.getLive(),
-        pulseScoreBaseball.getLive(),
-        pulseScoreVolleyball.getLive(),
-      ]);
-    res.json({
-      football: { count: football.length, events: football },
-      tennis: { count: tennis.length, events: tennis },
-      basketball: { count: basketball.length, events: basketball },
-      hockey: { count: hockey.length, events: hockey },
-      baseball: { count: baseball.length, events: baseball },
-      volleyball: { count: volleyball.length, events: volleyball },
-    });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/pulsescore-debug error");
-    res.status(500).json({
-      error: "Erro ao consultar PulseScore",
-      detail: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
-
-// PulseScore usage — same "Utilização" card the admin dashboard shows for
-// other providers, but PulseScore has no /user-request-count equivalent
-// to query from their side, so this reports what WE'VE counted ourselves
-// (see the requestsToday/framesToday counters in the pulsescore services).
-router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PULSESCORE_API_KEY) {
-    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-    return;
-  }
-  res.json({
-    football: { ...getPulseScoreFootballUsage(), ws: pulseScoreFootballWsStatus() },
-    tennis: getPulseScoreTennisUsage(),
-    basketball: pulseScoreBasketball.getUsage(),
-    hockey: pulseScoreHockey.getUsage(),
-    baseball: pulseScoreBaseball.getUsage(),
-    volleyball: pulseScoreVolleyball.getUsage(),
-  });
-});
-
-// Raw, uncached probe of PulseScore's /live-events endpoint — bypasses
-// getPulseScoreFootballLive()'s cache-and-swallow-errors behavior (built so
-// a transient failure never blows away the live board, but that same
-// behavior hides a persistent failure behind stale data with no visible
-// error anywhere in the UI). Confirmed in production (2026-08-08) via
-// Railway's Deploy Logs: football's live poller was getting a persistent
-// 401 while tennis's got a 429 (rate-limited, so its key IS accepted) in
-// the same window — this endpoint exists so that comparison can be re-run
-// from the admin panel instead of needing Railway shell/log access every
-// time, since PULSESCORE_API_KEY is the same for both sports/paths.
-router.get("/pulsescore-live-check", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PULSESCORE_API_KEY) {
-    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-    return;
-  }
-  const probe = async (sport: string, bookmaker: string) => {
-    const url = pulseScoreRestUrl(`/live-events?sport=${sport}&limit=5`, bookmaker);
-    const startedAt = Date.now();
-    try {
-      const resp = await fetch(url, {
-        headers: { "X-Secret": CONFIG.PULSESCORE_API_KEY },
-        signal: AbortSignal.timeout(6000),
-      });
-      const bodyText = await resp.text();
-      return {
-        sport,
-        status: resp.status,
-        ok: resp.ok,
-        tookMs: Date.now() - startedAt,
-        bodyPreview: bodyText.slice(0, 500),
-      };
-    } catch (err) {
-      return {
-        sport,
-        status: null,
-        ok: false,
-        tookMs: Date.now() - startedAt,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  };
-  // Explicit bookmaker per sport, matching each sport's real current live
-  // pipeline (bwin for football since the 2026-08-08 switch, bet365 for
-  // tennis — see football.ts/tennis.ts) — this used to omit the bookmaker
-  // and silently fall back to CONFIG.PULSESCORE_BOOKMAKER's "bet365"
-  // default for both probes, which meant football's diagnostic result no
-  // longer reflected the bookmaker football actually runs on (audit
-  // finding, 2026-08-10).
-  const [football, tennis] = await Promise.all([
-    probe("soccer", "bwin"),
-    probe("tennis", "bet365"),
-  ]);
-  res.json({ football, tennis, checkedAt: new Date().toISOString() });
-});
-
-// Read-only diagnostic ahead of a possible PulseScore fixtures cutover:
-// PulseScore's league listing has no country field (just a flat league
-// name), while our whole catalog (blocking, priority, market tier) is keyed
-// by "country: league". This reports what fraction of bet365's actual
-// prematch football league list we can already resolve a country for via
-// countryForLeagueName() (derived from DOMESTIC_PRIORITY) — the real
-// coverage number needed to decide whether that migration is safe yet,
-// instead of guessing from the league count alone.
-router.get(
-  "/pulsescore-league-coverage",
-  adminMiddleware,
-  async (_req: AdminRequest, res) => {
-    if (!CONFIG.PULSESCORE_API_KEY) {
-      res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-      return;
-    }
-    try {
-      const leagues = await pulseScoreFetchFootballLeagues();
-      const resolved: Array<{ league: string; country: string; eventCount: number }> = [];
-      const unresolved: Array<{ league: string; eventCount: number }> = [];
-      for (const l of leagues) {
-        const country = countryForLeagueName(l.league);
-        if (country) resolved.push({ league: l.league, country, eventCount: l.eventCount });
-        else unresolved.push({ league: l.league, eventCount: l.eventCount });
-      }
-      res.json({
-        totalLeagues: leagues.length,
-        resolvedCount: resolved.length,
-        unresolvedCount: unresolved.length,
-        coveragePct:
-          leagues.length > 0
-            ? Math.round((resolved.length / leagues.length) * 1000) / 10
-            : 0,
-        resolved,
-        unresolved,
-      });
-    } catch (err) {
-      logger.error({ err }, "GET /api/admin/pulsescore-league-coverage error");
-      res.status(500).json({
-        error: "Erro ao consultar ligas do PulseScore",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
-  },
-);
 
 // Read-only diagnostic for the Palace Casino integration. Includes
 // agent/info specifically so the account's configured currency can be

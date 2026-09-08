@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { CONFIG } from "../lib/config.js";
 
 const router: IRouter = Router();
 
@@ -19,23 +18,17 @@ router.get("/version", (_req, res) => {
   res.json({ commit: process.env["RAILWAY_GIT_COMMIT_SHA"] ?? null });
 });
 
-// Estado dos providers esportivos: flags kill-switch + último fetch com
-// sucesso por fornecedor. Útil para diagnosticar se PulseScore está
-// realmente SUSPENSO (sem 1 rede) após deploy.
+// All sports-data providers removed (2026-09-08) — kept as a stub returning
+// empty flags/keys rather than 404, so any existing consumer of this
+// diagnostic route degrades gracefully instead of breaking.
 // Rota não validada (mesmo espírito que /version) para não tocar no
 // contrato zod gerado por orval.
 router.get("/health-data-providers", (_req, res) => {
   const g = globalThis as any;
   res.json({
-    flags: {
-      ENABLE_PULSESCORE: CONFIG.ENABLE_PULSESCORE,
-    },
-    keys: {
-      PULSESCORE_API_KEY_SET: CONFIG.PULSESCORE_API_KEY.length > 0,
-    },
-    lastSuccessfulFetch: {
-      pulsescore: g.__lastFetchTs?.pulsescore ?? null,
-    },
+    flags: {},
+    keys: {},
+    lastSuccessfulFetch: {},
     providerQualityDebug: g.__providerQualityDebug ?? null,
     livePayloadDebug: g.__livePayloadDebug ?? null,
   });
