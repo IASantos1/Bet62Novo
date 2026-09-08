@@ -8753,7 +8753,17 @@ async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
   return results;
 }
 
-const PROPLINE_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
+// 120s, not the 15s every other PropLine live builder uses — confirmed
+// real (2026-09-08): PropLine's tennis /scores feed is noisy at the scale
+// of hundreds of concurrent matches (contradictory period strings like
+// "Set 1 · sets 0-1", finals with null scores) and is itself cached for
+// 30s (common.ts's SCORES_TTL_MS), so a single bad/truncated snapshot was
+// enough to make a genuinely still-live match disappear from `events` for
+// a full cache cycle and get finalized as "concluded" — reported in
+// production, matches still in set 1 showing as finished. 120s survives
+// a couple of bad cycles before giving up, same spirit as this app's
+// existing 5-minute mergeStickyLive grace for other flaky provider feeds.
+const PROPLINE_TENNIS_DISAPPEAR_GRACE_MS = 120_000;
 
 /** Tennis live from PropLine — same disappearance-based finalize pattern as
  * every other PropLine live builder. See tennis.ts's header for why this
@@ -8817,16 +8827,17 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
       let sets: Array<[number, number]>;
       if (prevSets.length === 0) {
         // First time we're seeing this match — if it's already past set 1
-        // (very common: PropLine only becomes the active source once
-        // PulseScore/GoalServe fail, which can happen mid-match), pad with
-        // [0,0] placeholders for the sets we never observed instead of
-        // writing the current set's real score into the "S1" column, which
-        // would mislabel it as an earlier set than it actually is.
-        const placeholders: Array<[number, number]> = Array.from(
-          { length: Math.max(0, currentSetNum - 1) },
-          () => [0, 0],
-        );
-        sets = [...placeholders, [sc.home_score, sc.away_score]];
+        // (common: PropLine only becomes the active source once PulseScore/
+        // GoalServe fail, which can happen mid-match), do NOT pad earlier
+        // columns with [0,0]: a tennis set can never actually end 0-0, so
+        // that placeholder reads as a real (wrong) score rather than "no
+        // data" — reported in production as "placar de sets errado". A
+        // single real column (mislabeled "S1" even when it's really set 2+,
+        // since the frontend labels columns by position) is honest data in
+        // the wrong slot, not a fabricated number — strictly better. The
+        // status badge (tennisSetLabel below) still shows the true set
+        // number regardless of this table's column count.
+        sets = [[sc.home_score, sc.away_score]];
       } else if (currentSetNum > prevSets.length) {
         if (!realPriorSets) {
           const finished = prevSets[prevSets.length - 1]!;
@@ -8882,7 +8893,9 @@ async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
   return results;
 }
 
-const PROPLINE_VOLLEYBALL_DISAPPEAR_GRACE_MS = 15_000;
+// Same 120s reasoning as tennis's grace above — matches PropLine's own
+// 30s cache TTL with room for a couple of bad cycles.
+const PROPLINE_VOLLEYBALL_DISAPPEAR_GRACE_MS = 120_000;
 
 /** Volleyball live from PropLine — same pattern/caveat as tennis above.
  * Same schema limitation confirmed for tennis applies here too: PropLine's
@@ -8928,14 +8941,11 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
       let setsWonAway = realPriorSets ? realPriorSets[1] : (existing?.awayScore ?? 0);
       let vollSets: Array<[number, number]>;
       if (prevSets.length === 0) {
-        // Same first-sighting-mid-match caveat as tennis's builder — pad
-        // with [0,0] placeholders so the current set's real score lands in
-        // the correct column instead of being mislabeled as set 1.
-        const placeholders: Array<[number, number]> = Array.from(
-          { length: Math.max(0, currentSetNum - 1) },
-          () => [0, 0],
-        );
-        vollSets = [...placeholders, [sc.home_score, sc.away_score]];
+        // Same first-sighting-mid-match reasoning as tennis's builder — no
+        // [0,0] padding (a set can't really end 0-0, so that placeholder
+        // read as a wrong real score, not "no data"). A single real column,
+        // even mislabeled positionally, is honest data in the wrong slot.
+        vollSets = [[sc.home_score, sc.away_score]];
       } else if (currentSetNum > prevSets.length) {
         if (!realPriorSets) {
           const finished = prevSets[prevSets.length - 1]!;
@@ -8991,7 +9001,8 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
   return results;
 }
 
-const PROPLINE_MMA_DISAPPEAR_GRACE_MS = 15_000;
+// Same 120s reasoning as tennis's grace above.
+const PROPLINE_MMA_DISAPPEAR_GRACE_MS = 120_000;
 
 /** MMA/boxing live from PropLine — same pattern/caveat as tennis above.
  * Unlike every other PropLine sport, mma had NO live tri-fallback wiring
