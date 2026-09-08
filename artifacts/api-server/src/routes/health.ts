@@ -1,21 +1,5 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { CONFIG } from "../lib/config.js";
-import { isUpcomingFixtureByStateOrKickoff as gsIsUpcoming } from "../services/goalserve/factory.js";
-import {
-  getGoalServeFootballUpcomingRaw,
-  getGoalServeFootballLiveRaw,
-} from "../services/goalserve/football.js";
-import { getGoalServeTennisUpcomingRaw, getGoalServeTennisLiveRaw } from "../services/goalserve/tennis.js";
-import { getGoalServeBasketballUpcomingRaw, getGoalServeBasketballLiveRaw } from "../services/goalserve/basketball.js";
-import { getGoalServeHockeyUpcomingRaw, getGoalServeHockeyLiveRaw } from "../services/goalserve/hockey.js";
-import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "../services/goalserve/baseball.js";
-import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
-import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
-import { propLineGetDebug, PropLineApiError, propLineQuota } from "../services/propline/client.js";
-import { propLineWebSocketStatus } from "../services/propline/websocket.js";
-import { getPropLineScores, getPropLineScoresLastErrors } from "../services/propline/common.js";
-import { PROPLINE_FOOTBALL_SPORT_KEYS, PROPLINE_FOOTBALL_LEAGUE_TITLES } from "../services/propline/football.js";
 
 const router: IRouter = Router();
 
@@ -34,30 +18,17 @@ router.get("/version", (_req, res) => {
   res.json({ commit: process.env["RAILWAY_GIT_COMMIT_SHA"] ?? null });
 });
 
-// Estado dos providers esportivos: flags kill-switch + último fetch com
-// sucesso por fornecedor. Útil para confirmar rapidamente se GoalServe é o
-// fornecedor ativo, e para diagnosticar se SportMonks/PulseScore estão
-// realmente SUSPENSOS (sem 1 rede) após deploy.
+// All sports-data providers removed (2026-09-08) — kept as a stub returning
+// empty flags/keys rather than 404, so any existing consumer of this
+// diagnostic route degrades gracefully instead of breaking.
 // Rota não validada (mesmo espírito que /version) para não tocar no
 // contrato zod gerado por orval.
 router.get("/health-data-providers", (_req, res) => {
   const g = globalThis as any;
   res.json({
-    flags: {
-      ENABLE_GOALSERVE: CONFIG.ENABLE_GOALSERVE,
-      ENABLE_SPORTMONKS: CONFIG.ENABLE_SPORTMONKS,
-      ENABLE_PULSESCORE: CONFIG.ENABLE_PULSESCORE,
-    },
-    keys: {
-      GOALSERVE_API_KEY_SET: CONFIG.GOALSERVE_API_KEY.length > 0,
-      SPORTMONKS_API_KEY_SET: CONFIG.SPORTMONKS_API_KEY.length > 0,
-      PULSESCORE_API_KEY_SET: CONFIG.PULSESCORE_API_KEY.length > 0,
-    },
-    lastSuccessfulFetch: {
-      goalserve: g.__lastFetchTs?.goalserve ?? null,
-      sportmonks: g.__lastFetchTs?.sportmonks ?? null,
-      pulsescore: g.__lastFetchTs?.pulsescore ?? null,
-    },
+    flags: {},
+    keys: {},
+    lastSuccessfulFetch: {},
     providerQualityDebug: g.__providerQualityDebug ?? null,
     livePayloadDebug: g.__livePayloadDebug ?? null,
   });
@@ -71,249 +42,6 @@ router.get("/debug-provider-quality", (_req, res) => {
     live: g.__providerQualityDebug?.live ?? {},
     livePayload: g.__livePayloadDebug ?? null,
   });
-});
-
-router.get("/debug-goalserve", async (_req, res) => {
-  function summarize(
-    fixtures: {
-      providerId?: string;
-      matchId?: string;
-      home?: string;
-      away?: string;
-      league?: string;
-      stateId?: number;
-      kickoffTimestamp?: number;
-      liveMinute?: number;
-      liveClockSec?: number;
-      liveClockStr?: string;
-      score?: { home: number; away: number };
-      odds?: unknown[];
-    }[],
-    label: string,
-  ) {
-    const total = fixtures.length;
-    const stateCounts: Record<string, number> = {};
-    let emptyHome = 0;
-    let emptyAway = 0;
-    let emptyLeague = 0;
-    let passedGsUpcoming = 0;
-    let withClock = 0;
-    let withScore = 0;
-    let withOdds = 0;
-    const topEmpty: Array<{ id: string; where: "home" | "away" | "league"; raw: any }> = [];
-    for (const f of fixtures) {
-      const sid = String(f?.stateId ?? "undefined");
-      stateCounts[sid] = (stateCounts[sid] ?? 0) + 1;
-      if (!f?.home?.trim()) {
-        emptyHome++;
-        if (topEmpty.length < 10) topEmpty.push({ id: f?.matchId ?? f?.providerId ?? "", where: "home", raw: f });
-      }
-      if (!f?.away?.trim()) {
-        emptyAway++;
-        if (topEmpty.length < 10) topEmpty.push({ id: f?.matchId ?? f?.providerId ?? "", where: "away", raw: f });
-      }
-      if (!f?.league?.trim()) {
-        emptyLeague++;
-        if (topEmpty.length < 10) topEmpty.push({ id: f?.matchId ?? f?.providerId ?? "", where: "league", raw: f });
-      }
-      if (gsIsUpcoming({ stateId: f.stateId, kickoffTimestamp: f.kickoffTimestamp })) passedGsUpcoming++;
-      if (
-        Number.isFinite(Number(f?.liveClockSec)) ||
-        !!f?.liveClockStr ||
-        Number(f?.liveMinute ?? 0) > 0
-      ) {
-        withClock++;
-      }
-      if (
-        f?.score &&
-        Number.isFinite(Number(f.score.home)) &&
-        Number.isFinite(Number(f.score.away))
-      ) {
-        withScore++;
-      }
-      if (Array.isArray(f?.odds) && f.odds.length > 0) {
-        withOdds++;
-      }
-    }
-    return {
-      label,
-      total,
-      stateCounts,
-      emptyHome,
-      emptyAway,
-      emptyLeague,
-      passedGsUpcomingFilter: passedGsUpcoming,
-      withClock,
-      withScore,
-      withOdds,
-      topEmptySamples: topEmpty,
-    };
-  }
-  try {
-    if (!CONFIG.ENABLE_GOALSERVE) {
-      res.status(200).json({ enabled: false, message: "ENABLE_GOALSERVE=false; saltei debug GoalServe." });
-      return;
-    }
-    const start = Date.now();
-    const [
-      football_up_raw,
-      football_lv_raw,
-      tennis_up_raw,
-      tennis_lv_raw,
-      basket_up_raw,
-      basket_lv_raw,
-      hockey_up_raw,
-      hockey_lv_raw,
-      baseball_up_raw,
-      baseball_lv_raw,
-      volley_up_raw,
-      volley_lv_raw,
-      mma_up_raw,
-      mma_lv_raw,
-    ] = await Promise.all([
-      getGoalServeFootballUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeFootballLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeTennisUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeTennisLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeBasketballUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeBasketballLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeHockeyUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeHockeyLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeBaseballUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeBaseballLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeVolleyballUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeVolleyballLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeMmaUpcomingRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-      getGoalServeMmaLiveRaw().catch((e) => [{ error: String(e?.message ?? e) } as any]),
-    ]);
-    res.status(200).json({
-      ms: Date.now() - start,
-      sports: {
-        football: {
-          upcoming: summarize(football_up_raw, "football-upcoming"),
-          live: summarize(football_lv_raw, "football-live"),
-        },
-        tennis: {
-          upcoming: summarize(tennis_up_raw, "tennis-upcoming"),
-          live: summarize(tennis_lv_raw, "tennis-live"),
-        },
-        basketball: {
-          upcoming: summarize(basket_up_raw, "basketball-upcoming"),
-          live: summarize(basket_lv_raw, "basketball-live"),
-        },
-        hockey: {
-          upcoming: summarize(hockey_up_raw, "hockey-upcoming"),
-          live: summarize(hockey_lv_raw, "hockey-live"),
-        },
-        baseball: {
-          upcoming: summarize(baseball_up_raw, "baseball-upcoming"),
-          live: summarize(baseball_lv_raw, "baseball-live"),
-        },
-        volleyball: {
-          upcoming: summarize(volley_up_raw, "volleyball-upcoming"),
-          live: summarize(volley_lv_raw, "volleyball-live"),
-        },
-        mma: {
-          upcoming: summarize(mma_up_raw, "mma-upcoming"),
-          live: summarize(mma_lv_raw, "mma-live"),
-        },
-      },
-      lastSuccessfulFetch: {
-        goalserve: (globalThis as any).__lastFetchTs?.goalserve ?? null,
-      },
-    });
-  } catch (err: any) {
-    res.status(500).json({
-      error: String(err?.message ?? err),
-      stack: String(err?.stack ?? "").slice(0, 800),
-    });
-  }
-});
-
-// Manual pass-through to the PropLine odds API (api.prop-line.com) — lets
-// the integration being explored (services/propline/*) be checked from a
-// plain browser URL against REAL responses. Works even while
-// ENABLE_PROPLINE is off (propLineGetDebug bypasses that killswitch) —
-// only PROPLINE_API_KEY needs to be configured. `path` must start with "/"
-// and NOT include the "/v1" prefix (already baked into PROPLINE_BASE_URL),
-// e.g. /api/debug-propline?path=/sports or
-// /api/debug-propline?path=/sports/soccer_brasileirao/odds&markets=h2h —
-// every other query param is forwarded to PropLine as-is.
-router.get("/debug-propline", async (req, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(200).json({ error: "PROPLINE_API_KEY não configurada" });
-    return;
-  }
-  const path = String(req.query["path"] ?? "");
-  if (!path.startsWith("/")) {
-    res.status(400).json({
-      error: 'query param "path" é obrigatório e deve começar com "/", ex: /sports',
-    });
-    return;
-  }
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.query)) {
-    if (key === "path") continue;
-    if (typeof value === "string") params[key] = value;
-  }
-  try {
-    const data = await propLineGetDebug<unknown>(path, params, 12_000);
-    res.status(200).json({ data, quota: propLineQuota });
-  } catch (err) {
-    if (err instanceof PropLineApiError) {
-      res.status(err.status).json({ error: err.message, detail: err.detail });
-      return;
-    }
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
-  }
-});
-
-// Quick visibility into the PropLine websocket connection (services/propline/
-// websocket.ts) without needing to grep server logs — public read-only
-// status, no key required to view (the key itself is never exposed here).
-router.get("/debug-propline-ws", (_req, res) => {
-  res.status(200).json(propLineWebSocketStatus());
-});
-
-// Diagnoses "só aparece 1 jogo ao vivo de futebol" (2026-09-08 report):
-// buildFootballLiveFromPropLine() fans out one /scores call per one of the
-// 24 curated leagues every tick; getPropLineScores()'s catch block used to
-// swallow a rate-limited/quota-exhausted league silently, making "this
-// league truly has 0 live matches" indistinguishable from "this league's
-// call got 429'd this tick". This route calls every league's /scores
-// (through the same 30s cache buildFootballLiveFromPropLine uses, so it
-// won't itself blow the quota) and reports each one's in_progress count
-// plus any last fetch error, so a rate-limit root cause is visible without
-// needing Railway logs.
-router.get("/debug-propline-live-status", async (_req, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(200).json({ error: "PROPLINE_API_KEY não configurada" });
-    return;
-  }
-  try {
-    const perLeague = await Promise.all(
-      PROPLINE_FOOTBALL_SPORT_KEYS.map(async (sportKey) => {
-        const events = await getPropLineScores(sportKey);
-        return {
-          sportKey,
-          title: PROPLINE_FOOTBALL_LEAGUE_TITLES[sportKey] ?? sportKey,
-          total: events.length,
-          inProgress: events.filter((e) => e.status === "in_progress").length,
-          inProgressMatches: events
-            .filter((e) => e.status === "in_progress")
-            .map((e) => ({ home: e.home_team, away: e.away_team, period: e.period, home_score: e.home_score, away_score: e.away_score })),
-        };
-      }),
-    );
-    res.status(200).json({
-      quota: propLineQuota,
-      lastErrors: getPropLineScoresLastErrors(),
-      totalInProgress: perLeague.reduce((sum, l) => sum + l.inProgress, 0),
-      perLeague,
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
-  }
 });
 
 export default router;

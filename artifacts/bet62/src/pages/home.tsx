@@ -7025,14 +7025,15 @@ export default function Home({
       .finally(() => setConfrontosLoading(false));
   }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Próximos Jogos — each team's next fixtures, real SportMonks data
-  // (football only, sportmonks-football-* matchIds — see /team-upcoming).
+  // Próximos Jogos — each team's next fixtures. Used to be sourced from
+  // SportMonks (sportmonks-football-* matchIds); that provider was removed
+  // 2026-09-08 and /api/matches/team-upcoming now always returns [], but the
+  // fetch is kept so the section degrades gracefully instead of crashing.
   useEffect(() => {
     setHomeUpcoming([]);
     setAwayUpcoming([]);
     if (!expandedMatch) return;
     const rawId = getProviderMatchId(expandedMatch.id);
-    if (!rawId.startsWith("sportmonks-football-")) return;
     for (const [side, setter] of [
       ["home", setHomeUpcoming],
       ["away", setAwayUpcoming],
