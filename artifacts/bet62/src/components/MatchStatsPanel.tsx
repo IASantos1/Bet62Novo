@@ -27,6 +27,7 @@ type MatchStatsData = {
 type FormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; home: boolean };
 type H2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
 type ConfrontosData = { homeWins: number; awayWins: number; draws: number; recentMeetings: H2HMeeting[]; team1Name: string; team2Name: string; sport: string };
+type TeamUpcomingEntry = { date: string; opponent: string; competition: string; isHome: boolean };
 type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
 type StandingRow = {
   pos: number;
@@ -181,6 +182,8 @@ type Props = {
   v2StatsGroups: V2StatsGroup[] | null;
   v2StatsLoading: boolean;
   confrontosData: ConfrontosData | null;
+  homeUpcoming?: TeamUpcomingEntry[];
+  awayUpcoming?: TeamUpcomingEntry[];
   onGoH2H: () => void;
   onGoLive: () => void;
   onAddInsight?: (market: string, odds: number) => void;
@@ -573,7 +576,7 @@ export default function MatchStatsPanel({
   homeTeam, awayTeam, league, sport, isLive, liveMinute, isHalfTime,
   matchStats, matchStatsLoading,
   v2StatsGroups, v2StatsLoading,
-  confrontosData, onGoH2H, onGoLive, onAddInsight,
+  confrontosData, homeUpcoming = [], awayUpcoming = [], onGoH2H, onGoLive, onAddInsight,
   liveExtra, storyline,
   standings, standingsGroups, standingsLoading, standingsLeague,
   homeScore, awayScore,
@@ -1463,6 +1466,33 @@ export default function MatchStatsPanel({
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {(homeUpcoming.length > 0 || awayUpcoming.length > 0) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { team: homeTeam, list: homeUpcoming },
+                    { team: awayTeam, list: awayUpcoming },
+                  ].map(({ team, list }) =>
+                    list.length > 0 ? (
+                      <div key={team} className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                        <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 truncate">
+                          Próximos Jogos · {team}
+                        </div>
+                        <div className="space-y-1.5">
+                          {list.map((f, i) => (
+                            <div key={i} className="flex items-center gap-2 text-[11px]">
+                              <span className="text-zinc-500 shrink-0 w-16 tabular-nums">{f.date}</span>
+                              <span className="flex-1 text-zinc-300 truncate">
+                                {f.isHome ? "vs " : "@ "}{f.opponent}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null,
+                  )}
                 </div>
               )}
             </div>

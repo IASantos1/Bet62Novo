@@ -50,8 +50,18 @@ export type SettlementResult = {
 };
 
 const ENGINE_VERSION = "2025.06-v4";
-const NO_RESULT_AUTO_VOID_TIMEOUT_MS =
-  SETTLEMENT_TIMEOUT_HOURS * 60 * 60 * 1000;
+// Computed lazily (not a top-level const) — settlementHelpers.ts is reached
+// via a circular import path (settlement.ts -> jobs/settlementRecovery.js ->
+// services/settlement/settleBet.ts -> here -> back to settlement.ts for
+// SETTLEMENT_TIMEOUT_HOURS) while settlement.ts's own module body is still
+// mid-evaluation (hasn't reached its SETTLEMENT_TIMEOUT_HOURS declaration
+// yet), so reading it at THIS module's top level throws "Cannot access
+// before initialization". Deferring the read to inside a function — called
+// long after both modules have finished loading — resolves the same live
+// binding without the ordering hazard.
+function getNoResultAutoVoidTimeoutMs(): number {
+  return SETTLEMENT_TIMEOUT_HOURS * 60 * 60 * 1000;
+}
 
 const settlementStats: Record<
   string,
@@ -118,7 +128,7 @@ export function resolveSelectionOutcome(
     const kickoffTs = parseSelectionKickoffTimestamp(sel);
     if (
       Number.isFinite(kickoffTs) &&
-      Date.now() - (kickoffTs as number) >= NO_RESULT_AUTO_VOID_TIMEOUT_MS
+      Date.now() - (kickoffTs as number) >= getNoResultAutoVoidTimeoutMs()
     ) {
       updateSettlementStats(
         normalizedKey,

@@ -365,6 +365,87 @@ const tennisCases: FinishedSettlementCase[] = [
     expected: "won",
   },
   {
+    name: "tennis 2nd set exact score 4-6 is settled as won",
+    selection: makeSelection("sc2-4-6"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [4, 6],
+            [6, 2],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis 2nd set game handicap home -2.5 is settled as won",
+    selection: makeSelection("gh2-home-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [4, 6],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis 2nd set game handicap does not settle off the 1st set's score",
+    selection: makeSelection("gh2-home-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 0],
+            [6, 4],
+          ],
+        },
+      },
+    },
+    expected: "lost",
+  },
+  {
+    name: "tennis 2nd set home player total games over is settled as won",
+    selection: makeSelection("hpg2-o", { marketLine: 5.5 }),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis 2nd set away player total games under is settled as won",
+    selection: makeSelection("apg2-u", { marketLine: 4.5 }),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
     name: "tennis away wins at least one set no is settled as won",
     selection: makeSelection("wal2-no"),
     ft: { home: 2, away: 0 },
@@ -536,6 +617,107 @@ const tennisCases: FinishedSettlementCase[] = [
       },
     },
     expected: "won",
+  },
+  // ssw- ("Vence sem perder Set?" / onexbet's "Any Player To Win All
+  // Sets") had UI but no settlement branch before this session — a 2-0
+  // sweep must settle "yes".
+  {
+    name: "tennis straight sets winner yes is settled as won on a 2-0 sweep",
+    selection: makeSelection("ssw-yes"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis straight sets winner no is settled as won when the match went 3 sets",
+    selection: makeSelection("ssw-no"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [3, 6],
+            [6, 2],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis straight sets winner stays pending while the match is still undecided",
+    selection: makeSelection("ssw-yes"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[6, 4]],
+        },
+      },
+    },
+    expected: null,
+  },
+  // fstb- ("Tie-Break Or Extra Games In The Final Set") — did the deciding
+  // (last) set go past a clean finish, i.e. end 7-5 or 7-6?
+  {
+    name: "tennis final set tie-break or extra yes is settled as won on a 7-6 decider",
+    selection: makeSelection("fstb-yes"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [3, 6],
+            [7, 6],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis final set tie-break or extra no is settled as won on a clean 6-2 decider",
+    selection: makeSelection("fstb-no"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [3, 6],
+            [6, 2],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis final set tie-break or extra stays pending while the match is still undecided",
+    selection: makeSelection("fstb-yes"),
+    ft: { home: 1, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 4],
+            [3, 6],
+          ],
+        },
+      },
+    },
+    expected: null,
   },
 ];
 

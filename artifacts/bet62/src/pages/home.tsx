@@ -40,7 +40,6 @@ import {
   RefreshCw,
   Ticket,
   Search,
-  ArrowLeft,
   ExternalLink,
   Radio,
   Star,
@@ -158,6 +157,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import PlayerProfileModal from "@/components/PlayerProfileModal";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -489,42 +489,6 @@ type CasinoGame = {
 // ilike specifically so this doesn't have to be byte-perfect (see
 // routes/casino.ts's provider filter comment).
 const CASINO_DEFAULT_PROVIDER = "Pragmatic";
-// BET62 Live + Match Tracker + Streaming (BetBY live list + StatScore/
-// Statpal tracker + SMYTDRYT stream) — separate pipeline/ID scheme from the
-// existing Statpal/SportsAPI-backed live matches above. GET /api/live is a
-// single "LiveAggregator" feed with tracker + stream embedded inline (no
-// separate polling needed to see score/incidents); only rendered when a
-// BetBY event has a stream ready.
-type MatchTracker = {
-  provider: "statscore" | "pulsescore" | "statpal" | "sportscore";
-  eventId: string;
-  status: string;
-  minute: string;
-  homeScore: number;
-  awayScore: number;
-  incidents: Array<{ type: string; team: string; minute: number; player: string }>;
-  homeFormation?: string | null;
-  awayFormation?: string | null;
-  homeHalfTimeScore?: number | null;
-  awayHalfTimeScore?: number | null;
-  lineupConfirmed?: boolean | null;
-};
-type LiveTrackerEvent = {
-  eventId?: string;
-  // Our own match id (Statpal-sourced) — used to poll the Tracker directly
-  // (StatScore/SportScore/Statpal/PulseScore).
-  matchId?: string;
-  sport: string;
-  league: string;
-  country: string;
-  home: string;
-  away: string;
-  status: "LIVE" | "PREMATCH" | "FINISHED";
-  minute?: string;
-  score: { home: number; away: number };
-  tracker?: MatchTracker;
-  statscoreEventId?: string;
-};
 type CasinoBanner = {
   id: number;
   title: string;
@@ -2038,34 +2002,6 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
 
 const ARENA_BANNER = "/arena-banner.png";
 
-function buildSportsApiTeamLogoUrl(
-  sport: string | undefined,
-  teamId?: string,
-  imageVersion?: string,
-): string | undefined {
-  const cleanId = String(teamId ?? "").trim();
-  const cleanSport = String(sport ?? "football")
-    .trim()
-    .toLowerCase();
-  if (!cleanId) return undefined;
-  if (
-    ![
-      "football",
-      "basketball",
-      "hockey",
-      "tennis",
-      "baseball",
-      "volleyball",
-    ].includes(cleanSport)
-  ) {
-    return undefined;
-  }
-  const params = new URLSearchParams();
-  if (imageVersion) params.set("imageVersion", imageVersion);
-  const query = params.toString();
-  return `/api/matches/team-logo/${encodeURIComponent(cleanSport)}/${encodeURIComponent(cleanId)}${query ? `?${query}` : ""}`;
-}
-
 function getTeamBadgeAsset(
   match: Pick<
     Match,
@@ -2082,22 +2018,12 @@ function getTeamBadgeAsset(
   >,
   side: "home" | "away",
 ): { src?: string; fit: "cover" | "contain"; padded: boolean } {
-  // API-Football's crest URL is already the finished asset — no ID-to-URL
-  // construction needed, and it resolves for teams buildSportsApiTeamLogoUrl
-  // sometimes can't (lower-coverage leagues with no SportsAPI team ID
-  // cached yet). Preferred when present; falls through to the SportsAPI
-  // path otherwise, unchanged.
+  // homeLogoUrl/awayLogoUrl is already the finished asset URL — no ID-to-URL
+  // construction needed (populated from SportMonks's own image_path for
+  // football; other sports simply have no crest source once the SportsAPI
+  // Pro V2 image proxy was removed, 2026-09-03).
   const directLogo = side === "home" ? match.homeLogoUrl : match.awayLogoUrl;
   if (directLogo) return { src: directLogo, fit: "contain", padded: true };
-  const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
-  const imageVersion =
-    side === "home" ? match.homeImageVersion : match.awayImageVersion;
-  const officialLogo = buildSportsApiTeamLogoUrl(
-    match.sport,
-    teamId,
-    imageVersion,
-  );
-  if (officialLogo) return { src: officialLogo, fit: "contain", padded: true };
   // No local-banner fallback here on purpose — TEAM_BANNERS holds wide
   // promotional photos (getMatchBanner's card-background art), not circular
   // crest logos. Cropping one into the small round badge slot showed a
@@ -2490,7 +2416,7 @@ function normalizeTicketSelectionKey(selection: string): string {
 
 function inferSelectionSport(selection: string): "football" | "tennis" | "basketball" | "baseball" | "hockey" | "volleyball" {
   const s = String(selection ?? "").toLowerCase();
-  if (/^vs[123][ha]$/.test(s) || /^vs-s(30|31|32|03|13|23)$/.test(s) || /^pt-[ou]-\d+(?:\.\d+)?$/.test(s) || s === "hcap-vb-home" || s === "hcap-vb-away" || s === "opts" || s === "upts" || s === "pth" || s === "pta" || s === "pth2" || s === "pta2")
+  if (/^vs[123][ha]$/.test(s) || /^vs-s(30|31|32|03|13|23)$/.test(s) || /^pt-[ou]-\d+(?:\.\d+)?$/.test(s) || s === "hcap-vb-home" || s === "hcap-vb-away" || s === "opts" || s === "upts" || s === "pth" || s === "pta" || s === "pth2" || s === "pta2" || /^s[23]pt-[ou]-\d+(?:\.\d+)?$/.test(s) || /^s[23]ph-(home|away)$/.test(s))
     return "volleyball";
   if (s.startsWith("set") || s.startsWith("es-") || s.startsWith("sh") || s.startsWith("gh-") || s.startsWith("ses-") || s.startsWith("oe-") || s.startsWith("oe1-") || s.startsWith("oe2-") || s.startsWith("wal1-") || s.startsWith("wal2-") || s.startsWith("sm2-") || s.startsWith("sc1-") || s.startsWith("sc2-") || s.startsWith("tg-") || s.startsWith("s1g-") || s.startsWith("s2g-") || s.includes("sets"))
     return "tennis";
@@ -3308,7 +3234,10 @@ const OTHER_SPORTS: {
     key: "mma",
     label: "MMA",
     icon: "🥋",
-    leagues: ["UFC"],
+    // "UFC" kept as a shortcut even though it hasn't appeared in a real
+    // onexbet sample yet — the two leagues confirmed real (2026-08-28,
+    // GET /mma prematch sample) are "Combatsport. BFL" and "Road to UFC".
+    leagues: ["UFC", "Road to UFC", "Combatsport. BFL"],
   },
   {
     key: "cricket",
@@ -3723,7 +3652,7 @@ type AdvancedMarkets = {
   // Tennis-specific live markets (injected server-side)
   tennisExtra?: {
     firstSet?: { home: number; away: number };
-    setHandicap?: { home: number; away: number };
+    setHandicap?: { line: number; home: number; away: number };
     gameHandicap?: { line: number; home: number; away: number };
     setExactScore?: Record<string, number>;
     set1ExactScore?: Record<string, number>;
@@ -3737,12 +3666,17 @@ type Match = {
   id: string | number;
   home: string;
   away: string;
+  // homeTeamId/awayTeamId/homeImageVersion/awayImageVersion used to feed
+  // buildSportsApiTeamLogoUrl (SportsAPI Pro V2 crest proxy) in
+  // getTeamBadgeAsset; that proxy was removed 2026-09-03, so these are no
+  // longer read there — kept only because the API response shape still
+  // carries them (see the raw match types below).
   homeTeamId?: string;
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
-  // Direct crest URLs from API-Football (football only) — preferred over
-  // homeTeamId/homeImageVersion in getTeamBadgeAsset, see that function.
+  // Direct crest URL (football only, from SportMonks's own image_path) —
+  // the only source getTeamBadgeAsset uses; see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
   league: string;
@@ -3752,13 +3686,6 @@ type Match = {
   sport?: string;
   // Football only — market-depth/staking tier (1 = full, 4 = minimal).
   matchTier?: 1 | 2 | 3 | 4;
-  // Explicit Statscore event ID (native Statscore numeric ID, e.g. 6479574
-  // for New York City FC vs Club Necaxa). When set, bypasses BetBY-side
-  // statscoreEventId resolution (which requires cookies) and is injected
-  // directly into the tracker widget — the ONLY way to guarantee the
-  // actual green field tracker renders instead of a "Tracker indisponível"
-  // fallback.  See proxy.ts resolveStatscoreEventIdFromBetby for details.
-  statscoreEventId?: string;
   hasRealOdds?: boolean;
   isWomens?: boolean;
   odds: Odds;
@@ -3773,6 +3700,7 @@ type Match = {
     team: string;
     minute: number;
     player: string;
+    playerId?: number;
     detail?: string;
   }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
@@ -3866,7 +3794,8 @@ type Match = {
   scheduledTime?: string;
   // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
   scheduledDate?: string;
-  // SportsApiPro league ID — used to fetch player markets (football only)
+  // League ID (football only) — currently unpopulated; no provider feeds it
+  // since the StatPal integration that used to set it was removed.
   leagueId?: string;
   /** Formula 1 only — race winner and podium odds by driver */
   f1Extra?: {
@@ -3877,12 +3806,15 @@ type Match = {
   mmaExtra?: {
     toDistance?: { yes: number; no: number };
     totalRoundsLines?: Array<{ line: number; over: number; under: number }>;
+    winInsideDistance?: { yes: number; no: number };
+    methodOfVictory?: {
+      homeDecision?: { yes: number; no: number };
+      homeInside?: { yes: number; no: number };
+      awayDecision?: { yes: number; no: number };
+      awayInside?: { yes: number; no: number };
+      draw?: number;
+    };
   };
-  // Match Tracker resolved server-side directly against this match by team
-  // name (see matches.ts's attachDirectTracker). Drives the inline Tracker
-  // button on the match card, replacing the old separate "Transmissões ao
-  // vivo" list that showed the same match twice.
-  tracker?: MatchTracker;
 };
 
 type BetSelection = {
@@ -4366,7 +4298,7 @@ function MomentumChart({
           })()}
 
           {/* Card & substitution minute markers 🟨🟥🔄 — from the real
-              API-Football event timeline (match.events), placed close to the
+              event timeline (match.events), placed close to the
               center axis so they read as "inside the chart" alongside the
               existing goal markers above/below. */}
           {(() => {
@@ -4584,312 +4516,6 @@ function isWCMatch(league: string | null | undefined): boolean {
 
 function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
-class TrackerErrorBoundary extends Component<
-  { children: ReactNode; home?: string; away?: string; className?: string; aspectRatio?: string },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError(_e: unknown) { return { hasError: true }; }
-  componentDidCatch(error: unknown) { try { console.error("[tracker-error-boundary]", error); } catch {} }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div
-          className={this.props.className}
-          style={{ aspectRatio: this.props.aspectRatio ?? "16 / 9", position: "relative", overflow: "hidden", borderRadius: 20, isolation: "isolate" }}
-        >
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none text-zinc-400 text-xs px-6 text-center">
-            {this.props.home || this.props.away ? (
-              <div>
-                <div className="font-bold text-zinc-200 mb-1">{this.props.home ?? "?"} vs {this.props.away ?? "?"}</div>
-                Tracker indisponível neste momento.
-              </div>
-            ) : ("Tracker indisponível.")}
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// Polling Match Tracker (StatScore/SportScore/Statpal/PulseScore),
-// self-contained so its lifecycle (start/stop polling) doesn't entangle
-// with the rest of the page's state.
-// Bug report 2026-08-13 (3 rounds — 470 to 420 to 260 still "grande",
-// user asked to cut it further): "Mini Tracker" muito grande no PWA/mobile
-// — this is the shared ceiling for both the CSS clamp() (loading state) and
-// the JS resize handler's cap (once the widget reports its real, much
-// taller, native size). A single source of truth so the two can never drift
-// apart and visibly "jump" between a loading-state size and a different
-// loaded-state size.
-const MINI_TRACKER_MAX_HEIGHT = 180;
-
-function SportscoreTrackerIframe({
-  home,
-  away,
-  sport = "football",
-  aspectRatio = "16 / 9",
-  className,
-  matchId,
-}: {
-  home: string;
-  away: string;
-  sport?: string;
-  aspectRatio?: string;
-  className?: string;
-  matchId?: string;
-}) {
-  // BetBY removed (2026-08-17): its real widget needed our own Playwright
-  // session-capture pipeline just to work at all, which proved unreliable
-  // in production (Chromium launch failures, a Safari tab crash on
-  // unmount). SportScore is a plain CORS-open iframe with real fixture
-  // coverage and no session/proxy/bridge machinery to break — this
-  // component now does nothing but resolve and render that iframe.
-  const [sportscoreUrl, setSportscoreUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const triedKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!matchId || !home || !away) {
-      setFailed(true);
-      return;
-    }
-    const key = `${matchId}:${home}:${away}:${sport}`;
-    if (triedKey.current === key) return;
-    triedKey.current = key;
-    setFailed(false);
-    setSportscoreUrl(null);
-    let cancelled = false;
-    const params = new URLSearchParams({ sport, home, away, matchId });
-    fetch(`/api/sportscore-tracker/url?${params.toString()}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { ok?: boolean; embedUrl?: string | null } | null) => {
-        if (cancelled) return;
-        if (d?.ok && d.embedUrl) setSportscoreUrl(d.embedUrl);
-        else setFailed(true);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [matchId, home, away, sport]);
-
-  // Bug report 2026-08-17 (Safari): "Um problema ocorreu repetidamente"
-  // (WebKit tab crash) when tapping "Voltar aos eventos" right after the
-  // Tracker iframe had loaded live third-party content (sportscore.com,
-  // which keeps a WebSocket/canvas connection running). React unmounting
-  // the <iframe> yanks the DOM node out from under that live connection
-  // with no chance for the frame's own unload/teardown to run first,
-  // which iOS Safari can crash on. Blanking src on unmount lets the frame
-  // tear itself down cleanly before removal.
-  useEffect(() => {
-    return () => {
-      try {
-        if (iframeRef.current) iframeRef.current.src = "about:blank";
-      } catch { /* no-op */ }
-    };
-  }, []);
-
-  const showLoading = !sportscoreUrl && !failed;
-
-  return (
-    <div
-      className={className}
-      style={{
-        aspectRatio,
-        position: "relative",
-        display: "block",
-        width: "100%",
-        minHeight: `clamp(130px, 18vh, ${MINI_TRACKER_MAX_HEIGHT}px)`,
-        maxHeight: MINI_TRACKER_MAX_HEIGHT,
-        overflow: "hidden",
-        borderRadius: 8,
-        isolation: "isolate",
-        // #09090b (zinc-950) is indistinguishable from pure black on OLED
-        // screens, so an empty/loading tracker reads as "broken" — use
-        // #18181b (zinc-900), a dark gray visibly distinct from pure black.
-        backgroundColor: "#18181b",
-      }}
-    >
-        <div
-          aria-hidden
-          className="absolute inset-0 pointer-events-none"
-          style={{ backgroundColor: "#18181b", zIndex: 0 }}
-        />
-        {showLoading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/90 pointer-events-none">
-            <RefreshCw className="animate-spin text-green-500/80" size={24} />
-          </div>
-        )}
-        {sportscoreUrl ? (
-          // Matches SportScore's own official embed snippet (loading="lazy",
-          // referrerpolicy="no-referrer-when-downgrade") — deviating from it
-          // risks the widget refusing to render, since this is exactly what
-          // sportscore.com's own embed generator outputs for a match page.
-          //
-          // Bug report 2026-08-18: their tracker page has its own white
-          // "SportScore.com" watermark header bar and a score bar at the
-          // bottom, which showed up as an ugly white border inside our dark
-          // card. We can't reach into a cross-origin iframe's DOM to hide
-          // them, so instead the iframe is rendered TALLER than the visible
-          // box and shifted up (position:absolute, negative top) so the
-          // parent's overflow:hidden crops those bars off the top/bottom,
-          // leaving just the field. The exact crop amounts are estimated
-          // from screenshots, not measured — may need retuning.
-          <iframe
-            ref={iframeRef}
-            key={sportscoreUrl}
-            src={sportscoreUrl}
-            title={`SportScore Live Tracker · ${home} vs ${away}`}
-            className="w-full border-0 block"
-            style={{
-              backgroundColor: "#18181b",
-              zIndex: 1,
-              position: "absolute",
-              top: -48,
-              left: 0,
-              width: "100%",
-              height: "calc(100% + 88px)",
-            }}
-            loading="lazy"
-            allow="autoplay; fullscreen"
-            // SportScore's own tracker page renders taller than our small
-            // card (their own default snippet uses height=420) — without
-            // this, the browser shows the iframe's native scrollbar for the
-            // hidden overflow. scrolling="no" is a deprecated HTML
-            // attribute but still universally honored, and is the only way
-            // to suppress that scrollbar for a cross-origin iframe we have
-            // no other control over (no bridge/postMessage from SportScore
-            // the way the removed BetBY proxy had).
-            scrolling="no"
-            onError={() => setFailed(true)}
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        ) : failed ? (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 p-4 text-center bg-zinc-900/95 text-zinc-200 pointer-events-none">
-            <div className="text-[13px] font-semibold text-zinc-100">Tracker indisponível neste momento.</div>
-            <div className="text-[11px] text-zinc-400 max-w-[80%] leading-tight">
-              {home} vs {away}
-            </div>
-          </div>
-        ) : null}
-      </div>
-  );
-}
-
-function TrackerModal({
-  event,
-  onClose,
-}: {
-  event: LiveTrackerEvent;
-  onClose: () => void;
-}) {
-  const [tracker, setTracker] = useState<MatchTracker | null>(event.tracker ?? null);
-
-  useEffect(() => {
-    // Always poll, even if this event had no tracker yet at the moment the
-    // modal opened (event.tracker is a one-time snapshot from when the user
-    // tapped the card, not kept in sync with the parent's ongoing /api/live
-    // poll) — gating on it meant the tracker could get stuck on "A carregar
-    // tracker..." forever if it simply wasn't ready yet at open time, even
-    // once the backend resolved one moments later.
-    if (!event.matchId) return;
-    let cancelled = false;
-    const url = `/api/matches/tracker/${encodeURIComponent(event.matchId)}`;
-    const poll = () => {
-      fetch(url)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!cancelled && data) setTracker(data);
-        })
-        .catch(() => {});
-    };
-    poll();
-    const id = setInterval(poll, 2500);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [event.matchId]);
-
-  return (
-    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-      <div
-        className="flex items-center justify-between px-3 h-14 bg-zinc-950 border-b border-zinc-800/60 flex-shrink-0 gap-2"
-        style={{ paddingTop: "env(safe-area-inset-top, 0px)", height: "calc(3.5rem + env(safe-area-inset-top, 0px))" }}
-      >
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-white truncate">
-            {event.home} vs {event.away}
-          </div>
-          <div className="text-[11px] text-zinc-500 truncate">{event.league}</div>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-2 text-zinc-400 hover:text-white transition-colors shrink-0"
-          aria-label="Fechar tracker"
-        >
-          <X size={22} />
-        </button>
-      </div>
-
-      <div className="flex-1 min-h-0 bg-zinc-950 overflow-y-auto p-4">
-        {!tracker ? (
-          <div className="text-center text-zinc-600 text-sm py-8">
-            <RefreshCw className="animate-spin mx-auto mb-2 opacity-60" size={22} />
-            A carregar tracker…
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-2xl font-black text-white">
-                {tracker.homeScore} - {tracker.awayScore}
-              </div>
-              <div className="text-xs font-bold text-red-400 uppercase">
-                {tracker.status} {tracker.minute ? `· ${tracker.minute}` : ""}
-              </div>
-            </div>
-            <div className="mb-4 rounded-[24px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] overflow-hidden">
-              <TrackerErrorBoundary home={event.home} away={event.away} aspectRatio="16 / 9">
-                <SportscoreTrackerIframe
-                  home={event.home}
-                  away={event.away}
-                  sport={event.sport}
-                  aspectRatio="16 / 9"
-                  matchId={event.matchId}
-                />
-              </TrackerErrorBoundary>
-            </div>
-            <div className="text-xs text-zinc-600 font-semibold uppercase tracking-wider mb-2">
-              Incidentes
-            </div>
-            {tracker.incidents.length === 0 ? (
-              <div className="text-xs text-zinc-600">Sem incidentes ainda.</div>
-            ) : (
-              <div className="space-y-2">
-                {tracker.incidents.map((inc, i) => (
-                  <div
-                    key={i}
-                    className="text-xs text-zinc-300 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2"
-                  >
-                    <span className="text-zinc-500 font-mono shrink-0">{inc.minute}'</span>
-                    <span className="font-medium capitalize">{inc.type}</span>
-                    <span className="text-zinc-500 truncate">{inc.player}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function Home({
   initialTab = "sports",
 }: {
@@ -5066,7 +4692,6 @@ export default function Home({
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
   const casinoCarouselRef = useRef<HTMLDivElement>(null);
-  const [trackerModalEvent, setTrackerModalEvent] = useState<LiveTrackerEvent | null>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -5504,34 +5129,6 @@ export default function Home({
   };
   const [mlbSchedule, setMlbSchedule] = useState<MLBScheduleData | null>(null);
 
-  type NBAStandingsTeam = {
-    id: string;
-    name: string;
-    abbr: string;
-    position: number;
-    won: number;
-    lost: number;
-    pct: string;
-    gb: string;
-    streak: string;
-    lastTen: string;
-    homeRecord: string;
-    roadRecord: string;
-    ppg: string;
-    papg: string;
-    diff: string;
-  };
-  type NBAStandingsDivision = { name: string; teams: NBAStandingsTeam[] };
-  type NBAStandingsConference = {
-    name: string;
-    divisions: NBAStandingsDivision[];
-  };
-  type NBAStandingsData = {
-    season: string;
-    conferences: NBAStandingsConference[];
-  };
-  const [basketballStandings, setBasketballStandings] =
-    useState<NBAStandingsData | null>(null);
 
   type NBAPlayer = {
     id: string;
@@ -5628,208 +5225,6 @@ export default function Home({
   };
   const [hockeySchedule, setHockeySchedule] =
     useState<HockeyScheduleData | null>(null);
-
-  type NHLStandingsTeam = {
-    id: string;
-    name: string;
-    abbr: string;
-    position: number;
-    gp: number;
-    won: number;
-    lost: number;
-    otLosses: number;
-    points: number;
-    gf: number;
-    ga: number;
-    diff: string;
-    streak: string;
-    lastTen: string;
-    homeRecord: string;
-    roadRecord: string;
-  };
-  type NHLStandingsDivision = { name: string; teams: NHLStandingsTeam[] };
-  type NHLStandingsConference = {
-    name: string;
-    divisions: NHLStandingsDivision[];
-  };
-  type NHLStandingsData = {
-    season: string;
-    conferences: NHLStandingsConference[];
-  };
-  const [hockeyStandings, setHockeyStandings] =
-    useState<NHLStandingsData | null>(null);
-
-  type MLBStandingsTeam = {
-    id: string;
-    name: string;
-    position: number;
-    won: number;
-    lost: number;
-    gamesBack: string;
-    streak: string;
-    homeRecord: string;
-    awayRecord: string;
-    runsScored: number;
-    runsAllowed: number;
-    runsDiff: string;
-  };
-  type MLBStandingsDivision = { name: string; teams: MLBStandingsTeam[] };
-  type MLBStandingsLeague = { name: string; divisions: MLBStandingsDivision[] };
-  type MLBStandingsData = { season: string; leagues: MLBStandingsLeague[] };
-  const [mlbStandings, setMlbStandings] = useState<MLBStandingsData | null>(
-    null,
-  );
-
-  type MLBRosterPlayer = {
-    id: string;
-    name: string;
-    number: string;
-    age: number;
-    position: string;
-    height: string;
-    weight: string;
-    bats: string;
-    throws: string;
-    salary: string;
-  };
-  type MLBRosterPosition = { name: string; players: MLBRosterPlayer[] };
-  type MLBRosterData = {
-    teamName: string;
-    abbreviation: string;
-    season: string;
-    positions: MLBRosterPosition[];
-  };
-  const [mlbRosters, setMlbRosters] = useState<Record<string, MLBRosterData>>(
-    {},
-  );
-  const [selectedMLBRoster, setSelectedMLBRoster] = useState<string | null>(
-    null,
-  );
-  const [mlbRosterLoading, setMlbRosterLoading] = useState(false);
-  const [mlbPanelTab, setMlbPanelTab] = useState<
-    "roster" | "stats" | "injuries"
-  >("roster");
-
-  type MLBInjuryReport = {
-    playerName: string;
-    playerId: string;
-    status: string;
-    description: string;
-    date: string;
-  };
-  type MLBInjuriesData = { teamName: string; report: MLBInjuryReport[] };
-  const [mlbInjuries, setMlbInjuries] = useState<
-    Record<string, MLBInjuriesData>
-  >({});
-  const [mlbInjuriesLoading, setMlbInjuriesLoading] = useState(false);
-
-  type MLBLeaderBatter = {
-    rank: string;
-    name: string;
-    team: string;
-    gp: string;
-    atBats: string;
-    hits: string;
-    doubles: string;
-    triples: string;
-    homeRuns: string;
-    runs: string;
-    rbi: string;
-    stolenBases: string;
-    walks: string;
-    strikeouts: string;
-    avg: string;
-    obp: string;
-    slg: string;
-  };
-  type MLBLeagueStatsData = { batters: MLBLeaderBatter[] };
-  const [mlbLeagueStats, setMlbLeagueStats] =
-    useState<MLBLeagueStatsData | null>(null);
-  const [mlbLeagueStatsLoading, setMlbLeagueStatsLoading] = useState(false);
-  const [mlbLigaSubTab, setMlbLigaSubTab] = useState<
-    "avg" | "hr" | "rbi" | "sb"
-  >("avg");
-
-  type MLBBatterStat = {
-    id: string;
-    rank: number;
-    name: string;
-    gp: number;
-    ab: number;
-    h: number;
-    avg: string;
-    obp: string;
-    slg: string;
-    r: number;
-    rbi: number;
-    hr: number;
-    doubles: number;
-    triples: number;
-    sb: number;
-    bb: number;
-    so: number;
-  };
-  type MLBPitcherStat = {
-    id: string;
-    rank: number;
-    name: string;
-    gp: number;
-    gs: number;
-    era: string;
-    w: number;
-    l: number;
-    ip: string;
-    so: number;
-    bb: number;
-    h: number;
-    hr: number;
-    whip: string;
-    baa: string;
-  };
-  type MLBTeamStatsData = {
-    teamName: string;
-    season: string;
-    batters: MLBBatterStat[];
-    pitchers: MLBPitcherStat[];
-  };
-  const [mlbTeamStats, setMlbTeamStats] = useState<
-    Record<string, MLBTeamStatsData>
-  >({});
-  const [mlbStatsLoading, setMlbStatsLoading] = useState(false);
-
-  const MLB_ABBR: Record<string, string> = {
-    "Arizona Diamondbacks": "ari",
-    "Atlanta Braves": "atl",
-    "Baltimore Orioles": "bal",
-    "Boston Red Sox": "bos",
-    "Chicago Cubs": "chc",
-    "Chicago White Sox": "cws",
-    "Cincinnati Reds": "cin",
-    "Cleveland Guardians": "cle",
-    "Colorado Rockies": "col",
-    "Detroit Tigers": "det",
-    "Houston Astros": "hou",
-    "Kansas City Royals": "kc",
-    "Los Angeles Angels": "laa",
-    "Los Angeles Dodgers": "lad",
-    "Miami Marlins": "mia",
-    "Milwaukee Brewers": "mil",
-    "Minnesota Twins": "min",
-    "New York Mets": "nym",
-    "New York Yankees": "nyy",
-    "Oakland Athletics": "oak",
-    "Sacramento Athletics": "oak",
-    "Philadelphia Phillies": "phi",
-    "Pittsburgh Pirates": "pit",
-    "San Diego Padres": "sd",
-    "San Francisco Giants": "sf",
-    "Seattle Mariners": "sea",
-    "St. Louis Cardinals": "stl",
-    "Tampa Bay Rays": "tb",
-    "Texas Rangers": "tex",
-    "Toronto Blue Jays": "tor",
-    "Washington Nationals": "wsh",
-  };
 
   type NHLRosterPlayer = {
     id: string;
@@ -6301,13 +5696,6 @@ export default function Home({
     | "lineups"
     | "confrontos"
   >("markets");
-  // Match header ↔ mini field toggle — 2D SVG (MiniFieldView), sport-correct
-  // for all of football/tennis/basketball/hockey/volleyball/baseball.
-  const [showFieldView, setShowFieldView] = useState(false);
-  useEffect(() => {
-    setShowFieldView(false);
-  }, [expandedMatch?.id]);
-
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);
@@ -6362,8 +5750,6 @@ export default function Home({
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
   const [v2IncidentsFetchedAt, setV2IncidentsFetchedAt] = useState(0);
-  const v2StatsCacheRef = useRef<Record<string, V2StatsGroup[]>>({});
-  const v2IncidentsCacheRef = useRef<Record<string, V2Incident[]>>({});
   const [liveAdvancedTab, setLiveAdvancedTab] = useState<
     "all" | "goals" | "corners" | "cards"
   >("all");
@@ -6403,49 +5789,6 @@ export default function Home({
   const getProviderMatchId = useCallback(
     (matchId: string | number | undefined | null): string => {
       return String(matchId ?? "").replace(/^[a-z]+-v\d+-/, "");
-    },
-    [],
-  );
-  const sanitizeAllOddsMarkets = useCallback(
-    (rawMarkets: unknown): AllOddsMarket[] => {
-      if (!Array.isArray(rawMarkets)) return [];
-      return rawMarkets
-        .map((market): AllOddsMarket | null => {
-          if (!market || typeof market !== "object") return null;
-          const rawMarket = market as Record<string, unknown>;
-          const choices = Array.isArray(rawMarket.choices)
-            ? rawMarket.choices
-                .map((choice) => {
-                  if (!choice || typeof choice !== "object") return null;
-                  const rawChoice = choice as Record<string, unknown>;
-                  const odds =
-                    typeof rawChoice.odds === "number"
-                      ? rawChoice.odds
-                      : Number(rawChoice.odds);
-                  if (!Number.isFinite(odds) || odds < 1.01) return null;
-                  return {
-                    name: String(rawChoice.name ?? "").trim(),
-                    label:
-                      String(rawChoice.label ?? rawChoice.name ?? "").trim() ||
-                      "Opção",
-                    odds,
-                  };
-                })
-                .filter(
-                  (
-                    choice,
-                  ): choice is { name: string; label: string; odds: number } =>
-                    !!choice,
-                )
-            : [];
-          if (choices.length === 0) return null;
-          return {
-            name: String(rawMarket.name ?? "").trim() || "Mercado",
-            group: String(rawMarket.group ?? "").trim(),
-            choices,
-          };
-        })
-        .filter((market): market is AllOddsMarket => !!market);
     },
     [],
   );
@@ -6663,268 +6006,15 @@ export default function Home({
     null,
   );
   const [confrontosLoading, setConfrontosLoading] = useState(false);
-
-  const extractV2StatsGroups = (payload: any): V2StatsGroup[] => {
-    const root = payload?.data ?? payload;
-    const groups: any[] =
-      root?.statistics ??
-      root?.groups ??
-      root?.statisticsGroups ??
-      root?.data?.statistics ??
-      root?.data?.groups ??
-      [];
-    if (!Array.isArray(groups) || groups.length === 0) return [];
-
-    const toText = (v: unknown): string => {
-      if (v === null || typeof v === "undefined") return "";
-      if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
-      if (typeof v === "boolean") return v ? "Sim" : "Não";
-      if (typeof v === "string") return v;
-      return String(v);
-    };
-
-    const pickHomeAway = (item: any): { home: string; away: string } => {
-      const home =
-        item?.home ??
-        item?.homeValue ??
-        item?.homeStat ??
-        item?.homeTeam ??
-        item?.valueHome ??
-        item?.value?.home ??
-        item?.values?.home;
-      const away =
-        item?.away ??
-        item?.awayValue ??
-        item?.awayStat ??
-        item?.awayTeam ??
-        item?.valueAway ??
-        item?.value?.away ??
-        item?.values?.away;
-      return { home: toText(home), away: toText(away) };
-    };
-
-    return groups
-      .map((g: any) => {
-        const title = String(g?.groupName ?? g?.name ?? g?.title ?? "").trim();
-        const items: any[] =
-          g?.statisticsItems ??
-          g?.items ??
-          g?.statistics ??
-          g?.rows ??
-          g?.data ??
-          [];
-        if (!Array.isArray(items) || items.length === 0) return null;
-        const rows = items
-          .map((it: any) => {
-            const name = String(
-              it?.name ?? it?.title ?? it?.key ?? it?.statName ?? "",
-            ).trim();
-            const { home, away } = pickHomeAway(it);
-            if (!name || (!home && !away)) return null;
-            return { name, home, away };
-          })
-          .filter(Boolean) as Array<{
-          name: string;
-          home: string;
-          away: string;
-        }>;
-        if (rows.length === 0) return null;
-        return { title: title || "Estatísticas", rows } satisfies V2StatsGroup;
-      })
-      .filter(Boolean) as V2StatsGroup[];
+  type TeamUpcomingEntry = {
+    date: string;
+    opponent: string;
+    competition: string;
+    isHome: boolean;
   };
-
-  const extractV2Incidents = (payload: any): V2Incident[] => {
-    const root = payload?.data ?? payload;
-    const arr: any[] =
-      root?.incidents ??
-      root?.events ??
-      root?.timeline ??
-      root?.data?.incidents ??
-      [];
-    if (!Array.isArray(arr) || arr.length === 0) return [];
-
-    const toText = (v: unknown): string => {
-      if (v === null || typeof v === "undefined") return "";
-      if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
-      if (typeof v === "boolean") return v ? "Sim" : "Não";
-      if (typeof v === "string") return v;
-      return String(v);
-    };
-
-    const normalize = (s: string) =>
-      s
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]+/g, " ")
-        .trim();
-
-    const parseMinute = (raw: string): number | null => {
-      const s = raw.trim();
-      if (!s) return null;
-      const parts = s
-        .split("+")
-        .map((p) => p.trim())
-        .filter(Boolean);
-      const base = Number.parseInt(parts[0] ?? "", 10);
-      if (!Number.isFinite(base)) return null;
-      const extra = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
-      return base + (Number.isFinite(extra) ? extra : 0);
-    };
-
-    return arr
-      .map((e: any, idx: number) => {
-        const minute =
-          e?.time ??
-          e?.minute ??
-          e?.matchTime ??
-          e?.timeMinute ??
-          e?.elapsed ??
-          e?.addedTime ??
-          "";
-        const minuteRaw = toText(minute);
-        const time = minuteRaw !== "" ? `${minuteRaw}'` : "";
-        const isHome = Boolean(
-          e?.isHome ||
-            e?.home ||
-            e?.team === "home" ||
-            e?.side === "home" ||
-            (typeof e?.team_id === "number" && e?.home_team_id && e.team_id === e.home_team_id),
-        );
-        const isAway = Boolean(
-          e?.isAway ||
-            e?.away ||
-            e?.team === "away" ||
-            e?.side === "away" ||
-            (typeof e?.team_id === "number" && e?.away_team_id && e.team_id === e.away_team_id),
-        );
-        const team: "home" | "away" | "neutral" = isHome
-          ? "home"
-          : isAway
-            ? "away"
-            : "neutral";
-
-        const rawType = String(
-          e?.type ?? e?.incidentType ?? e?.eventType ?? "",
-        ).trim();
-        const rawName = String(e?.name ?? e?.title ?? "").trim();
-
-        const playerName = String(
-          e?.player?.name ??
-            e?.playerName ??
-            e?.player_name ??
-            e?.scorer?.name ??
-            e?.goalScorer?.name ??
-            e?.related_player_name ??
-            e?.relatedPlayer?.name ??
-            "",
-        ).trim();
-
-        const textBody = String(
-          e?.text ??
-            e?.description ??
-            e?.detail ??
-            e?.reason ??
-            e?.comments ??
-            e?.comment ??
-            "",
-        ).trim();
-
-        const sigSrc =
-          `${rawType} ${rawName} ${playerName} ${textBody}`.toLowerCase();
-        const sig = normalize(sigSrc);
-        let kind: V2IncidentKind = "other";
-        if (sig.includes("goal") || sig.includes("golo") || sig.includes("gol"))
-          kind = "goal";
-        else if (
-          sig.includes("corner") ||
-          sig.includes("canto") ||
-          sig.includes("escanteio")
-        )
-          kind = "corner";
-        else if (
-          sig.includes("card") ||
-          sig.includes("cartao") ||
-          sig.includes("yellow") ||
-          sig.includes("red") ||
-          sig.includes("amarel") ||
-          sig.includes("vermelh")
-        )
-          kind = "card";
-        else if (sig.includes("substitution") || sig.includes("substituic") || sig.includes(" sub "))
-          kind = "sub";
-
-        const card: "yellow" | "red" | null =
-          kind === "card"
-            ? sig.includes("red") || sig.includes("vermelh")
-              ? "red"
-              : "yellow"
-            : null;
-
-        let title: string;
-        switch (kind) {
-          case "goal":
-            title = "Golo";
-            break;
-          case "corner":
-            title = "Canto";
-            break;
-          case "card":
-            title = card === "red" ? "Cartão Vermelho" : "Cartão Amarelo";
-            break;
-          case "sub":
-            title = "Substituição";
-            break;
-          default:
-            title = rawType || rawName || "Evento";
-            break;
-        }
-
-        let detail: string;
-        if (kind === "goal" || kind === "card" || kind === "sub") {
-          detail = playerName || textBody;
-        } else if (kind === "corner") {
-          detail = textBody || playerName;
-        } else {
-          detail = textBody || playerName || rawName;
-        }
-
-        const hsRaw =
-          e?.homeScore?.current ??
-          e?.homeScore ??
-          e?.score?.home ??
-          e?.homeGoals ??
-          e?.homeTeamScore ??
-          e?.home_score ??
-          null;
-        const asRaw =
-          e?.awayScore?.current ??
-          e?.awayScore ??
-          e?.score?.away ??
-          e?.awayGoals ??
-          e?.awayTeamScore ??
-          e?.away_score ??
-          null;
-        const hs = typeof hsRaw === "number" ? hsRaw : null;
-        const as = typeof asRaw === "number" ? asRaw : null;
-        const score =
-          hs !== null && as !== null ? `${hs}-${as}` : undefined;
-
-        return {
-          key: `${idx}-${kind}-${title}-${detail}-${time}`,
-          time,
-          minute: parseMinute(minuteRaw),
-          team,
-          kind,
-          card,
-          score,
-          title,
-          detail,
-        } satisfies V2Incident;
-      })
-      .filter((e) => e.title || e.detail);
-  };
+  const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
+  const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
+  const [playerProfileId, setPlayerProfileId] = useState<number | null>(null);
 
   const extractLiveKeyStats = (
     groups: V2StatsGroup[],
@@ -7311,6 +6401,11 @@ export default function Home({
     if (matches.length === 0) return matches;
 
     const now = Date.now();
+    const liveIds = new Set(
+      liveMatchesRef.current
+        .filter((match) => !!match.isLive && !isFinishedMatchStatus(match.status))
+        .map((match) => String(match.id)),
+    );
     const liveIdentityKeys = new Set(
       liveMatchesRef.current
         .filter((match) => !!match.isLive && !isFinishedMatchStatus(match.status))
@@ -7320,7 +6415,11 @@ export default function Home({
     let changed = false;
 
     const filtered = matches.filter((match) => {
-      if (liveIdentityKeys.has(getLiveMatchIdentityKey(match))) {
+      const sameLiveMatch =
+        liveIds.has(String(match.id)) ||
+        (activeTab !== "live" &&
+          liveIdentityKeys.has(getLiveMatchIdentityKey(match)));
+      if (sameLiveMatch) {
         changed = true;
         return false;
       }
@@ -7340,7 +6439,44 @@ export default function Home({
     });
 
     return changed ? filtered : matches;
-  }, []);
+  }, [activeTab]);
+
+  const hasPlayableMarketOdds = (
+    value: unknown,
+    key?: string,
+  ): boolean => {
+    if (typeof value === "number") {
+      if (
+        key === "line" ||
+        key === "_spread" ||
+        key === "_total" ||
+        key === "_total1H" ||
+        key === "_spreadLine" ||
+        key === "currentSetNum"
+      ) {
+        return false;
+      }
+      return Number.isFinite(value) && value > 1.01;
+    }
+    if (Array.isArray(value)) {
+      return value.some((item) => hasPlayableMarketOdds(item));
+    }
+    if (value && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).some(([childKey, childValue]) =>
+        hasPlayableMarketOdds(childValue, childKey),
+      );
+    }
+    return false;
+  };
+
+  const matchHasPlayableOdds = (match: Pick<Match, "hasRealOdds" | "odds" | "markets">): boolean =>
+    !!(
+      match.hasRealOdds ||
+      (match.odds?.home ?? 0) > 0 ||
+      (match.odds?.draw ?? 0) > 0 ||
+      (match.odds?.away ?? 0) > 0 ||
+      hasPlayableMarketOdds(match.markets)
+    );
 
   const dedupeLiveMatches = (matches: Match[]) => {
     const byIdentity = new Map<string, Match>();
@@ -7476,13 +6612,6 @@ export default function Home({
               }
             : anyPrev.markets,
           events: anyUpdated.events ?? anyPrev.events,
-          // The direct-tracker poller resolves on its own 20s interval —
-          // any single /live poll tick can transiently land between
-          // resolutions and simply not have this match's tracker yet, even
-          // though a good one already showed a moment ago. Without this
-          // fallback the mini campo flickered (visible, then gone, then
-          // back) every time that happened instead of just holding steady.
-          tracker: anyUpdated.tracker ?? anyPrev.tracker,
         };
       });
     }
@@ -7538,20 +6667,7 @@ export default function Home({
           writeSnapshot(matchSnapshotKey(id), m as any);
           setExpandedMatch((prev) => {
             if (!prev || String(prev.id) !== id) return prev;
-            // This full-detail fetch can race the backend's own direct-
-            // tracker poller (which resolves the SportScore/Statpal tracker
-            // asynchronously, on its own interval) — if this fetch lands
-            // before that resolution finishes, m.tracker can be empty
-            // even though `prev` already had a good one from the periodic
-            // /live list sync. Never let a fetch that's simply "too early"
-            // permanently erase a tracker (formations/HT score/incidents)
-            // that's already showing on this expanded card.
-            const mm = m as any;
-            const pv = prev as any;
-            return {
-              ...mm,
-              tracker: mm.tracker ?? pv.tracker,
-            };
+            return { ...(m as any) };
           });
           return isTennisMatch
             ? !!(m as any).markets?.tennisExtra
@@ -7771,97 +6887,23 @@ export default function Home({
   }, [expandedMatch?.id]);
 
   useEffect(() => {
+    // The /v2-statistics backend endpoint (SportsAPI Pro V2) was removed —
+    // there is no replacement source for this per-match stats breakdown, so
+    // this now always settles straight to "not available" instead of polling
+    // a route that no longer exists.
     if (!expandedMatch) return;
-    // PulseScore-sourced football (Phase 1) has no statistics endpoint —
-    // SportsAPI Pro rejects its match id format and liveMatchState never
-    // gets populated for these matches, so this fetch can never succeed.
-    // Without this guard it retried every 30s forever, showing a permanent
-    // loading spinner instead of settling on "not available".
-    if (String(expandedMatch.id).startsWith("pulsescore-")) {
-      if (v2StatsGroups === null) setV2StatsGroups([]);
-      return;
-    }
-    if (v2StatsLoading) return;
-    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 30000) return;
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    const cacheKey = `${sport}:${rawId}`;
-    if (!rawId) return;
-    setV2StatsLoading(true);
-    fetch(`/api/matches/v2-statistics?sport=${sport}&matchId=${rawId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const nextGroups = d ? extractV2StatsGroups(d as any) : [];
-        if (nextGroups.length > 0)
-          v2StatsCacheRef.current[cacheKey] = nextGroups;
-        setV2StatsGroups(
-          nextGroups.length > 0
-            ? nextGroups
-            : (v2StatsCacheRef.current[cacheKey] ?? []),
-        );
-        setV2StatsFetchedAt(Date.now());
-      })
-      .catch(() => {
-        setV2StatsGroups(v2StatsCacheRef.current[cacheKey] ?? []);
-        setV2StatsFetchedAt(Date.now());
-      })
-      .finally(() => setV2StatsLoading(false));
-  }, [
-    matchViewTab,
-    expandedMatch?.id,
-    v2StatsGroups,
-    v2StatsLoading,
-    v2StatsFetchedAt,
-    livePollTick,
-    getProviderMatchId,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (v2StatsGroups === null) setV2StatsGroups([]);
+  }, [expandedMatch?.id, v2StatsGroups]);
 
   useEffect(() => {
+    // The /v2-incidents backend endpoint (SportsAPI Pro V2) was removed —
+    // there is no replacement source for the goals/cards/corners timeline,
+    // so this now always settles straight to "not available" instead of
+    // polling a route that no longer exists.
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
-    // Same PulseScore gap as the statistics fetch above — no incidents
-    // (goals/cards/corners timeline) endpoint exists for these matches, and
-    // this poll runs every 3s, so leaving it unguarded was the main source
-    // of "fica tentando carregar" (plus wasted requests every 3s per open
-    // match).
-    if (String(expandedMatch.id).startsWith("pulsescore-")) {
-      if (v2Incidents === null) setV2Incidents([]);
-      return;
-    }
-    if (v2IncidentsLoading) return;
-    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 3000)
-      return;
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    const cacheKey = `${sport}:${rawId}`;
-    if (!rawId) return;
-    setV2IncidentsLoading(true);
-    fetch(`/api/matches/v2-incidents?sport=${sport}&matchId=${rawId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const nextIncidents = d ? extractV2Incidents(d as any) : [];
-        if (nextIncidents.length > 0)
-          v2IncidentsCacheRef.current[cacheKey] = nextIncidents;
-        setV2Incidents(
-          nextIncidents.length > 0
-            ? nextIncidents
-            : (v2IncidentsCacheRef.current[cacheKey] ?? []),
-        );
-        setV2IncidentsFetchedAt(Date.now());
-      })
-      .catch(() => {
-        setV2Incidents(v2IncidentsCacheRef.current[cacheKey] ?? []);
-        setV2IncidentsFetchedAt(Date.now());
-      })
-      .finally(() => setV2IncidentsLoading(false));
-  }, [
-    matchViewTab,
-    expandedMatch?.id,
-    v2Incidents,
-    v2IncidentsLoading,
-    v2IncidentsFetchedAt,
-    livePollTick,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (v2Incidents === null) setV2Incidents([]);
+  }, [matchViewTab, expandedMatch?.id, expandedMatch?.isLive, v2Incidents]);
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
@@ -7912,118 +6954,42 @@ export default function Home({
             setStandingsLeague(d.league ?? league);
           }
         });
+    // The /v2-standings backend endpoint (SportsAPI Pro V2) was removed.
+    // Football still resolves standings via the V1 league-standings route;
+    // other sports had no other source for per-match standings, so they now
+    // settle straight to "not available".
     const sport = expandedMatch.sport ?? "football";
-    const idStr = String(expandedMatch.id);
-    const rawId = getProviderMatchId(idStr);
-    const isV2 = rawId !== idStr && rawId.length > 0;
-    if (isV2 && sport !== "tennis") {
-      fetch(`/api/matches/v2-standings?sport=${sport}&matchId=${rawId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d && Array.isArray(d.standings) && d.standings.length > 0) {
-            if (
-              acceptStandings(
-                d.standings as StandingRow[],
-                Array.isArray(d.groups) && d.groups.length > 0
-                  ? (d.groups as Array<{ name: string; rows: StandingRow[] }>)
-                  : null,
-                d.league ?? league,
-              )
-            ) {
-              return Promise.resolve();
-            }
-          }
-          if (sport === "football") {
-            return loadV1();
-          }
-          setStandings([]);
-          setStandingsGroups(null);
-          setStandingsLeague(d?.league ?? league);
-          return Promise.resolve();
-        })
-        .catch(() => {
-          if (sport === "football") return loadV1();
-          setStandings([]);
-          setStandingsGroups(null);
-          setStandingsLeague(league);
-          return Promise.resolve();
-        })
+    if (sport === "football") {
+      loadV1()
+        .catch(() => {})
         .finally(() => setStandingsLoading(false));
     } else {
-      if (sport === "football") {
-        loadV1()
-          .catch(() => {})
-          .finally(() => setStandingsLoading(false));
-      } else {
-        setStandings([]);
-        setStandingsGroups(null);
-        setStandingsLoading(false);
-      }
+      setStandings([]);
+      setStandingsGroups(null);
+      setStandingsLoading(false);
     }
-  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
-  // Lazy-load MLB league stats when "liga" tab is active
-  useEffect(() => {
-    if (matchViewTab !== "liga" || expandedMatch?.sport !== "baseball") return;
-    if (mlbLeagueStats || mlbLeagueStatsLoading) return;
-    setMlbLeagueStatsLoading(true);
-    fetch("/api/matches/mlb-league-stats")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) setMlbLeagueStats(d as MLBLeagueStatsData);
-      })
-      .catch(() => {})
-      .finally(() => setMlbLeagueStatsLoading(false));
-  }, [matchViewTab, expandedMatch?.sport]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch all V2 odds markets (kept for future use / "odds" tab)
+  // The /v2-match-odds backend endpoint (SportsAPI Pro V2) was removed —
+  // there is no replacement source for the full markets list, so the
+  // "odds" tab now always settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "odds" || !expandedMatch) return;
-    setAllOddsData(null);
-    setAllOddsLoading(true);
+    setAllOddsData([]);
+    setAllOddsLoading(false);
     setAllOddsQuery("");
     setAllOddsSectionOpen({});
-    const ctrl = new AbortController();
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`, {
-      signal: ctrl.signal,
-    })
-      .then((r) => (r.ok ? r.json() : { markets: [] }))
-      .then((d) => {
-        if (ctrl.signal.aborted) return;
-        setAllOddsData(
-          sanitizeAllOddsMarkets((d as { markets?: unknown }).markets),
-        );
-      })
-      .catch(() => {
-        if (!ctrl.signal.aborted) setAllOddsData([]);
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setAllOddsLoading(false);
-      });
-    return () => ctrl.abort();
-  }, [
-    matchViewTab,
-    expandedMatch?.id,
-    getProviderMatchId,
-    sanitizeAllOddsMarkets,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id]);
 
-  // Fetch lineups when "lineups" tab is selected
+  // The /v2-lineups backend endpoint (SportsAPI Pro V2) was removed — there
+  // is no replacement source for lineups, so the "lineups" tab now always
+  // settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
     setLineupsData(null);
-    setLineupsLoading(true);
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const sport = expandedMatch.sport ?? "football";
-    fetch(`/api/matches/v2-lineups?sport=${sport}&matchId=${rawId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setLineupsData(d as LineupsV2))
-      .catch(() => setLineupsData(null))
-      .finally(() => setLineupsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLineupsLoading(false);
+  }, [matchViewTab, expandedMatch?.id]);
 
   // Fetch live storyline when a live football match is expanded
   useEffect(() => {
@@ -8057,6 +7023,27 @@ export default function Home({
       .then((d) => setConfrontosData(d as ConfrontosData))
       .catch(() => setConfrontosData(null))
       .finally(() => setConfrontosLoading(false));
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Próximos Jogos — each team's next fixtures. Used to be sourced from
+  // SportMonks (sportmonks-football-* matchIds); that provider was removed
+  // 2026-09-08 and /api/matches/team-upcoming now always returns [], but the
+  // fetch is kept so the section degrades gracefully instead of crashing.
+  useEffect(() => {
+    setHomeUpcoming([]);
+    setAwayUpcoming([]);
+    if (!expandedMatch) return;
+    const rawId = getProviderMatchId(expandedMatch.id);
+    for (const [side, setter] of [
+      ["home", setHomeUpcoming],
+      ["away", setAwayUpcoming],
+    ] as const) {
+      const p = new URLSearchParams({ matchId: rawId, side, limit: "5" });
+      fetch(`/api/matches/team-upcoming?${p}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => setter(Array.isArray(d?.fixtures) ? d.fixtures : []))
+        .catch(() => setter([]));
+    }
   }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
@@ -8135,14 +7122,6 @@ export default function Home({
         .catch(() => {
           /* non-critical */
         });
-      fetch("/api/matches/basketball-schedule")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setBasketballSchedule(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
       fetch("/api/matches/basketball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
@@ -8166,46 +7145,6 @@ export default function Home({
       fetch("/api/matches/mlb-results")
         .then((r) => (r.ok ? r.json() : { results: [] }))
         .then((d) => setMlbResults(d.results ?? []))
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/mlb-schedule")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setMlbSchedule(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/mlb-standings")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setMlbStandings(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/hockey-schedule")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setHockeySchedule(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/basketball-standings")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setBasketballStandings(d);
-        })
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/hockey-standings")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d) setHockeyStandings(d);
-        })
         .catch(() => {
           /* non-critical */
         });
@@ -8241,7 +7180,8 @@ export default function Home({
   const fetchUpcoming = useCallback(
     async (showSpinner = false) => {
       if (document.visibilityState === "hidden") return;
-      if (isIdleRef.current || isLockedRef.current) return;
+      if ((isIdleRef.current && activeTab !== "live") || isLockedRef.current)
+        return;
       if (showSpinner) setUpcomingLoading(true);
       const params = new URLSearchParams();
       if (selectedSport !== "all") params.set("sport", selectedSport);
@@ -8310,7 +7250,7 @@ export default function Home({
         if (showSpinner) setUpcomingLoading(false);
       }
     },
-    [selectedSport, upcomingRange, upcomingSnapshotKey, writeSnapshot],
+    [selectedSport, upcomingRange, upcomingSnapshotKey, writeSnapshot, activeTab],
   );
 
   useEffect(() => {
@@ -8330,7 +7270,7 @@ export default function Home({
       );
       setUpcomingLoading(false);
     }
-    if (activeTab !== "sports") return;
+    if (activeTab !== "sports" && activeTab !== "live") return;
     fetchUpcoming(!canUseSnap);
     const id = setInterval(() => fetchUpcoming(false), 15_000);
     return () => clearInterval(id);
@@ -8615,7 +7555,8 @@ export default function Home({
   const fetchLive = useCallback(
     async (showSpinner = false): Promise<"success" | "skipped" | "failed"> => {
       if (document.visibilityState === "hidden") return "skipped";
-      if (isIdleRef.current || isLockedRef.current) return "skipped";
+      if ((isIdleRef.current && activeTab !== "live") || isLockedRef.current)
+        return "skipped";
       if (liveFetchInFlightRef.current) return "skipped";
       if (showSpinner) setLiveLoading(true);
       let ctrl: AbortController | null = null;
@@ -8652,7 +7593,7 @@ export default function Home({
         if (showSpinner) setLiveLoading(false);
       }
     },
-    [browserOnline, processLiveData, liveSnapshotKey, writeSnapshot],
+    [browserOnline, processLiveData, liveSnapshotKey, writeSnapshot, activeTab],
   );
 
   const refreshLiveMatchById = useCallback(
@@ -10651,11 +9592,21 @@ export default function Home({
       return null;
     }
 
-    // Tennis excluded: this heuristic exists to hide football's "obvious
-    // blowout" late-game prices, but a low live tennis price for a big
-    // favorite is a legitimate, bettable market — hiding it just disables
-    // real markets.
-    if (odd < 1.15 && market === "result" && match.sport !== "tennis") {
+    // Football-only: this heuristic exists to hide football's "obvious
+    // blowout" late-game prices (90-minute clock, goal-difference score).
+    // Was previously "!== tennis" (excluding only tennis), which let it
+    // wrongly fire on every other sport too — worst confirmed case,
+    // volleyball: match.homeScore/awayScore are SETS won (0-3), a long
+    // match's elapsed minutes easily clear 70-85 real minutes, and
+    // match.odds.draw is ALWAYS <=0 (volleyball has no draw market), so a
+    // tied 2-2 near-coin-flip decisive set — nothing "obvious" about it —
+    // trivially satisfied the "late draw with extreme odds" branch below
+    // and replaced BOTH team's real prices with "Aposta Já" buttons
+    // (user-reported, CBV Duo Masters Moçambique v Holanda, 2-2 in sets,
+    // set 6 at 2-2 in points). A low live price for a big favorite is a
+    // legitimate, bettable market in every sport, not just tennis —
+    // hiding it just disables real markets.
+    if (odd < 1.15 && market === "result" && match.sport === "football") {
       return (
         <div
           className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white") : "bg-zinc-800/40 border-zinc-700/30"}`}
@@ -10677,7 +9628,7 @@ export default function Home({
     const isObviousResult =
       match.isLive &&
       market === "result" &&
-      match.sport !== "tennis" &&
+      match.sport === "football" &&
       (() => {
         if (odd <= 1.05) return true;
         const min = getDisplayMinute(match);
@@ -11471,10 +10422,7 @@ export default function Home({
     const isPenShootout =
       match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const canShowOdds = !!(
-      match.hasRealOdds ||
-      (match.odds.home > 0 && match.odds.away > 0)
-    );
+    const canShowOdds = matchHasPlayableOdds(match);
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) =>
       e.stopPropagation();
     const oddsRow =
@@ -11562,6 +10510,14 @@ export default function Home({
               )
             ) : null}
           </div>
+          {!isLiveSuspended && !isPenShootout && !match.hasRealOdds && (
+            <div className="flex items-center justify-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span className="text-[9px] font-semibold tracking-wide text-zinc-500">
+                ODDS ESTIMADAS — SEM COTAÇÃO AO VIVO
+              </span>
+            </div>
+          )}
         </div>
       ) : null;
 
@@ -11611,32 +10567,6 @@ export default function Home({
             </div>
             <div className="shrink-0">{liveBadge}</div>
           </div>
-          {/* Tracker access (audit finding, 2026-08-10): matchToTrackerEvent/
-              setTrackerModalEvent were only ever wired into renderMatchCard
-              (prematch/"Em Destaque" listings) — the Ao Vivo tab itself,
-              where users actually are, had no way to open the incidents
-              Tracker at all. Same pattern as renderMatchCard's own button:
-              resolved directly onto this match by team name (see
-              attachDirectTracker in matches.ts). */}
-          {match.tracker && (
-            <div
-              className="flex gap-1.5 mb-2"
-              onClick={stopCardOpen}
-              onTouchStart={stopCardOpen}
-              onTouchMove={stopCardOpen}
-              onTouchEnd={stopCardOpen}
-              onPointerDown={stopCardOpen}
-              onPointerMove={stopCardOpen}
-              onPointerUp={stopCardOpen}
-            >
-              <button
-                onClick={() => setTrackerModalEvent(matchToTrackerEvent(match))}
-                className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              >
-                <Activity size={10} /> Tracker
-              </button>
-            </div>
-          )}
           {rivalry && (
             <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
               {rivalry}
@@ -11847,55 +10777,6 @@ export default function Home({
     </div>
   );
 
-  // Builds the LiveTrackerEvent shape TrackerModal expects, from the
-  // Tracker data resolved directly against this match by team name (see
-  // matches.ts's attachDirectTracker). Only called when match.tracker is
-  // present.
-  const matchToTrackerEvent = (match: Match): LiveTrackerEvent => ({
-    matchId: String(match.id),
-    eventId: match.tracker?.eventId,
-    sport: match.sport ?? "football",
-    league: match.league,
-    country: match.country ?? "",
-    home: match.home,
-    away: match.away,
-    status: match.isLive ? "LIVE" : "PREMATCH",
-    minute: match.tracker?.minute,
-    score: { home: match.homeScore ?? 0, away: match.awayScore ?? 0 },
-    tracker: match.tracker,
-    statscoreEventId: match.statscoreEventId,
-  });
-
-  // Goal/card markers for the Momentum chart, from the Match Tracker's
-  // incident list (attachDirectTracker: StatScore → SportScore → Statpal →
-  // PulseScore) rather than _liveExtra.football — the tracker is the one
-  // source that's actually populated for PulseScore-only football matches,
-  // where _liveExtra doesn't exist at all. Moved out of the mini-campo's own
-  // timeline strip per explicit request: goals/cards should show on the
-  // Momentum graph, not duplicated below the field.
-  const trackerFootballExtra = (
-    match: Pick<Match, "home" | "tracker">,
-  ): { goals: any[]; cards: any[] } => {
-    const goals: any[] = [];
-    const cards: any[] = [];
-    for (const inc of match.tracker?.incidents ?? []) {
-      const isHome =
-        inc.team.toLowerCase() === "home" ||
-        teamNamePt(inc.team) === teamNamePt(match.home);
-      const team = isHome ? "home" : "away";
-      if (inc.type === "goal" || inc.type === "penalty") {
-        goals.push({ team, minute: inc.minute, playerName: inc.player, penalty: inc.type === "penalty" });
-      } else if (inc.type === "own_goal") {
-        goals.push({ team, minute: inc.minute, playerName: inc.player, ownGoal: true });
-      } else if (inc.type === "yellow") {
-        cards.push({ team, minute: inc.minute, playerName: inc.player, cardType: "yellow" });
-      } else if (inc.type === "red_card" || inc.type === "yellow_red") {
-        cards.push({ team, minute: inc.minute, playerName: inc.player, cardType: "red" });
-      }
-    }
-    return { goals, cards };
-  };
-
   const renderMatchCard = (match: Match) => {
     const matchKey = String(match.id);
     const sport = match.sport ?? "football";
@@ -11920,10 +10801,7 @@ export default function Home({
       match.isLive &&
       (match.marketSuspension?.["result"] != null &&
         match.marketSuspension["result"] > Date.now());
-    const canShowOdds = !!(
-      match.hasRealOdds ||
-      (match.odds.home > 0 && match.odds.away > 0)
-    );
+    const canShowOdds = matchHasPlayableOdds(match);
     const OddsRow = () => {
       // ── Formula 1: race winner driver buttons ────────────────────────────────
       if (sport === "formula1") {
@@ -12074,6 +10952,63 @@ export default function Home({
                     </div>
                   );
                 })()}
+              {sport === "mma" && match.mmaExtra?.winInsideDistance && (
+                <div className="flex gap-1 w-full mt-1">
+                  <OddsButton
+                    match={match}
+                    selection="yes"
+                    odd={match.mmaExtra.winInsideDistance.yes}
+                    market="mma_win_inside"
+                    label="Vence Antes do Limite"
+                    grow
+                    variant="worldcup"
+                  />
+                  <OddsButton
+                    match={match}
+                    selection="no"
+                    odd={match.mmaExtra.winInsideDistance.no}
+                    market="mma_win_inside"
+                    label="Não Vence Antes do Limite"
+                    grow
+                    variant="worldcup"
+                  />
+                </div>
+              )}
+              {sport === "mma" &&
+                match.mmaExtra?.methodOfVictory &&
+                (
+                  [
+                    ["homeDecision", "mma_method_home_decision", `${match.home} vence por decisão`],
+                    ["homeInside", "mma_method_home_inside", `${match.home} vence por KO/Finalização`],
+                    ["awayDecision", "mma_method_away_decision", `${match.away} vence por decisão`],
+                    ["awayInside", "mma_method_away_inside", `${match.away} vence por KO/Finalização`],
+                  ] as const
+                ).map(([key, market, label]) => {
+                  const prop = match.mmaExtra!.methodOfVictory![key];
+                  if (!prop) return null;
+                  return (
+                    <div key={market} className="flex gap-1 w-full mt-1">
+                      <OddsButton
+                        match={match}
+                        selection="yes"
+                        odd={prop.yes}
+                        market={market}
+                        label={label}
+                        grow
+                        variant="worldcup"
+                      />
+                      <OddsButton
+                        match={match}
+                        selection="no"
+                        odd={prop.no}
+                        market={market}
+                        label={`Não — ${label}`}
+                        grow
+                        variant="worldcup"
+                      />
+                    </div>
+                  );
+                })}
             </>
           )}
         </div>
@@ -12126,27 +11061,6 @@ export default function Home({
               {dateStr}{match.time ? ` · ${match.time}` : ""}
             </span>
           </div>
-          {/* Tracker, resolved directly onto this exact match by team name
-              (see attachDirectTracker in matches.ts). */}
-          {match.tracker && (
-            <div
-              className="flex gap-1.5 mb-2"
-              onClick={stopCardOpen}
-              onTouchStart={stopCardOpen}
-              onTouchMove={stopCardOpen}
-              onTouchEnd={stopCardOpen}
-              onPointerDown={stopCardOpen}
-              onPointerMove={stopCardOpen}
-              onPointerUp={stopCardOpen}
-            >
-              <button
-                onClick={() => setTrackerModalEvent(matchToTrackerEvent(match))}
-                className="flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-[10px] font-semibold transition-colors"
-              >
-                <Activity size={10} /> Tracker
-              </button>
-            </div>
-          )}
           {/* Teams + odds — side by side on sm+, stacked on mobile */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex-1 min-w-0">
@@ -13938,9 +12852,8 @@ export default function Home({
     // OR when the match has computed markets (V1-built football with doubleChance/totalGoals)
     const hasTennisMarkets =
       match.sport === "tennis" && !!m?.tennisExtra?.firstSet?.home;
-    const hasComputedMarkets =
-      !!m?.doubleChance?.homeOrDraw || !!m?.totalGoals?.over25;
-    if (!match.hasRealOdds && !hasTennisMarkets && !hasComputedMarkets) {
+    const hasComputedMarkets = hasPlayableMarketOdds(m);
+    if (!matchHasPlayableOdds(match) && !hasTennisMarkets && !hasComputedMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
@@ -16007,44 +14920,44 @@ export default function Home({
                       <>
                         {tennisExtra?.setHandicap?.home > 0 && (
                           <MarketGroup
-                            title={`Handicap de Sets — ${match.home} −1.5`}
+                            title={`Handicap de Sets — Casa ${tennisExtra!.setHandicap!.line < 0 ? `−${Math.abs(tennisExtra!.setHandicap!.line)}` : `+${tennisExtra!.setHandicap!.line}`}`}
                           >
                             <MarketOddsBtn
                               match={match}
-                              sel="sh15-home2"
+                              sel={`sh-home-${Math.abs(tennisExtra!.setHandicap!.line)}`}
                               odd={tennisExtra!.setHandicap!.home}
                               market="handicap"
-                              label={`${match.home} −1.5 sets`}
+                              label={`${match.home} ${tennisExtra!.setHandicap!.line < 0 ? "−" : "+"}${Math.abs(tennisExtra!.setHandicap!.line)} sets`}
                               suspKey="setHandicap"
                             />
                             <MarketOddsBtn
                               match={match}
-                              sel="sh15-away2"
+                              sel={`sh-away-${Math.abs(tennisExtra!.setHandicap!.line)}`}
                               odd={tennisExtra!.setHandicap!.away}
                               market="handicap"
-                              label={`${match.away} +1.5 sets`}
+                              label={`${match.away} ${tennisExtra!.setHandicap!.line < 0 ? "+" : "−"}${Math.abs(tennisExtra!.setHandicap!.line)} sets`}
                               suspKey="setHandicap"
                             />
                           </MarketGroup>
                         )}
                         {tennisExtra?.gameHandicap?.home > 0 && (
                           <MarketGroup
-                            title={`Handicap de Games — Linha ${tennisExtra!.gameHandicap!.line > 0 ? `−${tennisExtra!.gameHandicap!.line}` : `+${Math.abs(tennisExtra!.gameHandicap!.line)}`}`}
+                            title={`Handicap de Games — Casa ${tennisExtra!.gameHandicap!.line < 0 ? `−${Math.abs(tennisExtra!.gameHandicap!.line)}` : `+${tennisExtra!.gameHandicap!.line}`}`}
                           >
                             <MarketOddsBtn
                               match={match}
-                              sel={`gh-home-${tennisExtra!.gameHandicap!.line}`}
+                              sel={`gh-home-${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               odd={tennisExtra!.gameHandicap!.home}
                               market="handicap"
-                              label={match.home}
+                              label={`${match.home} ${tennisExtra!.gameHandicap!.line < 0 ? "−" : "+"}${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               suspKey="gameHandicap"
                             />
                             <MarketOddsBtn
                               match={match}
-                              sel={`gh-away-${tennisExtra!.gameHandicap!.line}`}
+                              sel={`gh-away-${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               odd={tennisExtra!.gameHandicap!.away}
                               market="handicap"
-                              label={match.away}
+                              label={`${match.away} ${tennisExtra!.gameHandicap!.line < 0 ? "+" : "−"}${Math.abs(tennisExtra!.gameHandicap!.line)}`}
                               suspKey="gameHandicap"
                             />
                           </MarketGroup>
@@ -17128,37 +16041,39 @@ export default function Home({
                   </div>
                 )}
 
-              {/* ── HÓQUEI: 1º PERÍODO — visible throughout match ── */}
+              {/* ── HÓQUEI: 1º PERÍODO — visible throughout match ──
+                  Prefers real onexbet period1 odds (hockeyExtra.period1)
+                  over the synthetic halfTime fallback when present. */}
               {isHockey &&
                 (modalTab === "1periodo" || modalTab === "todos") &&
-                m?.halfTime?.home > 0 && (
+                (((m as any).hockeyExtra?.period1?.home ?? m?.halfTime?.home ?? 0) > 0) && (
                   <div>
                     <MarketGroup title="Resultado — 1º Período">
                       <MarketOddsBtn
                         match={match}
                         sel="p1-home"
-                        odd={m.halfTime.home}
+                        odd={(m as any).hockeyExtra?.period1?.home ?? m.halfTime.home}
                         market="1periodo"
                         label={match.home}
-                        suspKey="halfTime"
+                        suspKey="hockeyExtra"
                       />
-                      {m.halfTime.draw > 0 && (
+                      {((m as any).hockeyExtra?.period1?.draw ?? m.halfTime.draw) > 0 && (
                         <MarketOddsBtn
                           match={match}
                           sel="p1-draw"
-                          odd={m.halfTime.draw}
+                          odd={(m as any).hockeyExtra?.period1?.draw ?? m.halfTime.draw}
                           market="1periodo"
                           label="Empate"
-                          suspKey="halfTime"
+                          suspKey="hockeyExtra"
                         />
                       )}
                       <MarketOddsBtn
                         match={match}
                         sel="p1-away"
-                        odd={m.halfTime.away}
+                        odd={(m as any).hockeyExtra?.period1?.away ?? m.halfTime.away}
                         market="1periodo"
                         label={match.away}
-                        suspKey="halfTime"
+                        suspKey="hockeyExtra"
                       />
                     </MarketGroup>
                   </div>
@@ -17577,6 +16492,65 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {([2, 3] as const).map((setNum) => {
+                      const ve = (m as any).volleyballExtra as any;
+                      const lines = ve?.[`set${setNum}PointsLines`] as
+                        | Array<{ line: number; over: number; under: number }>
+                        | undefined;
+                      const hcap = ve?.[`set${setNum}HandicapPoints`] as
+                        | { line: number; home: number; away: number }
+                        | undefined;
+                      return (
+                        <div key={`set${setNum}-points`}>
+                          {Array.isArray(lines) &&
+                            lines.map((pl) => (
+                              <MarketGroup
+                                key={`s${setNum}pt-${pl.line}`}
+                                title={`Total de Pontos — ${setNum}º Set O/U ${pl.line}`}
+                              >
+                                <MarketOddsBtn
+                                  match={match}
+                                  sel={`s${setNum}pt-o-${pl.line}`}
+                                  odd={pl.over}
+                                  market="pontos"
+                                  label={`Mais de ${pl.line} pts`}
+                                  suspKey={`set${setNum}Points`}
+                                />
+                                <MarketOddsBtn
+                                  match={match}
+                                  sel={`s${setNum}pt-u-${pl.line}`}
+                                  odd={pl.under}
+                                  market="pontos"
+                                  label={`Menos de ${pl.line} pts`}
+                                  suspKey={`set${setNum}Points`}
+                                />
+                              </MarketGroup>
+                            ))}
+                          {hcap && hcap.home > 0 && (
+                            <MarketGroup
+                              title={`Handicap de Pontos — ${setNum}º Set ${hcap.line > 0 ? `Casa −${hcap.line}` : `Casa +${Math.abs(hcap.line)}`}`}
+                            >
+                              <MarketOddsBtn
+                                match={match}
+                                sel={`s${setNum}ph-home`}
+                                odd={hcap.home}
+                                market="pontos"
+                                label={`${match.home} ${hcap.line > 0 ? `-${hcap.line}` : `+${Math.abs(hcap.line)}`}`}
+                                suspKey={`set${setNum}HandicapPoints`}
+                              />
+                              <MarketOddsBtn
+                                match={match}
+                                sel={`s${setNum}ph-away`}
+                                odd={hcap.away}
+                                market="pontos"
+                                label={`${match.away} ${hcap.line > 0 ? `+${hcap.line}` : `-${Math.abs(hcap.line)}`}`}
+                                suspKey={`set${setNum}HandicapPoints`}
+                              />
+                            </MarketGroup>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -17982,26 +16956,26 @@ export default function Home({
                     {/* Game handicap */}
                     {((m as any).tennisExtra as any).gameHandicap?.home > 0 && (
                       <MarketGroup
-                        title={`Handicap de Games — ${((m as any).tennisExtra as any).gameHandicap.line > 0 ? `Casa −${((m as any).tennisExtra as any).gameHandicap.line}` : `Casa +${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}`}
+                        title={`Handicap de Games — ${((m as any).tennisExtra as any).gameHandicap.line < 0 ? `Casa −${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}` : `Casa +${((m as any).tennisExtra as any).gameHandicap.line}`}`}
                       >
                         <MarketOddsBtn
                           match={match}
-                          sel={`gh-home-${((m as any).tennisExtra as any).gameHandicap.line}`}
+                          sel={`gh-home-${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           odd={
                             ((m as any).tennisExtra as any).gameHandicap.home
                           }
                           market="jogos"
-                          label={match.home}
+                          label={`${match.home} ${((m as any).tennisExtra as any).gameHandicap.line < 0 ? "−" : "+"}${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           suspKey="gameHandicap"
                         />
                         <MarketOddsBtn
                           match={match}
-                          sel={`gh-away-${((m as any).tennisExtra as any).gameHandicap.line}`}
+                          sel={`gh-away-${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           odd={
                             ((m as any).tennisExtra as any).gameHandicap.away
                           }
                           market="jogos"
-                          label={match.away}
+                          label={`${match.away} ${((m as any).tennisExtra as any).gameHandicap.line < 0 ? "+" : "−"}${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}
                           suspKey="gameHandicap"
                         />
                       </MarketGroup>
@@ -18080,6 +17054,96 @@ export default function Home({
                           }
                           market="jogos"
                           label={`Menos de ${((m as any).tennisExtra as any).awayPlayerGames.line}`}
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* 2nd set game handicap */}
+                    {((m as any).tennisExtra as any).gameHandicapSet2?.home >
+                      0 && (
+                      <MarketGroup
+                        title={`Handicap de Games — 2º Set ${((m as any).tennisExtra as any).gameHandicapSet2.line < 0 ? `Casa −${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}` : `Casa +${((m as any).tennisExtra as any).gameHandicapSet2.line}`}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`gh2-home-${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          odd={
+                            ((m as any).tennisExtra as any).gameHandicapSet2
+                              .home
+                          }
+                          market="jogos"
+                          label={`${match.home} ${((m as any).tennisExtra as any).gameHandicapSet2.line < 0 ? "−" : "+"}${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          suspKey="gameHandicapSet2"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`gh2-away-${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          odd={
+                            ((m as any).tennisExtra as any).gameHandicapSet2
+                              .away
+                          }
+                          market="jogos"
+                          label={`${match.away} ${((m as any).tennisExtra as any).gameHandicapSet2.line < 0 ? "+" : "−"}${Math.abs(((m as any).tennisExtra as any).gameHandicapSet2.line)}`}
+                          suspKey="gameHandicapSet2"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* 2nd set home player total games */}
+                    {((m as any).tennisExtra as any).homePlayerGamesSet2
+                      ?.over > 0 && (
+                      <MarketGroup
+                        title={`Total Games de ${match.home} — 2º Set O/U ${((m as any).tennisExtra as any).homePlayerGamesSet2.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel="hpg2-o"
+                          odd={
+                            ((m as any).tennisExtra as any).homePlayerGamesSet2
+                              .over
+                          }
+                          market="jogos"
+                          label={`Mais de ${((m as any).tennisExtra as any).homePlayerGamesSet2.line}`}
+                          suspKey="homePlayerGamesSet2"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="hpg2-u"
+                          odd={
+                            ((m as any).tennisExtra as any).homePlayerGamesSet2
+                              .under
+                          }
+                          market="jogos"
+                          label={`Menos de ${((m as any).tennisExtra as any).homePlayerGamesSet2.line}`}
+                          suspKey="homePlayerGamesSet2"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* 2nd set away player total games */}
+                    {((m as any).tennisExtra as any).awayPlayerGamesSet2
+                      ?.over > 0 && (
+                      <MarketGroup
+                        title={`Total Games de ${match.away} — 2º Set O/U ${((m as any).tennisExtra as any).awayPlayerGamesSet2.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel="apg2-o"
+                          odd={
+                            ((m as any).tennisExtra as any).awayPlayerGamesSet2
+                              .over
+                          }
+                          market="jogos"
+                          label={`Mais de ${((m as any).tennisExtra as any).awayPlayerGamesSet2.line}`}
+                          suspKey="awayPlayerGamesSet2"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="apg2-u"
+                          odd={
+                            ((m as any).tennisExtra as any).awayPlayerGamesSet2
+                              .under
+                          }
+                          market="jogos"
+                          label={`Menos de ${((m as any).tennisExtra as any).awayPlayerGamesSet2.line}`}
+                          suspKey="awayPlayerGamesSet2"
                         />
                       </MarketGroup>
                     )}
@@ -18229,6 +17293,123 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {/* Tie-Break (full match) */}
+                    {((m as any).tennisExtra as any).tieBreak?.yes > 0 && (
+                      <MarketGroup title="Vai a Tie-Break?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb-yes"
+                          odd={((m as any).tennisExtra as any).tieBreak.yes}
+                          market="especiais"
+                          label="Sim"
+                          suspKey="tieBreak"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb-no"
+                          odd={((m as any).tennisExtra as any).tieBreak.no}
+                          market="especiais"
+                          label="Não"
+                          suspKey="tieBreak"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Tie-Break (1st set) */}
+                    {((m as any).tennisExtra as any).tieBreak1st?.yes > 0 && (
+                      <MarketGroup title="1º Set vai a Tie-Break?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb1-yes"
+                          odd={((m as any).tennisExtra as any).tieBreak1st.yes}
+                          market="especiais"
+                          label="Sim"
+                          suspKey="tieBreak1st"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="tb1-no"
+                          odd={((m as any).tennisExtra as any).tieBreak1st.no}
+                          market="especiais"
+                          label="Não"
+                          suspKey="tieBreak1st"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Total Tie-Breaks */}
+                    {((m as any).tennisExtra as any).totalTieBreaks?.over > 0 && (
+                      <MarketGroup
+                        title={`Total de Tie-Breaks — O/U ${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`ttb-o-${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          odd={((m as any).tennisExtra as any).totalTieBreaks.over}
+                          market="especiais"
+                          label={`Mais de ${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          suspKey="totalTieBreaks"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`ttb-u-${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          odd={((m as any).tennisExtra as any).totalTieBreaks.under}
+                          market="especiais"
+                          label={`Menos de ${((m as any).tennisExtra as any).totalTieBreaks.line}`}
+                          suspKey="totalTieBreaks"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Highest Scoring Set Total */}
+                    {((m as any).tennisExtra as any).highestSetTotal?.over > 0 && (
+                      <MarketGroup
+                        title={`Maior Set (Total de Games) — O/U ${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`hst-o-${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          odd={((m as any).tennisExtra as any).highestSetTotal.over}
+                          market="especiais"
+                          label={`Mais de ${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          suspKey="highestSetTotal"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`hst-u-${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          odd={((m as any).tennisExtra as any).highestSetTotal.under}
+                          market="especiais"
+                          label={`Menos de ${((m as any).tennisExtra as any).highestSetTotal.line}`}
+                          suspKey="highestSetTotal"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Sets Scoring — 1º set vs 2º set (total de games) */}
+                    {((m as any).tennisExtra as any).setsScoring?.firstHigher > 0 && (
+                      <MarketGroup title="1º Set vs 2º Set — Mais Games">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ss-1h"
+                          odd={((m as any).tennisExtra as any).setsScoring.firstHigher}
+                          market="especiais"
+                          label="1º Set tem mais games"
+                          suspKey="setsScoring"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ss-2h"
+                          odd={((m as any).tennisExtra as any).setsScoring.secondHigher}
+                          market="especiais"
+                          label="2º Set tem mais games"
+                          suspKey="setsScoring"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="ss-eq"
+                          odd={((m as any).tennisExtra as any).setsScoring.equal}
+                          market="especiais"
+                          label="Empate"
+                          suspKey="setsScoring"
+                        />
+                      </MarketGroup>
+                    )}
                     {/* Straight Sets Winner */}
                     {((m as any).tennisExtra as any).straightSetsWinner?.yes >
                       0 && (
@@ -18254,6 +17435,34 @@ export default function Home({
                           market="especiais"
                           label="Não"
                           suspKey="straightSets"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Tie-Break Or Extra Games In The Final Set */}
+                    {((m as any).tennisExtra as any).finalSetTieBreakOrExtra
+                      ?.yes > 0 && (
+                      <MarketGroup title="Tie-Break ou Extra Games no Set Decisivo?">
+                        <MarketOddsBtn
+                          match={match}
+                          sel="fstb-yes"
+                          odd={
+                            ((m as any).tennisExtra as any)
+                              .finalSetTieBreakOrExtra.yes
+                          }
+                          market="especiais"
+                          label="Sim"
+                          suspKey="finalSetTieBreakOrExtra"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel="fstb-no"
+                          odd={
+                            ((m as any).tennisExtra as any)
+                              .finalSetTieBreakOrExtra.no
+                          }
+                          market="especiais"
+                          label="Não"
+                          suspKey="finalSetTieBreakOrExtra"
                         />
                       </MarketGroup>
                     )}
@@ -18571,6 +17780,63 @@ export default function Home({
                             />
                           </MarketGroup>
                         )}
+                        {/* Draw No Bet — reuses the existing generic dnb-home/
+                            dnb-away settlement keys (void on a draw), same
+                            ones football already uses. */}
+                        {((m as any).hockeyExtra as any).drawNoBet?.home >
+                          0 && (
+                          <MarketGroup title="Vencedor (Empate Anula)">
+                            <MarketOddsBtn
+                              match={match}
+                              sel="dnb-home"
+                              odd={
+                                ((m as any).hockeyExtra as any).drawNoBet.home
+                              }
+                              market="especiais"
+                              label={match.home}
+                              suspKey="hockeyExtra"
+                            />
+                            <MarketOddsBtn
+                              match={match}
+                              sel="dnb-away"
+                              odd={
+                                ((m as any).hockeyExtra as any).drawNoBet.away
+                              }
+                              market="especiais"
+                              label={match.away}
+                              suspKey="hockeyExtra"
+                            />
+                          </MarketGroup>
+                        )}
+                        {/* Correct Score — reuses the existing generic
+                            cs-<home>-<away> settlement key. */}
+                        {Array.isArray(
+                          ((m as any).hockeyExtra as any).correctScore,
+                        ) &&
+                          ((m as any).hockeyExtra as any).correctScore
+                            .length > 0 && (
+                            <MarketGroup title="Resultado Exato">
+                              <div className="flex flex-wrap gap-1 w-full">
+                                {(
+                                  ((m as any).hockeyExtra as any)
+                                    .correctScore as Array<{
+                                    label: string;
+                                    odds: number;
+                                  }>
+                                ).map((entry) => (
+                                  <MarketOddsBtn
+                                    key={`cs-${entry.label}`}
+                                    match={match}
+                                    sel={`cs-${entry.label}`}
+                                    odd={entry.odds}
+                                    market="especiais"
+                                    label={entry.label}
+                                    suspKey="hockeyExtra"
+                                  />
+                                ))}
+                              </div>
+                            </MarketGroup>
+                          )}
                       </>
                     )}
                   </div>
@@ -19529,20 +18795,6 @@ export default function Home({
                 <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
-                    {showFieldView ? (
-                      <div className="mb-3">
-                        <TrackerErrorBoundary home={expandedMatch.home} away={expandedMatch.away} aspectRatio="16 / 9">
-                          <SportscoreTrackerIframe
-                            home={expandedMatch.home}
-                            away={expandedMatch.away}
-                            sport={expandedMatch.sport ?? "football"}
-                            aspectRatio="16 / 9"
-                            matchId={expandedMatch.id}
-                          />
-                        </TrackerErrorBoundary>
-                      </div>
-                    ) : (
-                      <>
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="min-w-0 flex items-center gap-2">
                         <span className="text-sm leading-none shrink-0">
@@ -19678,25 +18930,6 @@ export default function Home({
                         );
                       })()}
                     </div>
-                      </>
-                    )}
-
-                    {["football", "tennis", "basketball", "hockey", "volleyball", "baseball", "cricket"].includes(expandedMatch.sport ?? "football") && (
-                      <div className="flex items-center">
-                        <button
-                          onClick={() => setShowFieldView((v) => !v)}
-                          className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md active:scale-95 transition-transform"
-                          aria-label={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
-                          title={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
-                        >
-                          {showFieldView ? (
-                            <ArrowLeft size={14} className="text-white" />
-                          ) : (
-                            <ChevronUp size={14} className="text-white" />
-                          )}
-                        </button>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -19715,6 +18948,8 @@ export default function Home({
                     v2StatsGroups={v2StatsGroups}
                     v2StatsLoading={v2StatsLoading}
                     confrontosData={confrontosData}
+                    homeUpcoming={homeUpcoming}
+                    awayUpcoming={awayUpcoming}
                     onGoH2H={() => setMatchViewTab("confrontos")}
                     onGoLive={() => setMatchViewTab("live")}
                     standings={standings}
@@ -19726,17 +18961,7 @@ export default function Home({
                       toggleBet(expandedMatch, market, odds, "insight", market);
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
-                    liveExtra={(() => {
-                      const base = (expandedMatch as any)._liveExtra;
-                      const tracked = trackerFootballExtra(expandedMatch);
-                      return {
-                        ...base,
-                        football: {
-                          goals: tracked.goals.length > 0 ? tracked.goals : base?.football?.goals,
-                          cards: tracked.cards.length > 0 ? tracked.cards : base?.football?.cards,
-                        },
-                      };
-                    })()}
+                    liveExtra={(expandedMatch as any)._liveExtra}
                     homeScore={expandedMatch.homeScore}
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
@@ -20138,916 +19363,6 @@ export default function Home({
                       )}
                     </div>
                   )}
-
-                {/* MLB Standings panel (baseball "yesterday" tab) */}
-                {matchViewTab === "yesterday" &&
-                  expandedMatch.sport === "baseball" && (
-                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                          🏆 Classificação MLB
-                        </span>
-                        {mlbStandings && (
-                          <span className="text-[9px] text-zinc-600">
-                            — {mlbStandings.season}
-                          </span>
-                        )}
-                      </div>
-                      {!mlbStandings ? (
-                        <div className="text-center text-zinc-500 py-4 text-sm animate-pulse">
-                          A carregar...
-                        </div>
-                      ) : (
-                        <div className="space-y-5">
-                          {mlbStandings.leagues.map((lg) => (
-                            <div key={lg.name}>
-                              <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">
-                                {lg.name}
-                              </div>
-                              <div className="space-y-2">
-                                {lg.divisions.map((div) => (
-                                  <div
-                                    key={div.name}
-                                    className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden"
-                                  >
-                                    <div className="bg-zinc-800/50 px-2.5 py-1 text-[8px] font-black text-zinc-500 uppercase tracking-wider">
-                                      {div.name}
-                                    </div>
-                                    <div className="overflow-x-auto">
-                                      <table className="w-full text-[10px] font-mono tabular-nums">
-                                        <thead>
-                                          <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                            <th className="text-left py-1 px-2 w-4">
-                                              #
-                                            </th>
-                                            <th className="text-left py-1 px-2 min-w-[90px]">
-                                              Equipa
-                                            </th>
-                                            <th className="py-1 px-1 text-center text-green-500">
-                                              V
-                                            </th>
-                                            <th className="py-1 px-1 text-center text-red-400">
-                                              D
-                                            </th>
-                                            <th className="py-1 px-1 text-center">
-                                              GB
-                                            </th>
-                                            <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                              PC
-                                            </th>
-                                            <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                              PA
-                                            </th>
-                                            <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                              DIF
-                                            </th>
-                                            <th className="py-1 px-1 text-center">
-                                              SÉRIE
-                                            </th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {div.teams.map((team, idx) => {
-                                            const abbr = MLB_ABBR[team.name];
-                                            const isSelected =
-                                              selectedMLBRoster === abbr;
-                                            return (
-                                              <tr
-                                                key={team.id}
-                                                className={`border-b border-zinc-800/30 transition-colors ${idx === 0 ? "border-l-2 border-l-green-600/40" : ""} ${abbr ? (isSelected ? "bg-red-500/10 cursor-pointer" : "cursor-pointer hover:bg-zinc-800/30") : ""}`}
-                                                onClick={() => {
-                                                  if (!abbr) return;
-                                                  if (isSelected) {
-                                                    setSelectedMLBRoster(null);
-                                                    return;
-                                                  }
-                                                  setSelectedMLBRoster(abbr);
-                                                  if (mlbRosters[abbr]) return;
-                                                  setMlbRosterLoading(true);
-                                                  fetch(
-                                                    `/api/matches/mlb-roster/${abbr}`,
-                                                  )
-                                                    .then((r) =>
-                                                      r.ok ? r.json() : null,
-                                                    )
-                                                    .then((d) => {
-                                                      if (d)
-                                                        setMlbRosters(
-                                                          (prev) => ({
-                                                            ...prev,
-                                                            [abbr]: d,
-                                                          }),
-                                                        );
-                                                    })
-                                                    .catch(() => {})
-                                                    .finally(() =>
-                                                      setMlbRosterLoading(
-                                                        false,
-                                                      ),
-                                                    );
-                                                }}
-                                              >
-                                                <td className="py-1 px-2 text-zinc-600">
-                                                  {team.position}
-                                                </td>
-                                                <td
-                                                  className={`py-1 px-2 font-semibold truncate max-w-[90px] ${isSelected ? "text-red-300" : "text-zinc-200"}`}
-                                                >
-                                                  {
-                                                    team.name
-                                                      .split(" ")
-                                                      .slice(-1)[0]
-                                                  }
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-green-400">
-                                                  {team.won}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-red-400">
-                                                  {team.lost}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500">
-                                                  {team.gamesBack}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {team.runsScored}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {team.runsAllowed}
-                                                </td>
-                                                <td
-                                                  className={`py-1 px-1 text-center hidden sm:table-cell font-bold ${team.runsDiff.startsWith("+") ? "text-green-400" : team.runsDiff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}
-                                                >
-                                                  {team.runsDiff}
-                                                </td>
-                                                <td
-                                                  className={`py-1 px-1 text-center font-black ${team.streak.startsWith("W") ? "text-green-400" : team.streak.startsWith("L") ? "text-red-400" : "text-zinc-400"}`}
-                                                >
-                                                  {team.streak}
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                {/* MLB Liga — league batting leaderboards */}
-                {matchViewTab === "liga" &&
-                  expandedMatch.sport === "baseball" &&
-                  (() => {
-                    const TABS: {
-                      key: "avg" | "hr" | "rbi" | "sb";
-                      label: string;
-                      col: keyof MLBLeaderBatter;
-                      color: string;
-                      title: string;
-                    }[] = [
-                      {
-                        key: "avg",
-                        label: "AVG",
-                        col: "avg",
-                        color: "text-yellow-400",
-                        title: "Média (AVG)",
-                      },
-                      {
-                        key: "hr",
-                        label: "HR",
-                        col: "homeRuns",
-                        color: "text-red-400",
-                        title: "Home Runs",
-                      },
-                      {
-                        key: "rbi",
-                        label: "RBI",
-                        col: "rbi",
-                        color: "text-blue-400",
-                        title: "RBI",
-                      },
-                      {
-                        key: "sb",
-                        label: "SB",
-                        col: "stolenBases",
-                        color: "text-emerald-400",
-                        title: "Bases Roubadas",
-                      },
-                    ];
-                    const active =
-                      TABS.find((t) => t.key === mlbLigaSubTab) ?? TABS[0];
-                    const sorted = mlbLeagueStats
-                      ? [...mlbLeagueStats.batters]
-                          .sort((a, b) => {
-                            const va = parseFloat(a[active.col] as string) || 0;
-                            const vb = parseFloat(b[active.col] as string) || 0;
-                            return vb - va;
-                          })
-                          .slice(0, 25)
-                      : [];
-                    return (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                            ⭐ Líderes MLB
-                          </div>
-                          <div className="flex rounded overflow-hidden border border-zinc-700">
-                            {TABS.map((t) => (
-                              <button
-                                key={t.key}
-                                onClick={() => setMlbLigaSubTab(t.key)}
-                                className={`text-[9px] font-black px-2.5 py-1 transition-colors ${mlbLigaSubTab === t.key ? "bg-zinc-700 text-white" : "text-zinc-600 hover:text-zinc-400"}`}
-                              >
-                                {t.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div
-                          className={`text-[9px] font-bold mb-2 ${active.color}`}
-                        >
-                          🏆 Top 25 — {active.title}
-                        </div>
-                        {mlbLeagueStatsLoading || !mlbLeagueStats ? (
-                          <div className="flex items-center justify-center py-10">
-                            <div className="text-zinc-600 text-xs animate-pulse">
-                              A carregar líderes...
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-[10px] font-mono tabular-nums">
-                              <thead>
-                                <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                  <th className="text-left py-1 px-1 w-5">#</th>
-                                  <th className="text-left py-1 px-2 min-w-[110px]">
-                                    Jogador
-                                  </th>
-                                  <th className="text-left py-1 px-1 min-w-[65px] hidden sm:table-cell">
-                                    Equipa
-                                  </th>
-                                  <th className="py-1 px-1 text-center">PJ</th>
-                                  <th
-                                    className={`py-1 px-1 text-center font-black ${active.color}`}
-                                  >
-                                    {active.label}
-                                  </th>
-                                  {active.key === "avg" && (
-                                    <>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        OBP
-                                      </th>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        SLG
-                                      </th>
-                                      <th className="py-1 px-1 text-center">
-                                        HR
-                                      </th>
-                                      <th className="py-1 px-1 text-center">
-                                        RBI
-                                      </th>
-                                    </>
-                                  )}
-                                  {active.key === "hr" && (
-                                    <>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        AVG
-                                      </th>
-                                      <th className="py-1 px-1 text-center">
-                                        RBI
-                                      </th>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        R
-                                      </th>
-                                    </>
-                                  )}
-                                  {active.key === "rbi" && (
-                                    <>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        AVG
-                                      </th>
-                                      <th className="py-1 px-1 text-center">
-                                        HR
-                                      </th>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        H
-                                      </th>
-                                    </>
-                                  )}
-                                  {active.key === "sb" && (
-                                    <>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        AVG
-                                      </th>
-                                      <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                        R
-                                      </th>
-                                      <th className="py-1 px-1 text-center">
-                                        H
-                                      </th>
-                                    </>
-                                  )}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {sorted.map((b, i) => (
-                                  <tr
-                                    key={i}
-                                    className="border-b border-zinc-800/30 hover:bg-zinc-800/20"
-                                  >
-                                    <td className="py-1 px-1 text-zinc-600">
-                                      {i + 1}
-                                    </td>
-                                    <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[110px]">
-                                      {b.name}
-                                    </td>
-                                    <td className="py-1 px-1 text-zinc-500 truncate max-w-[65px] hidden sm:table-cell">
-                                      {b.team}
-                                    </td>
-                                    <td className="py-1 px-1 text-center text-zinc-500">
-                                      {b.gp}
-                                    </td>
-                                    <td
-                                      className={`py-1 px-1 text-center font-black ${active.color}`}
-                                    >
-                                      {b[active.col] as string}
-                                    </td>
-                                    {active.key === "avg" && (
-                                      <>
-                                        <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">
-                                          {b.obp}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">
-                                          {b.slg}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-red-400">
-                                          {b.homeRuns}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-300">
-                                          {b.rbi}
-                                        </td>
-                                      </>
-                                    )}
-                                    {active.key === "hr" && (
-                                      <>
-                                        <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">
-                                          {b.avg}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-300">
-                                          {b.rbi}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                          {b.runs}
-                                        </td>
-                                      </>
-                                    )}
-                                    {active.key === "rbi" && (
-                                      <>
-                                        <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">
-                                          {b.avg}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-red-400">
-                                          {b.homeRuns}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                          {b.hits}
-                                        </td>
-                                      </>
-                                    )}
-                                    {active.key === "sb" && (
-                                      <>
-                                        <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">
-                                          {b.avg}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                          {b.runs}
-                                        </td>
-                                        <td className="py-1 px-1 text-center text-zinc-300">
-                                          {b.hits}
-                                        </td>
-                                      </>
-                                    )}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            {sorted.length === 0 && (
-                              <div className="text-center text-zinc-600 py-6 text-xs">
-                                Sem dados disponíveis.
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                {/* MLB Roster/Stats panel */}
-                {matchViewTab === "yesterday" &&
-                  expandedMatch.sport === "baseball" &&
-                  selectedMLBRoster &&
-                  (() => {
-                    const abbr = selectedMLBRoster;
-                    const roster = mlbRosters[abbr];
-                    const stats = mlbTeamStats[abbr];
-                    return (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
-                        {/* Header */}
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-[10px] font-black text-red-500 uppercase tracking-widest shrink-0">
-                              ⚾
-                            </span>
-                            <span className="text-[9px] text-zinc-400 font-semibold truncate">
-                              {roster?.teamName ?? abbr.toUpperCase()}
-                            </span>
-                            {(mlbRosterLoading || mlbStatsLoading) && (
-                              <span className="text-[9px] text-zinc-600 animate-pulse shrink-0">
-                                A carregar...
-                              </span>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => {
-                              setSelectedMLBRoster(null);
-                              setMlbPanelTab("roster");
-                            }}
-                            className="text-zinc-600 hover:text-zinc-400 text-xs shrink-0"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                        {/* Tabs */}
-                        <div className="flex border-b border-zinc-800 mb-3">
-                          {(["roster", "stats", "injuries"] as const).map(
-                            (tab) => (
-                              <button
-                                key={tab}
-                                onClick={() => {
-                                  setMlbPanelTab(tab);
-                                  if (tab === "stats" && !mlbTeamStats[abbr]) {
-                                    setMlbStatsLoading(true);
-                                    fetch(`/api/matches/mlb-team-stats/${abbr}`)
-                                      .then((r) => (r.ok ? r.json() : null))
-                                      .then((d) => {
-                                        if (d)
-                                          setMlbTeamStats((prev) => ({
-                                            ...prev,
-                                            [abbr]: d,
-                                          }));
-                                      })
-                                      .catch(() => {})
-                                      .finally(() => setMlbStatsLoading(false));
-                                  }
-                                  if (
-                                    tab === "injuries" &&
-                                    !mlbInjuries[abbr]
-                                  ) {
-                                    setMlbInjuriesLoading(true);
-                                    fetch(`/api/matches/mlb-injuries/${abbr}`)
-                                      .then((r) => (r.ok ? r.json() : null))
-                                      .then((d) => {
-                                        if (d)
-                                          setMlbInjuries((prev) => ({
-                                            ...prev,
-                                            [abbr]: d,
-                                          }));
-                                      })
-                                      .catch(() => {})
-                                      .finally(() =>
-                                        setMlbInjuriesLoading(false),
-                                      );
-                                  }
-                                }}
-                                className={`flex-1 py-1.5 text-[10px] font-bold transition-colors ${mlbPanelTab === tab ? (tab === "injuries" ? "text-red-400 border-b-2 border-red-500 bg-red-500/5" : "text-red-400 border-b-2 border-red-500 bg-red-500/5") : "text-zinc-600 hover:text-zinc-400"}`}
-                              >
-                                {tab === "roster"
-                                  ? "Plantel"
-                                  : tab === "stats"
-                                    ? "Estatísticas"
-                                    : "🩹 Lesões"}
-                              </button>
-                            ),
-                          )}
-                        </div>
-
-                        {/* Roster tab */}
-                        {mlbPanelTab === "roster" && (
-                          <>
-                            {!roster && !mlbRosterLoading && (
-                              <div className="text-center text-zinc-600 py-4 text-xs">
-                                Plantel não disponível.
-                              </div>
-                            )}
-                            {roster && (
-                              <div className="space-y-3">
-                                {roster.positions.map((pos) => (
-                                  <div key={pos.name}>
-                                    <div className="text-[8px] font-black text-zinc-600 uppercase tracking-widest mb-1.5 px-1">
-                                      {pos.name}
-                                    </div>
-                                    <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-[10px]">
-                                          <thead>
-                                            <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                              <th className="text-left py-1 px-2 w-5">
-                                                #
-                                              </th>
-                                              <th className="text-left py-1 px-2 min-w-[110px]">
-                                                Nome
-                                              </th>
-                                              <th className="py-1 px-1 text-center w-8">
-                                                POS
-                                              </th>
-                                              <th className="py-1 px-1 text-center w-8">
-                                                I
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                Alt
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                Peso
-                                              </th>
-                                              <th className="py-1 px-1 text-center w-8">
-                                                Bat
-                                              </th>
-                                              <th className="py-1 px-1 text-center w-8">
-                                                Lan
-                                              </th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {pos.players.map((pl) => (
-                                              <tr
-                                                key={pl.id}
-                                                className="border-b border-zinc-800/30 last:border-0"
-                                              >
-                                                <td className="py-1 px-2 text-zinc-600 font-mono tabular-nums">
-                                                  {pl.number || "—"}
-                                                </td>
-                                                <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[110px]">
-                                                  {pl.name}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 font-mono">
-                                                  {pl.position || "—"}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 tabular-nums">
-                                                  {pl.age || "—"}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden sm:table-cell">
-                                                  {pl.height || "—"}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden sm:table-cell">
-                                                  {pl.weight || "—"}
-                                                </td>
-                                                <td
-                                                  className={`py-1 px-1 text-center font-bold ${pl.bats === "L" ? "text-blue-400" : pl.bats === "R" ? "text-orange-400" : pl.bats === "S" ? "text-purple-400" : "text-zinc-600"}`}
-                                                >
-                                                  {pl.bats || "—"}
-                                                </td>
-                                                <td
-                                                  className={`py-1 px-1 text-center font-bold ${pl.throws === "L" ? "text-blue-400" : pl.throws === "R" ? "text-orange-400" : "text-zinc-600"}`}
-                                                >
-                                                  {pl.throws || "—"}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                                <div className="flex gap-4 text-[8px] text-zinc-700 px-1 pt-1">
-                                  <span>
-                                    <span className="text-blue-400 font-bold">
-                                      L
-                                    </span>{" "}
-                                    — Esquerdo
-                                  </span>
-                                  <span>
-                                    <span className="text-orange-400 font-bold">
-                                      R
-                                    </span>{" "}
-                                    — Direito
-                                  </span>
-                                  <span>
-                                    <span className="text-purple-400 font-bold">
-                                      S
-                                    </span>{" "}
-                                    — Ambos (Switch)
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-
-                        {/* Stats tab */}
-                        {mlbPanelTab === "stats" && (
-                          <>
-                            {!stats && !mlbStatsLoading && (
-                              <div className="text-center text-zinc-600 py-4 text-xs">
-                                Estatísticas não disponíveis.
-                              </div>
-                            )}
-                            {mlbStatsLoading && !stats && (
-                              <div className="text-center text-zinc-600 py-4 text-xs animate-pulse">
-                                A carregar...
-                              </div>
-                            )}
-                            {stats && (
-                              <div className="space-y-4">
-                                {/* Batting */}
-                                {stats.batters.length > 0 && (
-                                  <div>
-                                    <div className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 px-1">
-                                      ⚾ Batimento
-                                    </div>
-                                    <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-[10px] font-mono tabular-nums">
-                                          <thead>
-                                            <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                              <th className="text-left py-1 px-2 min-w-[100px]">
-                                                Jogador
-                                              </th>
-                                              <th className="py-1 px-1 text-center">
-                                                G
-                                              </th>
-                                              <th className="py-1 px-1 text-center font-black text-orange-400">
-                                                AVG
-                                              </th>
-                                              <th className="py-1 px-1 text-center text-green-400">
-                                                OBP
-                                              </th>
-                                              <th className="py-1 px-1 text-center text-blue-400">
-                                                SLG
-                                              </th>
-                                              <th className="py-1 px-1 text-center text-red-400">
-                                                HR
-                                              </th>
-                                              <th className="py-1 px-1 text-center">
-                                                RBI
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                R
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                H
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                SB
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden md:table-cell">
-                                                BB
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden md:table-cell">
-                                                SO
-                                              </th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {stats.batters.map((p, idx) => (
-                                              <tr
-                                                key={p.id}
-                                                className={`border-b border-zinc-800/30 last:border-0 ${idx === 0 ? "bg-orange-500/5" : ""}`}
-                                              >
-                                                <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[100px]">
-                                                  {p.name}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600">
-                                                  {p.gp}
-                                                </td>
-                                                <td className="py-1 px-1 text-center font-black text-orange-400">
-                                                  {p.avg}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-green-400 font-bold">
-                                                  {p.obp}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-blue-400 font-bold">
-                                                  {p.slg}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-red-400 font-bold">
-                                                  {p.hr}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-400">
-                                                  {p.rbi}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {p.r}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {p.h}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {p.sb}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden md:table-cell">
-                                                  {p.bb}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden md:table-cell">
-                                                  {p.so}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                                {/* Pitching */}
-                                {stats.pitchers.length > 0 && (
-                                  <div>
-                                    <div className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 px-1">
-                                      ⚾ Lançamento
-                                    </div>
-                                    <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-[10px] font-mono tabular-nums">
-                                          <thead>
-                                            <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                              <th className="text-left py-1 px-2 min-w-[100px]">
-                                                Jogador
-                                              </th>
-                                              <th className="py-1 px-1 text-center font-black text-green-400">
-                                                ERA
-                                              </th>
-                                              <th className="py-1 px-1 text-center text-green-500">
-                                                V
-                                              </th>
-                                              <th className="py-1 px-1 text-center text-red-400">
-                                                D
-                                              </th>
-                                              <th className="py-1 px-1 text-center">
-                                                G
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                IP
-                                              </th>
-                                              <th className="py-1 px-1 text-center text-orange-400">
-                                                SO
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden sm:table-cell">
-                                                BB
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden md:table-cell">
-                                                WHIP
-                                              </th>
-                                              <th className="py-1 px-1 text-center hidden md:table-cell">
-                                                BAA
-                                              </th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {stats.pitchers.map((p, idx) => (
-                                              <tr
-                                                key={p.id}
-                                                className={`border-b border-zinc-800/30 last:border-0 ${idx === 0 ? "bg-green-500/5" : ""}`}
-                                              >
-                                                <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[100px]">
-                                                  {p.name}
-                                                </td>
-                                                <td className="py-1 px-1 text-center font-black text-green-400">
-                                                  {p.era}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-green-400 font-bold">
-                                                  {p.w}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-red-400">
-                                                  {p.l}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600">
-                                                  {p.gp}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {p.ip}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-orange-400 font-bold">
-                                                  {p.so}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">
-                                                  {p.bb}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden md:table-cell">
-                                                  {p.whip}
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden md:table-cell">
-                                                  {p.baa}
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-
-                        {/* Injuries tab */}
-                        {mlbPanelTab === "injuries" &&
-                          (() => {
-                            const injData = mlbInjuries[abbr];
-                            const injColor = (r: MLBInjuryReport) => {
-                              const s = r.status.toLowerCase();
-                              if (s.includes("60-day") || s === "sidelined")
-                                return {
-                                  badge:
-                                    "bg-red-500/20 text-red-400 border-red-700/40",
-                                  dot: "bg-red-500",
-                                };
-                              if (s.includes("15-day") || s.includes("10-day"))
-                                return {
-                                  badge:
-                                    "bg-amber-500/20 text-amber-400 border-amber-700/40",
-                                  dot: "bg-amber-500",
-                                };
-                              if (
-                                s.includes("7-day") ||
-                                s.includes("day-to-day")
-                              )
-                                return {
-                                  badge:
-                                    "bg-yellow-500/20 text-yellow-400 border-yellow-700/40",
-                                  dot: "bg-yellow-500",
-                                };
-                              return {
-                                badge:
-                                  "bg-amber-500/20 text-amber-400 border-amber-700/40",
-                                dot: "bg-amber-500",
-                              };
-                            };
-                            return (
-                              <>
-                                {!injData && !mlbInjuriesLoading && (
-                                  <div className="text-center text-zinc-600 py-4 text-xs">
-                                    Sem lesões disponíveis.
-                                  </div>
-                                )}
-                                {mlbInjuriesLoading && !injData && (
-                                  <div className="text-center text-zinc-600 py-4 text-xs animate-pulse">
-                                    A carregar...
-                                  </div>
-                                )}
-                                {injData && injData.report.length === 0 && (
-                                  <div className="flex items-center gap-2 px-3 py-4 text-xs text-green-400">
-                                    <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
-                                    Equipa sem lesões reportadas.
-                                  </div>
-                                )}
-                                {injData && injData.report.length > 0 && (
-                                  <div className="divide-y divide-zinc-800/50">
-                                    {injData.report.map((r) => {
-                                      const { badge, dot } = injColor(r);
-                                      return (
-                                        <div
-                                          key={r.playerId}
-                                          className="flex items-start gap-3 px-3 py-2.5 hover:bg-zinc-800/20 transition-colors"
-                                        >
-                                          <span
-                                            className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${dot}`}
-                                          />
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                              <span className="text-[11px] font-bold text-zinc-200">
-                                                {r.playerName}
-                                              </span>
-                                              <span
-                                                className={`text-[9px] font-black border rounded px-1 py-0.5 ${badge}`}
-                                              >
-                                                {r.status}
-                                              </span>
-                                            </div>
-                                            <div className="text-[10px] text-zinc-500 mt-0.5">
-                                              {r.description}
-                                            </div>
-                                          </div>
-                                          <div className="text-[9px] text-zinc-700 shrink-0 tabular-nums whitespace-nowrap">
-                                            {r.date}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                      </div>
-                    );
-                  })()}
 
                 {/* Yesterday results panel (tennis) */}
                 {matchViewTab === "yesterday" &&
@@ -22463,6 +20778,76 @@ export default function Home({
                             </div>
                           </div>
                         )}
+
+                        {/* Próximos Jogos — real SportMonks team schedule */}
+                        {(homeUpcoming.length > 0 || awayUpcoming.length > 0) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { team: expandedMatch.home, list: homeUpcoming },
+                              { team: expandedMatch.away, list: awayUpcoming },
+                            ].map(({ team, list }) =>
+                              list.length > 0 ? (
+                                <div
+                                  key={team}
+                                  className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4"
+                                >
+                                  <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3 truncate">
+                                    Próximos Jogos · {team}
+                                  </div>
+                                  <div className="space-y-2">
+                                    {list.map((f, i) => (
+                                      <div
+                                        key={i}
+                                        className="flex items-center gap-2 text-[11px]"
+                                      >
+                                        <span className="text-zinc-600 shrink-0 w-16 tabular-nums">
+                                          {f.date}
+                                        </span>
+                                        <span className="flex-1 text-zinc-300 truncate">
+                                          {f.isHome ? "vs " : "@ "}
+                                          {f.opponent}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null,
+                            )}
+                          </div>
+                        )}
+
+                        {/* Eventos ao vivo — nomes de jogadores clicáveis abrem o perfil */}
+                        {(expandedMatch.events?.length ?? 0) > 0 && (
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
+                              Eventos
+                            </div>
+                            <div className="space-y-1.5">
+                              {expandedMatch.events!.map((ev, i) => (
+                                <div key={i} className="flex items-center gap-2 text-[11px]">
+                                  <span className="text-zinc-600 shrink-0 w-8 tabular-nums">
+                                    {ev.minute}'
+                                  </span>
+                                  <span className="text-zinc-500 shrink-0 w-24 truncate">
+                                    {ev.type}
+                                  </span>
+                                  {ev.playerId ? (
+                                    <button
+                                      onClick={() => setPlayerProfileId(ev.playerId!)}
+                                      className="flex-1 text-left text-zinc-200 font-semibold truncate hover:text-red-400 hover:underline"
+                                    >
+                                      {ev.player}
+                                    </button>
+                                  ) : (
+                                    <span className="flex-1 text-zinc-200 font-semibold truncate">
+                                      {ev.player}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -23290,13 +21675,7 @@ export default function Home({
                     : allUpcoming.filter(
                         (m) => (m.sport ?? "football") === selectedSport,
                       );
-                // Pin WC2026 matches at the top (regardless of kick-off time)
-                const sortedUpcoming = [...filteredUpcoming].sort((a, b) => {
-                  const aIsWC = isWCMatch(a.league) ? 0 : 1;
-                  const bIsWC = isWCMatch(b.league) ? 0 : 1;
-                  return aIsWC - bIsWC;
-                });
-                const visibleUpcoming = sortedUpcoming.filter((m) => {
+                const visibleUpcoming = filteredUpcoming.filter((m) => {
                   const q = upcomingSearchQuery.trim().toLowerCase();
                   if (!q) return true;
                   return (
@@ -23335,7 +21714,6 @@ export default function Home({
                 // Sport grouping for display
                 // Ordem: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
                 const SPORT_GROUPS = [
-                  { key: "wc2026", emoji: "🏆", label: "Copa do Mundo" },
                   { key: "football", emoji: "⚽", label: "Futebol" },
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
                   { key: "hockey", emoji: "🏒", label: "Hóquei no Gelo" },
@@ -23354,8 +21732,6 @@ export default function Home({
                 const _shouldLimit = !showAllLeagues && selectedSport === "all" && !selectedLeague && !upcomingSearchQuery;
                 const sportGroups = SPORT_GROUPS.map((g) => {
                   const all = listUpcoming.filter((m) => {
-                    if (g.key === "wc2026") return isWCMatch(m.league);
-                    if (g.key === "football") return (m.sport ?? "football") === "football" && !isWCMatch(m.league);
                     return (m.sport ?? "football") === g.key;
                   });
                   const matches = _shouldLimit ? all.slice(0, _PER_SPORT_LIMIT) : all;
@@ -28089,13 +26465,6 @@ export default function Home({
         </div>
       )}
 
-      {trackerModalEvent && (
-        <TrackerModal
-          event={trackerModalEvent}
-          onClose={() => setTrackerModalEvent(null)}
-        />
-      )}
-
       {/* MOBILE APP DOWNLOAD BANNER */}
       <AnimatePresence>
         {showAppBanner && (
@@ -28196,6 +26565,11 @@ export default function Home({
           </div>
         </div>
       </footer>
+
+      <PlayerProfileModal
+        playerId={playerProfileId}
+        onClose={() => setPlayerProfileId(null)}
+      />
 
       {/* AUTH MODAL */}
       {authModalOpen && (

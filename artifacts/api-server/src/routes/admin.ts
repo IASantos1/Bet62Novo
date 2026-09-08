@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Response, type Request } from "express";
-import jwt from "jsonwebtoken";
+import * as jwt from "jsonwebtoken";
 import { db } from "@workspace/db";
 import {
   kycDocumentsTable,
@@ -8,11 +8,9 @@ import {
   paymentsTable,
   withdrawalsTable,
   settlementLogsTable,
-  sportscoreMatchMapTable,
   casinoGamesTable,
   ledgerEntriesTable,
   casinoBannersTable,
-  apiFootballNameMismatchesTable,
 } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
@@ -22,23 +20,6 @@ import {
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, applyFreebetBalanceDelta } from "../lib/ledger.js";
-import {
-  getPulseScoreFootballLive,
-  getPulseScoreFootballUsage,
-} from "../services/pulsescore/football.js";
-import {
-  getPulseScoreTennisLive,
-  getPulseScoreTennisUsage,
-} from "../services/pulsescore/tennis.js";
-import { pulseScoreFootballWsStatus } from "../services/pulsescore/footballWs.js";
-import { getApiFootballUsage, getApiFootballLiveFixtures } from "../services/apiFootball.js";
-import {
-  pulseScoreBasketball,
-  pulseScoreHockey,
-  pulseScoreBaseball,
-  pulseScoreVolleyball,
-} from "../services/pulsescore/genericSportLive.js";
-import { pulseScoreRestUrl } from "../services/pulsescore/client.js";
 import { CONFIG } from "../lib/config.js";
 import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
 import { timingSafeEqualString } from "../lib/security.js";
@@ -47,21 +28,9 @@ import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
 import {
-  unknownStatpalMarkets,
-  countryForLeagueName,
-} from "./matches.js";
-import { pulseScoreFetchFootballLeagues } from "../services/pulsescore/leagues.js";
-import {
   getPalaceCasinoProviders,
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
-import { listMappings, setMapping, createMapping } from "../services/liveStream/mapping.js";
-import {
-  SPORTSCORE_BASE,
-  resolveSportscoreMatchByTeams,
-  fetchSportscoreTracker,
-  type SportscoreTrackerSummary,
-} from "../services/sportscore/client.js";
 import { memberAccountForUser } from "./casino.js";
 
 function escapeCsv(val: unknown): string {
@@ -457,16 +426,23 @@ router.get(
         .from(usersTable)
         .orderBy(desc(usersTable.createdAt));
 
-      const betCounts = await db
+      // Drizzle's type inference collapses to `unknown` for this particular
+      // combination of a plain column + two aggregates in the same select —
+      // the runtime shape is exactly this, so annotate it explicitly.
+      const betCounts = (await db
         .select({
           userId: betsTable.userId,
           count: count(),
           totalStaked: sum(betsTable.stake),
         })
         .from(betsTable)
-        .groupBy(betsTable.userId);
+        .groupBy(betsTable.userId)) as Array<{
+        userId: number;
+        count: number;
+        totalStaked: string | null;
+      }>;
 
-      const betMap = new Map(betCounts.map((b) => [b.userId, b]));
+      const betMap = new Map(betCounts.map((b): [number, typeof b] => [b.userId, b]));
 
       const result = users.map((u) => ({
         ...u,
@@ -2169,428 +2145,6 @@ router.get(
   },
 );
 
-// ── Statpal API usage ─────────────────────────────────────────────────────────
-// Cached so the dashboard card can refresh every 60 s without hammering Statpal.
-let statpalUsageCache: { data: Record<string, unknown>; at: number } | null = null;
-const STATPAL_USAGE_TTL_MS = 60_000;
-
-router.get("/statpal-usage", adminMiddleware, async (_req, res) => {
-  try {
-    const key = process.env.STATPAL_API_KEY;
-    if (!key) {
-      res.status(503).json({ error: "STATPAL_API_KEY não configurada" });
-      return;
-    }
-
-    // Serve from cache if fresh
-    if (statpalUsageCache && Date.now() - statpalUsageCache.at < STATPAL_USAGE_TTL_MS) {
-      res.json(statpalUsageCache.data);
-      return;
-    }
-
-    const url = new URL("https://statpal.io/api/user-request-count");
-    url.searchParams.set("access_key", key);
-
-    const resp = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(8000),
-      headers: { Accept: "application/json" },
-    });
-
-    if (!resp.ok) {
-      res.status(502).json({ error: `Statpal devolveu ${resp.status}` });
-      return;
-    }
-
-    const raw = await resp.json() as Record<string, unknown>;
-
-    // Normalize field names (Statpal uses Portuguese keys)
-    const data = {
-      accessKey: raw["access_key"] ?? raw["accessKey"] ?? null,
-      date: raw["data_atual"] ?? raw["date"] ?? null,
-      requestCount:
-        raw["contagem_de_solicitações"] ??
-        raw["request_count"] ??
-        raw["requestCount"] ??
-        null,
-    };
-
-    statpalUsageCache = { data, at: Date.now() };
-    res.json(data);
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/statpal-usage error");
-    res.status(500).json({ error: "Erro ao consultar Statpal" });
-  }
-});
-
-// ── SportScore Match Tracker ID mapping ───────────────────────────────────────
-// Statpal stays the source for games/odds/stats/events/settlement. SportScore
-// is only used to embed its Match Tracker widget, which requires SportScore's
-// own match ID (unrelated to Statpal's). Until an automatic team/date
-// matching service is wired up against a real SportScore fixtures/search
-// endpoint, mappings are pasted in here manually per match.
-router.get("/sportscore-map", adminMiddleware, async (req: AdminRequest, res) => {
-  try {
-    const sport = String(req.query["sport"] ?? "").trim();
-    const rows = await db
-      .select()
-      .from(sportscoreMatchMapTable)
-      .where(sport ? eq(sportscoreMatchMapTable.sport, sport) : undefined)
-      .orderBy(desc(sportscoreMatchMapTable.updatedAt))
-      .limit(200);
-    res.json({ mappings: rows });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/sportscore-map error");
-    res.status(500).json({ error: "Erro ao carregar mapeamentos do SportScore" });
-  }
-});
-
-router.post("/sportscore-map", adminMiddleware, async (req: AdminRequest, res) => {
-  try {
-    const sport = String(req.body?.sport ?? "").trim().toLowerCase();
-    const statpalMatchId = String(req.body?.statpalMatchId ?? "").trim();
-    const sportscoreId = String(req.body?.sportscoreId ?? "").trim();
-    const homeTeam = req.body?.homeTeam ? String(req.body.homeTeam).trim() : null;
-    const awayTeam = req.body?.awayTeam ? String(req.body.awayTeam).trim() : null;
-    const matchDate = req.body?.matchDate ? String(req.body.matchDate).trim() : null;
-
-    if (!sport || !statpalMatchId || !sportscoreId) {
-      res.status(400).json({
-        error: "sport, statpalMatchId e sportscoreId são obrigatórios",
-      });
-      return;
-    }
-
-    const existing = await db
-      .select({ id: sportscoreMatchMapTable.id })
-      .from(sportscoreMatchMapTable)
-      .where(
-        and(
-          eq(sportscoreMatchMapTable.sport, sport),
-          eq(sportscoreMatchMapTable.statpalMatchId, statpalMatchId),
-        ),
-      )
-      .limit(1);
-
-    if (existing[0]) {
-      await db
-        .update(sportscoreMatchMapTable)
-        .set({
-          sportscoreId,
-          homeTeam,
-          awayTeam,
-          matchDate,
-          source: "manual",
-          updatedAt: new Date(),
-        })
-        .where(eq(sportscoreMatchMapTable.id, existing[0].id));
-    } else {
-      await db.insert(sportscoreMatchMapTable).values({
-        sport,
-        statpalMatchId,
-        sportscoreId,
-        homeTeam,
-        awayTeam,
-        matchDate,
-        source: "manual",
-      });
-    }
-
-    logger.info(
-      { sport, statpalMatchId, sportscoreId, admin: req.admin!.username },
-      "Admin set SportScore match mapping",
-    );
-    res.json({ success: true });
-  } catch (err) {
-    logger.error({ err }, "POST /api/admin/sportscore-map error");
-    res.status(500).json({ error: "Erro ao salvar mapeamento do SportScore" });
-  }
-});
-
-// Removes a mapping — needed to clear a stale/wrong entry an earlier,
-// looser auto-matching pass may have cached (e.g. before the matching
-// logic was tightened), which would otherwise keep short-circuiting the
-// lookup forever since a cached row is always trusted first.
-router.delete("/sportscore-map/:id", adminMiddleware, async (req: AdminRequest, res) => {
-  try {
-    const id = Number(req.params["id"]);
-    if (!Number.isInteger(id)) {
-      res.status(400).json({ error: "id inválido" });
-      return;
-    }
-    await db.delete(sportscoreMatchMapTable).where(eq(sportscoreMatchMapTable.id, id));
-    logger.info({ id, admin: req.admin!.username }, "Admin deleted SportScore match mapping");
-    res.json({ success: true });
-  } catch (err) {
-    logger.error({ err }, "DELETE /api/admin/sportscore-map/:id error");
-    res.status(500).json({ error: "Erro ao remover mapeamento do SportScore" });
-  }
-});
-
-// Was referenced by the admin frontend's "Testar casamento automático"
-// button since it was built, but never actually existed on the backend —
-// every click just 404'd. Now runs the real automatic resolver: searches
-// SportScore's real fixtures list for a team-name match, and if found,
-// fetches its live tracker JSON too so the admin can see actual data, not
-// just a resolved id.
-router.post("/sportscore-test", adminMiddleware, async (req: AdminRequest, res) => {
-  const sport = String(req.body?.sport ?? "").trim().toLowerCase() || "football";
-  const homeTeam = String(req.body?.homeTeam ?? "").trim();
-  const awayTeam = String(req.body?.awayTeam ?? "").trim();
-  if (!homeTeam || !awayTeam) {
-    res.status(400).json({ error: "homeTeam e awayTeam são obrigatórios" });
-    return;
-  }
-  const steps: Array<{ step: string; url: string; ok: boolean; status?: number; detail: string }> = [];
-  const matchesUrl = `${SPORTSCORE_BASE}/api/widget/matches/?sport=${encodeURIComponent(sport)}`;
-  try {
-    const match = await resolveSportscoreMatchByTeams(sport, homeTeam, awayTeam);
-    steps.push({
-      step: "search-fixtures",
-      url: matchesUrl,
-      ok: !!match,
-      detail: match
-        ? `Encontrado: "${match.home}" vs "${match.away}" (id: ${match.sportscoreId})`
-        : `Nenhum jogo de "${homeTeam}" vs "${awayTeam}" encontrado no catálogo real da SportScore agora.`,
-    });
-    if (!match) {
-      res.json({ result: null, steps, error: "Não encontrado" });
-      return;
-    }
-    let tracker: { ok: boolean; status?: number; raw?: unknown; error?: string } = { ok: false, error: "sem trackerId" };
-    let mappedTracker: SportscoreTrackerSummary | null = null;
-    if (match.trackerId) {
-      const trackerRes = await fetchSportscoreTracker(sport, match.trackerId);
-      tracker = { ok: trackerRes.ok, status: trackerRes.status, raw: trackerRes.raw, error: trackerRes.error };
-      mappedTracker = trackerRes.mapped;
-      steps.push({
-        step: "fetch-tracker",
-        url: `${SPORTSCORE_BASE}/api/widget/tracker/?sport=${encodeURIComponent(sport)}&id=${encodeURIComponent(match.trackerId)}`,
-        ok: trackerRes.ok,
-        status: trackerRes.status,
-        detail: trackerRes.ok ? "Tracker respondeu" : (trackerRes.error ?? "falhou"),
-      });
-    }
-    res.json({
-      result: { id: match.sportscoreId, slug: match.sportscoreId },
-      steps,
-      tracker,
-      mappedTracker,
-    });
-  } catch (err) {
-    logger.error({ err }, "POST /api/admin/sportscore-test error");
-    res.status(500).json({ error: "Erro ao testar casamento automático", detail: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-// Read-only diagnostic for the PulseScore integration (real bookmaker odds).
-// Each sport's live odds are built directly from this same feed by its own
-// buildXLiveFromPulseScore function in matches.ts (buildFootballLive.../
-// buildTennisLive.../buildBasketballLive.../buildHockeyLive.../
-// buildBaseballLive.../buildVolleyballLive...) — there is no separate
-// "overlay" step. All six come from a fresh REST fetch each tick. Bookmaker
-// pin per sport (confirmed against real samples, not a fixed convention —
-// verify against the actual *.ts extraction file before relying on this):
-// tennis=bet365, football/basketball/hockey=bwin, volleyball=unibetau.
-// Hockey and baseball currently have no LIVE builder wired into the public
-// feed (prematch/upcoming only) — this debug route still fetches their raw
-// live data for diagnostic purposes.
-router.get("/pulsescore-debug", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PULSESCORE_API_KEY) {
-    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-    return;
-  }
-  try {
-    const [football, tennis, basketball, hockey, baseball, volleyball] =
-      await Promise.all([
-        getPulseScoreFootballLive(),
-        getPulseScoreTennisLive(),
-        pulseScoreBasketball.getLive(),
-        pulseScoreHockey.getLive(),
-        pulseScoreBaseball.getLive(),
-        pulseScoreVolleyball.getLive(),
-      ]);
-    res.json({
-      football: { count: football.length, events: football },
-      tennis: { count: tennis.length, events: tennis },
-      basketball: { count: basketball.length, events: basketball },
-      hockey: { count: hockey.length, events: hockey },
-      baseball: { count: baseball.length, events: baseball },
-      volleyball: { count: volleyball.length, events: volleyball },
-    });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/pulsescore-debug error");
-    res.status(500).json({
-      error: "Erro ao consultar PulseScore",
-      detail: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
-
-// PulseScore usage — same "Utilização" card the admin dashboard already
-// shows for Statpal, but PulseScore has no /user-request-count equivalent
-// to query from their side, so this reports what WE'VE counted ourselves
-// (see the requestsToday/framesToday counters in the pulsescore services).
-router.get("/pulsescore-usage", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PULSESCORE_API_KEY) {
-    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-    return;
-  }
-  res.json({
-    football: { ...getPulseScoreFootballUsage(), ws: pulseScoreFootballWsStatus() },
-    tennis: getPulseScoreTennisUsage(),
-    basketball: pulseScoreBasketball.getUsage(),
-    hockey: pulseScoreHockey.getUsage(),
-    baseball: pulseScoreBaseball.getUsage(),
-    volleyball: pulseScoreVolleyball.getUsage(),
-  });
-});
-
-// API-Football usage/health — built to diagnose a user report (2026-08-11)
-// that VAR-review suspension "isn't working". VAR/red-card/missed-penalty
-// detection (matches.ts's newVarReview et al.) only ever fires when a
-// PulseScore live match successfully matched an API-Football fixture
-// (findApiFootballFixture) AND that fixture happened to carry a real VAR
-// incident in the sampled window — both silent, unobservable failure modes
-// with nothing in the admin panel to check before this route existed:
-// API_FOOTBALL_KEY simply unset/wrong, the account's plan/quota not
-// covering live fixtures for the leagues actually being watched, or a
-// team-name mismatch (see api_football_name_mismatches, written by
-// routes/matches.ts and read by the Pré-Jogo AI agent) silently leaving
-// apiFixture null for a specific match. Surfaces all three causes in one
-// place instead of needing Railway log access to even start diagnosing.
-router.get("/apifootball-usage", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
-  if (!CONFIG.API_FOOTBALL_KEY) {
-    res.json({ configured: false });
-    return;
-  }
-  try {
-    const [liveFixtures, recentMismatches] = await Promise.all([
-      getApiFootballLiveFixtures(),
-      db
-        .select({
-          matchId: apiFootballNameMismatchesTable.matchId,
-          homeTeam: apiFootballNameMismatchesTable.homeTeam,
-          awayTeam: apiFootballNameMismatchesTable.awayTeam,
-          league: apiFootballNameMismatchesTable.league,
-          occurrenceCount: apiFootballNameMismatchesTable.occurrenceCount,
-          lastSeenAt: apiFootballNameMismatchesTable.lastSeenAt,
-        })
-        .from(apiFootballNameMismatchesTable)
-        .orderBy(desc(apiFootballNameMismatchesTable.lastSeenAt))
-        .limit(20),
-    ]);
-    res.json({
-      configured: true,
-      ...getApiFootballUsage(),
-      liveFixtureCount: liveFixtures.length,
-      recentNameMismatches: recentMismatches,
-    });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/apifootball-usage error");
-    res.status(500).json({ error: "Erro ao consultar API-Football" });
-  }
-});
-
-// Raw, uncached probe of PulseScore's /live-events endpoint — bypasses
-// getPulseScoreFootballLive()'s cache-and-swallow-errors behavior (built so
-// a transient failure never blows away the live board, but that same
-// behavior hides a persistent failure behind stale data with no visible
-// error anywhere in the UI). Confirmed in production (2026-08-08) via
-// Railway's Deploy Logs: football's live poller was getting a persistent
-// 401 while tennis's got a 429 (rate-limited, so its key IS accepted) in
-// the same window — this endpoint exists so that comparison can be re-run
-// from the admin panel instead of needing Railway shell/log access every
-// time, since PULSESCORE_API_KEY is the same for both sports/paths.
-router.get("/pulsescore-live-check", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PULSESCORE_API_KEY) {
-    res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-    return;
-  }
-  const probe = async (sport: string, bookmaker: string) => {
-    const url = pulseScoreRestUrl(`/live-events?sport=${sport}&limit=5`, bookmaker);
-    const startedAt = Date.now();
-    try {
-      const resp = await fetch(url, {
-        headers: { "X-Secret": CONFIG.PULSESCORE_API_KEY },
-        signal: AbortSignal.timeout(6000),
-      });
-      const bodyText = await resp.text();
-      return {
-        sport,
-        status: resp.status,
-        ok: resp.ok,
-        tookMs: Date.now() - startedAt,
-        bodyPreview: bodyText.slice(0, 500),
-      };
-    } catch (err) {
-      return {
-        sport,
-        status: null,
-        ok: false,
-        tookMs: Date.now() - startedAt,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  };
-  // Explicit bookmaker per sport, matching each sport's real current live
-  // pipeline (bwin for football since the 2026-08-08 switch, bet365 for
-  // tennis — see football.ts/tennis.ts) — this used to omit the bookmaker
-  // and silently fall back to CONFIG.PULSESCORE_BOOKMAKER's "bet365"
-  // default for both probes, which meant football's diagnostic result no
-  // longer reflected the bookmaker football actually runs on (audit
-  // finding, 2026-08-10).
-  const [football, tennis] = await Promise.all([
-    probe("soccer", "bwin"),
-    probe("tennis", "bet365"),
-  ]);
-  res.json({ football, tennis, checkedAt: new Date().toISOString() });
-});
-
-// Read-only diagnostic ahead of a possible PulseScore fixtures cutover:
-// PulseScore's league listing has no country field (just a flat league
-// name), while our whole catalog (blocking, priority, market tier) is keyed
-// by "country: league". This reports what fraction of bet365's actual
-// prematch football league list we can already resolve a country for via
-// countryForLeagueName() (derived from DOMESTIC_PRIORITY) — the real
-// coverage number needed to decide whether that migration is safe yet,
-// instead of guessing from the league count alone.
-router.get(
-  "/pulsescore-league-coverage",
-  adminMiddleware,
-  async (_req: AdminRequest, res) => {
-    if (!CONFIG.PULSESCORE_API_KEY) {
-      res.status(503).json({ error: "PULSESCORE_API_KEY não configurada" });
-      return;
-    }
-    try {
-      const leagues = await pulseScoreFetchFootballLeagues();
-      const resolved: Array<{ league: string; country: string; eventCount: number }> = [];
-      const unresolved: Array<{ league: string; eventCount: number }> = [];
-      for (const l of leagues) {
-        const country = countryForLeagueName(l.league);
-        if (country) resolved.push({ league: l.league, country, eventCount: l.eventCount });
-        else unresolved.push({ league: l.league, eventCount: l.eventCount });
-      }
-      res.json({
-        totalLeagues: leagues.length,
-        resolvedCount: resolved.length,
-        unresolvedCount: unresolved.length,
-        coveragePct:
-          leagues.length > 0
-            ? Math.round((resolved.length / leagues.length) * 1000) / 10
-            : 0,
-        resolved,
-        unresolved,
-      });
-    } catch (err) {
-      logger.error({ err }, "GET /api/admin/pulsescore-league-coverage error");
-      res.status(500).json({
-        error: "Erro ao consultar ligas do PulseScore",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
-  },
-);
 
 // Read-only diagnostic for the Palace Casino integration. Includes
 // agent/info specifically so the account's configured currency can be
@@ -3085,124 +2639,6 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
     logger.error({ err }, "POST /api/admin/casino/banners/ai-generate error");
     res.status(500).json({ error: "Erro ao gerar banner" });
   }
-});
-
-// ── BET62 Live + Match Tracker + Streaming — mapping admin ──────────────────
-// An admin fills in statscoreEventId (looked up on StatScore's own
-// dashboard for the same fixture — real auth confirmed, see
-// CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to complete the
-// tracker/stream wiring for a match.
-//
-// Fixed 2026-08-16: this comment used to say leaving statscoreEventId unset
-// was fine because "the tracker automatically falls back to PulseScore" —
-// that's not accurate for the BetBY Tracker widget (routes/betbyTracker.ts),
-// whose only real automatic path is BetBY's own live catalogue (unverified
-// against real traffic, see pulseBridge.ts's own header comment) plus a
-// handful of markets hardcoded in proxy.ts. A statscoreEventId set here via
-// POST/PATCH is a genuine, reliable third path BetBY's resolver actually
-// reads now (see tryDbTeamStatscoreId in routes/betbyTracker.ts) — filling
-// this in for a match is the correct way to guarantee its Tracker works.
-router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
-  try {
-    const mappings = await listMappings();
-    res.json({ mappings });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/live-stream/mappings error");
-    res.status(500).json({ error: "Erro ao listar mapeamentos" });
-  }
-});
-
-// Was missing entirely until 2026-08-16: only an UPDATE-by-betbyEventId
-// route existed below (PATCH), which 404s on any team pair that doesn't
-// already have a row — and nothing ever auto-seeded rows, so there was no
-// way to add a new team↔Statscore mapping through the admin UI at all.
-// betbyEventId isn't a real BetBY id here (the whole point of this route is
-// mapping teams BetBY's own catalogue doesn't have) — a stable placeholder
-// is generated so the NOT NULL UNIQUE column is satisfied without pretending
-// to know a real one.
-router.post("/live-stream/mappings", adminMiddleware, async (req: AdminRequest, res) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    const home = String(body["home"] ?? "").trim();
-    const away = String(body["away"] ?? "").trim();
-    const league = typeof body["league"] === "string" && body["league"].trim() ? body["league"].trim() : null;
-    const statscoreRaw = body["statscoreEventId"];
-    const statscoreEventId =
-      statscoreRaw === undefined || statscoreRaw === null || statscoreRaw === ""
-        ? null
-        : Number(statscoreRaw);
-    if (!home || !away) {
-      res.status(400).json({ error: "home e away são obrigatórios" });
-      return;
-    }
-    if (statscoreEventId !== null && !Number.isFinite(statscoreEventId)) {
-      res.status(400).json({ error: "statscoreEventId inválido" });
-      return;
-    }
-    const betbyEventId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const created = await createMapping({ betbyEventId, home, away, league, statscoreEventId });
-    logger.info(
-      { home, away, statscoreEventId, admin: req.admin!.username },
-      "Admin created live-stream/tracker mapping",
-    );
-    res.status(201).json(created);
-  } catch (err) {
-    logger.error({ err }, "POST /api/admin/live-stream/mappings error");
-    res.status(500).json({ error: "Erro ao criar mapeamento" });
-  }
-});
-
-router.patch(
-  "/live-stream/mappings/:betbyEventId",
-  adminMiddleware,
-  async (req: AdminRequest, res) => {
-    const betbyEventId = String(req.params["betbyEventId"]);
-    const body = req.body as Record<string, unknown>;
-    const toIntOrNull = (v: unknown): number | null | undefined => {
-      if (v === undefined) return undefined;
-      if (v === null || v === "") return null;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : undefined;
-    };
-    const toStrOrNull = (v: unknown): string | null | undefined => {
-      if (v === undefined) return undefined;
-      if (v === null || v === "") return null;
-      return String(v);
-    };
-    try {
-      const updated = await setMapping(betbyEventId, {
-        statscoreEventId: toIntOrNull(body["statscoreEventId"]),
-        videoMatchId: toIntOrNull(body["videoMatchId"]),
-        videoSportId: toIntOrNull(body["videoSportId"]),
-        videoTournamentId: toIntOrNull(body["videoTournamentId"]),
-        videoStatsHost: toStrOrNull(body["videoStatsHost"]),
-        videoKey: toStrOrNull(body["videoKey"]),
-        videoBasePath: toStrOrNull(body["videoBasePath"]),
-        videoTimestamp: toIntOrNull(body["videoTimestamp"]),
-      });
-      if (!updated) {
-        res.status(404).json({ error: "Mapeamento não encontrado" });
-        return;
-      }
-      res.json(updated);
-    } catch (err) {
-      logger.error({ err, betbyEventId }, "PATCH /api/admin/live-stream/mappings/:betbyEventId error");
-      res.status(500).json({ error: "Erro ao atualizar mapeamento" });
-    }
-  },
-);
-
-// Read-only diagnostic: market names Statpal's /odds/prematch feed returns
-// that we don't currently parse into AdvancedMarkets (see matches.ts —
-// parseStatpalPrematchMarkets). Fills up as real production traffic hits the
-// football odds endpoints; used to discover what market depth Statpal
-// actually offers (including any player props like anytime goalscorer or
-// assist) without guessing blind.
-router.get("/unknown-markets", adminMiddleware, async (_req: AdminRequest, res) => {
-  const entries = Array.from(unknownStatpalMarkets.entries())
-    .map(([name, v]) => ({ name, ...v }))
-    .sort((a, b) => b.count - a.count);
-  res.json({ count: entries.length, markets: entries });
 });
 
 export default router;

@@ -10,9 +10,11 @@ declare module "@workspace/db" {
   export const competitionConfigsTable: any; export const competitionAliasesTable: any;
   export const eventRuntimeStatesTable: any; export const eventAdminOverridesTable: any;
   export const settlementIdempotencyTable: any; export const manualReviewQueueTable: any;
-  export const settlementReplayLogTable: any; export const sportscoreMatchMapTable: any;
+  export const settlementReplayLogTable: any;
   export const casinoGamesTable: any; export const casinoBannersTable: any;
-  export const liveStreamMappingsTable: any;
+  export const aiConsoleCommandsTable: any; export const aiAgentProposalsTable: any;
+  export const aiAgentRunsTable: any;
+  export type AiAgentProposal = any; export type AiAgentRun = any;
 }
 declare module "@workspace/db/schema" {
   export const usersTable: any; export const betsTable: any;
@@ -25,9 +27,8 @@ declare module "@workspace/db/schema" {
   export const competitionConfigsTable: any; export const competitionAliasesTable: any;
   export const eventRuntimeStatesTable: any; export const eventAdminOverridesTable: any;
   export const settlementIdempotencyTable: any; export const manualReviewQueueTable: any;
-  export const settlementReplayLogTable: any; export const sportscoreMatchMapTable: any;
+  export const settlementReplayLogTable: any;
   export const casinoGamesTable: any; export const casinoBannersTable: any;
-  export const liveStreamMappingsTable: any;
 }
 declare module "@workspace/api-zod" {
   export default function(...args: any[]): any;
@@ -70,44 +71,6 @@ declare module "pino" {
   export type Logger = any; export type LoggerOptions = any; export type DestinationStream = any;
   export const stdSerializers: any; export const stdTimeFunctions: any; export const levels: any;
   export type Level = any; export type LogDescriptor = any;
-}
-declare module "stripe" {
-  export default class Stripe { constructor(...args: any[]); [k: string]: any }
-  export namespace Stripe {
-    export type Stripe = any; export type Event = any; export type Webhook = any;
-    export namespace webhooks { export const constructEvent: any; export const generateTestHeaderString: any; }
-    export namespace errors {
-      export const StripeError: any; export const StripeCardError: any; export const StripeInvalidRequestError: any;
-      export const StripeAPIError: any; export const StripeAuthenticationError: any;
-      export const StripePermissionError: any; export const StripeRateLimitError: any;
-      export const StripeConnectionError: any; export const StripeSignatureVerificationError: any;
-      export const StripeIdempotencyError: any; export const StripeInvalidGrantError: any;
-    }
-    export namespace resources { export const Customers: any; export const Charges: any; export const PaymentIntents: any; }
-    export type Checkout = any; export namespace Checkout { export type Session = any; }
-    export type PaymentIntent = any; export type PaymentMethod = any;
-    export type Customer = any; export type Charge = any; export type Refund = any;
-    export type Invoice = any; export type Subscription = any; export type Product = any;
-    export type Price = any; export type SetupIntent = any; export type Balance = any;
-    export type Transfer = any; export type Payout = any; export type Account = any;
-  }
-  export const webhooks: any;
-  export const resources: any;
-  export namespace errors {
-    export const StripeError: any; export const StripeCardError: any; export const StripeInvalidRequestError: any;
-    export const StripeAPIError: any; export const StripeAuthenticationError: any;
-    export const StripePermissionError: any; export const StripeRateLimitError: any;
-    export const StripeConnectionError: any; export const StripeSignatureVerificationError: any;
-    export const StripeIdempotencyError: any; export const StripeInvalidGrantError: any;
-  }
-  export namespace webhooks { export const constructEvent: any; export const generateTestHeaderString: any; }
-  export type Event = any; export type Webhook = any;
-  export type Checkout = any; export namespace Checkout { export type Session = any; }
-  export type PaymentIntent = any; export type PaymentMethod = any;
-  export type Customer = any; export type Charge = any; export type Refund = any;
-  export type Invoice = any; export type Subscription = any; export type Product = any;
-  export type Price = any; export type SetupIntent = any; export type Balance = any;
-  export type Transfer = any; export type Payout = any; export type Account = any;
 }
 declare module "drizzle-orm" {
   export default function(...args: any[]): any;
@@ -187,34 +150,12 @@ declare module "pg" {
   export class Query { constructor(config?: any); }
   export const native: any;
 }
-declare module "nodemailer" {
-  export default function(...args: any[]): any;
-  export const createTransport: any; export const createTestAccount: any;
-  export const getTestMessageUrl: any;
-  export type Transporter = any; export type SendMailOptions = any;
-  export type SentMessageInfo = any; export type Transport = any;
-  export type TestAccount = any;
-}
 declare module "ioredis" {
   export default function(...args: any[]): any;
   export class Redis { constructor(...args: any[]); on: any; get: any; set: any; del: any; exists: any; expire: any; publish: any; subscribe: any; }
   export class Cluster { constructor(nodes: any, options?: any); on: any; }
   export type RedisOptions = any; export type ClusterOptions = any;
   export type RedisKey = any; export type RedisValue = any;
-}
-declare module "jsonwebtoken" {
-  export default function(...args: any[]): any;
-  export const sign: any; export const verify: any; export const decode: any;
-  export type Jwt = any; export type JwtPayload = any; export type SignOptions = any;
-  export type VerifyOptions = any; export type DecodeOptions = any;
-  export const JsonWebTokenError: any; export const NotBeforeError: any; export const TokenExpiredError: any;
-  export namespace jwt { export type JwtPayload = any; export type Jwt = any; export type SignOptions = any; export type VerifyOptions = any; export type DecodeOptions = any; }
-}
-declare module "bcryptjs" {
-  export default function(...args: any[]): any;
-  export const hash: any; export const compare: any; export const hashSync: any;
-  export const compareSync: any; export const getSalt: any; export const genSalt: any;
-  export const genSaltSync: any; export const setRandomFallback: any;
 }
 declare module "bullmq" {
   export default function(...args: any[]): any;
@@ -238,21 +179,6 @@ declare module "ws" {
   export type Event = any; export type ErrorEvent = any; export type MessageEvent = any;
   export type CloseEvent = any; export type ServerOptions = any;
   export type ClientOptions = any; export const RawData: any;
-}
-declare module "zod" {
-  export default function(...args: any[]): any;
-  export const z: any; export const ZodError: any; export type ZodError = any;
-  export type ZodSchema = any; export type ZodTypeAny = any;
-  export type ZodString = any; export type ZodNumber = any; export type ZodBoolean = any;
-  export type ZodObject<T = any> = any; export type ZodArray = any;
-  export type infer<T> = any; export type input<T> = any; export type output<T> = any;
-  export type SafeParseReturnType<T, U> = any; export type SafeParseSuccess<T> = any;
-  export type SafeParseError<T> = any;
-}
-declare module "zod/v4" {
-  export default function(...args: any[]): any;
-  export const z: any; export const ZodError: any; export type ZodSchema = any;
-  export type ZodTypeAny = any; export type infer<T> = any;
 }
 declare module "http" {
   const CallableWithProps: {

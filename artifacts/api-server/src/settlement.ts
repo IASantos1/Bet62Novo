@@ -19,11 +19,6 @@ import {
   ensureFinishedMatchResult,
   finishedMatchResults,
   liveMatchState,
-  scanVolleyballForFinished,
-  scanTennisV1ForFinished,
-  scanNHLForFinished,
-  scanNBAForFinished,
-  scanMLBForFinished,
 } from "./routes/matches.js";
 import { startSettlementQueueWorker } from "./lib/settlementQueue.js";
 import { runSettlementRecovery } from "./jobs/settlementRecovery.js";
@@ -2596,10 +2591,19 @@ export function scoreOutcomeForSel(
     winning = score === want;
   }
   // ── Tennis set handicap / game handicap / game totals / correct set score ──
-  else if (/^sh(\d+)-(home|away)$/.test(s)) {
-    const m = s.match(/^sh(\d+)-(home|away)$/)!;
-    const line = decodeCompactLine(m[1]!);
-    if (!Number.isFinite(line)) return null;
+  // Sets Handicap: confirmed real (2026-08-28 onexbet sample) with the exact
+  // same genuinely-signed-line convention as GAME_HANDICAP (positive on
+  // home's own side = home underdog getting a sets head start) — same fix
+  // as gh- below: readSelectionMarketLine preferred over the unsigned
+  // compact-digit magnitude, which otherwise silently assumed home is
+  // always favorite (this key was previously dead — setHandicap was always
+  // a hardcoded synthetic {home:0,away:0}, so the bug never fired in
+  // production — now that it's wired to real data it would have).
+  else if (/^sh(\d+)-(home|away)\d*$/.test(s) || /^sh-(home|away)-(\d+(?:\.\d+)?)$/.test(s)) {
+    const compact = s.match(/^sh(\d+)-(home|away)\d*$/);
+    const decimal = s.match(/^sh-(home|away)-(\d+(?:\.\d+)?)$/);
+    const side = (compact ? compact[2] : decimal![1]) as "home" | "away";
+    const magnitude = compact ? decodeCompactLine(compact[1]!) : Number(decimal![2]);
     const sets = getTennisSetsFromExtras(extra?.extras);
     if (sets.length === 0) return null;
     const homeSets = sets.filter(
@@ -2608,26 +2612,200 @@ export function scoreOutcomeForSel(
     const awaySets = sets.filter(
       ([h, a]) => tennisSetFinished([h, a]) && a > h,
     ).length;
-    const diff = homeSets - awaySets;
-    if (diff === line) voided = true;
-    else winning = m[2] === "home" ? diff > line : diff < line;
-  } else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
-    const m = s.match(/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
-    // The line is normally embedded in the key ("gh-home-2.5"); some client
-    // aliases send a bare "gh-home" with the line only in the label instead.
-    const line = m[2] !== undefined
-      ? Number(m[2])
-      : Math.abs(readSelectionMarketLine(sel) ?? NaN);
+    const signedLine = readSelectionMarketLine(sel);
+    const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
     if (!Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(homeSets, awaySets, side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
+  // Total Sets — confirmed real, frontend key is fixed "ts-o-2.5"/"ts-u-2.5"
+  // (2.5 is the only real line for a best-of-3 match). Previously dead: the
+  // normalizeSettlementSelectionKey alias table rewrote "ts-o-2.5" into
+  // "osets25", a form nothing downstream ever scored — bets on it would
+  // have stayed pending forever. Scored directly here instead.
+  else if (/^ts-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^ts-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    // A match ends the moment one side reaches 2 sets won — so "how many
+    // sets were played" is just how many completed sets exist, no need to
+    // separately check who's leading.
+    const totalSetsPlayed = completedSets.length;
+    if (totalSetsPlayed === line) voided = true;
+    else winning = m[1] === "o" ? totalSetsPlayed > line : totalSetsPlayed < line;
+  }
+  // Tie-Break Yes/No (full match) / 1st set Tie-Break Yes/No — a tie-break
+  // happened in a given set iff its final score is 7-6 or 6-7 (tennis's
+  // only way to reach 7 games without a 2-game-clear margin).
+  else if (/^tb-(yes|no)$/.test(s) || /^tb1-(yes|no)$/.test(s)) {
+    const scoped1st = /^tb1-/.test(s);
+    const answer = s.endsWith("yes") ? "yes" : "no";
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length === 0) return null;
+    const relevantSets = scoped1st ? sets.slice(0, 1) : sets;
+    if (scoped1st && relevantSets.length === 0) return null;
+    const hadTieBreak = relevantSets.some(
+      ([h, a]) => (h === 7 && a === 6) || (h === 6 && a === 7),
+    );
+    // 1st-set-only can resolve as soon as set 1 finishes; full-match "No"
+    // can only be confirmed once the match itself is over (any remaining
+    // set could still go to a tie-break) — "Yes" resolves early either way.
+    if (!scoped1st && !hadTieBreak) {
+      if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    }
+    winning = answer === "yes" ? hadTieBreak : !hadTieBreak;
+  }
+  // Straight Sets Winner ("Vence sem perder Set?", ssw-yes/ssw-no) — this
+  // key had UI (home.tsx) but NO settlement at all before now, so any bet
+  // placed on it would never resolve automatically. Did the match end in a
+  // straight-sets sweep (2-0)? `home`/`away` are already sets-won for
+  // tennis (same convention dnb-home/away above relies on). Can only
+  // resolve once the match itself is decided (2 sets won by either side) —
+  // "No" is otherwise still possible right up until the very last set.
+  else if (/^ssw-(yes|no)$/.test(s)) {
+    const answer = s.endsWith("yes") ? "yes" : "no";
+    if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+    if (home < 2 && away < 2) return null;
+    const sweep = (home >= 2 && away === 0) || (away >= 2 && home === 0);
+    winning = answer === "yes" ? sweep : !sweep;
+  }
+  // "Tie-Break Or Extra Games In The Final Set" — did the LAST set played
+  // (the deciding one) go past a clean 6-0..6-4, i.e. end 7-5 or 7-6?
+  // Distinct from tb-/tb1- above, which ask about ANY set / the 1st set
+  // specifically, not the final one. Only resolvable once the match is
+  // decided (home !== away, both sets-won counts final).
+  else if (/^fstb-(yes|no)$/.test(s)) {
+    const answer = s.endsWith("yes") ? "yes" : "no";
+    if (!Number.isFinite(home) || !Number.isFinite(away) || home === away) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length === 0) return null;
+    const finalSet = sets[sets.length - 1]!;
+    const wentExtra = Math.max(finalSet[0], finalSet[1]) >= 7;
+    winning = answer === "yes" ? wentExtra : !wentExtra;
+  }
+  // Total Tie-Breaks — Over/Under how many sets went to a tie-break.
+  else if (/^ttb-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^ttb-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const tieBreakCount = sets.filter(
+      ([h, a]) => (h === 7 && a === 6) || (h === 6 && a === 7),
+    ).length;
+    if (tieBreakCount === line) voided = true;
+    else winning = m[1] === "o" ? tieBreakCount > line : tieBreakCount < line;
+  }
+  // Highest Scoring Set Total — Over/Under the single highest-games set.
+  else if (/^hst-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^hst-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length === 0) return null;
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const highest = Math.max(...sets.map(([h, a]) => h + a));
+    if (highest === line) voided = true;
+    else winning = m[1] === "o" ? highest > line : highest < line;
+  }
+  // Sets Scoring — 1st set total games vs 2nd set total games.
+  else if (/^ss-(1h|2h|eq)$/.test(s)) {
+    const m = s.match(/^ss-(1h|2h|eq)$/)!;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    if (sets.length < 2) return null;
+    const set1Total = sets[0]![0] + sets[0]![1];
+    const set2Total = sets[1]![0] + sets[1]![1];
+    if (m[1] === "eq") {
+      winning = set1Total === set2Total;
+    } else if (set1Total === set2Total) {
+      voided = true;
+    } else {
+      winning = m[1] === "1h" ? set1Total > set2Total : set1Total < set2Total;
+    }
+  }
+  else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
+    const side = m[1] as "home" | "away";
     const sets = getTennisSetsFromExtras(extra?.extras);
     if (sets.length === 0) return null;
     const completedSets = sets.filter(tennisSetFinished);
     if (completedSets.length === 0) return null;
     const homeGames = completedSets.reduce((sum, [h]) => sum + h, 0);
     const awayGames = completedSets.reduce((sum, [, a]) => sum + a, 0);
-    const diff = homeGames - awayGames;
-    if (diff === line) voided = true;
-    else winning = m[1] === "home" ? diff > line : diff < line;
+    // The line is normally embedded in the key ("gh-home-2.5") as an
+    // UNSIGNED magnitude; some client aliases send a bare "gh-home" with
+    // the line only in the label/marketLine instead. A genuinely SIGNED
+    // line (from home's own perspective, e.g. +3.5 when home is the
+    // underdog) is preferred — same fix as basketball's b-spread-/
+    // baseball's rl- this session: the unsigned-magnitude fallback below
+    // silently assumes "home is always the favorite," which real onexbet
+    // data (away-favored matches included) now confirms is wrong for
+    // tennis's game handicap too. Falls back to that old assumption only
+    // when no signed source exists, so bets placed before a signed
+    // marketLine/label was captured still settle exactly as before.
+    const magnitude = m[2] !== undefined ? Number(m[2]) : NaN;
+    const signedLine = readSelectionMarketLine(sel);
+    const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+    if (!Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(homeGames, awayGames, side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
+  // Per-player total games (HOME_OVER_UNDER/AWAY_OVER_UNDER, confirmed real
+  // 2026-08-28 onexbet catalog) — frontend key is bare ("hpg-o"/"apg-u",
+  // no embedded line, home.tsx's MarketOddsBtn), so the line only ever
+  // comes from the bet's stored marketLine (readSelectionMarketLine).
+  else if (/^(hpg|apg)-([ou])$/.test(s)) {
+    const m = s.match(/^(hpg|apg)-([ou])$/)!;
+    const isHome = m[1] === "hpg";
+    const line = readSelectionMarketLine(sel);
+    if (line === null) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    const playerGames = completedSets.reduce(
+      (sum, [h, a]) => sum + (isHome ? h : a),
+      0,
+    );
+    if (playerGames === line) voided = true;
+    else winning = m[2] === "o" ? playerGames > line : playerGames < line;
+  }
+  // 2nd-set game handicap (GAME_HANDICAP, period SECOND_SET — confirmed
+  // real 2026-08-28 onexbet sample) — same signed-line convention as gh-
+  // above, but scoped to set index 1 (the 2nd set) instead of the whole
+  // match's completed-sets total.
+  else if (/^gh2-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^gh2-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
+    const side = m[1] as "home" | "away";
+    const setScore = getTennisSetsFromExtras(extra?.extras)[1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const [homeGames, awayGames] = setScore;
+    const magnitude = m[2] !== undefined ? Number(m[2]) : NaN;
+    const signedLine = readSelectionMarketLine(sel);
+    const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+    if (!Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(homeGames, awayGames, side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
+  // 2nd-set per-player total games (HOME_OVER_UNDER/AWAY_OVER_UNDER, period
+  // SECOND_SET — same real sample) — same bare-key convention as hpg-/apg-
+  // above, scoped to set index 1.
+  else if (/^(hpg2|apg2)-([ou])$/.test(s)) {
+    const m = s.match(/^(hpg2|apg2)-([ou])$/)!;
+    const isHome = m[1] === "hpg2";
+    const line = readSelectionMarketLine(sel);
+    if (line === null) return null;
+    const setScore = getTennisSetsFromExtras(extra?.extras)[1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const playerGames = isHome ? setScore[0] : setScore[1];
+    if (playerGames === line) voided = true;
+    else winning = m[2] === "o" ? playerGames > line : playerGames < line;
   } else if (/^tg-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^tg-([ou])-(\d+(?:\.\d+)?)$/)!;
     const line = Number(m[2]!);
@@ -2823,6 +3001,37 @@ export function scoreOutcomeForSel(
     if (adjusted === 0) voided = true;
     else winning = adjusted > 0;
   }
+  // Per-set total points (OVER_UNDER, period SECOND_SET/THIRD_SET —
+  // confirmed real 2026-08-28 onexbet sample) — same bare-line-in-key
+  // convention as the whole-match "pt-o-line" above, scoped to ONE set's
+  // final score (getVolleyballSetPointsFromExtras[setIndex]) instead of the
+  // sum across all sets.
+  else if (/^s([23])pt-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^s([23])pt-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const line = Number(m[3]!);
+    if (!Number.isFinite(line)) return null;
+    const setScore = getVolleyballSetPointsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !volleyballSetFinished(setScore)) return null;
+    const totalPoints = setScore[0] + setScore[1];
+    if (totalPoints === line) voided = true;
+    else winning = m[2] === "o" ? totalPoints > line : totalPoints < line;
+  }
+  // Per-set points handicap (ASIAN_HANDICAP, period SECOND_SET/THIRD_SET) —
+  // same signed-line convention as tennis's gh2- (readSelectionMarketLine),
+  // scoped to ONE set's final score rather than the whole match's.
+  else if (/^s([23])ph-(home|away)$/.test(s)) {
+    const m = s.match(/^s([23])ph-(home|away)$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const side = m[2] as "home" | "away";
+    const setScore = getVolleyballSetPointsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !volleyballSetFinished(setScore)) return null;
+    const line = readSelectionMarketLine(sel);
+    if (line === null) return null;
+    const outcome = settleAsianSideHandicapOutcome(setScore[0], setScore[1], side, line);
+    if (outcome === "void") voided = true;
+    else winning = outcome === "won";
+  }
 
   // ── Basketball (totals / spread / team totals / halves / quarters) ─────────
   else if (
@@ -2891,13 +3100,37 @@ export function scoreOutcomeForSel(
 
     const spread = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
     if (winning === null && spread) {
-      const side = spread[1]!;
-      const line = parseLine(spread[2]!) ?? parseSelectionLabelLine(sel.label);
-      if (line === null) return null;
-      const diff = ft.home - ft.away;
-      const adj = diff - line;
-      if (adj === 0) voided = true;
-      else winning = side === "home" ? adj > 0 : adj < 0;
+      const side = spread[1]! as "home" | "away";
+      // The key only ever carries the UNSIGNED magnitude (see the regex
+      // above — no +/- in the pattern), so a signed source is needed to
+      // know whether THIS side is favorite (must overcome a deficit) or
+      // underdog (covers within the margin, or wins outright) — that's not
+      // implied by magnitude+side alone. Prefer the bet's stored marketLine,
+      // falling back to a +/- sign parsed off its label (same
+      // readSelectionMarketLine + settleAsianSideHandicapOutcome combo
+      // already used correctly for hockey's puck line below).
+      //
+      // Fixed 2026-08-27: the old code (`diff - line` with `line` always
+      // the unsigned magnitude, `winning = side==="home" ? adj>0 : adj<0`)
+      // implicitly assumed home is ALWAYS the favorite — correct when it
+      // was, but INVERTED for both sides whenever away was the true
+      // favorite. Verified: home wins by 3 with away truly favored -5.5 →
+      // home's real +5.5 bet should win (home won outright) and away's real
+      // -5.5 should lose (away lost) — the old formula graded both exactly
+      // backwards. In production since basketball moved to bwin
+      // (2026-08-09/10); flagged then in applyBasketballPeriodOverrides's
+      // comment (matches.ts) as needing its own dedicated fix, not touched
+      // there — this is that fix. Falls back to the old unsigned-magnitude
+      // behavior (home assumed favorite) only when no signed source exists
+      // at all, so bets placed before a signed marketLine/label was
+      // captured still settle exactly as before.
+      const magnitude = parseLine(spread[2]!);
+      if (magnitude === null) return null;
+      const signedLine = readSelectionMarketLine(sel);
+      const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+      const outcome = settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
+      if (outcome === "void") voided = true;
+      else winning = outcome === "won";
     }
 
     const tt = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
@@ -3078,12 +3311,27 @@ export function scoreOutcomeForSel(
       s.match(/^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/) ||
       s.match(/^rl-(home|away)$/);
     if (winning === null && rl) {
-      const side = rl[1]!;
-      const line = parseLine(rl[2]) ?? 1.5;
-      if (line === null) return null;
-      const diff = ft.home - ft.away;
-      if (diff === line) voided = true;
-      else winning = side === "home" ? diff > line : diff < line;
+      const side = rl[1]! as "home" | "away";
+      // Fixed 2026-08-27: same class of bug as basketball's b-spread- key
+      // (fixed earlier this file) — the captured magnitude (or the 1.5
+      // default for the bare rl-home/rl-away form) is always UNSIGNED, and
+      // the old formula (`diff > line` for home, `diff < line` for away,
+      // both using the same positive line) implicitly assumed home was
+      // ALWAYS the run-line favorite. Verified: away truly favored -1.5,
+      // home loses by 1 run (diff=-1) — home's real +1.5 must win (lost by
+      // less than the cushion) and away's real -1.5 must lose (won but not
+      // by enough), but the old formula graded both backwards. Standard
+      // MLB run line is a fixed ±1.5 split, same idea as hockey's puck
+      // line — same readSelectionMarketLine + settleAsianSideHandicapOutcome
+      // combo, defaulting to -1.5/+1.5 the same way pl-home/pl-away does
+      // when no signed source is available.
+      const magnitude = parseLine(rl[2]) ?? 1.5;
+      if (magnitude === null) return null;
+      const signedLine = readSelectionMarketLine(sel);
+      const line = signedLine ?? (side === "home" ? -magnitude : magnitude);
+      const outcome = settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
+      if (outcome === "void") voided = true;
+      else winning = outcome === "won";
     }
 
     const f5res =
@@ -3233,6 +3481,31 @@ export function scoreOutcomeForSel(
   // ── Goal Odd / Even ────────────────────────────────────────────────────────
   else if (s === "goe-odd") winning = total % 2 === 1;
   else if (s === "goe-even") winning = total % 2 === 0;
+
+  // ── MMA round total (new sport, 2026-08-28) ─────────────────────────────
+  // A fight has no home/away score — `total` (ft.home+ft.away) is
+  // meaningless here — so this can't reuse the generic O/U key above.
+  // Grading needs to know which round the fight actually ended in, read
+  // from extra.extras.mma.endedInRound (mirroring the existing
+  // extras.basketball.quarters/extras.tennis.sets pattern for sport-
+  // specific supplementary stats). No PulseScore /results sample for MMA
+  // has been seen yet to confirm that field ever actually gets populated —
+  // deliberately returns null (stays pending) rather than guess when it's
+  // absent, same as every other "insufficient data" branch in this
+  // function; a pending MMA round-total bet settles via the admin panel's
+  // manual settlement path until a real sample lets this be wired up for
+  // real (see mma.ts's header for the full story).
+  else if (/^mma-round-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^mma-round-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const mmaExtras = ex["mma"] as { endedInRound?: number } | undefined;
+    const endedInRound = mmaExtras?.endedInRound;
+    if (typeof endedInRound === "number" && Number.isFinite(endedInRound)) {
+      const line = Number(m[2]);
+      if (endedInRound === line) voided = true;
+      else winning = m[1] === "o" ? endedInRound > line : endedInRound < line;
+    }
+    // else: winning stays null — no round data available yet, pending.
+  }
   // ── Win to Nil ─────────────────────────────────────────────────────────────
   else if (s === "wtn-h") winning = home > away && away === 0;
   else if (s === "wtn-a") winning = away > home && home === 0;
@@ -3489,6 +3762,16 @@ function normalizeSelectionSport(
   | "baseball"
   | "hockey"
   | "volleyball"
+  | "mma"
+  | "handball"
+  | "cricket"
+  | "rugby"
+  | "rugbyleague"
+  | "esports"
+  | "amfootball"
+  | "boxing"
+  | "futsal"
+  | "darts"
   | null {
   const value = String(raw ?? "")
     .trim()
@@ -3501,6 +3784,29 @@ function normalizeSelectionSport(
   if (value === "volleyball" || value === "volley") return "volleyball";
   if (value === "baseball" || value === "mlb") return "baseball";
   if (value === "hockey" || value === "nhl") return "hockey";
+  // Added 2026-08-28 alongside the new sport — without this, an MMA
+  // selection's explicit sport:"mma" field was silently discarded here,
+  // falling through to detectSportFromKey's default of "football" for
+  // MMA's plain home/away/draw keys (no sport-specific prefix exists for
+  // MMA, same as football) — every MMA bet would have looked up its
+  // result under football's provider-matchId prefixes and never resolved.
+  if (value === "mma") return "mma";
+  // GoalServe extra sports (2026)
+  if (value === "handball") return "handball";
+  if (value === "cricket") return "cricket";
+  if (value === "rugby" || value === "rugby_union") return "rugby";
+  if (value === "rugbyleague" || value === "rugby_league") return "rugbyleague";
+  if (value === "esports" || value === "esport") return "esports";
+  if (
+    value === "amfootball" ||
+    value === "american_football" ||
+    value === "nfl" ||
+    value === "us_football"
+  )
+    return "amfootball";
+  if (value === "boxing") return "boxing";
+  if (value === "futsal") return "futsal";
+  if (value === "darts") return "darts";
   return null;
 }
 
@@ -3513,6 +3819,16 @@ function readSelectionSport(
   | "baseball"
   | "hockey"
   | "volleyball"
+  | "mma"
+  | "handball"
+  | "cricket"
+  | "rugby"
+  | "rugbyleague"
+  | "esports"
+  | "amfootball"
+  | "boxing"
+  | "futsal"
+  | "darts"
   | null {
   return normalizeSelectionSport(sel.providerSport ?? sel.sport);
 }
@@ -3526,9 +3842,27 @@ function inferSelectionLookupSport(
   | "baseball"
   | "hockey"
   | "volleyball"
+  | "mma"
+  | "handball"
+  | "cricket"
+  | "rugby"
+  | "rugbyleague"
+  | "esports"
+  | "amfootball"
+  | "boxing"
+  | "futsal"
+  | "darts"
   | null {
   const explicitSport = readSelectionSport(sel);
   if (explicitSport) return explicitSport;
+  // detectSportFromKey has no MMA-specific key prefix to recognize (MMA's
+  // moneyline/double-chance keys are the same bare home/away/draw/dc-*
+  // shape football uses, on purpose — see mma.ts's header) — it can only
+  // ever return "football" here for an MMA selection missing its explicit
+  // sport field. Not fixable by adding a case to that function the way the
+  // other sports are, since there is no distinguishing text in the key
+  // itself; readSelectionSport's explicit sport:"mma" field above is the
+  // only reliable signal, which is why it's checked first.
   return normalizeSelectionSport(
     detectSportFromKey(normalizeSettlementSelectionKey(sel.selection)),
   );
@@ -3579,7 +3913,17 @@ function providerMatchIdPrefixesForSport(
     | "basketball"
     | "baseball"
     | "hockey"
-    | "volleyball",
+    | "volleyball"
+    | "mma"
+    | "handball"
+    | "cricket"
+    | "rugby"
+    | "rugbyleague"
+    | "esports"
+    | "amfootball"
+    | "boxing"
+    | "futsal"
+    | "darts",
 ): string[] {
   switch (sport) {
     case "football":
@@ -3590,12 +3934,14 @@ function providerMatchIdPrefixesForSport(
       // here, resultMatchesSelectionSport() rejected every current football match before
       // even attempting a team-name match, silently breaking the fuzzy-lookup fallback
       // (findLiveResultByTeams/findResultByTeams) for 100% of today's football bets.
-      return ["pulsescore-football", "football-v2"];
+      // gs-soccer added 2026 — GoalServe primary provider; uses soccer internally
+      // for historical football, so prefix is gs-soccer-XXX even after normalization.
+      return ["pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
     case "tennis":
       // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
       // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
       // kept for the same pre-migration reason as football-v2 above.
-      return ["pulsescore-tennis", "tennis-v1", "tennis-v2"];
+      return ["pulsescore-tennis", "tennis-v1", "tennis-v2", "gs-tennis"];
     case "basketball":
       // pulsescore-basketball is the current live prefix
       // (buildBasketballLiveFromPulseScore in matches.ts, switched from bwin
@@ -3610,18 +3956,50 @@ function providerMatchIdPrefixesForSport(
       // ensureFinishedMatchResult() for one either, silently breaking both
       // the fuzzy-lookup fallback and the active "confirm this match is
       // really finished" check for 100% of today's basketball bets.
-      return ["pulsescore-basketball", "bball-v2"];
+      return ["pulsescore-basketball", "bball-v2", "gs-basketball"];
     case "baseball":
-      return ["baseball-v2", "mlb-v2"];
+      // Missing "pulsescore-baseball" until 2026-08-28 (found while wiring
+      // real onexbet markets into baseball this session) — same bug class
+      // already diagnosed and fixed for basketball/volleyball above (see
+      // basketball's comment): buildBaseballLiveFromPulseScore (matches.ts)
+      // has used `pulsescore-baseball-${eventId}` as baseball's live matchId
+      // since that pipeline shipped, but this list never had it, silently
+      // breaking the fuzzy team-name-lookup fallback for every current
+      // baseball bet — baseball-v2/mlb-v2 are the dead pre-migration prefixes.
+      return ["pulsescore-baseball", "baseball-v2", "mlb-v2", "gs-baseball"];
     case "hockey":
-      return ["hockey-v2"];
+      // Same gap as baseball above, same fix — hockey-v2 is the dead
+      // pre-migration prefix.
+      return ["pulsescore-hockey", "hockey-v2", "gs-hockey"];
+    case "mma":
+      // New sport (2026-08-28) — no pre-migration prefix exists, this is
+      // the only one buildMmaUpcomingFromPulseScore ever creates.
+      return ["pulsescore-mma", "gs-mma"];
     case "volleyball":
       // pulsescore-volleyball is the current live AND prematch prefix
       // (buildVolleyballLiveFromPulseScore/buildVolleyballUpcomingFromPulseScore
       // in matches.ts, built 2026-08-09) — volley-live/volley-odds are the
       // dead Statpal-era prefixes, kept for pre-migration matchIds only.
       // Same missing-prefix bug as basketball above (see its comment).
-      return ["pulsescore-volleyball", "volley-live", "volley-odds"];
+      return ["pulsescore-volleyball", "volley-live", "volley-odds", "gs-volleyball"];
+    case "handball":
+      return ["gs-handball"];
+    case "cricket":
+      return ["gs-cricket"];
+    case "rugby":
+      return ["gs-rugby"];
+    case "rugbyleague":
+      return ["gs-rugbyleague"];
+    case "esports":
+      return ["gs-esports"];
+    case "amfootball":
+      return ["gs-amfootball"];
+    case "boxing":
+      return ["gs-boxing"];
+    case "futsal":
+      return ["gs-futsal"];
+    case "darts":
+      return ["gs-darts"];
   }
 }
 
@@ -3632,7 +4010,17 @@ function buildCanonicalMatchIds(
     | "basketball"
     | "baseball"
     | "hockey"
-    | "volleyball",
+    | "volleyball"
+    | "mma"
+    | "handball"
+    | "cricket"
+    | "rugby"
+    | "rugbyleague"
+    | "esports"
+    | "amfootball"
+    | "boxing"
+    | "futsal"
+    | "darts",
   providerId: string,
 ): string[] {
   const normalizedId = String(providerId ?? "").trim();
@@ -3701,7 +4089,10 @@ function getSelectionLookupMatchIds(
 
 function isProviderManagedMatchId(matchId: string): boolean {
   // tennis-v1 must be included so ensureFinishedMatchResult (with DB fallback) is called
-  // nhl/nba/mlb are the prefixes used by Statpal-native scan functions
+  // nhl/nba/mlb are the prefixes that were used by StatPal-native scan functions
+  // (scanNHLForFinished/scanNBAForFinished/scanMLBForFinished, removed along with
+  // the rest of the StatPal integration — kept here only for DB-fallback lookup
+  // of historical results on old pending bets, same as tennis-v1/tennis-v2 above)
   // pulsescore-football/pulsescore-tennis added 2026-08-08 — ensureFinishedMatchResult
   // gained a DB-recovery branch for these (matches.ts) but it was never reachable from
   // the settlement cycle's ensure-loop since this regex never matched the current live
@@ -3715,7 +4106,12 @@ function isProviderManagedMatchId(matchId: string): boolean {
   // own disappearance-based GC — the active safety net football/tennis already had
   // was silently missing for these two sports since their PulseScore live pipelines
   // shipped (basketball 2026-08-08, volleyball 2026-08-09).
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(
+  // pulsescore-hockey/pulsescore-baseball added 2026-08-28 — same exact gap,
+  // found while wiring real onexbet markets into both sports this session
+  // (see providerMatchIdPrefixesForSport's matching comment above).
+  // pulsescore-mma added the same day — new sport, built from scratch.
+  // gs-* prefixes: GoalServe (2026). Supported for all migrated sports.
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }
@@ -4175,23 +4571,14 @@ function liveDefinitiveOutcomeForSel(
     return total > line ? "lost" : null;
   }
 
-  // Corners/Cards O/U — deliberately NEVER settled early from live
-  // score.cornersTotal/cardsTotal (audit finding, 2026-08-11, user report
-  // of a ticket wrongly settling "lost"). That live total is sourced from
-  // API-Football's per-fixture stats (routes/matches.ts's
-  // buildFootballLiveFromPulseScore, findApiFootballFixture), matched to
-  // the PulseScore live match by tolerant team-name comparison
-  // (teamNamesMatch) with no kickoff/date/league to disambiguate a
-  // single wrong fixture — findApiFootballFixture only refuses when
-  // MULTIPLE live fixtures satisfy the match, not when exactly one wrong
-  // one does. A false-positive match silently attaches another game's
-  // card/corner count, which can cross an Under line early and settle
-  // this leg "lost" on data that was never this match's own. These two
-  // markets now always fall through to null (pending) here and wait for
-  // the authoritative full-time count in match_results (SportsAPI V2's
-  // fetchFootballExtras, captured at finish, not API-Football) via the
-  // normal non-live settlement path — a later but correct settlement,
-  // never a fast but possibly wrong one.
+  // Corners/Cards O/U — deliberately NEVER settled early from a live running
+  // total (audit finding, 2026-08-11, user report of a ticket wrongly
+  // settling "lost"). These two markets always fall through to null
+  // (pending) here and wait for an authoritative full-time count in
+  // match_results via the normal non-live settlement path — a later but
+  // correct settlement, never a fast but possibly wrong one. No live data
+  // provider remains as of 2026-09-08, so these currently just stay
+  // pending until void.
   const mCorner = s.match(/^([ou])c(\d+)$/);
   if (mCorner) return null;
 
@@ -5755,12 +6142,23 @@ async function expireStalePendingBets(): Promise<void> {
  * Start the background settlement worker.
  *
  * Each cycle (every ~60 s):
- *   1. scanNHLForFinished()         — NHL finished matches (Statpal live + daily)
- *      scanNBAForFinished()         — NBA finished matches (Statpal live + daily)
- *      scanMLBForFinished()         — MLB finished matches (Statpal live + daily)
- *   2. scanVolleyballForFinished()  — volleyball finished matches from live feed
- *   3. autoSettlePendingBets()      — settle bets with known results
- *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *   1. autoSettlePendingBets()      — settle bets with known results
+ *   2. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *
+ * Tennis is NOT scanned here — the legacy SportsAPI Pro tennis-v1-* scan
+ * (scanTennisV1ForFinished) was removed; those matchIds now fall through
+ * ensureFinishedMatchResult() unhandled and resolve only via the 72h
+ * stale-bet void/refund path (expireStalePendingBets()) below.
+ *
+ * Volleyball/NHL/NBA/MLB are NOT scanned here either — their StatPal-only
+ * scan functions (scanVolleyballForFinished/scanNHLForFinished/
+ * scanNBAForFinished/scanMLBForFinished) were removed along with the
+ * StatPal integration. Those matchIds (volley-live-, volley-odds-, nhl-,
+ * nba-, mlb- prefixes) now fall through ensureFinishedMatchResult()
+ * unhandled too, resolving only via the same 72h stale-bet void/refund path
+ * — a known, accepted consequence of the removal (no real settlement data
+ * for pending bets on those formats any more, same tradeoff as tennis
+ * above).
  *
  * Football is NOT scanned here anymore — since the PulseScore migration
  * (2026-08-05), football matches carry "pulsescore-football-*" ids, not
@@ -5822,16 +6220,9 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: Statpal-only — volleyball, tennis, NHL, NBA, MLB.
-      // Football is no longer scanned here — see startSettlementWorker's
-      // doc comment above for why.
-      await Promise.allSettled([
-        scanVolleyballForFinished(),   // volleyball (Statpal live)
-        scanTennisV1ForFinished(),     // tennis (Statpal V1)
-        scanNHLForFinished(),          // hockey (Statpal live + daily)
-        scanNBAForFinished(),          // basketball (Statpal live + daily)
-        scanMLBForFinished(),          // baseball (Statpal live + daily)
-      ]);
+      // No per-sport scan step here anymore — football, tennis, and
+      // volleyball/NHL/NBA/MLB (StatPal, removed) all settle through other
+      // paths; see startSettlementWorker's doc comment above for why.
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {
         await autoSettlePendingBets();

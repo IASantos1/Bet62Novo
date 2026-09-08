@@ -394,23 +394,6 @@ export async function initDb(): Promise<void> {
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      CREATE TABLE IF NOT EXISTS sportscore_match_map (
-        id                SERIAL PRIMARY KEY,
-        sport             TEXT NOT NULL,
-        statpal_match_id  TEXT NOT NULL,
-        sportscore_id     TEXT NOT NULL,
-        tracker_id        TEXT,
-        home_team         TEXT,
-        away_team         TEXT,
-        match_date        TEXT,
-        source            TEXT NOT NULL DEFAULT 'manual',
-        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS sportscore_match_map_statpal_idx
-        ON sportscore_match_map (sport, statpal_match_id);
-
       CREATE TABLE IF NOT EXISTS casino_games (
         id           SERIAL PRIMARY KEY,
         provider     TEXT NOT NULL,
@@ -458,42 +441,6 @@ export async function initDb(): Promise<void> {
       CREATE INDEX IF NOT EXISTS casino_banners_position_active_idx
         ON casino_banners (position, is_active, sort_order);
 
-      CREATE TABLE IF NOT EXISTS live_stream_mappings (
-        id                   SERIAL PRIMARY KEY,
-        betby_event_id       TEXT NOT NULL,
-        home                 TEXT NOT NULL,
-        away                 TEXT NOT NULL,
-        league               TEXT,
-        video_match_id       INTEGER,
-        video_sport_id       INTEGER,
-        video_tournament_id  INTEGER,
-        video_stats_host     TEXT,
-        video_key            TEXT,
-        resolved_by          TEXT NOT NULL DEFAULT 'auto',
-        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS live_stream_mappings_betby_event_idx
-        ON live_stream_mappings (betby_event_id);
-
-      -- Real StatScore auth was confirmed after this table first shipped
-      -- (get_pushes/get_standings example URLs sharing one static partner
-      -- token), reinstating StatScore as the primary Match Tracker source
-      -- with PulseScore as the automatic no-mapping-needed fallback.
-      ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS statscore_event_id INTEGER;
-
-      -- SMYTDRYT's hex path segment (host/{this}/playlist.m3u8) turned out,
-      -- from real BetBY captures, to vary per match/stream rather than being
-      -- a fixed account-wide value — has to be admin-set per event like the
-      -- key, not a single global config default.
-      ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS video_base_path TEXT;
-
-      -- Confirmed via live testing: SMYTDRYT's key is signed against the
-      -- exact timestamp it was issued with, not "now" — must be captured
-      -- and stored alongside the key, never regenerated per request.
-      ALTER TABLE live_stream_mappings ADD COLUMN IF NOT EXISTS video_timestamp INTEGER;
-
       -- Backing the internal "IA Operações" agent system (schema/aiAgents.ts).
       -- These two were missing from this file when that system first
       -- shipped (2026-08-11) — schema/aiAgents.ts existed but nothing ever
@@ -533,30 +480,6 @@ export async function initDb(): Promise<void> {
         created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      -- Persists the "[DIAG apifootball-miss]" signal (routes/matches.ts,
-      -- buildFootballLiveFromPulseScore): a PulseScore/bwin live football
-      -- match with real priced odds that no API-Football fixture matched
-      -- by team name. Was pino-log-only (2026-08-09) until the Pré-Jogo
-      -- Agent needed something queryable to tell a one-off miss (API-
-      -- Football just doesn't cover that league live) apart from a
-      -- persistently-failing name pair worth fixing in team-name matching.
-      -- One row per PulseScore match id, upserted on every fresh
-      -- occurrence rather than growing unbounded per tick/restart.
-      CREATE TABLE IF NOT EXISTS api_football_name_mismatches (
-        id                             SERIAL PRIMARY KEY,
-        match_id                       TEXT NOT NULL,
-        home_team                      TEXT NOT NULL,
-        away_team                      TEXT NOT NULL,
-        league                         TEXT,
-        api_football_candidate_names   JSONB,
-        occurrence_count               INTEGER NOT NULL DEFAULT 1,
-        first_seen_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_seen_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS api_football_name_mismatches_match_idx
-        ON api_football_name_mismatches (match_id);
-
       -- Audit trail for the "BET62 Brain" natural-language admin console
       -- (lib/aiAgents/console.ts, 2026-08-11) — see that file's header for
       -- the safety design (fixed tool allow-list, no free-form execution).
@@ -571,58 +494,6 @@ export async function initDb(): Promise<void> {
         error            TEXT,
         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
-
-      -- Persistent, cross-session team-identity cache between PulseScore/
-      -- bwin's team names and API-Football's team ids (2026-08-12,
-      -- user-requested architecture hardening) — see
-      -- apiFootballTeamMappings.ts's own header for the full reasoning.
-      -- Grown organically: upserted whenever findApiFootballFixture
-      -- resolves a match via fuzzy name+league+kickoff-time matching, so
-      -- future matches involving the same team can look it up by exact id
-      -- instead of re-deriving the match from scratch.
-      CREATE TABLE IF NOT EXISTS api_football_team_mappings (
-        id                     SERIAL PRIMARY KEY,
-        pulsescore_team_name   TEXT NOT NULL,
-        api_football_team_id   INTEGER NOT NULL,
-        api_football_team_name TEXT NOT NULL,
-        confirmed_count        INTEGER NOT NULL DEFAULT 1,
-        first_confirmed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_confirmed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS api_football_team_mappings_name_idx
-        ON api_football_team_mappings (pulsescore_team_name);
-
-      -- Persistent, cross-session PulseScore-match -> API-Football-fixture
-      -- cache (2026-08-12) — see apiFootballFixtureMappings.ts's own header
-      -- for the full reasoning. Production incident 2026-08-13: this table
-      -- was added to the Drizzle schema (lib/db/src/schema/
-      -- apiFootballFixtureMappings.ts) but the matching CREATE TABLE here
-      -- was missed, so it never actually existed in the real database —
-      -- every live football tick's ensureFixtureMappingCacheFresh() call
-      -- (services/apiFootball.ts) failed with "relation ... does not
-      -- exist" and, since the failure never updates
-      -- fixtureMappingCacheLoadedAt, immediately retried on the very next
-      -- tick for every live match, hammering the Postgres connection pool
-      -- hard enough to bring the whole site down (Cloudflare 502 — the
-      -- origin stopped responding, not because the process crashed, but
-      -- because it could no longer get a DB connection for anything).
-      CREATE TABLE IF NOT EXISTS api_football_fixture_mappings (
-        id                      SERIAL PRIMARY KEY,
-        pulsescore_match_id     TEXT NOT NULL,
-        pulsescore_event_id     TEXT NOT NULL,
-        api_football_fixture_id INTEGER NOT NULL,
-        home_team               TEXT,
-        away_team               TEXT,
-        league                  TEXT,
-        kickoff_ms              INTEGER,
-        confirmation_count      INTEGER NOT NULL DEFAULT 1,
-        first_confirmed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_confirmed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS api_football_fixture_mappings_match_idx
-        ON api_football_fixture_mappings (pulsescore_match_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");
