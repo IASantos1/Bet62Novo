@@ -2950,12 +2950,13 @@ router.get("/propline-player-trends", adminMiddleware, async (req: AdminRequest,
   }
 });
 
-router.get("/propline/raw/*", adminMiddleware, async (req: AdminRequest, res) => {
+router.get("/propline/raw/:path*", adminMiddleware, async (req: AdminRequest, res) => {
   if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const wild = (req.params as any)["0"] ?? "";
+  const rawPath = (req.params as any)["path"] as string | undefined;
+  const wild = rawPath ?? "";
   const params: Record<string, any> = {};
   for (const [k, v] of Object.entries(req.query)) {
-    if (k === "0") continue;
+    if (k === "path") continue;
     params[k] = typeof v === "string" ? v : JSON.stringify(v);
   }
   try {
