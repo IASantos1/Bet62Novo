@@ -8,7 +8,6 @@ import { startPulseScoreBasketballWs } from "../services/pulsescore/basketballWs
 import { startPulseScoreTennisWs } from "../services/pulsescore/tennisWs.js";
 import { startPulseScoreHockeyWs } from "../services/pulsescore/hockeyWs.js";
 import { startPulseScoreVolleyballWs } from "../services/pulsescore/volleyballWs.js";
-import { startPropLineWebSocket } from "../services/propline/websocket.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
@@ -76,11 +75,6 @@ server.listen(port, () => {
   startPulseScoreBasketballWs();
   // startPulseScoreHockeyWs();      // MAX limit 3/3 used — REST fallback
   // startPulseScoreVolleyballWs();  // MAX limit 3/3 used — REST fallback
-
-  // PropLine real-time push (Streaming plan, confirmed active 2026-09-07) —
-  // separate connection cap (5) from PulseScore's, and a different account
-  // entirely, so no interaction with the limits above.
-  startPropLineWebSocket();
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY

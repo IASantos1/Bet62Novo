@@ -12,10 +12,6 @@ import { getGoalServeHockeyUpcomingRaw, getGoalServeHockeyLiveRaw } from "../ser
 import { getGoalServeBaseballUpcomingRaw, getGoalServeBaseballLiveRaw } from "../services/goalserve/baseball.js";
 import { getGoalServeVolleyballUpcomingRaw, getGoalServeVolleyballLiveRaw } from "../services/goalserve/volleyball.js";
 import { getGoalServeMmaUpcomingRaw, getGoalServeMmaLiveRaw } from "../services/goalserve/mma.js";
-import { propLineGetDebug, PropLineApiError, propLineQuota } from "../services/propline/client.js";
-import { propLineWebSocketStatus } from "../services/propline/websocket.js";
-import { getPropLineScores, getPropLineScoresLastErrors } from "../services/propline/common.js";
-import { PROPLINE_FOOTBALL_SPORT_KEYS, PROPLINE_FOOTBALL_LEAGUE_TITLES } from "../services/propline/football.js";
 
 const router: IRouter = Router();
 
@@ -227,92 +223,6 @@ router.get("/debug-goalserve", async (_req, res) => {
       error: String(err?.message ?? err),
       stack: String(err?.stack ?? "").slice(0, 800),
     });
-  }
-});
-
-// Manual pass-through to the PropLine odds API (api.prop-line.com) — lets
-// the integration being explored (services/propline/*) be checked from a
-// plain browser URL against REAL responses. Works even while
-// ENABLE_PROPLINE is off (propLineGetDebug bypasses that killswitch) —
-// only PROPLINE_API_KEY needs to be configured. `path` must start with "/"
-// and NOT include the "/v1" prefix (already baked into PROPLINE_BASE_URL),
-// e.g. /api/debug-propline?path=/sports or
-// /api/debug-propline?path=/sports/soccer_brasileirao/odds&markets=h2h —
-// every other query param is forwarded to PropLine as-is.
-router.get("/debug-propline", async (req, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(200).json({ error: "PROPLINE_API_KEY não configurada" });
-    return;
-  }
-  const path = String(req.query["path"] ?? "");
-  if (!path.startsWith("/")) {
-    res.status(400).json({
-      error: 'query param "path" é obrigatório e deve começar com "/", ex: /sports',
-    });
-    return;
-  }
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.query)) {
-    if (key === "path") continue;
-    if (typeof value === "string") params[key] = value;
-  }
-  try {
-    const data = await propLineGetDebug<unknown>(path, params, 12_000);
-    res.status(200).json({ data, quota: propLineQuota });
-  } catch (err) {
-    if (err instanceof PropLineApiError) {
-      res.status(err.status).json({ error: err.message, detail: err.detail });
-      return;
-    }
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
-  }
-});
-
-// Quick visibility into the PropLine websocket connection (services/propline/
-// websocket.ts) without needing to grep server logs — public read-only
-// status, no key required to view (the key itself is never exposed here).
-router.get("/debug-propline-ws", (_req, res) => {
-  res.status(200).json(propLineWebSocketStatus());
-});
-
-// Diagnoses "só aparece 1 jogo ao vivo de futebol" (2026-09-08 report):
-// buildFootballLiveFromPropLine() fans out one /scores call per one of the
-// 24 curated leagues every tick; getPropLineScores()'s catch block used to
-// swallow a rate-limited/quota-exhausted league silently, making "this
-// league truly has 0 live matches" indistinguishable from "this league's
-// call got 429'd this tick". This route calls every league's /scores
-// (through the same 30s cache buildFootballLiveFromPropLine uses, so it
-// won't itself blow the quota) and reports each one's in_progress count
-// plus any last fetch error, so a rate-limit root cause is visible without
-// needing Railway logs.
-router.get("/debug-propline-live-status", async (_req, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(200).json({ error: "PROPLINE_API_KEY não configurada" });
-    return;
-  }
-  try {
-    const perLeague = await Promise.all(
-      PROPLINE_FOOTBALL_SPORT_KEYS.map(async (sportKey) => {
-        const events = await getPropLineScores(sportKey);
-        return {
-          sportKey,
-          title: PROPLINE_FOOTBALL_LEAGUE_TITLES[sportKey] ?? sportKey,
-          total: events.length,
-          inProgress: events.filter((e) => e.status === "in_progress").length,
-          inProgressMatches: events
-            .filter((e) => e.status === "in_progress")
-            .map((e) => ({ home: e.home_team, away: e.away_team, period: e.period, home_score: e.home_score, away_score: e.away_score })),
-        };
-      }),
-    );
-    res.status(200).json({
-      quota: propLineQuota,
-      lastErrors: getPropLineScoresLastErrors(),
-      totalInProgress: perLeague.reduce((sum, l) => sum + l.inProgress, 0),
-      perLeague,
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
 });
 

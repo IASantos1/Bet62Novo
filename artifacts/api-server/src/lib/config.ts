@@ -81,27 +81,6 @@ const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
 
-// PropLine — 4th candidate replacement after Statyx (no game-level soccer
-// market), TheRundown (dropped before any endpoint beyond /sports) and
-// Bet365Soft (fully removed 2026-09-07 by explicit user decision). Unlike
-// all three, this one has been confirmed real end-to-end for football:
-// GET /v1/sports lists "soccer_brasileirao" (active:true), GET
-// /v1/sports/soccer_brasileirao/events returned 21 real upcoming Série A
-// fixtures with real ESPN team ids, and GET .../odds?markets=h2h,spreads,totals
-// returned real 1X2 American-odds prices from up to 9 real bookmakers per
-// match (Bovada, Pinnacle, BetMGM, Kalshi, LowVig, Marathon, BetOnline,
-// Rebet, Smarkets) — genuinely different prices per book, not synthetic.
-// Auth via `apiKey` query param OR `X-API-Key` header (using the header —
-// keeps the key out of logged URLs). Account is on the free tier; no
-// confirmed X-Daily-Limit value yet, so services/propline/client.ts reads
-// the X-Daily-Remaining/RateLimit-Remaining response headers on every call
-// and self-throttles instead of assuming a fixed budget.
-const ENABLE_PROPLINE =
-  (process.env["ENABLE_PROPLINE"] ?? "false").trim().toLowerCase() === "true";
-const PROPLINE_API_KEY = process.env["PROPLINE_API_KEY"]?.trim() ?? "";
-const PROPLINE_BASE_URL =
-  process.env["PROPLINE_BASE_URL"]?.trim() || "https://api.prop-line.com/v1";
-
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
 // deterministic template when unset. Kept separate from the AI_AGENTS_*
@@ -153,7 +132,6 @@ export const CONFIG = {
   ENABLE_GOALSERVE,
   ENABLE_SPORTMONKS,
   ENABLE_PULSESCORE,
-  ENABLE_PROPLINE,
   GOALSERVE_API_KEY,
   GOALSERVE_BASE_URL,
   GOALSERVE_LIVESCORE_BASE,
@@ -163,8 +141,6 @@ export const CONFIG = {
   PULSESCORE_BOOKMAKER,
   SPORTMONKS_API_KEY,
   SPORTMONKS_BASE_URL,
-  PROPLINE_API_KEY,
-  PROPLINE_BASE_URL,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
