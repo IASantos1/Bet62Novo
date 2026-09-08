@@ -57,6 +57,71 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
+// ── BET62 Live + Match Tracker + Streaming ──
+//
+//  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
+//    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
+//      polling para futebol e tênis; WebSocket (~1s) dedicado ao futebol
+//      mas ainda não consumido no payload ao vivo (só observação — ver
+//      footballWs.ts).
+//    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
+//
+//  TRACKER LIVE: StatScore — placar/minuto/incidentes AO VIVO.
+//    • Endpoint: /get_pushes/{eventId}. Auth: header X-Auth (OBRIGATÓRIO) + query ?auth= fallback compat.
+//    • Requer Referer: https://widgets.statscore.com/. Payload mais rico (minute, status, incidents[]).
+//    • Requer mapeamento MANUAL do admin (live_stream_mappings.statscore_event_id).
+//    • Fallback automático: SportScore -> Statpal -> PulseScore (por nome de time, zero trabalho manual).
+//
+//  STATS/EVENTOS: StatPal — dados estatísticos, play-by-play, metadados.
+//    • RESPONSABILIDADES: Estatísticas de jogo, play-by-play, H2H, rankings/standings, logos, ligas detalhadas.
+//    • NÃO FAZ: Agregação multi-bookmaker de odds (isso é PulseScore).
+//    • Soccer: /v2/soccer/matches/live + /match/{id}/statistics. Outros esportes: /v1/*
+//    • Cota: 300.000 requests/dia. Cache TTL rigoroso. Verificação de quota via /user-request-count (GRÁTIS, não conta na cota).
+//    • 100% AUTOMÁTICO por nome de time (ZERO trabalho manual por partida — futebol apenas).
+//
+//  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
+//  7 campos de vídeo em live_stream_mappings por evento.
+// SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
+// between the host and /playlist.m3u8 was originally assumed to be a fixed
+// per-account value, but two real BetBY captures for two different matches
+// showed two different segments — it's per-match/per-stream, so it lives in
+// live_stream_mappings.videoBasePath (admin-set per event, like the key)
+// rather than as a config default here. statsHost + per-video
+// matchId/sportId/tournamentId/key/basePath come from live_stream_mappings.
+const SMYTDRYT_HOST_URL =
+  process.env["SMYTDRYT_HOST_URL"]?.trim() || "https://edg05.smytdryt.live";
+const SMYTDRYT_DEFAULT_STATS_HOST =
+  process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
+
+// PropLine — AGREGADOR CROSS-BOOK DE ODDS + PLAYER PROPS + +EV + HISTORY + RESULTS.
+//   - RESPONSABILIDADES: 24 bookmakers (tradicionais + DFS exchanges), odds em
+//     tempo real, player props completos (até 500+ mercados/jogo), fair-line
+//     no-vig + cálculo +EV embutido (/ev), line-movement history, closing-line
+//     (CLV), resolução real de player props contra box-scores (/results),
+//     placar live (/scores ~90s), webhooks push de line_movement e resolution.
+//   - Plano STREAMING $79/mês ativado: 1.000.000 req/dia + 10 webhooks ativos.
+//   - Compatível com the-odds-api (troca só a base URL).
+//   - SPORT KEYS PROPRIOS do PropLine, mapeados no football.ts: baseball_mlb,
+//     basketball_nba, hockey_nhl, soccer_epl / soccer_la_liga / soccer_serie_a /
+//     soccer_bundesliga / soccer_ligue_1 / soccer_mls (+ aliases the-odds-api).
+const PROPLINE_API_KEY = process.env["PROPLINE_API_KEY"] ?? "";
+const PROPLINE_BASE_URL =
+  process.env["PROPLINE_BASE_URL"]?.trim() || "https://api.prop-line.com";
+const PROPLINE_API_VERSION =
+  process.env["PROPLINE_API_VERSION"]?.trim() || "v1";
+const PROPLINE_ENABLED_SPORTS = (
+  process.env["PROPLINE_ENABLED_SPORTS"]?.trim() || ""
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const PROPLINE_DEFAULT_BOOKMAKERS = (
+  process.env["PROPLINE_DEFAULT_BOOKMAKERS"]?.trim() || ""
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
@@ -68,6 +133,15 @@ export const CONFIG = {
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
+  SMYTDRYT_HOST_URL,
+  SMYTDRYT_DEFAULT_STATS_HOST,
+  PROPLINE_API_KEY,
+  PROPLINE_BASE_URL,
+  PROPLINE_API_VERSION,
+  PROPLINE_ENABLED_SPORTS,
+  PROPLINE_DEFAULT_BOOKMAKERS,
+  FOOTBALL_DAILY_PROVIDER,
+  FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,

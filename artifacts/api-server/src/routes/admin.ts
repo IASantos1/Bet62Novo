@@ -32,6 +32,12 @@ import {
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
 import { memberAccountForUser } from "./casino.js";
+import { propline } from "../services/propline/index.js";
+import {
+  proplineFindEventByName,
+  resolveProplineSportKey,
+  proplineAllActiveSports,
+} from "../services/propline/football.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2638,6 +2644,326 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
   } catch (err) {
     logger.error({ err }, "POST /api/admin/casino/banners/ai-generate error");
     res.status(500).json({ error: "Erro ao gerar banner" });
+  }
+});
+
+// ── BET62 Live + Match Tracker + Streaming — mapping admin ──────────────────
+// An admin fills in statscoreEventId (looked up on StatScore's own
+// dashboard for the same fixture — real auth confirmed, see
+// CONFIG.STATSCORE_AUTH) and/or the SMYTDRYT video fields to complete the
+// tracker/stream wiring for a match.
+//
+// Fixed 2026-08-16: this comment used to say leaving statscoreEventId unset
+// was fine because "the tracker automatically falls back to PulseScore" —
+// that's not accurate for the BetBY Tracker widget (routes/betbyTracker.ts),
+// whose only real automatic path is BetBY's own live catalogue (unverified
+// against real traffic, see pulseBridge.ts's own header comment) plus a
+// handful of markets hardcoded in proxy.ts. A statscoreEventId set here via
+// POST/PATCH is a genuine, reliable third path BetBY's resolver actually
+// reads now (see tryDbTeamStatscoreId in routes/betbyTracker.ts) — filling
+// this in for a match is the correct way to guarantee its Tracker works.
+router.get("/live-stream/mappings", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const mappings = await listMappings();
+    res.json({ mappings });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/live-stream/mappings error");
+    res.status(500).json({ error: "Erro ao listar mapeamentos" });
+  }
+});
+
+// Was missing entirely until 2026-08-16: only an UPDATE-by-betbyEventId
+// route existed below (PATCH), which 404s on any team pair that doesn't
+// already have a row — and nothing ever auto-seeded rows, so there was no
+// way to add a new team↔Statscore mapping through the admin UI at all.
+// betbyEventId isn't a real BetBY id here (the whole point of this route is
+// mapping teams BetBY's own catalogue doesn't have) — a stable placeholder
+// is generated so the NOT NULL UNIQUE column is satisfied without pretending
+// to know a real one.
+router.post("/live-stream/mappings", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const home = String(body["home"] ?? "").trim();
+    const away = String(body["away"] ?? "").trim();
+    const league = typeof body["league"] === "string" && body["league"].trim() ? body["league"].trim() : null;
+    const statscoreRaw = body["statscoreEventId"];
+    const statscoreEventId =
+      statscoreRaw === undefined || statscoreRaw === null || statscoreRaw === ""
+        ? null
+        : Number(statscoreRaw);
+    if (!home || !away) {
+      res.status(400).json({ error: "home e away são obrigatórios" });
+      return;
+    }
+    if (statscoreEventId !== null && !Number.isFinite(statscoreEventId)) {
+      res.status(400).json({ error: "statscoreEventId inválido" });
+      return;
+    }
+    const betbyEventId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const created = await createMapping({ betbyEventId, home, away, league, statscoreEventId });
+    logger.info(
+      { home, away, statscoreEventId, admin: req.admin!.username },
+      "Admin created live-stream/tracker mapping",
+    );
+    res.status(201).json(created);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/live-stream/mappings error");
+    res.status(500).json({ error: "Erro ao criar mapeamento" });
+  }
+});
+
+router.patch(
+  "/live-stream/mappings/:betbyEventId",
+  adminMiddleware,
+  async (req: AdminRequest, res) => {
+    const betbyEventId = String(req.params["betbyEventId"]);
+    const body = req.body as Record<string, unknown>;
+    const toIntOrNull = (v: unknown): number | null | undefined => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const toStrOrNull = (v: unknown): string | null | undefined => {
+      if (v === undefined) return undefined;
+      if (v === null || v === "") return null;
+      return String(v);
+    };
+    try {
+      const updated = await setMapping(betbyEventId, {
+        statscoreEventId: toIntOrNull(body["statscoreEventId"]),
+        videoMatchId: toIntOrNull(body["videoMatchId"]),
+        videoSportId: toIntOrNull(body["videoSportId"]),
+        videoTournamentId: toIntOrNull(body["videoTournamentId"]),
+        videoStatsHost: toStrOrNull(body["videoStatsHost"]),
+        videoKey: toStrOrNull(body["videoKey"]),
+        videoBasePath: toStrOrNull(body["videoBasePath"]),
+        videoTimestamp: toIntOrNull(body["videoTimestamp"]),
+      });
+      if (!updated) {
+        res.status(404).json({ error: "Mapeamento não encontrado" });
+        return;
+      }
+      res.json(updated);
+    } catch (err) {
+      logger.error({ err, betbyEventId }, "PATCH /api/admin/live-stream/mappings/:betbyEventId error");
+      res.status(500).json({ error: "Erro ao atualizar mapeamento" });
+    }
+  },
+);
+
+// Read-only diagnostic: market names Statpal's /odds/prematch feed returns
+// that we don't currently parse into AdvancedMarkets (see matches.ts —
+// parseStatpalPrematchMarkets). Fills up as real production traffic hits the
+// football odds endpoints; used to discover what market depth Statpal
+// actually offers (including any player props like anytime goalscorer or
+// assist) without guessing blind.
+router.get("/unknown-markets", adminMiddleware, async (_req: AdminRequest, res) => {
+  const entries = Array.from(unknownStatpalMarkets.entries())
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.count - a.count);
+  res.json({ count: entries.length, markets: entries });
+});
+
+router.get("/propline-probe", adminMiddleware, async (_req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    res.status(503).json({ configured: false, error: "PROPLINE_API_KEY não configurada" });
+    return;
+  }
+  try {
+    const probe = await propline.probe();
+    const usage = propline.usage();
+    res.json({ configured: true, probe, usage });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-probe error");
+    res.status(500).json({ configured: true, error: "Erro ao consultar PropLine", detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/propline-usage", adminMiddleware, async (_req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    res.status(503).json({ configured: false });
+    return;
+  }
+  res.json({ configured: true, usage: propline.usage() });
+});
+
+router.get("/propline-sports", adminMiddleware, async (_req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    res.status(503).json({ configured: false });
+    return;
+  }
+  try {
+    const sports = await propline.getSports();
+    res.json({ configured: true, configuredEnabled: CONFIG.PROPLINE_ENABLED_SPORTS, count: sports.length, sports });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-sports error");
+    res.status(500).json({ error: "Erro ao consultar PropLine", detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/propline-freshness", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    res.status(503).json({ configured: false });
+    return;
+  }
+  try {
+    const sportKey = typeof req.query.sport ? String(req.query.sport) : undefined;
+    const data = await propline.getFreshness(sportKey);
+    res.json({ configured: true, freshness: data });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-freshness error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline-odds", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    res.status(503).json({ configured: false });
+    return;
+  }
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "soccer_epl";
+  const markets = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : ["h2h", "spreads", "totals"];
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw ?? sportRaw);
+    if (!sportKey) { res.status(400).json({ error: "Sport inválido" }); return; }
+    const events = await propline.getOdds(sportKey, {
+      markets,
+      includeLinks: true,
+      includeBookIds: true,
+    });
+    res.json({ configured: true, sport: sportKey, eventCount: events.length, events });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-odds error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline-event/:eventId", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    res.status(503).json({ configured: false });
+    return;
+  }
+  const eventId = String(req.params.eventId ?? "");
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "";
+  const marketsRaw = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : undefined;
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
+    if (!sportKey) { res.status(400).json({ error: "Sport inválido" }); return; }
+    const event = await propline.getEventOdds(sportKey, eventId, { markets: marketsRaw, includeLinks: true, includeBookIds: true });
+    res.json({ configured: true, sport: sportKey, event });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-event error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline-match", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "";
+  const home = typeof req.query.home ? String(req.query.home) : "";
+  const away = typeof req.query.away ? String(req.query.away) : "";
+  if (!sportRaw || (!home && !away)) { res.status(400).json({ error: "Informe sport + (home ou away)" }); return; }
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw);
+    if (!sportKey) { res.status(400).json({ error: "Sport inválido" }); return; }
+    const events = await propline.getEvents(sportKey);
+    const found = proplineFindEventByName(events, { home, away });
+    if (!found) {
+      res.json({ configured: true, sport: sportKey, matched: null, search: { home, away }, candidates: events.slice(0, 10).map(e => ({ id: e.id, home: e.home_team, away: e.away_team, commence_time: e.commence_time })) });
+      return;
+    }
+    const full = await propline.getEventOdds(sportKey, found.id, { includeLinks: true, includeBookIds: true });
+    res.json({ configured: true, sport: sportKey, matched: found, full });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-match error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline/scores", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "soccer_epl";
+  const daysFrom = typeof req.query.daysFrom ? Number(req.query.daysFrom) : undefined;
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
+    const scores = await propline.getScores(sportKey, { daysFrom });
+    res.json({ configured: true, sport: sportKey, scores });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-scores error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline/results", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "baseball_mlb";
+  const daysFrom = typeof req.query.daysFrom ? Number(req.query.daysFrom) : 1;
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
+    const results = await propline.getResults(sportKey, { daysFrom });
+    res.json({ configured: true, sport: sportKey, results });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-results error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline/ev", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "baseball_mlb";
+  const markets = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : ["h2h"];
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
+    const data = await propline.getEV(sportKey, { markets });
+    res.json({ configured: true, sport: sportKey, ev: data });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-ev error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline/best-line", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "baseball_mlb";
+  const markets = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : ["h2h"];
+  try {
+    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
+    const data = await propline.getBestLine(sportKey, { markets, includeLinks: true });
+    res.json({ configured: true, sport: sportKey, bestLine: data });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-best-line error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline-player-trends", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const name = typeof req.query.name ? String(req.query.name) : "";
+  if (!name) { res.status(400).json({ error: "Informe name" }); return; }
+  try {
+    const data = await propline.getPlayerTrends(name);
+    res.json({ configured: true, name, trends: data });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/propline-player-trends error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get("/propline/raw/*", adminMiddleware, async (req: AdminRequest, res) => {
+  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
+  const wild = (req.params as any)["0"] ?? "";
+  const params: Record<string, any> = {};
+  for (const [k, v] of Object.entries(req.query)) {
+    if (k === "0") continue;
+    params[k] = typeof v === "string" ? v : JSON.stringify(v);
+  }
+  try {
+    const data = await propline.raw(`/${wild}`, params);
+    res.json({ configured: true, path: "/" + wild, params, data });
+  } catch (err) {
+    logger.error({ err, wild }, "GET /api/admin/propline/raw error");
+    res.status(500).json({ error: String(err) });
   }
 });
 

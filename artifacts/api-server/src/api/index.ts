@@ -4,6 +4,8 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
+import { propline } from "../services/propline/index.js";
+import { proplineAllActiveSports } from "../services/propline/football.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -31,6 +33,108 @@ if (Number.isNaN(port) || port <= 0) {
 
 const server = createServer(app);
 
+// ── StatPal Quota Health Check ──────────────────────────────────────────────
+// Chamada GRATUITA (/user-request-count NÃO conta na cota de 300k/dia,
+// confirmado statpal docs "Monitoring Usage"). Roda uma vez no startup e
+// depois a cada 60 minutos para alertar no log se estourarmos 75% da cota.
+// Avisa o operador via logger (sem interromper o servidor — Statpal é só
+// camada 3 de tracker, temos StatScore e PulseScore de fallback).
+let lastQuotaWarnPct = -1;
+async function statpalQuotaCheck(phase: "startup" | "periodic"): Promise<void> {
+  if (!CONFIG.STATPAL_API_KEY) {
+    logger.debug("[statpal-quota] STATPAL_API_KEY não configurada — skip check");
+    return;
+  }
+  try {
+    const url = new URL("https://statpal.io/api/user-request-count");
+    url.searchParams.set("access_key", CONFIG.STATPAL_API_KEY);
+    const r = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(8000),
+      headers: { Accept: "application/json" },
+    });
+    if (!r.ok) {
+      logger.warn({ status: r.status, phase }, "[statpal-quota] /user-request-count falhou");
+      return;
+    }
+    const raw = (await r.json()) as Record<string, unknown>;
+    const cnt = Number(
+      raw["contagem_de_solicitações"] ?? raw["request_count"] ?? raw["requestCount"] ?? 0,
+    );
+    const DAILY_LIMIT = 300_000;
+    const pct = DAILY_LIMIT > 0 ? Math.round((cnt / DAILY_LIMIT) * 1000) / 10 : 0;
+    const info = {
+      count: cnt,
+      dailyLimit: DAILY_LIMIT,
+      usedPct: pct,
+      date: raw["data_atual"] ?? raw["date"] ?? new Date().toISOString().slice(0, 10),
+      phase,
+    };
+    if (pct >= 95) {
+      logger.error(info, "[statpal-quota] CRÍTICO: >95% da cota diária usada — risco de 429");
+    } else if (pct >= 75) {
+      if (lastQuotaWarnPct < 75 || phase === "startup") {
+        logger.warn(info, "[statpal-quota] ATENÇÃO: >75% da cota diária usada");
+      }
+    } else {
+      if (phase === "startup") {
+        logger.info(info, "[statpal-quota] Startup check OK");
+      } else {
+        logger.debug(info, "[statpal-quota] Periodic check OK");
+      }
+    }
+    lastQuotaWarnPct = pct >= 75 ? 75 : pct >= 95 ? 95 : 0;
+  } catch (err) {
+    logger.warn({ err, phase }, "[statpal-quota] check falhou (transiente) — ignora");
+  }
+}
+
+// ── PropLine Startup Probe + Quota Check ────────────────────────────────────
+// PropLine já retorna quota/daily-usage via headers em TODA resposta autenticada.
+// O probe() acerta /sports (barato, conta 1 req de 1M/dia) e preenche os
+// snapshots internos. Avisa no log a qualquer sinal de <10% remaining.
+let lastProplineWarnRemainingPct = -1;
+async function proplineStartupAndPeriodicCheck(phase: "startup" | "periodic"): Promise<void> {
+  if (!CONFIG.PROPLINE_API_KEY) {
+    logger.debug("[propline] PROPLINE_API_KEY não configurada — skip check");
+    return;
+  }
+  try {
+    const probe = await propline.probe();
+    const usage = propline.usage();
+    const dailyLimit = usage.dailyLimit ?? 1_000_000;
+    const dailyUsed = usage.dailyUsed ?? 0;
+    const dailyRemaining = usage.dailyRemaining ?? Math.max(0, dailyLimit - dailyUsed);
+    const remainingPct = dailyLimit > 0 ? Math.round((dailyRemaining / dailyLimit) * 1000) / 10 : 100;
+    const info = {
+      ok: probe.ok,
+      sportCount: probe.sportCount,
+      enabledSports: proplineAllActiveSports(),
+      defaultBookmakers: CONFIG.PROPLINE_DEFAULT_BOOKMAKERS,
+      dailyLimit,
+      dailyUsed,
+      dailyRemaining,
+      remainingPct,
+      rateLimitRemaining: usage.rateLimitRemaining,
+      rateLimitResetSec: usage.rateLimitReset,
+      dailyResetAtUnix: usage.dailyReset,
+      phase,
+    };
+    if (remainingPct < 5) {
+      logger.error(info, "[propline] CRÍTICO: <5% de quota restante");
+    } else if (remainingPct < 10) {
+      if (lastProplineWarnRemainingPct >= 10 || phase === "startup") {
+        logger.warn(info, "[propline] ATENÇÃO: <10% de quota restante");
+      }
+    } else if (phase === "startup") {
+      logger.info(info, "[propline] Startup probe OK");
+    } else {
+      logger.debug(info, "[propline] Periodic check OK");
+    }
+    lastProplineWarnRemainingPct = remainingPct < 10 ? 10 : remainingPct;
+  } catch (err) {
+    logger.warn({ err, phase }, "[propline] probe falhou (transiente) — ignora");
+  }
+}
 server.listen(port, () => {
   logger.info({ port }, "API server started");
 
@@ -39,6 +143,43 @@ server.listen(port, () => {
   // (or early in-play when the outcome is already determined).
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
+
+  // Football/Tennis/Basketball's dedicated WS connections — see
+  // getPulseScoreFootballLive (football.ts), getPulseScoreTennisLive
+  // (tennis.ts), and getPulseScoreBasketballLive (basketball.ts) for each
+  // sport's per-event merge design. Safe to call even before
+  // PULSESCORE_API_KEY is set, they just no-op until then.
+  //
+  // All three calls together were the actual reason for the 2026-08-11 MAX
+  // plan upgrade (€149/mês, 3 concurrent connections) — until then, PulseScore
+  // docs confirm connection limits are per PLAN for the WHOLE ACCOUNT, not
+  // per sport (PRO's 1 connection meant only one sport at a time; a second
+  // simultaneous connection gets closed with non-retryable code 4029). Each
+  // REST poller already tolerates its WS overlay being empty/stale/absent —
+  // if the account ever drops back to a lower tier, whichever connections
+  // get closed by PulseScore simply degrade to REST-only for that sport,
+  // nothing needs to change here.
+  // MAX plan (2026-08-15 docs) allows 3 concurrent WebSocket connections
+  // (one per sport) across the ENTIRE account — per-plan connections are NOT
+  // per-sport independent. The 3 highest-volume live sports (soccer, tennis,
+  // basketball) get the real-time WS feed; the rest (hockey, volleyball,
+  // baseball, ...) are intentionally left REST-polled via genericSportLive
+  // + per-sport builders below, which already tolerate no WS overlay cleanly.
+  // If the plan ever upgrades to ULTRA (10 concurrent) simply uncomment the
+  // disabled lines; the hockeyWs/volleyballWs modules themselves already
+  // exist and are safe to start — we just skip them here to stay under the
+  // 4029 "Connection limit reached" close code.
+  startPulseScoreFootballWs();
+  startPulseScoreTennisWs();
+  startPulseScoreBasketballWs();
+  // startPulseScoreHockeyWs();      // MAX limit 3/3 used — REST fallback
+  // startPulseScoreVolleyballWs();  // MAX limit 3/3 used — REST fallback
+
+  void statpalQuotaCheck("startup");
+  setInterval(() => void statpalQuotaCheck("periodic"), 60 * 60 * 1000);
+
+  void proplineStartupAndPeriodicCheck("startup");
+  setInterval(() => void proplineStartupAndPeriodicCheck("periodic"), 60 * 60 * 1000);
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY
