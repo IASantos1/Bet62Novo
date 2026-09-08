@@ -23,5 +23,15 @@ export async function getPropLineVolleyballLive(): Promise<PropLineScoreEvent[]>
   if (!CONFIG.ENABLE_PROPLINE) return [];
   if (!CONFIG.PROPLINE_API_KEY) return [];
   const events = await getPropLineScores("volleyball");
-  return events.filter((e) => e.status === "in_progress");
+  // Confirmed real (2026-09-08, a full /scores sample with dozens of
+  // live:true volleyball events): `status` stays "upcoming" forever for
+  // this sport — it never transitions to "in_progress" the way it does
+  // for tennis/football/basketball/hockey/baseball. Every event in that
+  // sample also had home_score/away_score/period null, live:true included,
+  // so PropLine currently has no real live scoring data for volleyball at
+  // all (its own docs' near-real-time caveat turned out to be correct
+  // here, unlike for football). Filtering on live===true + a real score
+  // present (not status) is the correct condition going forward if that
+  // ever changes — still requires real data, never fabricates a score.
+  return events.filter((e) => e.live === true && e.home_score != null && e.away_score != null);
 }
