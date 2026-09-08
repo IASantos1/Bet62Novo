@@ -26,8 +26,6 @@ const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
 // ── Kill-switches (suspensão sem apagar código; rollback 1 clique) ─────────
-const ENABLE_SPORTMONKS =
-  (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
   (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
 
@@ -42,14 +40,6 @@ const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net/api";
 const PULSESCORE_BOOKMAKER =
   process.env["PULSESCORE_BOOKMAKER"]?.trim() || "bet365";
-
-// SportMonks Football API v3 — DESLIGADO POR DEFEITO (ENABLE_SPORTMONKS=false).
-// Fornecedor de futebol: fixtures, odds bet365, livescore.
-// Guardas em cada função pública de services/sportmonks/*.ts garantem 0 rede
-// enquanto desligado.
-const SPORTMONKS_API_KEY = process.env["SPORTMONKS_API_KEY"] ?? "";
-const SPORTMONKS_BASE_URL =
-  process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3/football";
 
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
@@ -99,13 +89,10 @@ export const CONFIG = {
   PALACE_CASINO_BASE_URL,
   PALACE_CASINO_API_TOKEN,
   PALACE_CASINO_CALLBACK_TOKEN,
-  ENABLE_SPORTMONKS,
   ENABLE_PULSESCORE,
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
-  SPORTMONKS_API_KEY,
-  SPORTMONKS_BASE_URL,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

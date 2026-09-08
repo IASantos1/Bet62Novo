@@ -20,23 +20,20 @@ router.get("/version", (_req, res) => {
 });
 
 // Estado dos providers esportivos: flags kill-switch + último fetch com
-// sucesso por fornecedor. Útil para diagnosticar se SportMonks/PulseScore
-// estão realmente SUSPENSOS (sem 1 rede) após deploy.
+// sucesso por fornecedor. Útil para diagnosticar se PulseScore está
+// realmente SUSPENSO (sem 1 rede) após deploy.
 // Rota não validada (mesmo espírito que /version) para não tocar no
 // contrato zod gerado por orval.
 router.get("/health-data-providers", (_req, res) => {
   const g = globalThis as any;
   res.json({
     flags: {
-      ENABLE_SPORTMONKS: CONFIG.ENABLE_SPORTMONKS,
       ENABLE_PULSESCORE: CONFIG.ENABLE_PULSESCORE,
     },
     keys: {
-      SPORTMONKS_API_KEY_SET: CONFIG.SPORTMONKS_API_KEY.length > 0,
       PULSESCORE_API_KEY_SET: CONFIG.PULSESCORE_API_KEY.length > 0,
     },
     lastSuccessfulFetch: {
-      sportmonks: g.__lastFetchTs?.sportmonks ?? null,
       pulsescore: g.__lastFetchTs?.pulsescore ?? null,
     },
     providerQualityDebug: g.__providerQualityDebug ?? null,

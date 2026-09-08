@@ -4574,12 +4574,11 @@ function liveDefinitiveOutcomeForSel(
   // Corners/Cards O/U — deliberately NEVER settled early from a live running
   // total (audit finding, 2026-08-11, user report of a ticket wrongly
   // settling "lost"). These two markets always fall through to null
-  // (pending) here and wait for the authoritative full-time count in
-  // match_results (captured natively from SportMonks CORNERS/YELLOWCARDS
-  // statistics in finalizeStaleLiveMatch, at finish — SportsAPI Pro's old
-  // fetchFootballExtras role was removed 2026-09-03) via the normal
-  // non-live settlement path — a later but correct settlement, never a
-  // fast but possibly wrong one.
+  // (pending) here and wait for an authoritative full-time count in
+  // match_results via the normal non-live settlement path — a later but
+  // correct settlement, never a fast but possibly wrong one. No live data
+  // provider remains as of 2026-09-08, so these currently just stay
+  // pending until void.
   const mCorner = s.match(/^([ou])c(\d+)$/);
   if (mCorner) return null;
 
