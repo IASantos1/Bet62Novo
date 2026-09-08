@@ -26,40 +26,10 @@ const PALACE_CASINO_CALLBACK_TOKEN =
   process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
 
 // ── Kill-switches (suspensão sem apagar código; rollback 1 clique) ─────────
-// TODOS OS TRÊS default-off a partir de 2026-09-05 — decisão explícita do
-// usuário após uma sessão inteira de debug em cima de SportMonks/bet365
-// (repreçagem lenta em várias ligas, sem solução de código possível — é
-// comportamento real da casa de apostas) e do conflito SportMonks/PulseScore
-// para futebol: "Desativa todas as duas APIs sportmonks e pulsescore vamos
-// usar outra após para testar." Efeito: TODO esporte (não só futebol) fica
-// sem pré-jogo/ao vivo até um novo provedor ser escolhido e integrado —
-// intencional, não é o mesmo bug do apagão de 2026-09-04 (aquele era
-// GoalServe ligado sem key configurada; este é os três desligados de
-// propósito). Reabilitar via ENABLE_SPORTMONKS=true / ENABLE_PULSESCORE=true
-// / ENABLE_GOALSERVE=true no Railway/Replit quando o novo provedor estiver
-// pronto, ou apagar esta seção inteira quando o novo provedor substituir
-// SportMonks/PulseScore/GoalServe de vez no código.
-const ENABLE_GOALSERVE =
-  (process.env["ENABLE_GOALSERVE"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_SPORTMONKS =
   (process.env["ENABLE_SPORTMONKS"] ?? "false").trim().toLowerCase() === "true";
 const ENABLE_PULSESCORE =
   (process.env["ENABLE_PULSESCORE"] ?? "false").trim().toLowerCase() === "true";
-// GoalServe — NOVO fornecedor multi-desporto.
-// - Pregame odds:     https://www.goalserve.com/getfeed/<KEY>/getodds/soccer?cat=<sport>_10
-// - Fixtures/scores:  https://www.goalserve.com/getfeed/<KEY>/<sport>/{home,d-1,d1}
-// - Football live:    https://livescore.goalserve.com/api/v1/soccer/{home,live}
-// - Odds settlement:  http://oddsfeed.goalserve.com/api/v1/odds/pre-game/settlements
-// Auth: key na path (feeds/scores), query param `apiKey=` (livescore) ou `k=` (settle).
-// JSON via `?json=1` appended automáticamente pelo cliente (services/goalserve/client.ts).
-// NÃO colocar a KEY real hardcodada. Vem apenas de env var.
-const GOALSERVE_API_KEY = process.env["GOALSERVE_API_KEY"]?.trim() ?? "";
-const GOALSERVE_BASE_URL =
-  process.env["GOALSERVE_BASE_URL"]?.trim() || "https://www.goalserve.com/getfeed";
-const GOALSERVE_LIVESCORE_BASE =
-  process.env["GOALSERVE_LIVESCORE_BASE"]?.trim() || "https://livescore.goalserve.com/api/v1";
-const GOALSERVE_ODDSSETTLE_BASE =
-  process.env["GOALSERVE_ODDSSETTLE_BASE"]?.trim() || "http://oddsfeed.goalserve.com/api/v1";
 
 // PulseScore — AGREGADOR DE ODDS E MERCADOS MULTI-BOOKMAKERS NORMALIZADO.
 //   - RESPONSABILIDADES: Odds em tempo real, mercados, bookmakers agregadas (bet365, pinnacle, fanduel etc.), WebSocket ~1s push.
@@ -129,13 +99,8 @@ export const CONFIG = {
   PALACE_CASINO_BASE_URL,
   PALACE_CASINO_API_TOKEN,
   PALACE_CASINO_CALLBACK_TOKEN,
-  ENABLE_GOALSERVE,
   ENABLE_SPORTMONKS,
   ENABLE_PULSESCORE,
-  GOALSERVE_API_KEY,
-  GOALSERVE_BASE_URL,
-  GOALSERVE_LIVESCORE_BASE,
-  GOALSERVE_ODDSSETTLE_BASE,
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_BOOKMAKER,
