@@ -122,6 +122,33 @@ const PROPLINE_DEFAULT_BOOKMAKERS = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Football (soccer) provider selection knobs — two independent switches so
+// we can mix-and-match sources without code changes, and A/B the best
+// provider for each job independently. Currently the matches/ routes still
+// read providers in their own order (see matches.ts header comment), so
+// these exist primarily for readability + future explicit routing:
+//
+//   DAILY     = where to fetch today's pre-match odds, market list, and
+//               fixture schedule. PropLine is the default because it's the
+//               broadest aggregator (24 books) and costs nothing extra vs
+//               PulseScore under the $79 Streaming plan — falls back to
+//               PulseScore (cota ilimitada) if the PropLine key is empty.
+//               Falls back to StatPal only when both higher-tier keys are
+//               missing.
+//   REFERENCE = canonical source for H2H, standings, league metadata,
+//               settled results, and stats. StatPal has the deepest soccer
+//               coverage (Brasileirão Série C/D, state cups, ...) and the
+//               richest /statistics payload, so it's the reference of
+//               record; PulseScore is the next fallback because its
+//               /tournament endpoints include season standings as well.
+type FootballProvider = "propline" | "pulsescore" | "statpal";
+const FOOTBALL_DAILY_PROVIDER: FootballProvider =
+  (process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() as FootballProvider | undefined) ??
+  (PROPLINE_API_KEY ? "propline" : "pulsescore");
+const FOOTBALL_REFERENCE_PROVIDER: FootballProvider =
+  (process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() as FootballProvider | undefined) ??
+  "statpal";
+
 export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
