@@ -15,6 +15,7 @@ import type {
   GoalApiStandingZones,
   GoalApiPlayer,
   GoalApiPlayerStatistics,
+  GoalApiResultsStats,
 } from "./index.js";
 
 /** GOAL API's own English stat labels (match.fullTime[].type, confirmed
@@ -530,5 +531,84 @@ export function buildGoalApiPlayerProfile(
       minutesPlayed: perf?.minutes ?? null,
     },
     recentMatches: [],
+  };
+}
+
+export type BuiltFootballResult = {
+  id: string;
+  home: string;
+  homeBadge: string | null;
+  away: string;
+  awayBadge: string | null;
+  homeScore: number;
+  awayScore: number;
+  status: string;
+  league: string;
+  country: string | null;
+  round: string | null;
+  date: string;
+  time: string;
+};
+
+/** Maps one /results, /results/today or /results/yesterday entry into the
+ * shape the football "Resultados" panel renders — first real finished-match
+ * feed for football (previously only derivable indirectly, per-match, by
+ * watching a tracked live match disappear from liveMatchState). */
+export function buildGoalApiResultMatch(fixture: GoalApiFixture): BuiltFootballResult {
+  const { date, time } = goalApiKickoffDateTime(fixture);
+  return {
+    id: fixture.id,
+    home: fixture.homeTeam.name,
+    homeBadge: fixture.homeTeam.badge ?? null,
+    away: fixture.awayTeam.name,
+    awayBadge: fixture.awayTeam.badge ?? null,
+    homeScore: Number(fixture.homeTeamScore ?? 0),
+    awayScore: Number(fixture.awayTeamScore ?? 0),
+    status: fixture.matchStatus,
+    league: fixture.leagueName ?? "",
+    country: null,
+    round: fixture.matchRound ?? null,
+    date,
+    time,
+  };
+}
+
+export function buildGoalApiResults(fixtures: GoalApiFixture[] | null | undefined): BuiltFootballResult[] {
+  if (!fixtures) return [];
+  return fixtures.map(buildGoalApiResultMatch);
+}
+
+export type BuiltResultsStats = {
+  totalMatches: number;
+  totalGoals: number;
+  averageGoals: number;
+  homeWinPercentage: number;
+  drawPercentage: number;
+  awayWinPercentage: number;
+  bttsPercentage: number;
+  over25Percentage: number;
+  over35Percentage: number;
+  mostCommonScore: { score: string; percentage: number } | null;
+};
+
+/** Maps /results/stats's aggregate object into the panel's trends card.
+ * Percent fields are already computed server-side (0-100 numbers); this
+ * only picks the headline fields and defaults missing ones to 0 rather
+ * than fabricating a plausible-looking value. */
+export function buildGoalApiResultsStats(raw: GoalApiResultsStats | null | undefined): BuiltResultsStats | null {
+  if (!raw) return null;
+  return {
+    totalMatches: raw.totalMatches ?? 0,
+    totalGoals: raw.totalGoals ?? 0,
+    averageGoals: raw.averageGoals ?? 0,
+    homeWinPercentage: raw.homeWinPercentage ?? 0,
+    drawPercentage: raw.drawPercentage ?? 0,
+    awayWinPercentage: raw.awayWinPercentage ?? 0,
+    bttsPercentage: raw.bttsPercentage ?? 0,
+    over25Percentage: raw.over25Percentage ?? 0,
+    over35Percentage: raw.over35Percentage ?? 0,
+    mostCommonScore: raw.mostCommonScore
+      ? { score: raw.mostCommonScore.score, percentage: raw.mostCommonScore.percentage }
+      : null,
   };
 }

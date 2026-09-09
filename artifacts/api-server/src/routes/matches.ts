@@ -56,6 +56,8 @@ import {
   buildGoalApiStandings,
   buildGoalApiStandingZoneMap,
   buildGoalApiPlayerProfile,
+  buildGoalApiResults,
+  buildGoalApiResultsStats,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -11739,6 +11741,41 @@ router.get("/basketball-results", async (_req: Request, res: Response) => {
 
 router.get("/mlb-results", async (_req: Request, res: Response) => {
   res.json({ results: [] });
+});
+
+// Football's own finished-match feed — GOAL API's dedicated /results/today
+// and /results/yesterday endpoints, real and populated (unlike the dead
+// stubs above, whose providers were removed). Distinct from
+// finishedMatchResults (in-memory, only covers matches this server was
+// itself tracking live) — this is the provider's own authoritative list of
+// every finished fixture for the day, regardless of whether we ever polled it.
+router.get("/football-results", async (req: Request, res: Response) => {
+  const range = req.query.range === "today" ? "today" : "yesterday";
+  if (!CONFIG.GOAL_API_KEY) {
+    res.json({ results: [] });
+    return;
+  }
+  try {
+    const raw = range === "today" ? await goalApi.getResultsToday() : await goalApi.getResultsYesterday();
+    res.json({ results: buildGoalApiResults(raw) });
+  } catch (err) {
+    logger.error({ err, range }, "[goal-api] /football-results fetch failed");
+    res.json({ results: [] });
+  }
+});
+
+router.get("/football-results-stats", async (_req: Request, res: Response) => {
+  if (!CONFIG.GOAL_API_KEY) {
+    res.json({ stats: null });
+    return;
+  }
+  try {
+    const raw = await goalApi.getResultsStats();
+    res.json({ stats: buildGoalApiResultsStats(raw) });
+  } catch (err) {
+    logger.error({ err }, "[goal-api] /football-results-stats fetch failed");
+    res.json({ stats: null });
+  }
 });
 
 

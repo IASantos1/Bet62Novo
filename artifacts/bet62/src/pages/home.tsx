@@ -5132,6 +5132,38 @@ export default function Home({
   };
   const [mlbResults, setMlbResults] = useState<MLBResult[]>([]);
 
+  // Football results (yesterday) — real GOAL API /results/yesterday feed.
+  type FootballResult = {
+    id: string;
+    home: string;
+    homeBadge: string | null;
+    away: string;
+    awayBadge: string | null;
+    homeScore: number;
+    awayScore: number;
+    status: string;
+    league: string;
+    country: string | null;
+    round: string | null;
+    date: string;
+    time: string;
+  };
+  const [footballResults, setFootballResults] = useState<FootballResult[]>([]);
+  type FootballResultsStats = {
+    totalMatches: number;
+    totalGoals: number;
+    averageGoals: number;
+    homeWinPercentage: number;
+    drawPercentage: number;
+    awayWinPercentage: number;
+    bttsPercentage: number;
+    over25Percentage: number;
+    over35Percentage: number;
+    mostCommonScore: { score: string; percentage: number } | null;
+  };
+  const [footballResultsStats, setFootballResultsStats] =
+    useState<FootballResultsStats | null>(null);
+
   type NHLTeamStats = {
     shotsOnGoal: number;
     savesPct: number;
@@ -7271,6 +7303,18 @@ export default function Home({
       fetch("/api/matches/mlb-results")
         .then((r) => (r.ok ? r.json() : { results: [] }))
         .then((d) => setMlbResults(d.results ?? []))
+        .catch(() => {
+          /* non-critical */
+        });
+      fetch("/api/matches/football-results?range=yesterday")
+        .then((r) => (r.ok ? r.json() : { results: [] }))
+        .then((d) => setFootballResults(d.results ?? []))
+        .catch(() => {
+          /* non-critical */
+        });
+      fetch("/api/matches/football-results-stats")
+        .then((r) => (r.ok ? r.json() : { stats: null }))
+        .then((d) => setFootballResultsStats(d.stats ?? null))
         .catch(() => {
           /* non-critical */
         });
@@ -18969,6 +19013,14 @@ export default function Home({
                           <Activity size={11} />
                           Stats
                         </button>
+                        {(expandedMatch.sport ?? "football") === "football" && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "yesterday" ? "markets" : "yesterday")}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "yesterday" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          >
+                            Resultados
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -19270,6 +19322,97 @@ export default function Home({
                     )}
                   </div>
                 )}
+
+                {/* Results panel (football) — real GOAL API /results/yesterday
+                    feed + /results/stats trends. */}
+                {matchViewTab === "yesterday" &&
+                  (expandedMatch.sport ?? "football") === "football" && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                        ⚽ Resultados — Ontem
+                      </div>
+                      {footballResultsStats && (
+                        <div className="grid grid-cols-3 gap-1.5 mb-3">
+                          {[
+                            { label: "Ambas marcam", value: footballResultsStats.bttsPercentage },
+                            { label: "Mais de 2.5", value: footballResultsStats.over25Percentage },
+                            { label: "Mais de 3.5", value: footballResultsStats.over35Percentage },
+                            { label: "Vitória casa", value: footballResultsStats.homeWinPercentage },
+                            { label: "Empate", value: footballResultsStats.drawPercentage },
+                            { label: "Vitória fora", value: footballResultsStats.awayWinPercentage },
+                          ].map((s) => (
+                            <div
+                              key={s.label}
+                              className="bg-zinc-950/60 border border-zinc-800 rounded-lg py-2 px-1.5 text-center"
+                            >
+                              <div className="text-[13px] font-black text-white tabular-nums">
+                                {s.value}%
+                              </div>
+                              <div className="text-[8px] font-bold text-zinc-500 uppercase tracking-wide mt-0.5">
+                                {s.label}
+                              </div>
+                            </div>
+                          ))}
+                          {footballResultsStats.mostCommonScore && (
+                            <div className="col-span-3 flex items-center justify-between bg-zinc-950/60 border border-zinc-800 rounded-lg py-2 px-3">
+                              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wide">
+                                Placar mais comum
+                              </span>
+                              <span className="text-[12px] font-black text-white tabular-nums">
+                                {footballResultsStats.mostCommonScore.score} ·{" "}
+                                {footballResultsStats.mostCommonScore.percentage}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {footballResults.length === 0 ? (
+                        <div className="text-center text-zinc-500 py-6 text-sm">
+                          Sem resultados disponíveis.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-96 overflow-y-auto">
+                          {footballResults.slice(0, 40).map((r) => (
+                            <div
+                              key={r.id}
+                              className="flex items-center justify-between bg-zinc-950/60 border border-zinc-800 rounded-lg px-3 py-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[9px] font-bold text-zinc-600 truncate">
+                                  {r.league}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span
+                                    className={`text-[11px] font-bold truncate ${r.homeScore > r.awayScore ? "text-white" : "text-zinc-500"}`}
+                                  >
+                                    {r.home}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`text-[11px] font-bold truncate ${r.awayScore > r.homeScore ? "text-white" : "text-zinc-500"}`}
+                                  >
+                                    {r.away}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-center px-2 shrink-0">
+                                <span className="text-[13px] font-black text-white tabular-nums">
+                                  {r.homeScore}
+                                </span>
+                                <span className="text-[13px] font-black text-white tabular-nums">
+                                  {r.awayScore}
+                                </span>
+                              </div>
+                              <div className="text-[9px] font-semibold text-zinc-600 shrink-0 text-right">
+                                {r.time}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 {/* Legacy basketball standings block removed; generic sport standings are used above. */}
 

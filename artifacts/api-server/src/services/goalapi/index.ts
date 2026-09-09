@@ -43,6 +43,10 @@ export type GoalApiFixture = {
    * yet at all. */
   matchStadium?: string | null;
   matchReferee?: string | null;
+  /** Confirmed real on /results, /results/today and /results/yesterday
+   * (2026-09-09) — e.g. "Final", "Quarter-finals", or a plain matchday
+   * number as a string ("5"). Null for competitions without rounds. */
+  matchRound?: string | null;
 };
 
 /** One bookmaker's odds entry on /fixtures/:id/odds and /:id/live-odds —
@@ -351,6 +355,41 @@ export type GoalApiTeamResults = {
   season?: string;
 };
 
+/** /results/stats's actual "data" shape — confirmed real 2026-09-09.
+ * Aggregate trends the provider computes server-side over its own result
+ * set (not date-scoped by this client). scoreDistribution is a
+ * huge string-keyed map ("2-1": 85, ...) not consumed here — only the
+ * headline percentages/counts the UI actually renders. */
+export type GoalApiResultsStats = {
+  totalMatches: number;
+  totalGoals: number;
+  homeWins: number;
+  awayWins: number;
+  draws: number;
+  averageGoals: number;
+  averageHomeGoals: number;
+  averageAwayGoals: number;
+  bttsCount?: number;
+  bttsPercentage?: number;
+  over25Count?: number;
+  over25Percentage?: number;
+  over35Count?: number;
+  over35Percentage?: number;
+  cleanSheets?: { home: number; away: number };
+  homeWinPercentage?: number;
+  awayWinPercentage?: number;
+  drawPercentage?: number;
+  mostGoalsInMatch?: number;
+  highestScoringMatch?: {
+    id: string;
+    homeTeam: string;
+    awayTeam: string;
+    score: string;
+    date: string;
+  } | null;
+  mostCommonScore?: { score: string; count: number; percentage: number } | null;
+};
+
 const GOAL_API_TTL = {
   FIXTURES: 60,
   LIVE: 10,
@@ -514,6 +553,26 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiTeamResults>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
+  // ── Results ──────────────────────────────────────────────────────────────
+
+  /** /results/today and /results/yesterday — confirmed real 2026-09-09.
+   * The envelope carries {success, date, data, count, source}; cachedGet
+   * keeps only `data` (a flat array of the same canonical fixture DTO used
+   * elsewhere across this client), which is all the results feed needs. */
+  getResultsToday(): Promise<GoalApiFixture[]> {
+    return this.cachedGet<GoalApiFixture[]>("/results/today", undefined, GOAL_API_TTL.FIXTURES);
+  }
+
+  getResultsYesterday(): Promise<GoalApiFixture[]> {
+    return this.cachedGet<GoalApiFixture[]>("/results/yesterday", undefined, GOAL_API_TTL.FIXTURES);
+  }
+
+  /** /results/stats — confirmed real 2026-09-09. Aggregate trends, not
+   * scoped to a specific date by this client. */
+  getResultsStats(): Promise<GoalApiResultsStats> {
+    return this.cachedGet<GoalApiResultsStats>("/results/stats", undefined, GOAL_API_TTL.PREDICTIONS);
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -602,6 +661,9 @@ export const goalApi = {
   getLeagueStandingsZones: (leagueId: string) => getGoalApiClient().getLeagueStandingsZones(leagueId),
   getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
   getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
+  getResultsToday: () => getGoalApiClient().getResultsToday(),
+  getResultsYesterday: () => getGoalApiClient().getResultsYesterday(),
+  getResultsStats: () => getGoalApiClient().getResultsStats(),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
