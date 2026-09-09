@@ -5838,11 +5838,13 @@ export default function Home({
     confirmed: boolean;
     home: {
       formation?: string;
+      coach?: string;
       starters: LineupsV2Player[];
       bench: LineupsV2Player[];
     };
     away: {
       formation?: string;
+      coach?: string;
       starters: LineupsV2Player[];
       bench: LineupsV2Player[];
     };
@@ -20701,6 +20703,11 @@ export default function Home({
                                   </div>
                                 )}
                               </div>
+                              {teamData.coach && (
+                                <div className="text-[9px] text-zinc-500 mb-1.5 truncate">
+                                  <span className="text-zinc-600">Treinador:</span> {teamData.coach}
+                                </div>
+                              )}
                               <div className="space-y-1">
                                 {starters.map((p, i) => (
                                   <div
