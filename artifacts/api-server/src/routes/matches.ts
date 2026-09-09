@@ -380,6 +380,11 @@ export type LiveMatchState = {
   // those two fields are no longer read for logos anywhere.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
+  // populated on the same fixture object every other football field here
+  // comes from).
+  stadium?: string;
+  referee?: string;
   league: string;
   country: string;
   sport: string;
@@ -583,6 +588,10 @@ export type UpcomingMatch = {
   // homeImageVersion in getTeamBadgeAsset.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
+  // same fixture object every other football field here comes from).
+  stadium?: string;
+  referee?: string;
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
@@ -7502,6 +7511,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         leagueId: fx.leagueId,
         homeTeamId: fx.homeTeam?.id,
         awayTeamId: fx.awayTeam?.id,
+        stadium: fx.matchStadium ?? undefined,
+        referee: fx.matchReferee ?? undefined,
       });
     }
   }
@@ -7648,6 +7659,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       leagueId: fx.leagueId ?? existing?.leagueId,
       homeTeamId: fx.homeTeam?.id ?? existing?.homeTeamId,
       awayTeamId: fx.awayTeam?.id ?? existing?.awayTeamId,
+      stadium: fx.matchStadium ?? existing?.stadium,
+      referee: fx.matchReferee ?? existing?.referee,
     };
     liveMatchState.set(id, state);
     results.push(state);

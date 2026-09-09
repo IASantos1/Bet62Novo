@@ -37,6 +37,12 @@ export type GoalApiFixture = {
    * comment on this provider and the doc's own kickoffUtc migration note:
    * before 2026-08-20 these carried Europe/Berlin wall-clock time instead). */
   kickoffUtc?: string;
+  /** Confirmed real on a full /fixtures/:id response pasted this session
+   * (e.g. matchReferee: "Joseph Dickerson, USA") — both null far more
+   * often than populated, and matchStadium hasn't been observed non-null
+   * yet at all. */
+  matchStadium?: string | null;
+  matchReferee?: string | null;
 };
 
 /** One bookmaker's odds entry on /fixtures/:id/odds and /:id/live-odds —

@@ -3719,6 +3719,9 @@ type Match = {
   // the only source getTeamBadgeAsset uses; see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  // Football only — GOAL API's matchStadium/matchReferee.
+  stadium?: string;
+  referee?: string;
   league: string;
   country?: string;
   time?: string;
@@ -19054,6 +19057,17 @@ export default function Home({
                         );
                       })()}
                     </div>
+                    {(expandedMatch.sport ?? "football") === "football" &&
+                      (expandedMatch.stadium || expandedMatch.referee) && (
+                        <div className="flex items-center justify-center gap-3 text-[10px] text-zinc-500 pb-1">
+                          {expandedMatch.stadium && (
+                            <span className="truncate">🏟️ {expandedMatch.stadium}</span>
+                          )}
+                          {expandedMatch.referee && (
+                            <span className="truncate">👤 {expandedMatch.referee}</span>
+                          )}
+                        </div>
+                      )}
                   </div>
                 </div>
 
