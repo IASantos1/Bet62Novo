@@ -199,6 +199,51 @@ export type GoalApiTopScorer = {
   penaltyGoals: string;
 };
 
+/** One row of /standings/:leagueId (and /standings/:leagueId/team/:teamId,
+ * /standings/:leagueId/home, /standings/:leagueId/away) — confirmed real
+ * 2026-09-09. All numeric fields are strings, same convention as every
+ * other GOAL API resource in this file. overallLeague-, homeLeague- and
+ * awayLeague-prefixed fields are pre-computed splits; leagueRound carries a
+ * group/conference/division name when the league has one (e.g. MLS's
+ * "Eastern Conference"/"Western Conference"), in which case the same
+ * position repeats once per group in the flat array. */
+export type GoalApiStanding = {
+  id?: string;
+  leagueId?: string;
+  teamId: string;
+  teamName: string;
+  leagueRound?: string | null;
+  stageName?: string | null;
+  season?: string | null;
+  overallPromotion?: string | null;
+  overallLeaguePosition: string;
+  overallLeaguePlayed: string;
+  overallLeagueW: string;
+  overallLeagueD: string;
+  overallLeagueL: string;
+  overallLeagueGF: string;
+  overallLeagueGA: string;
+  overallLeaguePTS: string;
+  homeLeaguePosition?: string;
+  homeLeaguePlayed?: string;
+  homeLeagueW?: string;
+  homeLeagueD?: string;
+  homeLeagueL?: string;
+  homeLeagueGF?: string;
+  homeLeagueGA?: string;
+  homeLeaguePTS?: string;
+  awayLeaguePosition?: string;
+  awayLeaguePlayed?: string;
+  awayLeagueW?: string;
+  awayLeagueD?: string;
+  awayLeagueL?: string;
+  awayLeagueGF?: string;
+  awayLeagueGA?: string;
+  awayLeaguePTS?: string;
+  team?: { id: string; name: string; badge?: string | null; country?: string };
+  league?: { id: string; name: string; season?: string | null };
+};
+
 /** One entry of /teams/:id/results's recentFixtures — result/score are
  * already resolved server-side (score is literal "home-away", result is
  * W/D/L from the queried team's perspective); confirmed real via a raw
@@ -353,6 +398,17 @@ export class GoalApiClient {
     );
   }
 
+  /** /standings/:leagueId — confirmed real 2026-09-09: one flat array, one
+   * row per team, with separate overall/home/away splits already computed
+   * server-side (overallLeague-, homeLeague- and awayLeague-prefixed
+   * fields, all numeric strings). A league with conferences/groups (e.g.
+   * MLS) repeats each
+   * position once per group — "leagueRound" carries the group name
+   * ("Eastern Conference"/"Western Conference") to split on. */
+  getLeagueStandings(leagueId: string): Promise<GoalApiStanding[]> {
+    return this.cachedGet<GoalApiStanding[]>(`/standings/${encodeURIComponent(leagueId)}`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   /** /teams/:id/upcoming — same canonical fixture DTO confirmed real across
    * /fixtures, /leagues/:id/fixtures and /teams/:id/fixtures, pre-filtered
    * to that team's future matches. */
@@ -438,6 +494,7 @@ export const goalApi = {
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
   getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
+  getLeagueStandings: (leagueId: string) => getGoalApiClient().getLeagueStandings(leagueId),
   getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
   getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),

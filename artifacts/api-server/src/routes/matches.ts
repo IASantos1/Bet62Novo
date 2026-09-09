@@ -53,6 +53,7 @@ import {
   buildGoalApiTopScorers,
   buildGoalApiTeamUpcoming,
   buildGoalApiForm,
+  buildGoalApiStandings,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -11733,8 +11734,28 @@ router.get("/mlb-results", async (_req: Request, res: Response) => {
 // extractTennisOverride) — makeTennisBaseOdds' _tennisPreMatchOdds cache
 // simply never gets a hit any more and falls through to its neutral default.
 
+// GOAL API's leagueId (fx.leagueId, populated on the football
+// upcoming/live builders) lets this route return a real table instead of
+// buildLeagueStandings' fully synthetic ELO-seeded generator — same
+// "real data patches synthetic" convention every other GOAL API-backed
+// route in this file follows. Falls back to the synthetic table on any
+// failure or when no leagueId is given (non-football, or GOAL API not
+// configured).
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
+  const leagueId = String(req.query["leagueId"] ?? "");
+  if (leagueId && CONFIG.GOAL_API_KEY) {
+    try {
+      const raw = await goalApi.getLeagueStandings(leagueId);
+      const built = buildGoalApiStandings(raw, league);
+      if (built.teams.length > 0) {
+        res.json(built);
+        return;
+      }
+    } catch (err) {
+      logger.error({ err, leagueId }, "[goal-api] standings fetch failed");
+    }
+  }
   try {
     const standing = buildLeagueStandings(league, "", "");
     res.json(standing);

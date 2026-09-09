@@ -11,6 +11,7 @@ import type {
   GoalApiLineupEntry,
   GoalApiTopScorer,
   GoalApiTeamResults,
+  GoalApiStanding,
 } from "./index.js";
 
 /** GOAL API's own English stat labels (match.fullTime[].type, confirmed
@@ -247,6 +248,54 @@ export function buildGoalApiTopScorers(raw: GoalApiTopScorer[] | null | undefine
     assists: Number(s.assists) || 0,
     penaltyGoals: Number(s.penaltyGoals) || 0,
   }));
+}
+
+export type BuiltStandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+export type BuiltStandingsGroup = { name: string; rows: BuiltStandingRow[] };
+export type BuiltStandings = { league: string; teams: BuiltStandingRow[]; groups: BuiltStandingsGroup[] | null };
+
+function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
+  return {
+    pos: Number(row.overallLeaguePosition) || 0,
+    name: row.team?.name ?? row.teamName,
+    played: Number(row.overallLeaguePlayed) || 0,
+    won: Number(row.overallLeagueW) || 0,
+    drawn: Number(row.overallLeagueD) || 0,
+    lost: Number(row.overallLeagueL) || 0,
+    gf: Number(row.overallLeagueGF) || 0,
+    ga: Number(row.overallLeagueGA) || 0,
+    pts: Number(row.overallLeaguePTS) || 0,
+  };
+}
+
+/** Maps GOAL API's /standings/:leagueId response (confirmed real,
+ * 2026-09-09) into the frontend's Classificação tab shape — that tab has
+ * never shown a real table for any sport including football: its only
+ * backend source (buildLeagueStandings in routes/matches.ts) is a fully
+ * synthetic ELO-seeded generator that fabricates positions/points for a
+ * hardcoded team list, indistinguishable in the UI from a real table.
+ *
+ * A league with conferences/divisions (e.g. MLS) repeats each position
+ * once per group in the flat array — "leagueRound" carries the group name
+ * in that case, so rows are split into groups by that field; a league
+ * with a single table (no distinct leagueRound values) is returned as one
+ * flat sorted list instead. */
+export function buildGoalApiStandings(raw: GoalApiStanding[] | null | undefined, leagueName: string): BuiltStandings {
+  if (!raw || raw.length === 0) return { league: leagueName, teams: [], groups: null };
+  const league = raw[0]?.league?.name ?? leagueName;
+  const roundNames = new Set(raw.map((row) => row.leagueRound).filter((r): r is string => !!r));
+  if (roundNames.size > 1) {
+    const groups: BuiltStandingsGroup[] = Array.from(roundNames).map((name) => ({
+      name,
+      rows: raw
+        .filter((row) => row.leagueRound === name)
+        .map(buildStandingRow)
+        .sort((a, b) => a.pos - b.pos),
+    }));
+    return { league, teams: groups.flatMap((g) => g.rows), groups };
+  }
+  const teams = raw.map(buildStandingRow).sort((a, b) => a.pos - b.pos);
+  return { league, teams, groups: null };
 }
 
 export type BuiltTeamUpcomingEntry = { date: string; opponent: string; competition: string; isHome: boolean };
