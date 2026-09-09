@@ -397,7 +397,10 @@ export class ProplineClient {
 
   // ── Odds ───────────────────────────────────────────────────────────────────
 
-  /** GET /sports/{sport_key}/odds — game-line bulk (h2h, spreads, totals etc.) */
+  /** GET /sports/{sport_key}/odds — game-line bulk (h2h, spreads, totals etc.).
+   * `period` requests a segment market instead of the full match — PropLine's
+   * documented values are "q1" (1st quarter), "h1" (1st half), "p1" (1st
+   * period), "f5" (first 5 innings); omit for the full-match line. */
   getOdds(
     sportKey: string,
     opts?: {
@@ -410,6 +413,7 @@ export class ProplineClient {
       includeBookIds?: boolean;
       commenceTimeFrom?: string;
       commenceTimeTo?: string;
+      period?: "q1" | "h1" | "p1" | "f5";
     },
   ): Promise<ProplineOddsResponse> {
     return this.cachedGet<ProplineOddsResponse>(
@@ -424,6 +428,7 @@ export class ProplineClient {
         includeBookIds: opts?.includeBookIds,
         commenceTimeFrom: opts?.commenceTimeFrom,
         commenceTimeTo: opts?.commenceTimeTo,
+        period: opts?.period,
       },
       PROPLINE_TTL.LIVE,
     );
