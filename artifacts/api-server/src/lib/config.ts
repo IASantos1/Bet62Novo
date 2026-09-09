@@ -141,6 +141,19 @@ const GOAL_API_MAX_WS_MATCHES = Number(process.env["GOAL_API_MAX_WS_MATCHES"] ??
 const GOAL_API_ODDS_POLL_MS = Number(process.env["GOAL_API_ODDS_POLL_MS"] ?? "120000") || 120_000;
 const GOAL_API_MAX_ODDS_DELTA_PCT = Number(process.env["GOAL_API_MAX_ODDS_DELTA_PCT"] ?? "40") || 40;
 
+// api-tennis.com — dedicated tennis provider (2026-09-09), the first tennis
+// data source this platform has ever had (PulseScore/SportMonks tennis were
+// both removed earlier this session). Auth is an `APIkey` QUERY PARAM (not
+// a Bearer header like GOAL API), and every operation goes through one
+// endpoint with a `method=` selector rather than separate REST paths — the
+// response envelope is `{success, result}`, not GOAL API's `{success,
+// data}`. No webhook/WebSocket exists for this provider — REST polling
+// only, and get_fixtures/get_livescore already embed pointbypoint/scores/
+// statistics inline (no separate per-match calls needed).
+const TENNIS_API_KEY = process.env["TENNIS_API_KEY"] ?? "";
+const TENNIS_API_BASE_URL =
+  process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";
+
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
 // provider for each job independently. Currently the matches/ routes still
@@ -193,6 +206,8 @@ export const CONFIG = {
   GOAL_API_MAX_WS_MATCHES,
   GOAL_API_ODDS_POLL_MS,
   GOAL_API_MAX_ODDS_DELTA_PCT,
+  TENNIS_API_KEY,
+  TENNIS_API_BASE_URL,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
