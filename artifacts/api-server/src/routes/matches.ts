@@ -46,6 +46,8 @@ import {
 import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
 import {
   extractGoalApi1x2Odds,
+  extractGoalApiOverUnder25,
+  extractGoalApiBothTeamsToScore,
   goalApiKickoffDateTime,
   buildGoalApiMatchStats,
   buildGoalApiEvents,
@@ -7484,14 +7486,27 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       seen.add(key);
 
       let resultOdds: { home: number; draw: number; away: number } | null = null;
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
       try {
         const oddsList = await goalApi.getFixtureOdds(fx.id);
         resultOdds = extractGoalApi1x2Odds(oddsList);
+        // Same "real data patches synthetic" convention as resultOdds above —
+        // only the two markets GOAL API's flat odds shape actually carries
+        // (over/under 2.5 and BTTS) get patched; everything else stays the
+        // Poisson-model synthetic baseline.
+        const overUnder = extractGoalApiOverUnder25(oddsList);
+        if (overUnder) {
+          baseMarkets.totalGoals.over25 = overUnder.over;
+          baseMarkets.totalGoals.under25 = overUnder.under;
+        }
+        const bts = extractGoalApiBothTeamsToScore(oddsList);
+        if (bts) {
+          baseMarkets.bothTeamsScore = { yes: bts.yes, no: bts.no };
+        }
       } catch {
         /* no odds yet for this fixture — synthetic fallback below */
       }
       const baseOdds = makeOddsFromTeams(home, away);
-      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
       const { date, time } = goalApiKickoffDateTime(fx);
 
       results.push({
@@ -7608,6 +7623,18 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
           );
           resultOdds = previousReal;
         }
+      }
+      // Same two markets patched on the prematch builder — no variation
+      // guard here since, unlike the 1X2 result, there's no previous real
+      // value tracked for these on LiveMatchState to compare against.
+      const overUnder = extractGoalApiOverUnder25(oddsList);
+      if (overUnder) {
+        baseMarkets.totalGoals.over25 = overUnder.over;
+        baseMarkets.totalGoals.under25 = overUnder.under;
+      }
+      const bts = extractGoalApiBothTeamsToScore(oddsList);
+      if (bts) {
+        baseMarkets.bothTeamsScore = { yes: bts.yes, no: bts.no };
       }
     } catch {
       /* fall back to synthetic below */
