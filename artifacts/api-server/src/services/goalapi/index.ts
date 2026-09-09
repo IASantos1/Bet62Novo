@@ -16,9 +16,16 @@ export type GoalApiFixture = {
   leagueName?: string;
   homeTeam: GoalApiTeamRef;
   awayTeam: GoalApiTeamRef;
-  score?: string;
-  status: string;
-  minute?: number;
+  // The real payload has no combined "score" string — home/away are
+  // separate fields, strings (e.g. "2"), null before kickoff. Confirmed
+  // from a real /leagues/:id/fixtures response (2026-09-09).
+  homeTeamScore?: string | null;
+  awayTeamScore?: string | null;
+  // The real field is matchStatus, not status — e.g. "SCHEDULED", "FINISHED",
+  // "AFTER_ET" (confirmed from the same real response). matchLive ("0"/"1",
+  // a string) accompanies it.
+  matchStatus: string;
+  matchLive?: string;
   matchDate?: string;
   matchTime?: string;
   /** ISO-8601 UTC instant — the field to use; matchDate/matchTime are
