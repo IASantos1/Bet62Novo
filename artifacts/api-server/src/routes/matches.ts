@@ -46,6 +46,7 @@ import {
 import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
 import { extractGoalApi1x2Odds, goalApiKickoffDateTime } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
+import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
 
 
 const router: IRouter = Router();
@@ -7523,14 +7524,6 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const id = `goalapi-football-${fx.id}`;
     currentIds.add(id);
     const existing = liveMatchState.get(id);
-
-    let resultOdds: { home: number; draw: number; away: number } | null = null;
-    try {
-      const oddsList = await goalApi.getFixtureLiveOdds(fx.id);
-      resultOdds = extractGoalApi1x2Odds(oddsList);
-    } catch {
-      /* fall back to synthetic below */
-    }
     const baseOdds = makeOddsFromTeams(home, away);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
@@ -7544,6 +7537,36 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       /* keep previous counts if the events call fails this tick */
     }
 
+    const newRedCard =
+      !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
+    const goalScored = !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+
+    // Odds Engine validation: a big swing right after a goal/red card is
+    // expected (skipVariationCheck below) and always accepted; the same
+    // swing with NO supporting event usually means bad/stale upstream
+    // data, so the previous real value is kept instead for this tick —
+    // never a fabricated synthetic fallback just because one poll looked
+    // suspicious.
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    try {
+      const oddsList = await goalApi.getFixtureLiveOdds(fx.id);
+      const candidate = extractGoalApi1x2Odds(oddsList);
+      if (candidate) {
+        const previousReal = existing?.hasRealOdds ? existing.odds : null;
+        if (shouldAcceptOddsUpdate(previousReal, candidate, CONFIG.GOAL_API_MAX_ODDS_DELTA_PCT, goalScored || newRedCard)) {
+          resultOdds = candidate;
+        } else {
+          logger.warn(
+            { fixtureId: fx.id, previous: previousReal, candidate },
+            "[goal-api] odds update rejected — swing exceeds variation limit with no supporting event",
+          );
+          resultOdds = previousReal;
+        }
+      }
+    } catch {
+      /* fall back to synthetic below */
+    }
+
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
       ? { ...existing.marketSuspension }
       : undefined;
@@ -7553,9 +7576,6 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     }
     let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
 
-    const newRedCard =
-      !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
-    const goalScored = !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
     if (newRedCard) {
       const now = Date.now();
       marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]));
