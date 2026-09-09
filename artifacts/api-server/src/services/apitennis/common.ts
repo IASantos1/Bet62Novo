@@ -3,7 +3,7 @@
 // component and the expanded match header already read from
 // LiveMatchState._liveExtra (sets/currentPoints/serving/tennisStats), so no
 // new frontend shape is introduced.
-import type { ApiTennisMatch, ApiTennisOddsMarket } from "./index.js";
+import type { ApiTennisMatch, ApiTennisOddsMarket, ApiTennisH2HResult, ApiTennisPlayer } from "./index.js";
 
 /** /get_fixtures and /get_livescore's `scores` array — one entry per set,
  * confirmed real in the provider's docs. Sorted by score_set so an
@@ -49,6 +49,147 @@ export function parseApiTennisServer(serve: string | null | undefined): [boolean
  * Picks the first bookmaker quoting BOTH sides, same "first valid entry"
  * convention as extractGoalApi1x2Odds (services/goalapi/common.ts) — never
  * averages or fabricates a price. */
+export type BuiltApiTennisConfrontosMeeting = {
+  date: string;
+  team1: string;
+  team2: string;
+  score1: number;
+  score2: number;
+  league: string;
+  country?: string;
+};
+
+/** Maps /get_H2H's `H2H` array (past meetings between these two exact
+ * players) onto the shape routes/matches.ts's existing ConfrontosResult
+ * expects — GOAL API never had an H2H endpoint, so this is the first real
+ * H2H implementation in the app, not a port of an existing one. A meeting's
+ * "First Player"/"Second Player" side is matched by exact name against
+ * `homeName`/`awayName` (the same event_first_player/event_second_player
+ * strings this app's own tennis builders already use as `home`/`away`) so
+ * score1/score2 always align to THIS match's home/away, not whichever side
+ * happened to be "first" in a given historical meeting. Tennis has no
+ * draws — draws is always 0. */
+export function buildApiTennisConfrontos(
+  h2h: ApiTennisH2HResult | null | undefined,
+  homeName: string,
+  awayName: string,
+): { homeWins: number; awayWins: number; draws: number; recentMeetings: BuiltApiTennisConfrontosMeeting[] } {
+  let homeWins = 0;
+  let awayWins = 0;
+  const recentMeetings: BuiltApiTennisConfrontosMeeting[] = [];
+  for (const m of h2h?.H2H ?? []) {
+    const isHomeFirst = m.event_first_player === homeName;
+    const isAwayFirst = m.event_first_player === awayName;
+    if (!isHomeFirst && !isAwayFirst) continue;
+    if (m.event_winner) {
+      const winnerIsHome = isHomeFirst ? m.event_winner === "First Player" : m.event_winner === "Second Player";
+      if (winnerIsHome) homeWins++;
+      else awayWins++;
+    }
+    const [rawA, rawB] = (m.event_final_result ?? "").split("-").map((s) => Number(s.trim()));
+    const score1 = isHomeFirst ? rawA : rawB;
+    const score2 = isHomeFirst ? rawB : rawA;
+    recentMeetings.push({
+      date: m.event_date,
+      team1: homeName,
+      team2: awayName,
+      score1: Number.isFinite(score1) ? score1! : 0,
+      score2: Number.isFinite(score2) ? score2! : 0,
+      league: m.tournament_name,
+    });
+  }
+  return { homeWins, awayWins, draws: 0, recentMeetings };
+}
+
+/** player_bday — confirmed real format "DD.MM.YYYY" — to ISO "YYYY-MM-DD".
+ * PlayerProfileModal.tsx's ageFromBirthDate does `new Date(dateOfBirth)`,
+ * which silently misparses "DD.MM.YYYY" (read as invalid or month/day
+ * swapped), so this conversion is required, not cosmetic. */
+export function convertApiTennisBirthDate(bday: string | null | undefined): string | null {
+  if (!bday) return null;
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(bday.trim());
+  if (!m) return null;
+  const [, day, month, year] = m;
+  return `${year}-${month}-${day}`;
+}
+
+export type BuiltApiTennisPlayerProfile = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  nationality: string | null;
+  nationalityFlagUrl: string | null;
+  position: string | null;
+  height: number | null;
+  weight: number | null;
+  dateOfBirth: string | null;
+  team: string | null;
+  teamLogoUrl: string | null;
+  competition: string | null;
+  seasonStats: {
+    appearances: null;
+    goals: null;
+    assists: null;
+    yellowCards: null;
+    redCards: null;
+    minutesPlayed: null;
+  };
+  recentMatches: [];
+  tennisStats: {
+    season: string;
+    rank: string | null;
+    titles: number | null;
+    matchesWon: number | null;
+    matchesLost: number | null;
+  } | null;
+};
+
+/** Maps /get_players onto the Player Profile modal's shape. Football-only
+ * fields (goals/cards/appearances) have no tennis equivalent — left null
+ * rather than guessed, same convention as buildGoalApiPlayerProfile leaving
+ * height/weight/competition null. tennisStats carries the most recent
+ * season entry from the real `stats[]` array instead, for a sport-specific
+ * branch in the modal to render. */
+export function buildApiTennisPlayerProfile(player: ApiTennisPlayer): BuiltApiTennisPlayerProfile {
+  const latest = [...(player.stats ?? [])].sort((a, b) => Number(b.season) - Number(a.season))[0];
+  const toNum = (s: string | undefined): number | null => {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    id: player.player_key,
+    name: player.player_name,
+    imageUrl: player.player_logo ?? null,
+    nationality: player.player_country ?? null,
+    nationalityFlagUrl: null,
+    position: null,
+    height: null,
+    weight: null,
+    dateOfBirth: convertApiTennisBirthDate(player.player_bday),
+    team: null,
+    teamLogoUrl: null,
+    competition: null,
+    seasonStats: {
+      appearances: null,
+      goals: null,
+      assists: null,
+      yellowCards: null,
+      redCards: null,
+      minutesPlayed: null,
+    },
+    recentMatches: [],
+    tennisStats: latest
+      ? {
+          season: latest.season,
+          rank: latest.rank || null,
+          titles: toNum(latest.titles),
+          matchesWon: toNum(latest.matches_won),
+          matchesLost: toNum(latest.matches_lost),
+        }
+      : null,
+  };
+}
+
 export function extractApiTennisMoneyline(
   homeAway: ApiTennisOddsMarket | undefined,
 ): { home: number; away: number } | null {

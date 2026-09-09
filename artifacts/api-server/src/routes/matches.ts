@@ -64,12 +64,19 @@ import {
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
-import { apiTennis, type ApiTennisMatch } from "../services/apitennis/index.js";
+import {
+  apiTennis,
+  type ApiTennisMatch,
+  type ApiTennisStanding,
+  type ApiTennisLiveOddsEntry,
+} from "../services/apitennis/index.js";
 import {
   buildApiTennisSets,
   parseApiTennisGameResult,
   parseApiTennisServer,
   extractApiTennisMoneyline,
+  buildApiTennisConfrontos,
+  buildApiTennisPlayerProfile,
 } from "../services/apitennis/common.js";
 
 
@@ -444,6 +451,13 @@ export type LiveMatchState = {
   // compare BET62's price against the provider's without ever showing the
   // provider's price directly.
   _providerReferenceOdds?: { over25?: number; under25?: number; bttsYes?: number; bttsNo?: number };
+  // api-tennis.com's get_live_odds raw entries (tennis only) — captured as an
+  // internal benchmark only. Only one odd_name has ever been confirmed real
+  // in the provider's docs ("Set 1 to Break Serve"); none for the headline
+  // match-winner market, so nothing here is ever surfaced as a bettable
+  // price — same "capture but never publish" convention as
+  // _providerReferenceOdds above.
+  _apiTennisLiveOddsRef?: ApiTennisLiveOddsEntry[];
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
@@ -5671,6 +5685,7 @@ type TennisDailyResult = {
 };
 let tennisResultsCache: TennisDailyResult[] | null = null;
 let tennisResultsFetchedAt = 0;
+const TENNIS_RESULTS_CACHE_TTL = 60 * 60 * 1000; // 1h — yesterday's results won't change
 
 // Tennis tournament list (ATP + WTA) — active tournaments today
 type TournamentRaw = {
@@ -8076,6 +8091,15 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       /* no real odds this tick — keep whatever anchor already exists */
     }
 
+    let liveOddsRef: ApiTennisLiveOddsEntry[] | undefined = existing?._apiTennisLiveOddsRef;
+    try {
+      const liveOddsResult = await apiTennis.getLiveOdds({ match_key: fx.event_key });
+      const entry = liveOddsResult[fx.event_key];
+      if (entry?.live_odds) liveOddsRef = entry.live_odds;
+    } catch {
+      /* no live odds this tick — keep whatever reference already exists */
+    }
+
     const syntheticP = apiTennisSyntheticP(home, away);
     const baseOdds = makeTennisMoneylineFromP(syntheticP);
     const baseMarkets = makeTennisMarketsFromPlayers(home, away, syntheticP);
@@ -8096,6 +8120,7 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       markets: existing?.markets ?? baseMarkets,
       _baseOdds: existing?._baseOdds ?? resultOdds ?? baseOdds,
       _baseMarkets: existing?._baseMarkets ?? baseMarkets,
+      _apiTennisLiveOddsRef: liveOddsRef,
       events: existing?.events ?? [],
       _liveExtra: {
         ...existing?._liveExtra,
@@ -11994,11 +12019,66 @@ function buildLeagueStandings(
   };
 }
 
+/** Real name+tour only — get_tournaments has no category/surface/location/
+ * dates/prize_money (only tournament_key/name/event_type_key/type), so the
+ * rest of TournamentRaw stays empty rather than fabricated. tour is derived
+ * from the real event_type_type text (e.g. "Wta Singles"), not guessed. */
 async function getActiveTournaments(): Promise<ActiveTournament[]> {
+  if (!CONFIG.TENNIS_API_KEY) return tourListCache ?? [];
+  if (tourListCache && Date.now() - tourListFetchedAt < TOUR_CACHE_TTL) return tourListCache;
+  try {
+    const tournaments = await apiTennis.getTournaments();
+    tourListCache = tournaments.map((t) => ({
+      id: t.tournament_key,
+      name: t.tournament_name,
+      category: "",
+      surface: "",
+      location: "",
+      date_start: "",
+      date_end: "",
+      prize_money: "",
+      tour: /wta/i.test(t.event_type_type) ? "wta" : "atp",
+    }));
+    tourListFetchedAt = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] tournaments fetch failed");
+  }
   return tourListCache ?? [];
 }
 
+/** Yesterday-through-today finished singles matches, mapped to the
+ * pre-existing TennisDailyResult shape. api-tennis.com has no "results"
+ * endpoint of its own — get_fixtures with a date range already includes
+ * finished matches, same source buildTennisUpcomingFromApiTennis uses for
+ * not-yet-started ones. */
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
+  if (!CONFIG.TENNIS_API_KEY) return tennisResultsCache ?? [];
+  if (tennisResultsCache && Date.now() - tennisResultsFetchedAt < TENNIS_RESULTS_CACHE_TTL) {
+    return tennisResultsCache;
+  }
+  try {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateStart = yesterday.toISOString().slice(0, 10);
+    const dateStop = new Date().toISOString().slice(0, 10);
+    const fixtures = await apiTennis.getFixtures({ date_start: dateStart, date_stop: dateStop });
+    tennisResultsCache = fixtures
+      .filter((fx) => fx.event_winner && fx.event_live !== "1")
+      .map((fx) => ({
+        id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
+        home: fx.event_first_player,
+        away: fx.event_second_player,
+        sets: buildApiTennisSets(fx.scores),
+        homeWon: fx.event_winner === "First Player",
+        status: fx.event_status || "Finished",
+        tournament: fx.tournament_name || fx.event_type_type || "Tênis",
+        date: fx.event_date,
+        time: fx.event_time,
+      }));
+    tennisResultsFetchedAt = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] daily results fetch failed");
+  }
   return tennisResultsCache ?? [];
 }
 
@@ -12047,10 +12127,96 @@ const ROUND_ORDER: Record<string, number> = {
   final: 7,
 };
 
+/** get_draw's bracket (rounds → matches → seeds/TBD/next_slot) flattened
+ * into the pre-existing flat TournamentMatch[] list — lossy (loses round
+ * grouping/seeding/progression, which the new TournamentBracket component
+ * renders in full instead), but reuses the already-working card with zero
+ * new frontend shape. get_draw carries no date/time per match, so fixtures
+ * for the same tournament_key are cross-referenced by match_key to backfill
+ * real date/status; a draw slot with no matching fixture (future round,
+ * not yet scheduled) keeps the draw's own status string and an empty date
+ * rather than a fabricated "Not Started"/today's date. */
 async function getTournamentDetail(id: string): Promise<TournamentDetail> {
   const cached = tourDetailCache.get(id);
-  if (cached) return cached.data;
-  throw new Error("Detalhe de torneio indisponível");
+  if (cached && Date.now() - cached.at < TOUR_DETAIL_TTL) return cached.data;
+  if (!CONFIG.TENNIS_API_KEY) {
+    if (cached) return cached.data;
+    throw new Error("Detalhe de torneio indisponível");
+  }
+  try {
+    const draw = await apiTennis.getDraw({ tournament_key: id });
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - 21);
+    const rangeStop = new Date();
+    rangeStop.setDate(rangeStop.getDate() + 21);
+    const fixtures = await apiTennis
+      .getFixtures({
+        date_start: rangeStart.toISOString().slice(0, 10),
+        date_stop: rangeStop.toISOString().slice(0, 10),
+        tournament_key: id,
+      })
+      .catch(() => [] as ApiTennisMatch[]);
+    const fixtureByKey = new Map(fixtures.map((fx) => [String(fx.event_key), fx]));
+
+    const toPlayer = (
+      p: { player_key: number; name: string } | null,
+      winnerKey: number | null,
+    ): TournamentMatchPlayer | null =>
+      p
+        ? {
+            id: String(p.player_key),
+            name: p.name,
+            totalscore: "",
+            s1: "",
+            s2: "",
+            s3: "",
+            s4: "",
+            s5: "",
+            winner: winnerKey != null && winnerKey === p.player_key,
+            serve: false,
+          }
+        : null;
+
+    const matches: TournamentMatch[] = [];
+    for (const bracket of draw.brackets) {
+      bracket.rounds.forEach((round, roundIdx) => {
+        for (const m of round.matches) {
+          const fx = m.match_key != null ? fixtureByKey.get(String(m.match_key)) : undefined;
+          const players: TournamentMatchPlayer[] = [];
+          const p1 = toPlayer(m.first_player, m.winner_player_key);
+          const p2 = toPlayer(m.second_player, m.winner_player_key);
+          if (p1) players.push(p1);
+          if (p2) players.push(p2);
+          if (players.length > 0 && players.some((p) => p.totalscore === "") && m.result) {
+            for (const p of players) p.totalscore = m.result;
+          }
+          matches.push({
+            id: `${API_TENNIS_ID_PREFIX}${m.match_key ?? `draw-${m.draw_key}`}`,
+            status: fx ? fx.event_status || "Not Started" : m.status || "",
+            date: fx?.event_date ?? "",
+            time: fx?.event_time ?? "",
+            court: "",
+            round: round.round_name,
+            roundOrder: ROUND_ORDER[round.round_name.toLowerCase()] ?? roundIdx + 1,
+            players,
+          });
+        }
+      });
+    }
+
+    const detail: TournamentDetail = {
+      id,
+      league: draw.tournament.tournament_name,
+      season: draw.tournament.tournament_season,
+      matches,
+    };
+    tourDetailCache.set(id, { data: detail, at: Date.now() });
+    return detail;
+  } catch (err) {
+    logger.error({ err, id }, "[api-tennis] tournament detail fetch failed");
+    if (cached) return cached.data;
+    throw new Error("Detalhe de torneio indisponível");
+  }
 }
 
 router.get("/tournaments", async (_req: Request, res: Response) => {
@@ -12076,7 +12242,33 @@ let standingsCache: StandingsTour | null = null;
 let standingsFetchedAt = 0;
 const STANDINGS_CACHE_TTL = 30 * 60 * 1000;
 
+function apiTennisStandingToPlayer(s: ApiTennisStanding): StandingPlayer {
+  return {
+    id: s.player_key,
+    name: s.player,
+    country: s.country,
+    rank: s.place,
+    points: s.points,
+    movement: s.movement,
+  };
+}
+
 async function getTennisStandings(): Promise<StandingsTour> {
+  if (!CONFIG.TENNIS_API_KEY) return standingsCache ?? { atp: [], wta: [] };
+  if (standingsCache && Date.now() - standingsFetchedAt < STANDINGS_CACHE_TTL) return standingsCache;
+  try {
+    const [atp, wta] = await Promise.all([
+      apiTennis.getStandings("ATP"),
+      apiTennis.getStandings("WTA"),
+    ]);
+    standingsCache = {
+      atp: atp.map(apiTennisStandingToPlayer),
+      wta: wta.map(apiTennisStandingToPlayer),
+    };
+    standingsFetchedAt = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] standings fetch failed");
+  }
   return standingsCache ?? { atp: [], wta: [] };
 }
 
@@ -12105,6 +12297,31 @@ router.get("/results", async (_req: Request, res: Response) => {
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+// get_news is Ultra-plan-only per api-tennis.com's docs — a subscription-tier
+// error is handled the same as any other failure here (empty fallback), no
+// special guard. No UI consumes this yet; the route exists ready for when
+// one does.
+router.get("/tennis-news", async (req: Request, res: Response) => {
+  if (!CONFIG.TENNIS_API_KEY) {
+    res.json({ articles: [] });
+    return;
+  }
+  try {
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - 7);
+    const articles = await apiTennis.getNews({
+      date_start: rangeStart.toISOString().slice(0, 10),
+      date_stop: new Date().toISOString().slice(0, 10),
+      player_key: req.query.player_key ? String(req.query.player_key) : undefined,
+      tournament_key: req.query.tournament_key ? String(req.query.tournament_key) : undefined,
+    });
+    res.json({ articles });
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] news fetch failed");
+    res.json({ articles: [] });
   }
 });
 
@@ -13191,12 +13408,36 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   let homeWins = 0,
     awayWins = 0,
     draws = 0;
-  const recentMeetings: ConfrontosH2HMeeting[] = [];
+  let recentMeetings: ConfrontosH2HMeeting[] = [];
   let team1Name = home,
     team2Name = away;
 
-  // No data provider left (all removed, 2026-09-08) — every matchId scheme
-  // now gets an empty recentMeetings/0-0-0 result below rather than a crash.
+  // No data provider for any other sport (all removed, 2026-09-08) — every
+  // other matchId scheme still gets an empty recentMeetings/0-0-0 result.
+  if (sport === "tennis" && matchId && CONFIG.TENNIS_API_KEY) {
+    try {
+      const rangeStart = new Date();
+      rangeStart.setDate(rangeStart.getDate() - 3);
+      const rangeStop = new Date();
+      rangeStop.setDate(rangeStop.getDate() + 3);
+      const fixtures = await apiTennis.getFixtures({
+        date_start: rangeStart.toISOString().slice(0, 10),
+        date_stop: rangeStop.toISOString().slice(0, 10),
+        match_key: matchId,
+      });
+      const fx = fixtures[0];
+      if (fx?.first_player_key && fx?.second_player_key) {
+        const h2h = await apiTennis.getH2H(fx.first_player_key, fx.second_player_key);
+        const built = buildApiTennisConfrontos(h2h, home, away);
+        homeWins = built.homeWins;
+        awayWins = built.awayWins;
+        draws = built.draws;
+        recentMeetings = built.recentMeetings;
+      }
+    } catch (err) {
+      logger.error({ err, matchId }, "[api-tennis] H2H fetch failed");
+    }
+  }
 
   const result: ConfrontosResult = {
     homeWins,
@@ -13249,7 +13490,33 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
 // number to string alongside this fix.
 router.get("/player-profile/:id", async (req: Request, res: Response) => {
   const playerId = String(req.params.id ?? "");
-  if (!playerId || !CONFIG.GOAL_API_KEY) {
+  const sport = String(req.query.sport ?? "football");
+  if (!playerId) {
+    res.status(404).json({ error: "player profile unavailable" });
+    return;
+  }
+
+  if (sport === "tennis") {
+    if (!CONFIG.TENNIS_API_KEY) {
+      res.status(404).json({ error: "player profile unavailable" });
+      return;
+    }
+    try {
+      const players = await apiTennis.getPlayers({ player_key: playerId });
+      const player = players[0];
+      if (!player?.player_key) {
+        res.status(404).json({ error: "player profile unavailable" });
+        return;
+      }
+      res.json({ ...buildApiTennisPlayerProfile(player), sport: "tennis" });
+    } catch (err) {
+      logger.error({ err, playerId }, "[api-tennis] player profile fetch failed");
+      res.status(404).json({ error: "player profile unavailable" });
+    }
+    return;
+  }
+
+  if (!CONFIG.GOAL_API_KEY) {
     res.status(404).json({ error: "player profile unavailable" });
     return;
   }
@@ -13262,7 +13529,7 @@ router.get("/player-profile/:id", async (req: Request, res: Response) => {
       res.status(404).json({ error: "player profile unavailable" });
       return;
     }
-    res.json(buildGoalApiPlayerProfile(player, stats));
+    res.json({ ...buildGoalApiPlayerProfile(player, stats), sport: "football" });
   } catch (err) {
     logger.error({ err, playerId }, "[goal-api] player profile fetch failed");
     res.status(404).json({ error: "player profile unavailable" });
