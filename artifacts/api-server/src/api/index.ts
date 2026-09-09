@@ -8,6 +8,7 @@ import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 import { propline } from "../services/propline/index.js";
 import { proplineAllActiveSports } from "../services/propline/football.js";
 import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goalapi/websocketClient.js";
+import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
 import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
@@ -115,6 +116,13 @@ server.listen(port, () => {
         .map((id) => id.slice("goalapi-football-".length));
       syncGoalApiSubscriptions(ids);
     }, 30_000);
+  }
+
+  // api-tennis.com live push — no-op while TENNIS_API_KEY is unset.
+  // Lowers latency on top of buildTennisLiveFromApiTennis's REST poll;
+  // never a hard dependency (see websocketClient.ts's own comment).
+  if (CONFIG.TENNIS_API_KEY) {
+    startApiTennisWebSocket();
   }
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).

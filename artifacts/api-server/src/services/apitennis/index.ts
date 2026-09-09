@@ -9,6 +9,26 @@ import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { kvCache } from "../cache/kvCache.js";
 
+/** One point within a pointbypoint game — confirmed real in the WebSocket
+ * docs (2026-09-09). break_point/set_point/match_point are null except on
+ * the point they actually apply to. */
+export type ApiTennisPointByPointPoint = {
+  number_point: string;
+  score: string;
+  break_point: string | null;
+  set_point: string | null;
+  match_point: string | null;
+};
+export type ApiTennisPointByPointGame = {
+  set_number: string;
+  number_game: string;
+  player_served: "First Player" | "Second Player";
+  serve_winner: "First Player" | "Second Player";
+  serve_lost: "First Player" | "Second Player";
+  score: string;
+  points: ApiTennisPointByPointPoint[];
+};
+
 /** One /get_fixtures or /get_livescore entry — the same canonical match DTO
  * for both endpoints, confirmed real in the provider's docs. pointbypoint/
  * scores/statistics are embedded inline (empty arrays until available) —
@@ -35,7 +55,7 @@ export type ApiTennisMatch = {
   event_qualification?: string;
   event_first_player_logo: string | null;
   event_second_player_logo: string | null;
-  pointbypoint: unknown[];
+  pointbypoint: ApiTennisPointByPointGame[];
   scores: Array<{ score_first: string; score_second: string; score_set: string }>;
   statistics: Array<{
     player_key: string;

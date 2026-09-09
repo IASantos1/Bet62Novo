@@ -69,7 +69,9 @@ import {
   type ApiTennisMatch,
   type ApiTennisStanding,
   type ApiTennisLiveOddsEntry,
+  type ApiTennisPointByPointGame,
 } from "../services/apitennis/index.js";
+import { getApiTennisWsMatch } from "../services/apitennis/websocketClient.js";
 import {
   buildApiTennisSets,
   parseApiTennisGameResult,
@@ -482,6 +484,7 @@ export type LiveMatchState = {
     sets?: Array<[number, number]>; // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
+    pointByPoint?: ApiTennisPointByPointGame[]; // tennis: per-game point log, from the WS push (get_fixtures/livescore also carry it, usually empty by the time REST is polled)
     currentPts?: [number, number]; // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>; // volleyball: completed set scores [[25,18],[22,25]]
     // PropLine volleyball only: cumulative match-wide points at the moment
@@ -8076,11 +8079,17 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     currentIds.add(id);
     const existing = liveMatchState.get(id);
 
-    const sets = buildApiTennisSets(fx.scores);
+    // Prefer the WebSocket's pushed snapshot when one exists for this
+    // event_key — same DTO as the REST fixture, just fresher. Falls back
+    // to the REST fixture untouched when the socket is disconnected or
+    // hasn't seen this match yet.
+    const liveFx = getApiTennisWsMatch(fx.event_key) ?? fx;
+
+    const sets = buildApiTennisSets(liveFx.scores);
     const homeScore = sets.filter(([h, a]) => h > a).length;
     const awayScore = sets.filter(([h, a]) => a > h).length;
-    const currentPoints = parseApiTennisGameResult(fx.event_game_result);
-    const serving = parseApiTennisServer(fx.event_serve);
+    const currentPoints = parseApiTennisGameResult(liveFx.event_game_result);
+    const serving = parseApiTennisServer(liveFx.event_serve);
 
     let resultOdds: { home: number; draw: number; away: number } | null = null;
     try {
@@ -8114,7 +8123,7 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       homeScore,
       awayScore,
       minute: 0,
-      status: fx.event_status || "",
+      status: liveFx.event_status || "",
       hasRealOdds: !!resultOdds,
       odds: existing?.odds ?? resultOdds ?? baseOdds,
       markets: existing?.markets ?? baseMarkets,
@@ -8127,9 +8136,10 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
         sets,
         currentPoints,
         serving,
+        pointByPoint: liveFx.pointbypoint?.length ? liveFx.pointbypoint : existing?._liveExtra?.pointByPoint,
       },
-      homeLogoUrl: fx.event_first_player_logo ?? existing?.homeLogoUrl,
-      awayLogoUrl: fx.event_second_player_logo ?? existing?.awayLogoUrl,
+      homeLogoUrl: liveFx.event_first_player_logo ?? existing?.homeLogoUrl,
+      awayLogoUrl: liveFx.event_second_player_logo ?? existing?.awayLogoUrl,
       _lastSeenAt: Date.now(),
     };
     liveMatchState.set(id, state);
