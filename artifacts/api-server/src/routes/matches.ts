@@ -11751,15 +11751,23 @@ router.get("/mlb-results", async (_req: Request, res: Response) => {
 // every finished fixture for the day, regardless of whether we ever polled it.
 router.get("/football-results", async (req: Request, res: Response) => {
   const range = req.query.range === "today" ? "today" : "yesterday";
+  const leagueId = typeof req.query.leagueId === "string" ? req.query.leagueId : "";
   if (!CONFIG.GOAL_API_KEY) {
     res.json({ results: [] });
     return;
   }
   try {
-    const raw = range === "today" ? await goalApi.getResultsToday() : await goalApi.getResultsYesterday();
+    // When the panel is scoped to a specific match's league, /results/league/:id
+    // returns only that competition's finished matches instead of the global
+    // today/yesterday feed mixing in every league worldwide.
+    const raw = leagueId
+      ? await goalApi.getResultsByLeague(leagueId)
+      : range === "today"
+        ? await goalApi.getResultsToday()
+        : await goalApi.getResultsYesterday();
     res.json({ results: buildGoalApiResults(raw) });
   } catch (err) {
-    logger.error({ err, range }, "[goal-api] /football-results fetch failed");
+    logger.error({ err, range, leagueId }, "[goal-api] /football-results fetch failed");
     res.json({ results: [] });
   }
 });

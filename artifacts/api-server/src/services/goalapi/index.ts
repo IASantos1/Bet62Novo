@@ -573,6 +573,14 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiResultsStats>("/results/stats", undefined, GOAL_API_TTL.PREDICTIONS);
   }
 
+  /** /results/league/:leagueId — confirmed real 2026-09-09. Same envelope
+   * shape as /results ({success, leagueId, data, pagination}); lets the
+   * Resultados panel show finished matches from just the league being
+   * viewed instead of every competition worldwide. */
+  getResultsByLeague(leagueId: string): Promise<GoalApiFixture[]> {
+    return this.cachedGet<GoalApiFixture[]>(`/results/league/${encodeURIComponent(leagueId)}`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -664,6 +672,7 @@ export const goalApi = {
   getResultsToday: () => getGoalApiClient().getResultsToday(),
   getResultsYesterday: () => getGoalApiClient().getResultsYesterday(),
   getResultsStats: () => getGoalApiClient().getResultsStats(),
+  getResultsByLeague: (leagueId: string) => getGoalApiClient().getResultsByLeague(leagueId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
