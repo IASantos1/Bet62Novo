@@ -12791,12 +12791,10 @@ router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
 
 // ─── Lineups ────────────────────────────────────────────────────────────────
 // Same dead-until-now situation as /storylines above, but football now has a
-// real replacement: GOAL API's /fixtures/:id/lineups. That endpoint's exact
-// field names haven't been confirmed against a real response yet (unlike
-// every other GOAL API endpoint wired into this file), so the raw payload is
-// logged here for verification/correction — buildGoalApiLineups reads it
-// defensively. Non-football matchIds (or GOAL API not configured) get the
-// same empty-but-valid shape the frontend already treats as "not available".
+// real replacement: GOAL API's /fixtures/:id/lineups — field names confirmed
+// real 2026-09-09 (see GoalApiLineupEntry). Non-football matchIds (or GOAL
+// API not configured) get the same empty-but-valid shape the frontend
+// already treats as "not available".
 const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
 // ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
 // GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed

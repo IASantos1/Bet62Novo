@@ -8,36 +8,69 @@ import type {
   GoalApiSubstitution,
   GoalApiLineups,
   GoalApiLineupTeam,
-  GoalApiLineupPlayerEntry,
+  GoalApiLineupEntry,
   GoalApiTopScorer,
   GoalApiTeamResults,
 } from "./index.js";
 
+/** GOAL API's own English stat labels (match.fullTime[].type, confirmed
+ * real 2026-09-09) mapped to the Portuguese labels this panel already
+ * uses elsewhere. Only rows for a type in this map are shown — an
+ * unrecognized type is skipped rather than surfaced with its raw English
+ * name or fabricated. */
+const GOAL_API_STAT_LABELS: Record<string, string> = {
+  "Ball Possession": "Posse de bola",
+  "On Target": "Remates à baliza",
+  "Off Target": "Remates fora",
+  Corners: "Cantos",
+  Fouls: "Faltas",
+  Attacks: "Ataques",
+  "Dangerous Attacks": "Ataques perigosos",
+  "Free Kick": "Livres",
+  "Goal Kick": "Pontapé de baliza",
+  "Throw In": "Lançamentos laterais",
+  Penalty: "Grandes penalidades",
+  Substitution: "Substituições",
+  Offsides: "Fora de jogo",
+  "Yellow Cards": "Cartões amarelos",
+  "Red Cards": "Cartões vermelhos",
+};
+
 /** Shapes GOAL API's per-fixture statistics into the frontend's existing
  * generic stats-row renderer (home.tsx's V2StatsGroup type) — previously
  * fed by the deleted SportsAPI Pro V2 integration and hardcoded to an
- * empty array ever since. Only includes a row when at least one side has
- * a real value for it, so a field the provider hasn't populated for this
- * fixture yet just doesn't show up rather than rendering a fake "0". */
+ * empty array ever since.
+ *
+ * The real response (confirmed 2026-09-09) is a generic array of
+ * provider-labelled {type,home,away} rows under match.fullTime, not the
+ * fixed named fields ({shotsOnGoal,possession,corners,fouls}) originally
+ * assumed here without ever checking a real response — this reads that
+ * array directly instead. "Remates" (shots total) is derived by summing
+ * On Target + Off Target the same way the old fixed-field version did. */
 export function buildGoalApiMatchStats(
   stats: GoalApiFixtureStatistics | null | undefined,
 ): Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> {
-  if (!stats) return [];
+  const fullTime = stats?.match?.fullTime;
+  if (!fullTime || fullTime.length === 0) return [];
+  const byType = new Map(fullTime.map((row) => [row.type, row]));
   const rows: Array<{ name: string; home: string; away: string }> = [];
   const add = (name: string, home: unknown, away: unknown) => {
     if (home == null && away == null) return;
     rows.push({ name, home: home != null ? String(home) : "-", away: away != null ? String(away) : "-" });
   };
-  add("Posse de bola", stats.home.possession, stats.away.possession);
-  add("Remates", stats.home.shotsOnGoal != null && stats.home.shotsOffGoal != null
-    ? stats.home.shotsOnGoal + stats.home.shotsOffGoal
-    : undefined, stats.away.shotsOnGoal != null && stats.away.shotsOffGoal != null
-    ? stats.away.shotsOnGoal + stats.away.shotsOffGoal
-    : undefined);
-  add("Remates à baliza", stats.home.shotsOnGoal, stats.away.shotsOnGoal);
-  add("Remates fora", stats.home.shotsOffGoal, stats.away.shotsOffGoal);
-  add("Cantos", stats.home.corners, stats.away.corners);
-  add("Faltas", stats.home.fouls, stats.away.fouls);
+
+  const onTarget = byType.get("On Target");
+  const offTarget = byType.get("Off Target");
+  if (onTarget && offTarget) {
+    const homeShots = Number(onTarget.home) + Number(offTarget.home);
+    const awayShots = Number(onTarget.away) + Number(offTarget.away);
+    if (Number.isFinite(homeShots) && Number.isFinite(awayShots)) add("Remates", homeShots, awayShots);
+  }
+  for (const row of fullTime) {
+    const label = GOAL_API_STAT_LABELS[row.type];
+    if (!label) continue;
+    add(label, row.home, row.away);
+  }
   if (rows.length === 0) return [];
   return [{ title: "Estatísticas do Jogo", rows }];
 }
@@ -77,7 +110,7 @@ export function buildGoalApiEvents(
     return {
       type: e.type === "GOAL" ? "goal" : e.type.toLowerCase(),
       team,
-      minute: parseGoalApiEventMinute(e.time),
+      minute: e.timeNum ?? parseGoalApiEventMinute(e.time),
       player,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : undefined,
     };
@@ -99,40 +132,55 @@ export function buildGoalApiEvents(
  * are un-priced for most of the ~72h before their PropLine-equivalent
  * odds-sync window per the provider's own docs ("odds pré-jogo são
  * sincronizadas a cada três horas, num período de três dias antes do
- * início da partida"). */
+ * início da partida").
+ *
+ * Prices are the flat odd1/oddX/odd2 numeric-string fields (confirmed
+ * real 2026-09-09) — an earlier pass assumed a nested "1x2" object that
+ * never actually exists on this provider, so this market was silently
+ * never extracted before. */
 export function extractGoalApi1x2Odds(
   oddsList: GoalApiOdds[] | null | undefined,
 ): { home: number; draw: number; away: number } | null {
   if (!oddsList || oddsList.length === 0) return null;
   for (const entry of oddsList) {
-    const o = entry["1x2"];
-    if (o && o.home != null && o.draw != null && o.away != null) {
-      return { home: o.home, draw: o.draw, away: o.away };
+    const home = Number(entry.odd1);
+    const draw = Number(entry.oddX);
+    const away = Number(entry.odd2);
+    if (Number.isFinite(home) && Number.isFinite(draw) && Number.isFinite(away)) {
+      return { home, draw, away };
     }
   }
   return null;
 }
 
+/** overUnder is a flat string->numeric-string map keyed by line ("o+2.5",
+ * "u+2.5", ...) confirmed real 2026-09-09 — not one entry per line with
+ * nested {over,under} fields as originally assumed. */
 export function extractGoalApiOverUnder25(
   oddsList: GoalApiOdds[] | null | undefined,
 ): { over: number; under: number } | null {
   if (!oddsList || oddsList.length === 0) return null;
   for (const entry of oddsList) {
-    const line = entry.overUnder?.["2.5"] ?? entry.overUnder?.["o+2.5"];
-    if (line && line.over != null && line.under != null) {
-      return { over: line.over, under: line.under };
+    const over = Number(entry.overUnder?.["o+2.5"]);
+    const under = Number(entry.overUnder?.["u+2.5"]);
+    if (Number.isFinite(over) && Number.isFinite(under)) {
+      return { over, under };
     }
   }
   return null;
 }
 
+/** Both-teams-to-score is the flat btsYes/btsNo numeric-string pair
+ * (confirmed real 2026-09-09), not a nested "bothTeamsToScore" object as
+ * originally assumed. */
 export function extractGoalApiBothTeamsToScore(
   oddsList: GoalApiOdds[] | null | undefined,
 ): { yes: number; no: number } | null {
   if (!oddsList || oddsList.length === 0) return null;
   for (const entry of oddsList) {
-    const b = entry.bothTeamsToScore;
-    if (b && b.yes != null && b.no != null) return { yes: b.yes, no: b.no };
+    const yes = Number(entry.btsYes);
+    const no = Number(entry.btsNo);
+    if (Number.isFinite(yes) && Number.isFinite(no)) return { yes, no };
   }
   return null;
 }
@@ -141,46 +189,45 @@ export type BuiltLineupPlayer = { name: string; shortName?: string; position: st
 export type BuiltLineupTeam = { formation?: string; starters: BuiltLineupPlayer[]; bench: BuiltLineupPlayer[] };
 export type BuiltLineups = { confirmed: boolean; home: BuiltLineupTeam; away: BuiltLineupTeam };
 
-function buildLineupPlayer(entry: GoalApiLineupPlayerEntry): BuiltLineupPlayer {
-  // Some providers wrap each entry as { player: {...} } — unwrap once if so.
-  const e = entry.player ?? entry;
-  const name = e.name ?? e.playerName ?? "?";
-  const number = e.number ?? e.shirtNumber;
-  const rating = e.rating != null ? Number(e.rating) : undefined;
+function buildLineupPlayer(entry: GoalApiLineupEntry): BuiltLineupPlayer {
   return {
-    name,
-    shortName: e.shortName,
-    position: e.position ?? e.pos ?? "",
-    number: number != null ? String(number) : "",
-    rating: rating != null && Number.isFinite(rating) ? rating : undefined,
+    name: entry.lineupPlayer ?? "?",
+    position: entry.lineupPosition ?? "",
+    number: entry.lineupNumber != null ? String(entry.lineupNumber) : "",
   };
 }
 
 function buildLineupTeam(team: GoalApiLineupTeam | undefined, formationFallback?: string | null): BuiltLineupTeam {
-  const starters = (team?.starters ?? team?.startXI ?? []).map(buildLineupPlayer);
-  const bench = (team?.substitutes ?? team?.bench ?? []).map(buildLineupPlayer);
-  return { formation: team?.formation ?? formationFallback ?? undefined, starters, bench };
+  const starters = (team?.startingLineups ?? []).map(buildLineupPlayer);
+  const bench = (team?.substitutes ?? []).map(buildLineupPlayer);
+  return { formation: formationFallback ?? undefined, starters, bench };
 }
 
 /** Maps GOAL API's /fixtures/:id/lineups response into the frontend's
  * existing LineupsV2 shape (home.tsx) — previously fed by the deleted
- * SportsAPI Pro V2 integration and hardcoded to null ever since. Unlike
- * every other GoalApi* raw shape used in this file, this endpoint's exact
- * field names haven't been confirmed against a real response yet, so this
- * reads several plausible key names defensively rather than assuming one —
- * callers log the raw payload so the mapping can be corrected once a real
- * lineup is seen. formationFallback lets the fixture's own
- * homeTeamSystem/awayTeamSystem (confirmed real) show even before lineups
- * are officially published. */
+ * SportsAPI Pro V2 integration and hardcoded to null ever since.
+ *
+ * The real envelope (confirmed 2026-09-09) splits each side into
+ * startingLineups/substitutes/coach/missingPlayers arrays of one flat
+ * entry shape ({lineupPlayer,lineupNumber,lineupPosition,...}), and
+ * carries homeFormation/awayFormation itself rather than a per-team
+ * "formation" field — this replaces an earlier, never-verified guess at
+ * several plausible key names (startXI/starters, bench/substitutes,
+ * nested {player:{...}}). "confirmed" maps to the API's own hasLineups
+ * flag — the closest real signal to "lineup data exists for this
+ * fixture" (there is no separate official-vs-provisional flag).
+ * formationFallback still backs the fixture's own homeTeamSystem/
+ * awayTeamSystem (confirmed real) for the case homeFormation/
+ * awayFormation are null, which happens before kickoff. */
 export function buildGoalApiLineups(
   raw: GoalApiLineups | null | undefined,
   homeFormationFallback?: string | null,
   awayFormationFallback?: string | null,
 ): BuiltLineups {
   return {
-    confirmed: raw?.confirmed ?? false,
-    home: buildLineupTeam(raw?.home, homeFormationFallback),
-    away: buildLineupTeam(raw?.away, awayFormationFallback),
+    confirmed: raw?.hasLineups ?? false,
+    home: buildLineupTeam(raw?.home, raw?.homeFormation ?? homeFormationFallback),
+    away: buildLineupTeam(raw?.away, raw?.awayFormation ?? awayFormationFallback),
   };
 }
 
