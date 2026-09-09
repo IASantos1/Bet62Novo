@@ -49,6 +49,11 @@ import {
   goalApiKickoffDateTime,
   buildGoalApiMatchStats,
   buildGoalApiEvents,
+  buildGoalApiLineups,
+  buildGoalApiTopScorers,
+  buildGoalApiTeamUpcoming,
+  buildGoalApiForm,
+  buildGoalApiStandings,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -7457,7 +7462,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
   const seen = new Set<string>();
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
-      if (fx.status !== "SCHEDULED" && fx.status !== "NS") continue;
+      if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
       const home = stripGenderTeamSuffix(fx.homeTeam?.name);
       const away = stripGenderTeamSuffix(fx.awayTeam?.name);
       if (!home || !away) continue;
@@ -7490,6 +7495,11 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         markets: baseMarkets,
         isWomens: isWomensLeague(fx.leagueName ?? ""),
         isPriorityLeague: true,
+        homeLogoUrl: fx.homeTeam?.badge,
+        awayLogoUrl: fx.awayTeam?.badge,
+        leagueId: fx.leagueId,
+        homeTeamId: fx.homeTeam?.id,
+        awayTeamId: fx.awayTeam?.id,
       });
     }
   }
@@ -7526,9 +7536,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const home = stripGenderTeamSuffix(fx.homeTeam?.name);
     const away = stripGenderTeamSuffix(fx.awayTeam?.name);
     if (!home || !away) continue;
-    const scoreParts = (fx.score ?? "").split("-").map((s) => Number(s.trim()));
-    const homeScore = scoreParts[0];
-    const awayScore = scoreParts[1];
+    const homeScore = Number(fx.homeTeamScore);
+    const awayScore = Number(fx.awayTeamScore);
     if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
 
     const id = `goalapi-football-${fx.id}`;
@@ -7544,7 +7553,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       const events = await goalApi.getFixtureEvents(fx.id);
       redCardsHome = countGoalApiRedCards(events, "home");
       redCardsAway = countGoalApiRedCards(events, "away");
-      matchEvents = buildGoalApiEvents(events);
+      const substitutions = await goalApi.getFixtureSubstitutions(fx.id).catch(() => []);
+      matchEvents = buildGoalApiEvents(events, substitutions);
     } catch {
       /* keep previous counts/events if the events call fails this tick */
     }
@@ -7616,8 +7626,11 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore: homeScore as number,
       awayScore: awayScore as number,
-      minute: fx.minute ?? 0,
-      status: fx.status,
+      // No confirmed elapsed-minute field on the real payload yet — 0 until
+      // a real /fixtures/live example reveals the actual field name (never
+      // guessed, same policy as everywhere else in this file).
+      minute: 0,
+      status: fx.matchStatus,
       hasRealOdds: !!resultOdds,
       odds: resultOdds ?? baseOdds,
       markets: baseMarkets,
@@ -7628,6 +7641,11 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       _lastSeenAt: Date.now(),
       marketSuspension,
       _suspensionReason: suspensionReason,
+      homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
+      awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
+      leagueId: fx.leagueId ?? existing?.leagueId,
+      homeTeamId: fx.homeTeam?.id ?? existing?.homeTeamId,
+      awayTeamId: fx.awayTeam?.id ?? existing?.awayTeamId,
     };
     liveMatchState.set(id, state);
     results.push(state);
@@ -7681,7 +7699,8 @@ export async function applyGoalApiWebhookEvent(event: {
         const home = stripGenderTeamSuffix(fx.homeTeam?.name);
         const away = stripGenderTeamSuffix(fx.awayTeam?.name);
         if (!home || !away) return;
-        const scoreParts = (fx.score ?? "").split("-").map((s) => Number(s.trim()));
+        const homeScore = Number(fx.homeTeamScore);
+        const awayScore = Number(fx.awayTeamScore);
         state = {
           id,
           home,
@@ -7689,10 +7708,10 @@ export async function applyGoalApiWebhookEvent(event: {
           league: fx.leagueName ?? "Futebol",
           country: "Internacional",
           sport: "football",
-          homeScore: Number.isFinite(scoreParts[0]) ? (scoreParts[0] as number) : 0,
-          awayScore: Number.isFinite(scoreParts[1]) ? (scoreParts[1] as number) : 0,
-          minute: fx.minute ?? 90,
-          status: fx.status,
+          homeScore: Number.isFinite(homeScore) ? homeScore : 0,
+          awayScore: Number.isFinite(awayScore) ? awayScore : 0,
+          minute: 90,
+          status: fx.matchStatus,
           hasRealOdds: false,
           odds: makeOddsFromTeams(home, away),
           markets: makeAdvancedMarketsFromTeams(home, away),
@@ -9798,6 +9817,8 @@ router.get("/stats", async (req: Request, res: Response) => {
   const homeOdd = parseFloat(String(req.query["homeOdd"] ?? "2")) || 2;
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
+  const homeTeamIdQuery = String(req.query["homeTeamId"] ?? "");
+  const awayTeamIdQuery = String(req.query["awayTeamId"] ?? "");
 
   const rawHome = 1 / homeOdd;
   const rawDraw = 1 / drawOdd;
@@ -10022,6 +10043,23 @@ router.get("/stats", async (req: Request, res: Response) => {
 
   let homeForm: FormEntry[] = [];
   let awayForm: FormEntry[] = [];
+
+  // Real replacement for the synthetic fallback below (GOAL API,
+  // 2026-09-09): when the frontend has real GOAL API team ids for this
+  // fixture (populated on the football live/upcoming builders), fetch each
+  // team's actual last results and derive real form from them instead.
+  if (sport === "football" && homeTeamIdQuery && awayTeamIdQuery && CONFIG.GOAL_API_KEY) {
+    try {
+      const [homeResults, awayResults] = await Promise.all([
+        goalApi.getTeamResults(homeTeamIdQuery).catch(() => null),
+        goalApi.getTeamResults(awayTeamIdQuery).catch(() => null),
+      ]);
+      homeForm = buildGoalApiForm(homeResults);
+      awayForm = buildGoalApiForm(awayResults);
+    } catch (err) {
+      logger.error({ err, homeTeamIdQuery, awayTeamIdQuery }, "[goal-api] team form fetch failed");
+    }
+  }
 
   const realHomeCount = homeForm.length;
   const realAwayCount = awayForm.length;
@@ -11696,8 +11734,28 @@ router.get("/mlb-results", async (_req: Request, res: Response) => {
 // extractTennisOverride) — makeTennisBaseOdds' _tennisPreMatchOdds cache
 // simply never gets a hit any more and falls through to its neutral default.
 
+// GOAL API's leagueId (fx.leagueId, populated on the football
+// upcoming/live builders) lets this route return a real table instead of
+// buildLeagueStandings' fully synthetic ELO-seeded generator — same
+// "real data patches synthetic" convention every other GOAL API-backed
+// route in this file follows. Falls back to the synthetic table on any
+// failure or when no leagueId is given (non-football, or GOAL API not
+// configured).
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
+  const leagueId = String(req.query["leagueId"] ?? "");
+  if (leagueId && CONFIG.GOAL_API_KEY) {
+    try {
+      const raw = await goalApi.getLeagueStandings(leagueId);
+      const built = buildGoalApiStandings(raw, league);
+      if (built.teams.length > 0) {
+        res.json(built);
+        return;
+      }
+    } catch (err) {
+      logger.error({ err, leagueId }, "[goal-api] standings fetch failed");
+    }
+  }
   try {
     const standing = buildLeagueStandings(league, "", "");
     res.json(standing);
@@ -12703,11 +12761,32 @@ router.get("/confrontos", async (req: Request, res: Response) => {
 
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
 // Used to be sourced from SportMonks team schedules; that provider was
-// removed and nothing replaces it, so this just reports no fixtures rather
-// than 404 on the frontend's existing per-match fetch — same degraded-but-
-// not-broken shape as /storylines below.
-router.get("/team-upcoming", async (_req: Request, res: Response) => {
-  res.json({ fixtures: [] });
+// removed. Football now resolves it via GOAL API: the frontend passes the
+// fixture's matchId + which side (home/away) it wants, so this resolves
+// that side's real team id off the fixture (goalapi-football-<fixtureId>)
+// and asks GOAL API for that team's upcoming fixtures directly.
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "");
+  const side = req.query["side"] === "away" ? "away" : "home";
+  const limit = Math.max(1, Math.min(20, Number(req.query["limit"]) || 5));
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const fixture = await goalApi.getFixtureById(fixtureId);
+    const teamId = side === "home" ? fixture.homeTeam?.id : fixture.awayTeam?.id;
+    if (!teamId) {
+      res.json({ fixtures: [] });
+      return;
+    }
+    const upcoming = await goalApi.getTeamUpcoming(teamId);
+    res.json({ fixtures: buildGoalApiTeamUpcoming(upcoming, teamId).slice(0, limit) });
+  } catch (err) {
+    logger.error({ err, matchId, side }, "[goal-api] team-upcoming fetch failed");
+    res.json({ fixtures: [] });
+  }
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
@@ -12729,6 +12808,58 @@ router.get("/player-profile/:id", async (req: Request, res: Response) => {
 // not-broken shape as /volleyball-results etc. above.
 router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
   res.json({ storyline: null });
+});
+
+// ─── Lineups ────────────────────────────────────────────────────────────────
+// Same dead-until-now situation as /storylines above, but football now has a
+// real replacement: GOAL API's /fixtures/:id/lineups — field names confirmed
+// real 2026-09-09 (see GoalApiLineupEntry). Non-football matchIds (or GOAL
+// API not configured) get the same empty-but-valid shape the frontend
+// already treats as "not available".
+const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
+// ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
+// GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
+// by GOAL API's own leagueId (fx.leagueId, now populated on the football
+// upcoming/live builders above), not by league name like the legacy
+// /league-standings route.
+router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
+  const leagueId = req.params.leagueId ?? "";
+  if (!leagueId || !CONFIG.GOAL_API_KEY) {
+    res.json({ scorers: [] });
+    return;
+  }
+  try {
+    const raw = await goalApi.getLeagueTopScorers(leagueId);
+    res.json({ scorers: buildGoalApiTopScorers(raw) });
+  } catch (err) {
+    logger.error({ err, leagueId }, "[goal-api] top-scorers fetch failed");
+    res.json({ scorers: [] });
+  }
+});
+
+router.get("/lineups/:matchId", async (req: Request, res: Response) => {
+  const matchId = req.params.matchId ?? "";
+  const empty = {
+    confirmed: false,
+    home: { starters: [], bench: [] },
+    away: { starters: [], bench: [] },
+  };
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json(empty);
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const [raw, fixture] = await Promise.all([
+      goalApi.getFixtureLineups(fixtureId),
+      goalApi.getFixtureById(fixtureId).catch(() => null),
+    ]);
+    logger.info({ fixtureId, raw }, "[goal-api] lineups raw response");
+    res.json(buildGoalApiLineups(raw, fixture?.homeTeamSystem, fixture?.awayTeamSystem));
+  } catch (err) {
+    logger.error({ err, fixtureId }, "[goal-api] lineups fetch failed");
+    res.json(empty);
+  }
 });
 
 // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────
