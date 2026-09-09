@@ -9085,6 +9085,7 @@ type UpcomingTopCache = {
   hockey: UpcomingMatch[];
   volleyball: UpcomingMatch[];
   baseball: UpcomingMatch[];
+  mma: UpcomingMatch[];
   boxing: UpcomingMatch[];
   cricket: UpcomingMatch[];
   handball: UpcomingMatch[];
@@ -9217,6 +9218,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let basketball: UpcomingMatch[] = [];
   let hockey: UpcomingMatch[] = [];
   let volleyball: UpcomingMatch[] = [];
+  let mma: UpcomingMatch[] = [];
   const baseball: UpcomingMatch[] = [];
   if (CONFIG.PROPLINE_API_KEY) {
     try {
@@ -9234,9 +9236,14 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     } catch (err) {
       logger.error({ err }, "[refreshUpcomingTop] volleyball PropLine fetch failed");
     }
+    try {
+      mma = await buildMmaUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] mma PropLine fetch failed");
+    }
   }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma]);
   upcomingTopCache = {
     football,
     tennis,
@@ -9244,6 +9251,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey,
     volleyball,
     baseball,
+    mma,
     boxing: [],
     cricket: [],
     handball: [],
@@ -9296,6 +9304,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
               hockey: [],
               volleyball: [],
               baseball: [],
+              mma: [],
               boxing: [],
               cricket: [],
               handball: [],
@@ -9311,6 +9320,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "hockey") matches = cache.hockey;
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
+  else if (sport === "mma") matches = cache.mma;
   else if (sport === "boxing") matches = cache.boxing;
   else if (sport === "cricket") matches = cache.cricket;
   else if (sport === "handball") matches = cache.handball;
@@ -9323,6 +9333,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.hockey,
       ...cache.volleyball,
       ...cache.baseball,
+      ...cache.mma,
       ...cache.boxing,
       ...cache.cricket,
       ...cache.handball,
