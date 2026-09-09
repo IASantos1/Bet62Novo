@@ -7759,8 +7759,24 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       minute: estimateGoalApiLiveMinute(fx),
       status: fx.matchStatus,
       hasRealOdds: !!resultOdds,
-      odds: resultOdds ?? baseOdds,
-      markets: baseMarkets,
+      // CRITICAL: this function runs every ~1-2s (broadcastLive()'s forced-fresh
+      // cache rebuild — see LIVE_UPDATE_INTERVAL), far more often than the
+      // background drift engine (applyTieredMarketDrift, 8-15s+ per market)
+      // recomputes a new price. odds/markets must therefore be preserved from
+      // the existing state on every tick after the first — the drift engine is
+      // the SOLE owner of what's displayed. Overwriting them here with a fresh
+      // baseOdds/baseMarkets every cycle (the bug this replaces) meant a team
+      // down several goals late in the match could show near-competitive odds,
+      // because the drift engine's Poisson-corrected value got discarded again
+      // within 1-2s of being computed, almost every cycle.
+      odds: existing?.odds ?? resultOdds ?? baseOdds,
+      markets: existing?.markets ?? baseMarkets,
+      // Stable anchors the drift engine derives lambdas/oscillation from
+      // (LiveMatchState._baseOdds/_baseMarkets) — frozen on first sighting of
+      // this fixture, not reset every tick, so the model has a real reference
+      // instead of feeding back its own last displayed value into itself.
+      _baseOdds: existing?._baseOdds ?? resultOdds ?? baseOdds,
+      _baseMarkets: existing?._baseMarkets ?? baseMarkets,
       events: matchEvents,
       matchStats,
       redCardsHome,
