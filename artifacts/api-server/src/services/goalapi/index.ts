@@ -61,12 +61,33 @@ export type GoalApiPrediction = {
   over25?: string;
 };
 
+/** /fixtures/:id/events's real item shape — confirmed via the same
+ * "events" array embedded per-fixture on /fixtures/live (raw response
+ * pasted 2026-09-09); the canonical Event DTO this provider reuses
+ * everywhere, same pattern as its canonical Fixture DTO. This replaces an
+ * earlier, wrong assumption ({minute,team,type,player,detail}) that was
+ * never checked against a real response. "time" is a string ("3", "45+2"
+ * for stoppage time); side is which of homeScorer/awayScorer is set (only
+ * "GOAL" events have been observed so far, so other types may carry
+ * different populated fields). */
 export type GoalApiMatchEvent = {
-  minute: number;
-  team: "home" | "away";
-  type: "goal" | "card" | string;
-  player: string;
-  detail?: string;
+  id?: string;
+  fixtureId?: string;
+  time: string;
+  type: string;
+  homeScorer?: string | null;
+  homeScorerId?: string | null;
+  homeAssist?: string | null;
+  homeAssistId?: string | null;
+  awayScorer?: string | null;
+  awayScorerId?: string | null;
+  awayAssist?: string | null;
+  awayAssistId?: string | null;
+  score?: string;
+  info?: string | null;
+  scoreInfoTime?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type GoalApiSubstitution = {
@@ -130,6 +151,35 @@ export type GoalApiTopScorer = {
   goals: string;
   assists: string;
   penaltyGoals: string;
+};
+
+/** One entry of /teams/:id/results's recentFixtures — result/score are
+ * already resolved server-side (score is literal "home-away", result is
+ * W/D/L from the queried team's perspective); confirmed real via a raw
+ * response pasted 2026-09-09. */
+export type GoalApiTeamResultFixture = {
+  id: string;
+  date?: string;
+  opponent: string;
+  opponentBadge?: string | null;
+  score: string;
+  isHome: boolean;
+  result: "W" | "D" | "L";
+  league?: string;
+};
+
+/** /teams/:id/results's actual "data" shape — a single aggregate object,
+ * NOT a flat fixture array (that was this client's original, wrong,
+ * assumption). overall/home/away are W/D/L + goals aggregates; only
+ * recentFixtures is consumed today. */
+export type GoalApiTeamResults = {
+  overall?: unknown;
+  home?: unknown;
+  away?: unknown;
+  form?: string;
+  recentFixtures: GoalApiTeamResultFixture[];
+  totalMatches?: number;
+  season?: string;
 };
 
 const GOAL_API_TTL = {
@@ -265,12 +315,13 @@ export class GoalApiClient {
   }
 
   /** /teams/:id/results — confirmed real (raw response pasted 2026-09-09).
-   * The envelope also carries a sibling "stats" field (W/D/L/points
-   * aggregates) alongside "data" — discarded here the same way this client
-   * already discards "pagination" (see file header comment); data is the
-   * same canonical fixture DTO, most recent first. */
-  getTeamResults(teamId: string): Promise<GoalApiFixture[]> {
-    return this.cachedGet<GoalApiFixture[]>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
+   * "data" is a single aggregate object ({overall,home,away,form,
+   * recentFixtures,totalMatches,season}), NOT a flat fixture array — an
+   * earlier pass of this client wrongly assumed the latter before a fuller
+   * raw response surfaced the real shape. Only recentFixtures is consumed
+   * (see buildGoalApiForm). */
+  getTeamResults(teamId: string): Promise<GoalApiTeamResults> {
+    return this.cachedGet<GoalApiTeamResults>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
   // ── Odds ───────────────────────────────────────────────────────────────────

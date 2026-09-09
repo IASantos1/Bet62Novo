@@ -10,6 +10,7 @@ import type {
   GoalApiLineupTeam,
   GoalApiLineupPlayerEntry,
   GoalApiTopScorer,
+  GoalApiTeamResults,
 } from "./index.js";
 
 /** Shapes GOAL API's per-fixture statistics into the frontend's existing
@@ -41,23 +42,46 @@ export function buildGoalApiMatchStats(
   return [{ title: "Estatísticas do Jogo", rows }];
 }
 
+/** Parses GOAL API's "time" event field ("3", "45+2", "90+5") into a plain
+ * minute number for sorting/display — stoppage-time minutes sort after
+ * their own half but the "+N" part is dropped since the incident timeline
+ * only ever showed a bare minute for every other provider. */
+function parseGoalApiEventMinute(time: string): number {
+  const n = Number.parseInt(time, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** Maps GOAL API's raw match events (+ substitutions, a separate
  * documented endpoint — /fixtures/:id/substitutions) into the shape
  * routes/matches.ts's LiveMatchState.events field already expects (same
  * field every other provider in this file populates), sorted by minute so
  * the incident timeline reads chronologically regardless of which
- * endpoint contributed each entry. */
+ * endpoint contributed each entry.
+ *
+ * Only "GOAL" events have been observed in a real response so far — side
+ * is derived from whichever of homeScorer/awayScorer is populated,
+ * falling back to the "info" field ("home"/"away") when neither scorer
+ * name was recorded; "info": "Penalty" is appended to the detail instead
+ * of being treated as a side. */
 export function buildGoalApiEvents(
   events: GoalApiMatchEvent[] | null | undefined,
   substitutions?: GoalApiSubstitution[] | null,
 ): Array<{ type: string; team: string; minute: number; player: string; detail?: string }> {
-  const fromEvents = (events ?? []).map((e) => ({
-    type: e.type,
-    team: e.team,
-    minute: e.minute,
-    player: e.player,
-    detail: e.detail,
-  }));
+  const fromEvents = (events ?? []).map((e) => {
+    const team: "home" | "away" = e.homeScorer ? "home" : e.awayScorer ? "away" : e.info === "away" ? "away" : "home";
+    const player = (team === "home" ? e.homeScorer : e.awayScorer) ?? "?";
+    const assist = team === "home" ? e.homeAssist : e.awayAssist;
+    const detailParts = [assist ? `Assistência: ${assist}` : null, e.info === "Penalty" ? "Grande Penalidade" : null].filter(
+      (v): v is string => Boolean(v),
+    );
+    return {
+      type: e.type === "GOAL" ? "goal" : e.type.toLowerCase(),
+      team,
+      minute: parseGoalApiEventMinute(e.time),
+      player,
+      detail: detailParts.length > 0 ? detailParts.join(" · ") : undefined,
+    };
+  });
   const fromSubs = (substitutions ?? []).map((s) => ({
     type: "substitution",
     team: s.team,
@@ -211,28 +235,33 @@ export type BuiltFormEntry = { result: "W" | "D" | "L"; score: string; opponent:
  * into the "Forma" tab's FormEntry shape — that tab has never shown real
  * data ("homeForm/awayForm are never populated... this is always false",
  * per /stats's own comment) since the StatPal enrichment that used to feed
- * it was removed; this is the real replacement. Only FINISHED matches with
- * both scores present count — skips AFTER_ET/AFTER_PEN score fields on
- * purpose (homeTeamScore/awayTeamScore already reflect the final result
- * including extra time/penalties for those, so no special-casing needed),
- * caps at 5 to match the tab's existing expectations. */
-export function buildGoalApiForm(fixtures: GoalApiFixture[] | null | undefined, teamId: string): BuiltFormEntry[] {
+ * it was removed; this is the real replacement.
+ *
+ * "data" is a single aggregate object, not a flat fixture array — an
+ * earlier pass of this mapper assumed the latter before a fuller raw
+ * response surfaced the real shape (2026-09-09). recentFixtures already
+ * carries a per-team "result" (W/D/L) and a literal "home-away" score
+ * string; the frontend's FormEntry.score is expected in the queried
+ * team's own perspective ("ownGoals-opponentGoals", see
+ * MatchStatsPanel's goals-scored/clean-sheets aggregates), so the two
+ * numbers are swapped for away fixtures. Caps at 5 to match the tab's
+ * existing expectations. */
+export function buildGoalApiForm(results: GoalApiTeamResults | null | undefined): BuiltFormEntry[] {
+  const fixtures = results?.recentFixtures;
   if (!fixtures) return [];
   const entries: BuiltFormEntry[] = [];
   for (const fx of fixtures) {
     if (entries.length >= 5) break;
-    if (fx.matchStatus !== "FINISHED" && fx.matchStatus !== "AFTER_ET" && fx.matchStatus !== "AFTER_PEN") continue;
-    const isHome = fx.homeTeam?.id === teamId;
-    const teamScore = Number(isHome ? fx.homeTeamScore : fx.awayTeamScore);
-    const oppScore = Number(isHome ? fx.awayTeamScore : fx.homeTeamScore);
-    if (!Number.isFinite(teamScore) || !Number.isFinite(oppScore)) continue;
-    const result: "W" | "D" | "L" = teamScore > oppScore ? "W" : teamScore < oppScore ? "L" : "D";
-    const opponent = isHome ? fx.awayTeam?.name : fx.homeTeam?.name;
+    const parts = fx.score?.split(/[-–]/).map((n) => Number(n.trim()));
+    if (!parts || parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) continue;
+    const [homeScore, awayScore] = parts as [number, number];
+    const ownScore = fx.isHome ? homeScore : awayScore;
+    const oppScore = fx.isHome ? awayScore : homeScore;
     entries.push({
-      result,
-      score: isHome ? `${teamScore}-${oppScore}` : `${oppScore}-${teamScore}`,
-      opponent: opponent ?? "?",
-      home: isHome,
+      result: fx.result,
+      score: `${ownScore}-${oppScore}`,
+      opponent: fx.opponent ?? "?",
+      home: fx.isHome,
     });
   }
   return entries;

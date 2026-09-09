@@ -10050,11 +10050,11 @@ router.get("/stats", async (req: Request, res: Response) => {
   if (sport === "football" && homeTeamIdQuery && awayTeamIdQuery && CONFIG.GOAL_API_KEY) {
     try {
       const [homeResults, awayResults] = await Promise.all([
-        goalApi.getTeamResults(homeTeamIdQuery).catch(() => []),
-        goalApi.getTeamResults(awayTeamIdQuery).catch(() => []),
+        goalApi.getTeamResults(homeTeamIdQuery).catch(() => null),
+        goalApi.getTeamResults(awayTeamIdQuery).catch(() => null),
       ]);
-      homeForm = buildGoalApiForm(homeResults, homeTeamIdQuery);
-      awayForm = buildGoalApiForm(awayResults, awayTeamIdQuery);
+      homeForm = buildGoalApiForm(homeResults);
+      awayForm = buildGoalApiForm(awayResults);
     } catch (err) {
       logger.error({ err, homeTeamIdQuery, awayTeamIdQuery }, "[goal-api] team form fetch failed");
     }
