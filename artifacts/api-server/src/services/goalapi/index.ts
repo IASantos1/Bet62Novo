@@ -121,6 +121,17 @@ export type GoalApiLineups = {
   away?: GoalApiLineupTeam;
 };
 
+// /leagues/:id/top-scorers — confirmed real (2026-09-09): goals/assists/
+// penaltyGoals arrive as numeric strings, same convention as fixture scores.
+export type GoalApiTopScorer = {
+  playerPlace: string;
+  playerName: string;
+  teamName: string;
+  goals: string;
+  assists: string;
+  penaltyGoals: string;
+};
+
 const GOAL_API_TTL = {
   FIXTURES: 60,
   LIVE: 10,
@@ -238,6 +249,14 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiLineups>(`/fixtures/${encodeURIComponent(id)}/lineups`, undefined, GOAL_API_TTL.LIVE);
   }
 
+  getLeagueTopScorers(leagueId: string): Promise<GoalApiTopScorer[]> {
+    return this.cachedGet<GoalApiTopScorer[]>(
+      `/leagues/${encodeURIComponent(leagueId)}/top-scorers`,
+      undefined,
+      GOAL_API_TTL.PREDICTIONS,
+    );
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -305,6 +324,7 @@ export const goalApi = {
   getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
+  getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
