@@ -51,6 +51,7 @@ import {
   buildGoalApiEvents,
   buildGoalApiLineups,
   buildGoalApiTopScorers,
+  buildGoalApiTeamUpcoming,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -7495,6 +7496,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
         leagueId: fx.leagueId,
+        homeTeamId: fx.homeTeam?.id,
+        awayTeamId: fx.awayTeam?.id,
       });
     }
   }
@@ -7639,6 +7642,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
       awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
       leagueId: fx.leagueId ?? existing?.leagueId,
+      homeTeamId: fx.homeTeam?.id ?? existing?.homeTeamId,
+      awayTeamId: fx.awayTeam?.id ?? existing?.awayTeamId,
     };
     liveMatchState.set(id, state);
     results.push(state);
@@ -12715,11 +12720,32 @@ router.get("/confrontos", async (req: Request, res: Response) => {
 
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
 // Used to be sourced from SportMonks team schedules; that provider was
-// removed and nothing replaces it, so this just reports no fixtures rather
-// than 404 on the frontend's existing per-match fetch — same degraded-but-
-// not-broken shape as /storylines below.
-router.get("/team-upcoming", async (_req: Request, res: Response) => {
-  res.json({ fixtures: [] });
+// removed. Football now resolves it via GOAL API: the frontend passes the
+// fixture's matchId + which side (home/away) it wants, so this resolves
+// that side's real team id off the fixture (goalapi-football-<fixtureId>)
+// and asks GOAL API for that team's upcoming fixtures directly.
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "");
+  const side = req.query["side"] === "away" ? "away" : "home";
+  const limit = Math.max(1, Math.min(20, Number(req.query["limit"]) || 5));
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const fixture = await goalApi.getFixtureById(fixtureId);
+    const teamId = side === "home" ? fixture.homeTeam?.id : fixture.awayTeam?.id;
+    if (!teamId) {
+      res.json({ fixtures: [] });
+      return;
+    }
+    const upcoming = await goalApi.getTeamUpcoming(teamId);
+    res.json({ fixtures: buildGoalApiTeamUpcoming(upcoming, teamId).slice(0, limit) });
+  } catch (err) {
+    logger.error({ err, matchId, side }, "[goal-api] team-upcoming fetch failed");
+    res.json({ fixtures: [] });
+  }
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────

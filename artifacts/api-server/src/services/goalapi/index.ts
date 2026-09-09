@@ -257,6 +257,13 @@ export class GoalApiClient {
     );
   }
 
+  /** /teams/:id/upcoming — same canonical fixture DTO confirmed real across
+   * /fixtures, /leagues/:id/fixtures and /teams/:id/fixtures, pre-filtered
+   * to that team's future matches. */
+  getTeamUpcoming(teamId: string): Promise<GoalApiFixture[]> {
+    return this.cachedGet<GoalApiFixture[]>(`/teams/${encodeURIComponent(teamId)}/upcoming`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -325,6 +332,7 @@ export const goalApi = {
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
   getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
+  getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),

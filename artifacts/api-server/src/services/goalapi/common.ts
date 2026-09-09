@@ -178,6 +178,33 @@ export function buildGoalApiTopScorers(raw: GoalApiTopScorer[] | null | undefine
   }));
 }
 
+export type BuiltTeamUpcomingEntry = { date: string; opponent: string; competition: string; isHome: boolean };
+
+/** Maps GOAL API's /teams/:id/upcoming (same canonical fixture DTO as every
+ * other GOAL API fixture endpoint) into the frontend's "Próximos Jogos"
+ * shape — previously sourced from SportMonks team schedules, removed along
+ * with that provider and hardcoded to []. Compact "DD/MM" date to fit the
+ * existing fixed-width display slot. */
+export function buildGoalApiTeamUpcoming(fixtures: GoalApiFixture[] | null | undefined, teamId: string): BuiltTeamUpcomingEntry[] {
+  if (!fixtures) return [];
+  return fixtures.map((fx) => {
+    const isHome = fx.homeTeam?.id === teamId;
+    const opponent = isHome ? fx.awayTeam?.name : fx.homeTeam?.name;
+    const iso = fx.kickoffUtc;
+    let date = "";
+    if (iso) {
+      const d = new Date(iso);
+      if (!Number.isNaN(d.getTime())) {
+        const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Lisbon", day: "2-digit", month: "2-digit" }).formatToParts(d);
+        const p: Record<string, string> = {};
+        for (const part of parts) p[part.type] = part.value;
+        date = `${p["day"] ?? "?"}/${p["month"] ?? "?"}`;
+      }
+    }
+    return { date, opponent: opponent ?? "?", competition: fx.leagueName ?? "", isHome };
+  });
+}
+
 /** ISO-8601 kickoffUtc → { date: "DD.MM.YYYY", time: "HH:MM" } in
  * Europe/Lisbon — same shape/timezone every other provider in this app
  * already uses (see routes/matches.ts's proplineEventDateTime). Falls back
