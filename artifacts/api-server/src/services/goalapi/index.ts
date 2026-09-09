@@ -77,12 +77,11 @@ export type GoalApiOdds = {
   updatedAt?: string;
 };
 
-/** /fixtures/:id/predictions — confirmed real 2026-09-09; not wired into
- * any route yet (getFixturePrediction below is unused dead code today),
- * but the type is corrected here so it's right whenever that changes.
+/** /fixtures/:id/predictions — confirmed real 2026-09-09, wired into the
+ * "Previsão" card via buildGoalApiPrediction (services/goalapi/common.ts).
  * All prob* fields are 0-100 percentage strings, not decimal odds —
  * completely different field names/units than this client originally
- * (and, since unused, harmlessly) assumed. */
+ * (and, at the time, harmlessly) assumed. */
 export type GoalApiPrediction = {
   fixtureId: string;
   matchStatus?: string;

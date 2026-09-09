@@ -60,6 +60,7 @@ import {
   buildGoalApiPlayerProfile,
   buildGoalApiResults,
   buildGoalApiResultsStats,
+  buildGoalApiPrediction,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -12966,6 +12967,27 @@ router.get("/lineups/:matchId", async (req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err, fixtureId }, "[goal-api] lineups fetch failed");
     res.json(empty);
+  }
+});
+
+// GOAL API's own model-computed match-outcome probabilities — a distinct
+// data source from this file's odds-derived "Biblioteca de Combinações"
+// (predictions.ts's publishCombosForMatch, which works off match.odds/
+// markets, not this endpoint). Informational only — feeds the "Previsão"
+// card, not settlement.
+router.get("/prediction/:matchId", async (req: Request, res: Response) => {
+  const matchId = req.params.matchId ?? "";
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json({ prediction: null });
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const raw = await goalApi.getFixturePrediction(fixtureId);
+    res.json({ prediction: buildGoalApiPrediction(raw) });
+  } catch (err) {
+    logger.error({ err, fixtureId }, "[goal-api] prediction fetch failed");
+    res.json({ prediction: null });
   }
 });
 
