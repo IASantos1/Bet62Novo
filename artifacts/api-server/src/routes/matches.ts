@@ -18,7 +18,7 @@ import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
-import { extractProplineScore, proplineEventDateTime } from "../services/propline/common.js";
+import { extractProplineScore, proplineEventDateTime, dedupeProplineFixtures } from "../services/propline/common.js";
 import {
   PROPLINE_BASKETBALL_LEAGUE_TITLES,
   extractProplineBasketballOdds,
@@ -7456,8 +7456,9 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       });
     }
   }
-  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  return results;
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
 }
 
 /** Basketball live from PropLine — cross-references /scores with the
@@ -7589,8 +7590,9 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       });
     }
   }
-  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  return results;
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
 }
 
 /** Hockey (NHL) live from PropLine — NHL IS in PropLine's confirmed
@@ -7718,8 +7720,9 @@ async function buildVolleyballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       markets: baseMarkets,
     });
   }
-  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  return results;
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
 }
 
 // 120s, not the 15s most other PropLine live builders use — PropLine's
@@ -7880,8 +7883,9 @@ async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       });
     }
   }
-  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  return results;
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
 }
 
 const PROPLINE_MMA_DISAPPEAR_GRACE_MS = 120_000;
@@ -9081,6 +9085,7 @@ type UpcomingTopCache = {
   hockey: UpcomingMatch[];
   volleyball: UpcomingMatch[];
   baseball: UpcomingMatch[];
+  mma: UpcomingMatch[];
   boxing: UpcomingMatch[];
   cricket: UpcomingMatch[];
   handball: UpcomingMatch[];
@@ -9213,6 +9218,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let basketball: UpcomingMatch[] = [];
   let hockey: UpcomingMatch[] = [];
   let volleyball: UpcomingMatch[] = [];
+  let mma: UpcomingMatch[] = [];
   const baseball: UpcomingMatch[] = [];
   if (CONFIG.PROPLINE_API_KEY) {
     try {
@@ -9230,9 +9236,14 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     } catch (err) {
       logger.error({ err }, "[refreshUpcomingTop] volleyball PropLine fetch failed");
     }
+    try {
+      mma = await buildMmaUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] mma PropLine fetch failed");
+    }
   }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma]);
   upcomingTopCache = {
     football,
     tennis,
@@ -9240,6 +9251,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey,
     volleyball,
     baseball,
+    mma,
     boxing: [],
     cricket: [],
     handball: [],
@@ -9292,6 +9304,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
               hockey: [],
               volleyball: [],
               baseball: [],
+              mma: [],
               boxing: [],
               cricket: [],
               handball: [],
@@ -9307,6 +9320,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "hockey") matches = cache.hockey;
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
+  else if (sport === "mma") matches = cache.mma;
   else if (sport === "boxing") matches = cache.boxing;
   else if (sport === "cricket") matches = cache.cricket;
   else if (sport === "handball") matches = cache.handball;
@@ -9319,6 +9333,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.hockey,
       ...cache.volleyball,
       ...cache.baseball,
+      ...cache.mma,
       ...cache.boxing,
       ...cache.cricket,
       ...cache.handball,

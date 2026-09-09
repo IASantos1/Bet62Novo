@@ -154,7 +154,7 @@ function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
-function isFuzzyMatch(candidate: string, needle: string, threshold: number): boolean {
+export function isFuzzyMatch(candidate: string, needle: string, threshold: number): boolean {
   if (!candidate || !needle) return false;
   if (candidate === needle) return true;
   if (candidate.includes(needle) || needle.includes(candidate)) return true;
