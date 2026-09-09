@@ -52,6 +52,7 @@ import {
   buildGoalApiLineups,
   buildGoalApiTopScorers,
   buildGoalApiTeamUpcoming,
+  buildGoalApiForm,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -9815,6 +9816,8 @@ router.get("/stats", async (req: Request, res: Response) => {
   const homeOdd = parseFloat(String(req.query["homeOdd"] ?? "2")) || 2;
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
+  const homeTeamIdQuery = String(req.query["homeTeamId"] ?? "");
+  const awayTeamIdQuery = String(req.query["awayTeamId"] ?? "");
 
   const rawHome = 1 / homeOdd;
   const rawDraw = 1 / drawOdd;
@@ -10039,6 +10042,23 @@ router.get("/stats", async (req: Request, res: Response) => {
 
   let homeForm: FormEntry[] = [];
   let awayForm: FormEntry[] = [];
+
+  // Real replacement for the synthetic fallback below (GOAL API,
+  // 2026-09-09): when the frontend has real GOAL API team ids for this
+  // fixture (populated on the football live/upcoming builders), fetch each
+  // team's actual last results and derive real form from them instead.
+  if (sport === "football" && homeTeamIdQuery && awayTeamIdQuery && CONFIG.GOAL_API_KEY) {
+    try {
+      const [homeResults, awayResults] = await Promise.all([
+        goalApi.getTeamResults(homeTeamIdQuery).catch(() => null),
+        goalApi.getTeamResults(awayTeamIdQuery).catch(() => null),
+      ]);
+      homeForm = buildGoalApiForm(homeResults);
+      awayForm = buildGoalApiForm(awayResults);
+    } catch (err) {
+      logger.error({ err, homeTeamIdQuery, awayTeamIdQuery }, "[goal-api] team form fetch failed");
+    }
+  }
 
   const realHomeCount = homeForm.length;
   const realAwayCount = awayForm.length;
@@ -12771,12 +12791,10 @@ router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
 
 // ─── Lineups ────────────────────────────────────────────────────────────────
 // Same dead-until-now situation as /storylines above, but football now has a
-// real replacement: GOAL API's /fixtures/:id/lineups. That endpoint's exact
-// field names haven't been confirmed against a real response yet (unlike
-// every other GOAL API endpoint wired into this file), so the raw payload is
-// logged here for verification/correction — buildGoalApiLineups reads it
-// defensively. Non-football matchIds (or GOAL API not configured) get the
-// same empty-but-valid shape the frontend already treats as "not available".
+// real replacement: GOAL API's /fixtures/:id/lineups — field names confirmed
+// real 2026-09-09 (see GoalApiLineupEntry). Non-football matchIds (or GOAL
+// API not configured) get the same empty-but-valid shape the frontend
+// already treats as "not available".
 const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
 // ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
 // GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
