@@ -161,6 +161,7 @@ const lorientBanner = mk("Photorealistic 16:9 football stadium banner for FC Lor
 const brestBanner = mk("Photorealistic 16:9 football stadium banner for Stade Brestois 29 Brest Armorique, Stade Francis Le Ble, red and white colors Brittany sailboat, French Ligue 1, high detail, cinematic stadium photography, no text, no watermark");
 import MatchStatsPanel from "@/components/MatchStatsPanel";
 import PlayerProfileModal from "@/components/PlayerProfileModal";
+import TournamentBracket from "@/components/TournamentBracket";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import PredictionCard from "@/components/PredictionCard";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
@@ -23200,6 +23201,7 @@ export default function Home({
                                 });
 
                                 return (
+                                  <>
                                   <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/80 overflow-hidden">
                                     <div className={`h-0.5 w-full ${sc.bar}`} />
                                     <div className="p-3">
@@ -23267,6 +23269,12 @@ export default function Home({
                                         )}
                                     </div>
                                   </div>
+                                  <TournamentBracket
+                                    tournamentId={expandedTournamentId}
+                                    accentBar={sc.bar}
+                                    accentText={sc.text}
+                                  />
+                                  </>
                                 );
                               })()}
                           </div>
