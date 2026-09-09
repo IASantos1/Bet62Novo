@@ -44,7 +44,12 @@ import {
   proplineFetchMmaLiveAllLeagues,
 } from "../services/propline/mma.js";
 import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
-import { extractGoalApi1x2Odds, goalApiKickoffDateTime } from "../services/goalapi/common.js";
+import {
+  extractGoalApi1x2Odds,
+  goalApiKickoffDateTime,
+  buildGoalApiMatchStats,
+  buildGoalApiEvents,
+} from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
 
@@ -396,6 +401,11 @@ export type LiveMatchState = {
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
+  // Match statistics panel (football/GOAL API only) — possession/shots/
+  // corners/fouls, shaped for the frontend's existing generic stats-row
+  // renderer (home.tsx's V2StatsGroup type, previously fed by the deleted
+  // SportsAPI Pro V2 integration and always empty since).
+  matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -7529,12 +7539,23 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
 
     let redCardsHome = existing?.redCardsHome ?? 0;
     let redCardsAway = existing?.redCardsAway ?? 0;
+    let matchEvents: LiveMatchState["events"] = existing?.events ?? [];
     try {
       const events = await goalApi.getFixtureEvents(fx.id);
       redCardsHome = countGoalApiRedCards(events, "home");
       redCardsAway = countGoalApiRedCards(events, "away");
+      matchEvents = buildGoalApiEvents(events);
     } catch {
-      /* keep previous counts if the events call fails this tick */
+      /* keep previous counts/events if the events call fails this tick */
+    }
+
+    let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
+    try {
+      const stats = await goalApi.getFixtureStatistics(fx.id);
+      const built = buildGoalApiMatchStats(stats);
+      if (built.length > 0) matchStats = built;
+    } catch {
+      /* keep previous stats if unavailable this tick */
     }
 
     const newRedCard =
@@ -7600,7 +7621,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       hasRealOdds: !!resultOdds,
       odds: resultOdds ?? baseOdds,
       markets: baseMarkets,
-      events: [],
+      events: matchEvents,
+      matchStats,
       redCardsHome,
       redCardsAway,
       _lastSeenAt: Date.now(),

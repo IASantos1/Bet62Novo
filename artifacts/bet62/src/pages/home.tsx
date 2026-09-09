@@ -3743,6 +3743,9 @@ type Match = {
     playerId?: number;
     detail?: string;
   }>;
+  // Real match statistics (GOAL API football only) — replaces the deleted
+  // SportsAPI Pro V2 /v2-statistics feed this same shape used to come from.
+  matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
   // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
@@ -6927,23 +6930,52 @@ export default function Home({
   }, [expandedMatch?.id]);
 
   useEffect(() => {
-    // The /v2-statistics backend endpoint (SportsAPI Pro V2) was removed —
-    // there is no replacement source for this per-match stats breakdown, so
-    // this now always settles straight to "not available" instead of polling
-    // a route that no longer exists.
+    // Real replacement source (GOAL API, 2026-09-09) for what the deleted
+    // SportsAPI Pro V2 /v2-statistics feed used to provide — matchStats
+    // already arrives in the same V2StatsGroup shape via the live match
+    // object, so no separate fetch is needed here. Only football/GOAL API
+    // matches populate it; everything else correctly settles to "not
+    // available" exactly as before.
     if (!expandedMatch) return;
+    const real = expandedMatch.matchStats;
+    if (real && real.length > 0) {
+      setV2StatsGroups(real);
+      return;
+    }
     if (v2StatsGroups === null) setV2StatsGroups([]);
-  }, [expandedMatch?.id, v2StatsGroups]);
+  }, [expandedMatch?.id, expandedMatch?.matchStats, v2StatsGroups]);
 
   useEffect(() => {
-    // The /v2-incidents backend endpoint (SportsAPI Pro V2) was removed —
-    // there is no replacement source for the goals/cards/corners timeline,
-    // so this now always settles straight to "not available" instead of
-    // polling a route that no longer exists.
+    // Real replacement source (GOAL API, 2026-09-09) for what the deleted
+    // SportsAPI Pro V2 /v2-incidents feed used to provide — derived from
+    // the live match's own real events array (goals/cards), which already
+    // arrives with the match object with no separate fetch needed.
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
+    const rawEvents = expandedMatch.events ?? [];
+    if (rawEvents.length > 0) {
+      const incidents: V2Incident[] = rawEvents.map((e, i) => {
+        const isGoal = e.type === "goal";
+        const isCard = e.type === "card";
+        const isRed = isCard && (e.detail ?? "").toLowerCase().includes("red");
+        const team: "home" | "away" | "neutral" =
+          e.team === "home" || e.team === "away" ? e.team : "neutral";
+        return {
+          key: `${e.type}-${e.team}-${e.minute}-${i}`,
+          time: `${e.minute}'`,
+          minute: e.minute,
+          team,
+          kind: isGoal ? "goal" : isCard ? "card" : "other",
+          card: isCard ? (isRed ? "red" : "yellow") : null,
+          title: isGoal ? "Golo" : isCard ? (isRed ? "Cartão Vermelho" : "Cartão Amarelo") : e.type,
+          detail: e.player ?? "",
+        };
+      });
+      setV2Incidents(incidents);
+      return;
+    }
     if (v2Incidents === null) setV2Incidents([]);
-  }, [matchViewTab, expandedMatch?.id, expandedMatch?.isLive, v2Incidents]);
+  }, [matchViewTab, expandedMatch?.id, expandedMatch?.isLive, expandedMatch?.events, v2Incidents]);
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
