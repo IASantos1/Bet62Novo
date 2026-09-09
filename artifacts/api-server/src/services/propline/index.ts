@@ -723,7 +723,7 @@ export const propline = {
   getEventOdds: (
     sportKey: string,
     eventId: string,
-    opts?: Parameters<ProplineClient["getEventOdds"]>[1],
+    opts?: Parameters<ProplineClient["getEventOdds"]>[2],
   ) => getProplineClient().getEventOdds(sportKey, eventId, opts),
   getOddsHistory: (
     sportKey: string,
