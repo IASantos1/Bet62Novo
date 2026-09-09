@@ -147,12 +147,15 @@ const GOAL_API_MAX_ODDS_DELTA_PCT = Number(process.env["GOAL_API_MAX_ODDS_DELTA_
 // a Bearer header like GOAL API), and every operation goes through one
 // endpoint with a `method=` selector rather than separate REST paths — the
 // response envelope is `{success, result}`, not GOAL API's `{success,
-// data}`. No webhook/WebSocket exists for this provider — REST polling
-// only, and get_fixtures/get_livescore already embed pointbypoint/scores/
-// statistics inline (no separate per-match calls needed).
+// data}`. get_fixtures/get_livescore already embed pointbypoint/scores/
+// statistics inline (no separate per-match calls needed). A real inbound
+// WebSocket (confirmed 2026-09-09) pushes live event + point-by-point
+// updates using the SAME APIkey — same auth, separate endpoint — used as a
+// low-latency layer on top of the REST poll, never a replacement for it.
 const TENNIS_API_KEY = process.env["TENNIS_API_KEY"] ?? "";
 const TENNIS_API_BASE_URL =
   process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";
+const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss.api-tennis.com/live";
 
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
@@ -208,6 +211,7 @@ export const CONFIG = {
   GOAL_API_MAX_ODDS_DELTA_PCT,
   TENNIS_API_KEY,
   TENNIS_API_BASE_URL,
+  TENNIS_API_WS_URL,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
