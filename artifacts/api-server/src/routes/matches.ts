@@ -429,6 +429,14 @@ export type LiveMatchState = {
   scheduledTime?: string;
   // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
   scheduledDate?: string;
+  // GOAL API's own live Over/Under 2.5 + BTTS odds (football only) — kept
+  // strictly as an internal benchmark/reference, never surfaced as a
+  // published market. calculateLiveFootballMarkets (the Poisson grid also
+  // driving 1X2) is what actually prices these two markets for the bettor;
+  // this field exists only so a future reconciliation/drift-alert layer can
+  // compare BET62's price against the provider's without ever showing the
+  // provider's price directly.
+  _providerReferenceOdds?: { over25?: number; under25?: number; bttsYes?: number; bttsNo?: number };
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
@@ -6142,7 +6150,16 @@ export async function ensureFinishedMatchResult(
 // ────────────────────────────────────────────────────────────────────────────
 const LIVE_MARGIN = 0.06; // 6% house margin (vig)
 
-function calculateLive1x2(state: {
+/** Same Poisson grid backs 1X2, Over/Under 2.5 and BTTS — a live goal
+ * distribution is one model, not three. Previously only 1X2 was derived
+ * this way; Over/Under 2.5 and BTTS were GOAL API's raw live odds passed
+ * straight through (services/goalapi/common.ts's extractGoalApiOverUnder25/
+ * extractGoalApiBothTeamsToScore, called from buildFootballLiveFromGoalApi).
+ * That meant the bettor could see the provider's own live price on those
+ * two markets — this function is what replaces that: BET62's model derives
+ * every live football market, the provider's odds become log-only
+ * reference (see LiveMatchState._liveExtra.providerReferenceOdds). */
+function calculateLiveFootballMarkets(state: {
   minute: number;
   homeGoals: number;
   awayGoals: number;
@@ -6151,9 +6168,19 @@ function calculateLive1x2(state: {
   baseHome: number; // starting odds for this match (model/real)
   baseDraw: number;
   baseAway: number;
-}): { home: number; draw: number; away: number } {
+}): {
+  home: number;
+  draw: number;
+  away: number;
+  over25: number;
+  under25: number;
+  bttsYes: number;
+  bttsNo: number;
+} {
   const r = (n: number) => Math.round(n * 100) / 100;
   const vigFactor = 1 - LIVE_MARGIN;
+  const toOdd = (p: number, cap: number) =>
+    p > 0.005 ? Math.min(cap, Math.max(1.04, r((1 / p) * vigFactor))) : 0;
 
   // 1. Fair pre-match probabilities from odds (normalised)
   const invH = state.baseHome > 1.01 ? 1 / state.baseHome : 0.33;
@@ -6185,7 +6212,11 @@ function calculateLive1x2(state: {
     remainingFrac *
     Math.max(0.4, 1 - 0.12 * state.redCardsAway + 0.04 * state.redCardsHome);
 
-  // 5. Poisson convolution over remaining goals, conditioned on current score
+  // 5. Poisson convolution over remaining goals, conditioned on current score.
+  //    One grid, three markets read off the same (kH, kA) cells:
+  //    - 1X2 from the net-goal-difference sign (unchanged from before).
+  //    - Over/Under 2.5 from the final total (current score + remaining goals).
+  //    - BTTS from whether each side's final tally is ≥ 1.
   //    This guarantees P(Draw) ≥ P(losing team wins) by construction — because
   //    to draw from N goals down requires N net goals; to win requires N+1 net goals.
   const MAX_G = 8;
@@ -6195,7 +6226,9 @@ function calculateLive1x2(state: {
 
   let pHomeWin = 0,
     pDraw = 0,
-    pAwayWin = 0;
+    pAwayWin = 0,
+    pOver25 = 0,
+    pBttsYes = 0;
   for (let kH = 0; kH <= MAX_G; kH++) {
     for (let kA = 0; kA <= MAX_G; kA++) {
       const p = pH[kH]! * pA[kA]!;
@@ -6203,6 +6236,11 @@ function calculateLive1x2(state: {
       if (net > 0) pHomeWin += p;
       else if (net === 0) pDraw += p;
       else pAwayWin += p;
+
+      const finalHome = state.homeGoals + kH;
+      const finalAway = state.awayGoals + kA;
+      if (finalHome + finalAway > 2.5) pOver25 += p;
+      if (finalHome >= 1 && finalAway >= 1) pBttsYes += p;
     }
   }
 
@@ -6211,6 +6249,8 @@ function calculateLive1x2(state: {
   pHomeWin /= total;
   pDraw /= total;
   pAwayWin /= total;
+  pOver25 /= total;
+  pBttsYes /= total;
 
   // Global hard cap: no 1X2 odd exceeds 30.00.
   // Late-game draw rule: at 80+ min with a level score, cap further at 10.00.
@@ -6223,6 +6263,10 @@ function calculateLive1x2(state: {
         ? Math.min(cap, Math.max(1.04, r((1 / pDraw) * vigFactor)))
         : 0,
     away: Math.min(cap, Math.max(1.04, r((1 / pAwayWin) * vigFactor))),
+    over25: toOdd(pOver25, 30.0),
+    under25: toOdd(1 - pOver25, 30.0),
+    bttsYes: toOdd(pBttsYes, 30.0),
+    bttsNo: toOdd(1 - pBttsYes, 30.0),
   };
 }
 
@@ -6287,10 +6331,13 @@ function applyTieredMarketDrift(
 
   // ── Main 1X2 odds (highest priority, 8–15s cadence for live feel) ──────────
   // For football, re-anchor to score-aware Poisson model every tick so that a
-  // team winning 5-0 always has very low odds — not the pre-match line.
-  const liveAnchor: { home: number; draw: number; away: number } =
+  // team winning 5-0 always has very low odds — not the pre-match line. The
+  // same call also derives Over/Under 2.5 and BTTS off the identical grid
+  // (see calculateLiveFootballMarkets/bothTeamsScore+totalGoals below) —
+  // reused here rather than recomputed, since it's the same simulation.
+  const liveFootballMarkets =
     state.sport === "football"
-      ? calculateLive1x2({
+      ? calculateLiveFootballMarkets({
           minute,
           homeGoals: homeScore,
           awayGoals: awayScore,
@@ -6300,7 +6347,9 @@ function applyTieredMarketDrift(
           baseDraw: baseOdds.draw,
           baseAway: baseOdds.away,
         })
-      : baseOdds;
+      : null;
+  const liveAnchor: { home: number; draw: number; away: number } =
+    liveFootballMarkets ?? baseOdds;
 
   const oddsOscH =
     Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
@@ -6390,6 +6439,15 @@ function applyTieredMarketDrift(
 
     bothTeamsScore: btsDue
       ? (() => {
+          // Football: same score/time-aware Poisson grid as the 1X2 anchor
+          // above — not the team-name-only recalcLiveBothTeamsScore other
+          // sports use below, and never the provider's own live BTTS price
+          // (buildFootballLiveFromGoalApi keeps that as reference-only, see
+          // LiveMatchState._liveExtra.providerReferenceOdds).
+          if (liveFootballMarkets) {
+            if (liveFootballMarkets.bttsYes <= 0) return state.markets.bothTeamsScore;
+            return { yes: s1(liveFootballMarkets.bttsYes), no: s1(liveFootballMarkets.bttsNo) };
+          }
           const live = recalcLiveBothTeamsScore(
             state.home,
             state.away,
@@ -6415,13 +6473,22 @@ function applyTieredMarketDrift(
             state.status,
             state.markets.totalGoals,
           );
+          // Football's 2.5 line specifically comes from the same Poisson
+          // grid as the 1X2 anchor and BTTS above, for internal consistency
+          // (a 3-0 scoreline reads the same Over 2.5 probability the 1X2
+          // market itself is priced from). Every other line (0.5-6.5, plus
+          // any sport other than football) keeps the existing team-name-only
+          // recalcLiveTotalGoals model above — extending the grid to those
+          // lines too is out of scope for this pass.
+          const liveOver25 = liveFootballMarkets?.over25 ?? live.over25;
+          const liveUnder25 = liveFootballMarkets?.under25 ?? live.under25;
           return {
             over05: live.over05 > 0 ? Math.min(5.0, s1(live.over05)) : 0,
             under05: live.under05 > 0 ? s1(live.under05) : 0,
             over15: live.over15 > 0 ? Math.min(49.99, s1(live.over15)) : 0,
             under15: live.under15 > 0 ? s1(live.under15) : 0,
-            over25: live.over25 > 0 ? Math.min(49.99, s1(live.over25)) : 0,
-            under25: live.under25 > 0 ? s1(live.under25) : 0,
+            over25: liveOver25 > 0 ? Math.min(49.99, s1(liveOver25)) : 0,
+            under25: liveUnder25 > 0 ? s1(liveUnder25) : 0,
             over35: live.over35 > 0 ? Math.min(49.99, s1(live.over35)) : 0,
             under35: live.under35 > 0 ? s1(live.under35) : 0,
             over45: live.over45 > 0 ? Math.min(49.99, s1(live.over45)) : 0,
@@ -7540,9 +7607,27 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
 
 const GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
 
-/** Football live from GOAL API — /fixtures/live gives real minute/status
- * directly (unlike PropLine, which never returns a soccer clock), so no
- * elapsed-time estimation is needed here. Live odds come from a separate
+// No confirmed elapsed-minute field exists on /fixtures/live yet (never
+// guessed a field name — same policy as everywhere else in this file), but
+// the live Poisson model (calculateLiveFootballMarkets) needs SOME minute
+// to scale remaining time, and kickoffUtc is real and already trusted
+// elsewhere. Estimated, not authoritative — swap for a real field the
+// moment a pasted response reveals one.
+const GOAL_API_ESTIMATED_HALFTIME_BREAK_MINUTES = 15;
+
+function estimateGoalApiLiveMinute(fx: GoalApiFixture): number {
+  if (fx.matchStatus === "HALF_TIME") return 45;
+  const kickoffMs = fx.kickoffUtc ? Date.parse(fx.kickoffUtc) : NaN;
+  if (!Number.isFinite(kickoffMs)) return 0;
+  const elapsedMin = (Date.now() - kickoffMs) / 60_000;
+  if (elapsedMin <= 45) return Math.max(0, Math.floor(elapsedMin));
+  // Past the 45' mark in wall-clock time: assume halftime already happened
+  // and discount its (estimated) length before resuming the clock.
+  const secondHalfMinute = elapsedMin - GOAL_API_ESTIMATED_HALFTIME_BREAK_MINUTES;
+  return Math.min(90, Math.max(45, Math.floor(secondHalfMinute)));
+}
+
+/** Football live from GOAL API — market suspension and odds come from a separate
  * call since the provider's own docs confirm they refresh only every ~2
  * minutes regardless of channel — see GoalApiClient.getFixtureLiveOdds's
  * own comment.
@@ -7610,6 +7695,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     // never a fabricated synthetic fallback just because one poll looked
     // suspicious.
     let resultOdds: { home: number; draw: number; away: number } | null = null;
+    let providerReferenceOdds: LiveMatchState["_providerReferenceOdds"] = existing?._providerReferenceOdds;
     try {
       const oddsList = await goalApi.getFixtureLiveOdds(fx.id);
       const candidate = extractGoalApi1x2Odds(oddsList);
@@ -7625,17 +7711,18 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
           resultOdds = previousReal;
         }
       }
-      // Same two markets patched on the prematch builder — no variation
-      // guard here since, unlike the 1X2 result, there's no previous real
-      // value tracked for these on LiveMatchState to compare against.
+      // Unlike the prematch builder, these two markets are NOT patched onto
+      // baseMarkets here — live, the bettor must only ever see BET62's own
+      // price (calculateLiveFootballMarkets, applied in applyTieredMarketDrift).
+      // The provider's live odds are captured below purely as an internal
+      // reference/benchmark for a future drift-alert comparison.
       const overUnder = extractGoalApiOverUnder25(oddsList);
-      if (overUnder) {
-        baseMarkets.totalGoals.over25 = overUnder.over;
-        baseMarkets.totalGoals.under25 = overUnder.under;
-      }
       const bts = extractGoalApiBothTeamsToScore(oddsList);
-      if (bts) {
-        baseMarkets.bothTeamsScore = { yes: bts.yes, no: bts.no };
+      if (overUnder || bts) {
+        providerReferenceOdds = {
+          ...(overUnder ? { over25: overUnder.over, under25: overUnder.under } : {}),
+          ...(bts ? { bttsYes: bts.yes, bttsNo: bts.no } : {}),
+        };
       }
     } catch {
       /* fall back to synthetic below */
@@ -7669,10 +7756,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore: homeScore as number,
       awayScore: awayScore as number,
-      // No confirmed elapsed-minute field on the real payload yet — 0 until
-      // a real /fixtures/live example reveals the actual field name (never
-      // guessed, same policy as everywhere else in this file).
-      minute: 0,
+      minute: estimateGoalApiLiveMinute(fx),
       status: fx.matchStatus,
       hasRealOdds: !!resultOdds,
       odds: resultOdds ?? baseOdds,
@@ -7681,6 +7765,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       matchStats,
       redCardsHome,
       redCardsAway,
+      _providerReferenceOdds: providerReferenceOdds,
       _lastSeenAt: Date.now(),
       marketSuspension,
       _suspensionReason: suspensionReason,
@@ -7775,6 +7860,27 @@ export async function applyGoalApiWebhookEvent(event: {
     }
     liveMatchState.delete(id);
     return;
+  }
+
+  // match.status_changed placeholder for VAR: no real payload pasted this
+  // session has shown a dedicated VAR event or matchStatus (confirmed real
+  // values so far: SCHEDULED, FINISHED, AFTER_ET, AFTER_PEN, LIVE,
+  // HALF_TIME) — status_changed is the closest real signal available, and
+  // any status transition mid-match plausibly follows a review (penalty
+  // given/overturned, goal disallowed), so it's suspended at the same
+  // highest tier as a red card until confirmed otherwise. Conservative by
+  // design: this can suspend on status changes that aren't VAR at all
+  // (e.g. HT), which only costs a brief, safe pause — never a wrong price.
+  if (event.event === "match.status_changed") {
+    const existing = liveMatchState.get(id);
+    if (existing) {
+      const now = Date.now();
+      liveMatchState.set(id, {
+        ...existing,
+        marketSuspension: Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)])),
+        _suspensionReason: "VERIFICAÇÃO EM CURSO",
+      });
+    }
   }
 
   // match.started / goal.scored / score.changed / match.status_changed —
