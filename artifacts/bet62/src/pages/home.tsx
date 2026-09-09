@@ -7026,15 +7026,17 @@ export default function Home({
       setStandingsGroups(safeGroups);
       return true;
     };
+    const leagueId = expandedMatch.leagueId;
     const loadV1 = () =>
       fetch(
-        `/api/matches/league-standings?league=${encodeURIComponent(league)}`,
+        `/api/matches/league-standings?league=${encodeURIComponent(league)}${leagueId ? `&leagueId=${encodeURIComponent(leagueId)}` : ""}`,
       )
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (!d || !Array.isArray(d.teams)) return;
+          const groups = Array.isArray(d.groups) ? (d.groups as Array<{ name: string; rows: StandingRow[] }>) : null;
           if (
-            !acceptStandings(d.teams as StandingRow[], null, d.league ?? league)
+            !acceptStandings(d.teams as StandingRow[], groups, d.league ?? league)
           ) {
             setStandings([]);
             setStandingsGroups(null);
@@ -7042,9 +7044,11 @@ export default function Home({
           }
         });
     // The /v2-standings backend endpoint (SportsAPI Pro V2) was removed.
-    // Football still resolves standings via the V1 league-standings route;
-    // other sports had no other source for per-match standings, so they now
-    // settle straight to "not available".
+    // Football still resolves standings via the league-standings route —
+    // real GOAL API data when leagueId is known (see buildGoalApiStandings
+    // on the backend), synthetic otherwise; other sports had no other
+    // source for per-match standings, so they now settle straight to "not
+    // available".
     const sport = expandedMatch.sport ?? "football";
     if (sport === "football") {
       loadV1()
