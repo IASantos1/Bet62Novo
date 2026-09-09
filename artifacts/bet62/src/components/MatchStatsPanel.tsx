@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart2, Activity, Users, TrendingUp, Lightbulb,
-  Zap, Circle, ChevronRight, Loader2, ListOrdered
+  Zap, Circle, ChevronRight, Loader2, ListOrdered, Target
 } from "lucide-react";
 
 type MatchStatsData = {
@@ -41,6 +41,7 @@ type StandingRow = {
   pts: number;
 };
 type StandingsGroup = { name: string; rows: StandingRow[] };
+type TopScorerRow = { rank: number; playerName: string; teamName: string; goals: number; assists: number; penaltyGoals: number };
 
 function rowMatchesTeam(rowName: string, teamName: string): boolean {
   const norm = (s: string) =>
@@ -193,6 +194,8 @@ type Props = {
   standingsGroups?: StandingsGroup[] | null;
   standingsLoading?: boolean;
   standingsLeague?: string;
+  topScorers?: TopScorerRow[] | null;
+  topScorersLoading?: boolean;
   homeScore?: number;
   awayScore?: number;
 };
@@ -379,7 +382,7 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
   );
 }
 
-type TabId = "prob" | "stats" | "h2h" | "classificacao" | "forma" | "eventos" | "insight";
+type TabId = "prob" | "stats" | "h2h" | "classificacao" | "artilheiros" | "forma" | "eventos" | "insight";
 
 function AnimatedBar({ pct, color, delay = 0 }: { pct: number; color: string; delay?: number }) {
   return (
@@ -579,6 +582,7 @@ export default function MatchStatsPanel({
   confrontosData, homeUpcoming = [], awayUpcoming = [], onGoH2H, onGoLive, onAddInsight,
   liveExtra, storyline,
   standings, standingsGroups, standingsLoading, standingsLeague,
+  topScorers, topScorersLoading,
   homeScore, awayScore,
 }: Props) {
   const isFootball = !sport || sport === "football";
@@ -600,6 +604,9 @@ export default function MatchStatsPanel({
     if (standingsLoading || (standings && standings.length > 0) || (standingsGroups && standingsGroups.length > 0)) {
       tabs.push({ id: "classificacao", label: "Classificação", icon: <ListOrdered size={12} /> });
     }
+    if (isFootball && (topScorersLoading || (topScorers && topScorers.length > 0))) {
+      tabs.push({ id: "artilheiros", label: "Artilheiros", icon: <Target size={12} /> });
+    }
     if (isFootball && matchStats?.formIsReal) {
       tabs.push({ id: "forma", label: "Forma", icon: <TrendingUp size={12} /> });
     }
@@ -607,7 +614,7 @@ export default function MatchStatsPanel({
       tabs.push({ id: "insight", label: "Storyline", icon: <Lightbulb size={12} /> });
     }
     return tabs;
-  }, [isFootball, matchStats, confrontosData, hasEvents, storyline, standings, standingsGroups, standingsLoading]);
+  }, [isFootball, matchStats, confrontosData, hasEvents, storyline, standings, standingsGroups, standingsLoading, topScorers, topScorersLoading]);
 
   const defaultTab: TabId = isFootball && matchStats ? "prob" : "stats";
   const [tab, setTab] = useState<TabId>(defaultTab);
@@ -1574,6 +1581,48 @@ export default function MatchStatsPanel({
                     </div>
                   );
                 })()
+              )}
+            </div>
+          )}
+
+          {/* ── ARTILHEIROS ── */}
+          {activeTab === "artilheiros" && (
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+              {topScorersLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="animate-spin text-blue-400" size={28} />
+                </div>
+              ) : !topScorers || topScorers.length === 0 ? (
+                <div className="text-center text-zinc-500 py-8 text-sm">
+                  Artilheiros indisponíveis para esta liga.
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-zinc-500 border-b border-zinc-800">
+                      <th className="text-left py-1.5 pr-2 font-bold w-6">#</th>
+                      <th className="text-left py-1.5 font-bold">Jogador</th>
+                      <th className="text-left py-1.5 font-bold">Equipa</th>
+                      <th className="text-center py-1.5 px-1 font-bold text-white">Golos</th>
+                      <th className="text-center py-1.5 px-1 font-bold">Assist.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topScorers.map((row, ri) => {
+                      const isHome = rowMatchesTeam(row.teamName, homeTeam);
+                      const isAway = rowMatchesTeam(row.teamName, awayTeam);
+                      return (
+                        <tr key={ri} className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}>
+                          <td className="py-2 pr-2 text-zinc-500">{row.rank}</td>
+                          <td className={`py-2 font-semibold truncate max-w-[140px] ${isHome || isAway ? "text-white" : "text-zinc-300"}`}>{row.playerName}</td>
+                          <td className="py-2 truncate max-w-[100px] text-zinc-400">{row.teamName}</td>
+                          <td className="py-2 text-center font-black text-white">{row.goals}</td>
+                          <td className="py-2 text-center text-zinc-400">{row.assists}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
             </div>
           )}

@@ -50,6 +50,7 @@ import {
   buildGoalApiMatchStats,
   buildGoalApiEvents,
   buildGoalApiLineups,
+  buildGoalApiTopScorers,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -7493,6 +7494,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
+        leagueId: fx.leagueId,
       });
     }
   }
@@ -7636,6 +7638,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       _suspensionReason: suspensionReason,
       homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
       awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
+      leagueId: fx.leagueId ?? existing?.leagueId,
     };
     liveMatchState.set(id, state);
     results.push(state);
@@ -12749,6 +12752,26 @@ router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
 // defensively. Non-football matchIds (or GOAL API not configured) get the
 // same empty-but-valid shape the frontend already treats as "not available".
 const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
+// ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
+// GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
+// by GOAL API's own leagueId (fx.leagueId, now populated on the football
+// upcoming/live builders above), not by league name like the legacy
+// /league-standings route.
+router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
+  const leagueId = req.params.leagueId ?? "";
+  if (!leagueId || !CONFIG.GOAL_API_KEY) {
+    res.json({ scorers: [] });
+    return;
+  }
+  try {
+    const raw = await goalApi.getLeagueTopScorers(leagueId);
+    res.json({ scorers: buildGoalApiTopScorers(raw) });
+  } catch (err) {
+    logger.error({ err, leagueId }, "[goal-api] top-scorers fetch failed");
+    res.json({ scorers: [] });
+  }
+});
+
 router.get("/lineups/:matchId", async (req: Request, res: Response) => {
   const matchId = req.params.matchId ?? "";
   const empty = {

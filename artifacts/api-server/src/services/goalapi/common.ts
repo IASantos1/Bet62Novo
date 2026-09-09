@@ -9,6 +9,7 @@ import type {
   GoalApiLineups,
   GoalApiLineupTeam,
   GoalApiLineupPlayerEntry,
+  GoalApiTopScorer,
 } from "./index.js";
 
 /** Shapes GOAL API's per-fixture statistics into the frontend's existing
@@ -157,6 +158,24 @@ export function buildGoalApiLineups(
     home: buildLineupTeam(raw?.home, homeFormationFallback),
     away: buildLineupTeam(raw?.away, awayFormationFallback),
   };
+}
+
+export type BuiltTopScorer = { rank: number; playerName: string; teamName: string; goals: number; assists: number; penaltyGoals: number };
+
+/** Maps GOAL API's /leagues/:id/top-scorers response (confirmed real,
+ * 2026-09-09) into a compact ranked list for the frontend's "Artilheiros"
+ * tab. goals/assists/penaltyGoals arrive as numeric strings on the raw
+ * response, same convention as fixture scores elsewhere in this file. */
+export function buildGoalApiTopScorers(raw: GoalApiTopScorer[] | null | undefined): BuiltTopScorer[] {
+  if (!raw) return [];
+  return raw.map((s) => ({
+    rank: Number(s.playerPlace) || 0,
+    playerName: s.playerName,
+    teamName: s.teamName,
+    goals: Number(s.goals) || 0,
+    assists: Number(s.assists) || 0,
+    penaltyGoals: Number(s.penaltyGoals) || 0,
+  }));
 }
 
 /** ISO-8601 kickoffUtc → { date: "DD.MM.YYYY", time: "HH:MM" } in
