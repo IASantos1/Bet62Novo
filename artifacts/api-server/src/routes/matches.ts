@@ -45,6 +45,7 @@ import {
 } from "../services/propline/mma.js";
 import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
 import { extractGoalApi1x2Odds, goalApiKickoffDateTime } from "../services/goalapi/common.js";
+import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 
 
 const router: IRouter = Router();
@@ -7492,11 +7493,17 @@ const GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
  * elapsed-time estimation is needed here. Live odds come from a separate
  * call since the provider's own docs confirm they refresh only every ~2
  * minutes regardless of channel — see GoalApiClient.getFixtureLiveOdds's
- * own comment. Goal-triggered market suspension follows the same
- * marketSuspension/_suspensionReason convention every sport in this file
- * already uses (score-delta trigger for this first REST-only pass; a real
- * event-driven trigger — actual goal/red-card incidents from
- * /fixtures/:id/events — lands with the Live Match Engine in a follow-up). */
+ * own comment.
+ *
+ * Market suspension covers all of FOOTBALL_SUSP_KEYS (26 markets), tiered
+ * by risk exactly like the old SportMonks integration did
+ * (footballSuspensionDelayMs from lib/config.ts — never reinvented here):
+ * a goal uses the "goal" tier; a red card — detected via
+ * countGoalApiRedCards against /fixtures/:id/events, since a red card
+ * doesn't move the score the way a goal does — uses the higher "var" tier,
+ * same choice the deleted SportMonks/API-Football cross-reference made for
+ * the same reason (a red card swings the match materially more than a
+ * routine goal). */
 async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
   if (!CONFIG.GOAL_API_KEY) return [];
   const fixtures = await goalApi.getLiveFixtures().catch(() => [] as GoalApiFixture[]);
@@ -7527,6 +7534,16 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const baseOdds = makeOddsFromTeams(home, away);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
+    let redCardsHome = existing?.redCardsHome ?? 0;
+    let redCardsAway = existing?.redCardsAway ?? 0;
+    try {
+      const events = await goalApi.getFixtureEvents(fx.id);
+      redCardsHome = countGoalApiRedCards(events, "home");
+      redCardsAway = countGoalApiRedCards(events, "away");
+    } catch {
+      /* keep previous counts if the events call fails this tick */
+    }
+
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
       ? { ...existing.marketSuspension }
       : undefined;
@@ -7535,15 +7552,17 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       marketSuspension = Object.keys(active).length > 0 ? active : undefined;
     }
     let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+
+    const newRedCard =
+      !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
     const goalScored = !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
-    if (goalScored) {
+    if (newRedCard) {
       const now = Date.now();
-      marketSuspension = {
-        result: now + CONFIG.REOPEN_DELAY_GOAL_LOW,
-        handicap: now + CONFIG.REOPEN_DELAY_GOAL_LOW,
-        totalGoals: now + CONFIG.REOPEN_DELAY_GOAL_LOW,
-        doubleChance: now + CONFIG.REOPEN_DELAY_GOAL_LOW,
-      };
+      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]));
+      suspensionReason = "CARTÃO VERMELHO!";
+    } else if (goalScored) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]));
       suspensionReason = "GOL!";
     }
 
@@ -7562,6 +7581,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       odds: resultOdds ?? baseOdds,
       markets: baseMarkets,
       events: [],
+      redCardsHome,
+      redCardsAway,
       _lastSeenAt: Date.now(),
       marketSuspension,
       _suspensionReason: suspensionReason,
