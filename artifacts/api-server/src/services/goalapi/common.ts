@@ -192,7 +192,7 @@ export function extractGoalApiBothTeamsToScore(
 }
 
 export type BuiltLineupPlayer = { name: string; shortName?: string; position: string; number: string; rating?: number };
-export type BuiltLineupTeam = { formation?: string; starters: BuiltLineupPlayer[]; bench: BuiltLineupPlayer[] };
+export type BuiltLineupTeam = { formation?: string; coach?: string; starters: BuiltLineupPlayer[]; bench: BuiltLineupPlayer[] };
 export type BuiltLineups = { confirmed: boolean; home: BuiltLineupTeam; away: BuiltLineupTeam };
 
 function buildLineupPlayer(entry: GoalApiLineupEntry): BuiltLineupPlayer {
@@ -206,7 +206,8 @@ function buildLineupPlayer(entry: GoalApiLineupEntry): BuiltLineupPlayer {
 function buildLineupTeam(team: GoalApiLineupTeam | undefined, formationFallback?: string | null): BuiltLineupTeam {
   const starters = (team?.startingLineups ?? []).map(buildLineupPlayer);
   const bench = (team?.substitutes ?? []).map(buildLineupPlayer);
-  return { formation: formationFallback ?? undefined, starters, bench };
+  const coach = team?.coach?.[0]?.lineupPlayer;
+  return { formation: formationFallback ?? undefined, coach: coach ?? undefined, starters, bench };
 }
 
 /** Maps GOAL API's /fixtures/:id/lineups response into the frontend's
@@ -224,7 +225,11 @@ function buildLineupTeam(team: GoalApiLineupTeam | undefined, formationFallback?
  * fixture" (there is no separate official-vs-provisional flag).
  * formationFallback still backs the fixture's own homeTeamSystem/
  * awayTeamSystem (confirmed real) for the case homeFormation/
- * awayFormation are null, which happens before kickoff. */
+ * awayFormation are null, which happens before kickoff. The "coach"
+ * array (same flat entry shape, type:"coach") was already being fetched
+ * here but discarded until now — its first entry's name is surfaced as
+ * the head coach, confirmed real via a raw response pasted 2026-09-09
+ * (also confirmed as its own first-class /coaches resource). */
 export function buildGoalApiLineups(
   raw: GoalApiLineups | null | undefined,
   homeFormationFallback?: string | null,
