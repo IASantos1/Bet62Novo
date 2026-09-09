@@ -1,6 +1,51 @@
 // Shared, sport-agnostic (well — football is the only sport this provider
 // covers) extraction helpers for GOAL API responses.
-import type { GoalApiFixture, GoalApiOdds } from "./index.js";
+import type { GoalApiFixture, GoalApiOdds, GoalApiFixtureStatistics, GoalApiMatchEvent } from "./index.js";
+
+/** Shapes GOAL API's per-fixture statistics into the frontend's existing
+ * generic stats-row renderer (home.tsx's V2StatsGroup type) — previously
+ * fed by the deleted SportsAPI Pro V2 integration and hardcoded to an
+ * empty array ever since. Only includes a row when at least one side has
+ * a real value for it, so a field the provider hasn't populated for this
+ * fixture yet just doesn't show up rather than rendering a fake "0". */
+export function buildGoalApiMatchStats(
+  stats: GoalApiFixtureStatistics | null | undefined,
+): Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> {
+  if (!stats) return [];
+  const rows: Array<{ name: string; home: string; away: string }> = [];
+  const add = (name: string, home: unknown, away: unknown) => {
+    if (home == null && away == null) return;
+    rows.push({ name, home: home != null ? String(home) : "-", away: away != null ? String(away) : "-" });
+  };
+  add("Posse de bola", stats.home.possession, stats.away.possession);
+  add("Remates", stats.home.shotsOnGoal != null && stats.home.shotsOffGoal != null
+    ? stats.home.shotsOnGoal + stats.home.shotsOffGoal
+    : undefined, stats.away.shotsOnGoal != null && stats.away.shotsOffGoal != null
+    ? stats.away.shotsOnGoal + stats.away.shotsOffGoal
+    : undefined);
+  add("Remates à baliza", stats.home.shotsOnGoal, stats.away.shotsOnGoal);
+  add("Remates fora", stats.home.shotsOffGoal, stats.away.shotsOffGoal);
+  add("Cantos", stats.home.corners, stats.away.corners);
+  add("Faltas", stats.home.fouls, stats.away.fouls);
+  if (rows.length === 0) return [];
+  return [{ title: "Estatísticas do Jogo", rows }];
+}
+
+/** Maps GOAL API's raw match events into the shape routes/matches.ts's
+ * LiveMatchState.events field already expects (same field every other
+ * provider in this file populates). */
+export function buildGoalApiEvents(
+  events: GoalApiMatchEvent[] | null | undefined,
+): Array<{ type: string; team: string; minute: number; player: string; detail?: string }> {
+  if (!events) return [];
+  return events.map((e) => ({
+    type: e.type,
+    team: e.team,
+    minute: e.minute,
+    player: e.player,
+    detail: e.detail,
+  }));
+}
 
 /** Picks the first bookmaker entry that actually has a 1x2 price — GOAL
  * API's odds array is one entry per bookmaker, unlike PropLine's
