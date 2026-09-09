@@ -7457,7 +7457,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
   const seen = new Set<string>();
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
-      if (fx.status !== "SCHEDULED" && fx.status !== "NS") continue;
+      if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
       const home = stripGenderTeamSuffix(fx.homeTeam?.name);
       const away = stripGenderTeamSuffix(fx.awayTeam?.name);
       if (!home || !away) continue;
@@ -7490,6 +7490,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         markets: baseMarkets,
         isWomens: isWomensLeague(fx.leagueName ?? ""),
         isPriorityLeague: true,
+        homeLogoUrl: fx.homeTeam?.badge,
+        awayLogoUrl: fx.awayTeam?.badge,
       });
     }
   }
@@ -7526,9 +7528,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const home = stripGenderTeamSuffix(fx.homeTeam?.name);
     const away = stripGenderTeamSuffix(fx.awayTeam?.name);
     if (!home || !away) continue;
-    const scoreParts = (fx.score ?? "").split("-").map((s) => Number(s.trim()));
-    const homeScore = scoreParts[0];
-    const awayScore = scoreParts[1];
+    const homeScore = Number(fx.homeTeamScore);
+    const awayScore = Number(fx.awayTeamScore);
     if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
 
     const id = `goalapi-football-${fx.id}`;
@@ -7617,8 +7618,11 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore: homeScore as number,
       awayScore: awayScore as number,
-      minute: fx.minute ?? 0,
-      status: fx.status,
+      // No confirmed elapsed-minute field on the real payload yet — 0 until
+      // a real /fixtures/live example reveals the actual field name (never
+      // guessed, same policy as everywhere else in this file).
+      minute: 0,
+      status: fx.matchStatus,
       hasRealOdds: !!resultOdds,
       odds: resultOdds ?? baseOdds,
       markets: baseMarkets,
@@ -7629,6 +7633,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       _lastSeenAt: Date.now(),
       marketSuspension,
       _suspensionReason: suspensionReason,
+      homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
+      awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
     };
     liveMatchState.set(id, state);
     results.push(state);
@@ -7682,7 +7688,8 @@ export async function applyGoalApiWebhookEvent(event: {
         const home = stripGenderTeamSuffix(fx.homeTeam?.name);
         const away = stripGenderTeamSuffix(fx.awayTeam?.name);
         if (!home || !away) return;
-        const scoreParts = (fx.score ?? "").split("-").map((s) => Number(s.trim()));
+        const homeScore = Number(fx.homeTeamScore);
+        const awayScore = Number(fx.awayTeamScore);
         state = {
           id,
           home,
@@ -7690,10 +7697,10 @@ export async function applyGoalApiWebhookEvent(event: {
           league: fx.leagueName ?? "Futebol",
           country: "Internacional",
           sport: "football",
-          homeScore: Number.isFinite(scoreParts[0]) ? (scoreParts[0] as number) : 0,
-          awayScore: Number.isFinite(scoreParts[1]) ? (scoreParts[1] as number) : 0,
-          minute: fx.minute ?? 90,
-          status: fx.status,
+          homeScore: Number.isFinite(homeScore) ? homeScore : 0,
+          awayScore: Number.isFinite(awayScore) ? awayScore : 0,
+          minute: 90,
+          status: fx.matchStatus,
           hasRealOdds: false,
           odds: makeOddsFromTeams(home, away),
           markets: makeAdvancedMarketsFromTeams(home, away),
