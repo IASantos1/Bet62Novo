@@ -7544,7 +7544,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       const events = await goalApi.getFixtureEvents(fx.id);
       redCardsHome = countGoalApiRedCards(events, "home");
       redCardsAway = countGoalApiRedCards(events, "away");
-      matchEvents = buildGoalApiEvents(events);
+      const substitutions = await goalApi.getFixtureSubstitutions(fx.id).catch(() => []);
+      matchEvents = buildGoalApiEvents(events, substitutions);
     } catch {
       /* keep previous counts/events if the events call fails this tick */
     }

@@ -58,6 +58,13 @@ export type GoalApiMatchEvent = {
   detail?: string;
 };
 
+export type GoalApiSubstitution = {
+  minute: number;
+  team: "home" | "away";
+  playerOut: string;
+  playerIn: string;
+};
+
 export type GoalApiTeamStats = {
   shotsOnGoal?: number;
   shotsOffGoal?: number;
@@ -176,6 +183,14 @@ export class GoalApiClient {
     );
   }
 
+  getFixtureSubstitutions(id: string): Promise<GoalApiSubstitution[]> {
+    return this.cachedGet<GoalApiSubstitution[]>(
+      `/fixtures/${encodeURIComponent(id)}/substitutions`,
+      undefined,
+      GOAL_API_TTL.LIVE,
+    );
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -241,6 +256,7 @@ export const goalApi = {
   getFixtureById: (id: string) => getGoalApiClient().getFixtureById(id),
   getFixtureEvents: (id: string) => getGoalApiClient().getFixtureEvents(id),
   getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
+  getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
