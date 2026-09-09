@@ -4,6 +4,21 @@
 // this factors the common extraction logic out instead of each sport
 // module re-duplicating it.
 import type { ProplineBookmaker, ProplineScore } from "./index.js";
+import { normalizeTeamName, isFuzzyMatch } from "./football.js";
+
+/** PropLine's `oddsFormat: "decimal"` request param isn't honored for every
+ * sport/market — basketball/hockey/volleyball/mma responses observed in
+ * production 2026-09-09 came back as raw American prices (e.g. -7000, 1100)
+ * despite the request, producing wildly wrong "decimal" odds once displayed
+ * as-is. American odds are never in the [-99, 99] range by definition, so
+ * any price outside that band is converted; anything already inside it is
+ * assumed to already be a real decimal price and passed through untouched. */
+function proplineNormalizeOddsPrice(price: number): number {
+  if (!Number.isFinite(price)) return price;
+  if (price <= -100) return Math.round((1 + 100 / Math.abs(price)) * 100) / 100;
+  if (price >= 100) return Math.round((1 + price / 100) * 100) / 100;
+  return price;
+}
 
 /** Preference/positional-fallback H2H (moneyline) extraction validated
  * against real PropLine responses earlier this session: tries a curated
@@ -11,9 +26,9 @@ import type { ProplineBookmaker, ProplineScore } from "./index.js";
  * outcome POSITION only when PropLine's own documented ordering guarantee
  * applies (home, away, then draw when threeWay) and the count matches
  * exactly. Returns null (never a fabricated price) when no h2h market is
- * found for any bookmaker. Odds are requested in decimal format
- * (oddsFormat: "decimal") by the callers below, so no American→decimal
- * conversion is needed here. */
+ * found for any bookmaker. Every price is run through
+ * proplineNormalizeOddsPrice before being returned (see its own comment —
+ * requesting oddsFormat: "decimal" doesn't guarantee a decimal response). */
 export function extractProplineH2HOdds(
   bookmakers: ProplineBookmaker[] | null | undefined,
   home: string,
@@ -53,7 +68,11 @@ export function extractProplineH2HOdds(
     }
     if (homePrice == null || awayPrice == null) continue;
     if (threeWay && drawPrice == null) continue;
-    return { home: homePrice, draw: threeWay && drawPrice != null ? drawPrice : 0, away: awayPrice };
+    return {
+      home: proplineNormalizeOddsPrice(homePrice),
+      draw: threeWay && drawPrice != null ? proplineNormalizeOddsPrice(drawPrice) : 0,
+      away: proplineNormalizeOddsPrice(awayPrice),
+    };
   }
   return null;
 }
@@ -120,4 +139,43 @@ export function proplineEventDateTime(startTime: string): { date: string; time: 
     date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
     time: `${hh}:${mm}`,
   };
+}
+
+/** PropLine sometimes lists the exact same real-world fixture as two
+ * separate events when a bookmaker/region reports a team's name in a
+ * different language — confirmed in production 2026-09-09 with a
+ * volleyball "Turkiye vs Alemanha" and "Turquia vs Alemanha" pair at the
+ * same kickoff time and nearly identical odds. normalizeTeamName's
+ * accent/case folding can't unify genuinely different-language spellings
+ * of the same country, so this dedupes by exact kickoff date+time plus a
+ * fuzzy match on at least one side's team name (checked both straight and
+ * crossed, in case one language pairs differently) — keeping whichever
+ * duplicate carries real bookmaker odds when only one of them does. */
+export function dedupeProplineFixtures<
+  T extends { date: string; time: string; home: string; away: string; hasRealOdds?: boolean },
+>(matches: T[]): T[] {
+  const kept: T[] = [];
+  for (const m of matches) {
+    const mHome = normalizeTeamName(m.home);
+    const mAway = normalizeTeamName(m.away);
+    const dupIndex = kept.findIndex((k) => {
+      if (k.date !== m.date || k.time !== m.time) return false;
+      const kHome = normalizeTeamName(k.home);
+      const kAway = normalizeTeamName(k.away);
+      return (
+        isFuzzyMatch(kHome, mHome, 0.22) ||
+        isFuzzyMatch(kAway, mAway, 0.22) ||
+        isFuzzyMatch(kHome, mAway, 0.22) ||
+        isFuzzyMatch(kAway, mHome, 0.22)
+      );
+    });
+    if (dupIndex === -1) {
+      kept.push(m);
+      continue;
+    }
+    if (!kept[dupIndex].hasRealOdds && m.hasRealOdds) {
+      kept[dupIndex] = m;
+    }
+  }
+  return kept;
 }
