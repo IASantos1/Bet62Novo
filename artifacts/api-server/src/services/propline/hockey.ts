@@ -12,6 +12,14 @@ export function extractProplineHockeyOdds(bookmakers: ProplineEvent["bookmakers"
   return extractProplineH2HOdds(bookmakers, home, away, false);
 }
 
+// Full match hockey always has a winner (OT/shootout), so the moneyline
+// above is 2-way — but a single regulation period genuinely can end tied,
+// so the 1st-period market is priced 3-way (home/draw/away), same shape as
+// this app's existing synthetic halfTime field for hockey.
+export function extractProplineHockeyPeriod1Odds(bookmakers: ProplineEvent["bookmakers"], home: string, away: string) {
+  return extractProplineH2HOdds(bookmakers, home, away, true);
+}
+
 export type ProplineHockeyLeagueOdds = { sportKey: string; events: ProplineEvent[] };
 
 export async function proplineFetchHockeyOddsAllLeagues(): Promise<ProplineHockeyLeagueOdds[]> {
@@ -20,6 +28,18 @@ export async function proplineFetchHockeyOddsAllLeagues(): Promise<ProplineHocke
     PROPLINE_HOCKEY_SPORT_KEYS.map(async (sportKey) => ({
       sportKey,
       events: await propline.getOdds(sportKey, { markets: ["h2h"], oddsFormat: "decimal" }).catch(() => []),
+    })),
+  );
+}
+
+export async function proplineFetchHockeyPeriod1OddsAllLeagues(): Promise<ProplineHockeyLeagueOdds[]> {
+  if (!CONFIG.PROPLINE_API_KEY) return [];
+  return Promise.all(
+    PROPLINE_HOCKEY_SPORT_KEYS.map(async (sportKey) => ({
+      sportKey,
+      events: await propline
+        .getOdds(sportKey, { markets: ["h2h"], oddsFormat: "decimal", period: "p1" })
+        .catch(() => []),
     })),
   );
 }

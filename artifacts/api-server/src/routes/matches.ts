@@ -24,11 +24,14 @@ import {
   extractProplineBasketballOdds,
   proplineFetchBasketballOddsAllLeagues,
   proplineFetchBasketballLiveAllLeagues,
+  proplineFetchBasketballPeriodOddsAllLeagues,
 } from "../services/propline/basketball.js";
 import {
   extractProplineHockeyOdds,
+  extractProplineHockeyPeriod1Odds,
   proplineFetchHockeyOddsAllLeagues,
   proplineFetchHockeyLiveAllLeagues,
+  proplineFetchHockeyPeriod1OddsAllLeagues,
 } from "../services/propline/hockey.js";
 import {
   extractProplineVolleyballOdds,
@@ -7421,11 +7424,17 @@ const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
  * extractProplineBasketballOdds wherever a bookmaker prices it; falls back
  * to the synthetic model otherwise (hasRealOdds:false). */
 async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
-  const perLeague = await proplineFetchBasketballOddsAllLeagues();
+  const [perLeague, q1PerLeague, h1PerLeague] = await Promise.all([
+    proplineFetchBasketballOddsAllLeagues(),
+    proplineFetchBasketballPeriodOddsAllLeagues("q1"),
+    proplineFetchBasketballPeriodOddsAllLeagues("h1"),
+  ]);
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { sportKey, events } of perLeague) {
     const leagueTitle = PROPLINE_BASKETBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const q1Events = q1PerLeague.find((l) => l.sportKey === sportKey)?.events ?? [];
+    const h1Events = h1PerLeague.find((l) => l.sportKey === sportKey)?.events ?? [];
     for (const ev of events) {
       if (ev.live) continue;
       const home = stripGenderTeamSuffix(ev.home_team);
@@ -7439,6 +7448,20 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const markets = makeBasketballMarketsFromTeams(home, away);
       const odds = resultOdds ?? { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      // Real 1st-quarter/1st-half markets from PropLine's ?period= filter,
+      // overriding basketballExtra's synthetic q1 (and populating firstHalf,
+      // which has no synthetic fallback) when a bookmaker actually prices
+      // that event's segment — most events won't have one, so this quietly
+      // no-ops rather than requiring it.
+      const q1Ev = q1Events.find((e) => e.id === ev.id);
+      const q1Odds = q1Ev ? extractProplineBasketballOdds(q1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      const h1Ev = h1Events.find((e) => e.id === ev.id);
+      const h1Odds = h1Ev ? extractProplineBasketballOdds(h1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      if (markets.basketballExtra && (q1Odds || h1Odds)) {
+        if (q1Odds) markets.basketballExtra.q1 = { home: q1Odds.home, away: q1Odds.away };
+        if (h1Odds) markets.basketballExtra.firstHalf = { home: h1Odds.home, away: h1Odds.away };
+      }
 
       results.push({
         id: `propline-basketball-${ev.id}`,
@@ -7557,10 +7580,14 @@ const PROPLINE_HOCKEY_DISAPPEAR_GRACE_MS = 15_000;
 
 /** Hockey (NHL) prematch from PropLine. */
 async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
-  const perLeague = await proplineFetchHockeyOddsAllLeagues();
+  const [perLeague, p1PerLeague] = await Promise.all([
+    proplineFetchHockeyOddsAllLeagues(),
+    proplineFetchHockeyPeriod1OddsAllLeagues(),
+  ]);
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { events } of perLeague) {
+    const p1Events = p1PerLeague.find((l) => l.sportKey === "hockey_nhl")?.events ?? [];
     for (const ev of events) {
       if (ev.live) continue;
       const home = stripGenderTeamSuffix(ev.home_team);
@@ -7574,6 +7601,14 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const markets = makeHockeyMarketsFromTeams(home, away);
       const odds = resultOdds ?? makeHockeyMoneylineFromTeams(home, away);
       const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      // Real 1st-period market from PropLine's ?period=p1 filter, overriding
+      // the synthetic halfTime field (this app's slot for hockey's period-1
+      // 3-way result) when a bookmaker actually prices it — most events
+      // won't, so this quietly no-ops otherwise.
+      const p1Ev = p1Events.find((e) => e.id === ev.id);
+      const p1Odds = p1Ev ? extractProplineHockeyPeriod1Odds(p1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      if (p1Odds) markets.halfTime = p1Odds;
 
       results.push({
         id: `propline-hockey-${ev.id}`,
