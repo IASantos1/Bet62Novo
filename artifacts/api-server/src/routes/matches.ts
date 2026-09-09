@@ -24,11 +24,14 @@ import {
   extractProplineBasketballOdds,
   proplineFetchBasketballOddsAllLeagues,
   proplineFetchBasketballLiveAllLeagues,
+  proplineFetchBasketballPeriodOddsAllLeagues,
 } from "../services/propline/basketball.js";
 import {
   extractProplineHockeyOdds,
+  extractProplineHockeyPeriod1Odds,
   proplineFetchHockeyOddsAllLeagues,
   proplineFetchHockeyLiveAllLeagues,
+  proplineFetchHockeyPeriod1OddsAllLeagues,
 } from "../services/propline/hockey.js";
 import {
   extractProplineVolleyballOdds,
@@ -40,6 +43,18 @@ import {
   proplineFetchMmaOddsAllLeagues,
   proplineFetchMmaLiveAllLeagues,
 } from "../services/propline/mma.js";
+import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
+import {
+  extractGoalApi1x2Odds,
+  goalApiKickoffDateTime,
+  buildGoalApiMatchStats,
+  buildGoalApiEvents,
+  buildGoalApiLineups,
+  buildGoalApiTopScorers,
+  buildGoalApiTeamUpcoming,
+} from "../services/goalapi/common.js";
+import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
+import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
 
 
 const router: IRouter = Router();
@@ -389,6 +404,11 @@ export type LiveMatchState = {
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
+  // Match statistics panel (football/GOAL API only) — possession/shots/
+  // corners/fouls, shaped for the frontend's existing generic stats-row
+  // renderer (home.tsx's V2StatsGroup type, previously fed by the deleted
+  // SportsAPI Pro V2 integration and always empty since).
+  matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -5835,7 +5855,7 @@ async function persistFinishedMatchRecord(
   } catch {}
 }
 
-async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
+export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   const finishedAt = Date.now();
   const htScore = state._liveExtra?.htScore;
   // Tennis/basketball/volleyball can never legitimately end 0-0 (sets or
@@ -7404,15 +7424,323 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
 
 // ─── Match builders ────────────────────────────────────────────────────────────
 
-// buildUpcomingMatches() used to delegate to whichever real provider served
-// football's upcoming list. Football and tennis are intentionally on
-// separate, dedicated providers (user decision, 2026-09-09) — PropLine is
-// scoped to basketball/hockey/volleyball/mma only. Kept as a thin named
-// wrapper returning [] until football's own provider is chosen, so
+// buildUpcomingMatches() delegates to whichever real provider serves
+// football's upcoming list — GOAL API as of 2026-09-09 (tennis still on its
+// own separate, not-yet-chosen provider; PropLine stays scoped to
+// basketball/hockey/volleyball/mma). Kept as a thin named wrapper so
 // predictions.ts's dynamic import("./matches.js") (see its by-matchId
 // upcoming lookup) doesn't need to change.
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return [];
+  return buildFootballUpcomingFromGoalApi();
+}
+
+/** Football prematch from GOAL API. Real 1X2 odds via extractGoalApi1x2Odds
+ * wherever a bookmaker has priced the fixture — per the provider's own
+ * docs, pre-match odds only exist inside a ~72h pre-kickoff sync window
+ * (refreshed 8x/day), so most fixtures further out will have none yet and
+ * fall back to the synthetic Poisson-model baseline (hasRealOdds:false) —
+ * same "real data patches synthetic" convention every provider in this
+ * file follows. */
+async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.GOAL_API_KEY) return [];
+  const today = new Date();
+  const dates = Array.from({ length: 8 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+  const perDay = await Promise.all(
+    dates.map((date) => goalApi.getFixturesByDate(date).catch(() => [] as GoalApiFixture[])),
+  );
+  logger.info(
+    { counts: perDay.map((f, i) => ({ date: dates[i], fixtures: f.length })) },
+    "[goal-api] football upcoming raw fixture counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const fixtures of perDay) {
+    for (const fx of fixtures) {
+      if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+      const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+      const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      let resultOdds: { home: number; draw: number; away: number } | null = null;
+      try {
+        const oddsList = await goalApi.getFixtureOdds(fx.id);
+        resultOdds = extractGoalApi1x2Odds(oddsList);
+      } catch {
+        /* no odds yet for this fixture — synthetic fallback below */
+      }
+      const baseOdds = makeOddsFromTeams(home, away);
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+      const { date, time } = goalApiKickoffDateTime(fx);
+
+      results.push({
+        id: `goalapi-football-${fx.id}`,
+        home,
+        away,
+        league: fx.leagueName ?? "Futebol",
+        country: "Internacional",
+        time,
+        date,
+        sport: "football",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? baseOdds,
+        markets: baseMarkets,
+        isWomens: isWomensLeague(fx.leagueName ?? ""),
+        isPriorityLeague: true,
+        homeLogoUrl: fx.homeTeam?.badge,
+        awayLogoUrl: fx.awayTeam?.badge,
+        leagueId: fx.leagueId,
+        homeTeamId: fx.homeTeam?.id,
+        awayTeamId: fx.awayTeam?.id,
+      });
+    }
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+const GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Football live from GOAL API — /fixtures/live gives real minute/status
+ * directly (unlike PropLine, which never returns a soccer clock), so no
+ * elapsed-time estimation is needed here. Live odds come from a separate
+ * call since the provider's own docs confirm they refresh only every ~2
+ * minutes regardless of channel — see GoalApiClient.getFixtureLiveOdds's
+ * own comment.
+ *
+ * Market suspension covers all of FOOTBALL_SUSP_KEYS (26 markets), tiered
+ * by risk exactly like the old SportMonks integration did
+ * (footballSuspensionDelayMs from lib/config.ts — never reinvented here):
+ * a goal uses the "goal" tier; a red card — detected via
+ * countGoalApiRedCards against /fixtures/:id/events, since a red card
+ * doesn't move the score the way a goal does — uses the higher "var" tier,
+ * same choice the deleted SportMonks/API-Football cross-reference made for
+ * the same reason (a red card swings the match materially more than a
+ * routine goal). */
+async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
+  if (!CONFIG.GOAL_API_KEY) return [];
+  const fixtures = await goalApi.getLiveFixtures().catch(() => [] as GoalApiFixture[]);
+  logger.info({ count: fixtures.length }, "[goal-api] football live raw fixture count");
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const fx of fixtures) {
+    const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+    const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+    if (!home || !away) continue;
+    const homeScore = Number(fx.homeTeamScore);
+    const awayScore = Number(fx.awayTeamScore);
+    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
+
+    const id = `goalapi-football-${fx.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+    let redCardsHome = existing?.redCardsHome ?? 0;
+    let redCardsAway = existing?.redCardsAway ?? 0;
+    let matchEvents: LiveMatchState["events"] = existing?.events ?? [];
+    try {
+      const events = await goalApi.getFixtureEvents(fx.id);
+      redCardsHome = countGoalApiRedCards(events, "home");
+      redCardsAway = countGoalApiRedCards(events, "away");
+      const substitutions = await goalApi.getFixtureSubstitutions(fx.id).catch(() => []);
+      matchEvents = buildGoalApiEvents(events, substitutions);
+    } catch {
+      /* keep previous counts/events if the events call fails this tick */
+    }
+
+    let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
+    try {
+      const stats = await goalApi.getFixtureStatistics(fx.id);
+      const built = buildGoalApiMatchStats(stats);
+      if (built.length > 0) matchStats = built;
+    } catch {
+      /* keep previous stats if unavailable this tick */
+    }
+
+    const newRedCard =
+      !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
+    const goalScored = !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+
+    // Odds Engine validation: a big swing right after a goal/red card is
+    // expected (skipVariationCheck below) and always accepted; the same
+    // swing with NO supporting event usually means bad/stale upstream
+    // data, so the previous real value is kept instead for this tick —
+    // never a fabricated synthetic fallback just because one poll looked
+    // suspicious.
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    try {
+      const oddsList = await goalApi.getFixtureLiveOdds(fx.id);
+      const candidate = extractGoalApi1x2Odds(oddsList);
+      if (candidate) {
+        const previousReal = existing?.hasRealOdds ? existing.odds : null;
+        if (shouldAcceptOddsUpdate(previousReal, candidate, CONFIG.GOAL_API_MAX_ODDS_DELTA_PCT, goalScored || newRedCard)) {
+          resultOdds = candidate;
+        } else {
+          logger.warn(
+            { fixtureId: fx.id, previous: previousReal, candidate },
+            "[goal-api] odds update rejected — swing exceeds variation limit with no supporting event",
+          );
+          resultOdds = previousReal;
+        }
+      }
+    } catch {
+      /* fall back to synthetic below */
+    }
+
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+      ? { ...existing.marketSuspension }
+      : undefined;
+    if (marketSuspension) {
+      const active = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()));
+      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+    }
+    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+
+    if (newRedCard) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]));
+      suspensionReason = "CARTÃO VERMELHO!";
+    } else if (goalScored) {
+      const now = Date.now();
+      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]));
+      suspensionReason = "GOL!";
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: fx.leagueName ?? "Futebol",
+      country: "Internacional",
+      sport: "football",
+      homeScore: homeScore as number,
+      awayScore: awayScore as number,
+      // No confirmed elapsed-minute field on the real payload yet — 0 until
+      // a real /fixtures/live example reveals the actual field name (never
+      // guessed, same policy as everywhere else in this file).
+      minute: 0,
+      status: fx.matchStatus,
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? baseOdds,
+      markets: baseMarkets,
+      events: matchEvents,
+      matchStats,
+      redCardsHome,
+      redCardsAway,
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+      homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
+      awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
+      leagueId: fx.leagueId ?? existing?.leagueId,
+      homeTeamId: fx.homeTeam?.id ?? existing?.homeTeamId,
+      awayTeamId: fx.awayTeam?.id ?? existing?.awayTeamId,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("goalapi-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[goal-api] football finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+/** Dispatch target for the GOAL API webhook receiver (app.ts's
+ * /api/webhooks/goal-api route). The webhook payload shapes for each event
+ * aren't fully documented beyond the event names, so rather than trust and
+ * parse per-event fields that might not match reality, this treats every
+ * event as a "refresh this data now" signal and re-derives state from the
+ * same REST calls buildFootballLiveFromGoalApi already uses — one source
+ * of truth for suspension/red-card logic regardless of trigger.
+ * match.finished is the one case worth short-circuiting: waiting for the
+ * fixture to merely vanish from /fixtures/live and ride out
+ * GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS defeats the entire point of a
+ * push-based finished signal, so it finalizes immediately instead. */
+export async function applyGoalApiWebhookEvent(event: {
+  event: string;
+  data?: { fixtureId?: string };
+}): Promise<void> {
+  const fixtureId = event.data?.fixtureId;
+  if (!fixtureId) return;
+  const id = `goalapi-football-${fixtureId}`;
+
+  if (event.event === "match.finished") {
+    let state = liveMatchState.get(id);
+    if (!state) {
+      try {
+        const fx = await goalApi.getFixtureById(fixtureId);
+        const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+        const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+        if (!home || !away) return;
+        const homeScore = Number(fx.homeTeamScore);
+        const awayScore = Number(fx.awayTeamScore);
+        state = {
+          id,
+          home,
+          away,
+          league: fx.leagueName ?? "Futebol",
+          country: "Internacional",
+          sport: "football",
+          homeScore: Number.isFinite(homeScore) ? homeScore : 0,
+          awayScore: Number.isFinite(awayScore) ? awayScore : 0,
+          minute: 90,
+          status: fx.matchStatus,
+          hasRealOdds: false,
+          odds: makeOddsFromTeams(home, away),
+          markets: makeAdvancedMarketsFromTeams(home, away),
+          events: [],
+          _lastSeenAt: Date.now(),
+        };
+      } catch (err) {
+        logger.error({ err, fixtureId }, "[goal-api] webhook match.finished: fixture fetch failed");
+        return;
+      }
+    }
+    try {
+      await finalizeStaleLiveMatch(state);
+    } catch (err) {
+      logger.error({ err, id }, "[goal-api] webhook-triggered finalizeStaleLiveMatch failed");
+    }
+    liveMatchState.delete(id);
+    return;
+  }
+
+  // match.started / goal.scored / score.changed / match.status_changed —
+  // refresh the whole live feed now instead of waiting for the next poll
+  // tick. Refreshes every live fixture, not just this one, but GOAL API's
+  // documented rate limits are generous relative to how many fixtures are
+  // ever live at once, and this guarantees the webhook and poll paths can
+  // never disagree about how a score/status change gets applied.
+  try {
+    await buildFootballLiveFromGoalApi();
+  } catch (err) {
+    logger.error({ err, fixtureId, event: event.event }, "[goal-api] webhook-triggered live refresh failed");
+  }
 }
 
 const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
@@ -7421,11 +7749,21 @@ const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
  * extractProplineBasketballOdds wherever a bookmaker prices it; falls back
  * to the synthetic model otherwise (hasRealOdds:false). */
 async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
-  const perLeague = await proplineFetchBasketballOddsAllLeagues();
+  const [perLeague, q1PerLeague, h1PerLeague] = await Promise.all([
+    proplineFetchBasketballOddsAllLeagues(),
+    proplineFetchBasketballPeriodOddsAllLeagues("q1"),
+    proplineFetchBasketballPeriodOddsAllLeagues("h1"),
+  ]);
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] basketball upcoming raw event counts",
+  );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { sportKey, events } of perLeague) {
     const leagueTitle = PROPLINE_BASKETBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const q1Events = q1PerLeague.find((l) => l.sportKey === sportKey)?.events ?? [];
+    const h1Events = h1PerLeague.find((l) => l.sportKey === sportKey)?.events ?? [];
     for (const ev of events) {
       if (ev.live) continue;
       const home = stripGenderTeamSuffix(ev.home_team);
@@ -7439,6 +7777,20 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const markets = makeBasketballMarketsFromTeams(home, away);
       const odds = resultOdds ?? { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      // Real 1st-quarter/1st-half markets from PropLine's ?period= filter,
+      // overriding basketballExtra's synthetic q1 (and populating firstHalf,
+      // which has no synthetic fallback) when a bookmaker actually prices
+      // that event's segment — most events won't have one, so this quietly
+      // no-ops rather than requiring it.
+      const q1Ev = q1Events.find((e) => e.id === ev.id);
+      const q1Odds = q1Ev ? extractProplineBasketballOdds(q1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      const h1Ev = h1Events.find((e) => e.id === ev.id);
+      const h1Odds = h1Ev ? extractProplineBasketballOdds(h1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      if (markets.basketballExtra && (q1Odds || h1Odds)) {
+        if (q1Odds) markets.basketballExtra.q1 = { home: q1Odds.home, away: q1Odds.away };
+        if (h1Odds) markets.basketballExtra.firstHalf = { home: h1Odds.home, away: h1Odds.away };
+      }
 
       results.push({
         id: `propline-basketball-${ev.id}`,
@@ -7557,10 +7909,18 @@ const PROPLINE_HOCKEY_DISAPPEAR_GRACE_MS = 15_000;
 
 /** Hockey (NHL) prematch from PropLine. */
 async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
-  const perLeague = await proplineFetchHockeyOddsAllLeagues();
+  const [perLeague, p1PerLeague] = await Promise.all([
+    proplineFetchHockeyOddsAllLeagues(),
+    proplineFetchHockeyPeriod1OddsAllLeagues(),
+  ]);
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] hockey upcoming raw event counts",
+  );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { events } of perLeague) {
+    const p1Events = p1PerLeague.find((l) => l.sportKey === "hockey_nhl")?.events ?? [];
     for (const ev of events) {
       if (ev.live) continue;
       const home = stripGenderTeamSuffix(ev.home_team);
@@ -7574,6 +7934,14 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const markets = makeHockeyMarketsFromTeams(home, away);
       const odds = resultOdds ?? makeHockeyMoneylineFromTeams(home, away);
       const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      // Real 1st-period market from PropLine's ?period=p1 filter, overriding
+      // the synthetic halfTime field (this app's slot for hockey's period-1
+      // 3-way result) when a bookmaker actually prices it — most events
+      // won't, so this quietly no-ops otherwise.
+      const p1Ev = p1Events.find((e) => e.id === ev.id);
+      const p1Odds = p1Ev ? extractProplineHockeyPeriod1Odds(p1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      if (p1Odds) markets.halfTime = p1Odds;
 
       results.push({
         id: `propline-hockey-${ev.id}`,
@@ -7849,6 +8217,10 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
  * this app's single "mma" tab. */
 async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
   const perLeague = await proplineFetchMmaOddsAllLeagues();
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] mma upcoming raw event counts",
+  );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { sportKey, events } of perLeague) {
@@ -7879,7 +8251,11 @@ async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
         hasRealOdds: !!resultOdds,
         odds,
         markets,
-        mmaExtra: { toDistance: { yes: 0, no: 0 }, totalRoundsLines: [] },
+        // No PropLine data source for "goes the distance"/total-rounds yet
+        // — omit mmaExtra entirely (it's fully optional) rather than a
+        // {yes:0,no:0} placeholder, which the frontend renders as a real
+        // 0.00 market instead of hiding it (only checks the object's
+        // presence, not its values).
       });
     }
   }
@@ -7932,7 +8308,9 @@ async function buildMmaLiveFromPropLine(): Promise<LiveMatchState[]> {
         hasRealOdds: !!resultOdds,
         odds: resultOdds ?? { ...makeMmaMoneylineFromTeams(home, away), draw: 0 },
         markets,
-        mmaExtra: { toDistance: { yes: 0, no: 0 }, totalRoundsLines: [] },
+        // See buildMmaUpcomingFromPropLine's comment — omit mmaExtra
+        // entirely rather than a {yes:0,no:0} placeholder the frontend
+        // renders as a real 0.00 market.
         events: [],
         _lastSeenAt: Date.now(),
       };
@@ -8089,11 +8467,13 @@ async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
-    // Football has its own dedicated provider, not yet chosen/wired
-    // (2026-09-09) — stays empty here until then.
+    // GOAL API restored 2026-09-09 for football.
     let football: UpcomingMatch[] = [];
     try {
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.GOAL_API_KEY) {
+        candidates.push({ provider: "goalapi", matches: await buildFootballUpcomingFromGoalApi() });
+      }
       football = chooseUpcomingProvider("football", candidates);
       _lastGoodFootballUpcoming = football;
     } catch (err) {
@@ -8191,9 +8571,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    // Football has its own dedicated provider, not yet chosen/wired
-    // (2026-09-09) — stays empty here until then.
+    // GOAL API restored 2026-09-09 for football.
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.GOAL_API_KEY) {
+      candidates.push({ provider: "goalapi", matches: await buildFootballLiveFromGoalApi() });
+    }
     footballLiveRaw = chooseLiveProvider("football", candidates);
   } catch (err) {
     logger.error(
@@ -9208,9 +9590,15 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 }
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
-  // Football has its own dedicated provider, not yet chosen/wired
-  // (2026-09-09) — stays empty here until then.
-  const football: UpcomingMatch[] = [];
+  // GOAL API restored 2026-09-09 for football.
+  let football: UpcomingMatch[] = [];
+  if (CONFIG.GOAL_API_KEY) {
+    try {
+      football = await buildFootballUpcomingFromGoalApi();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] football GOAL API fetch failed");
+    }
+  }
   const tennis: UpcomingMatch[] = [];
   // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
   // (football and tennis excluded from PropLine's scope — separate
@@ -12332,11 +12720,32 @@ router.get("/confrontos", async (req: Request, res: Response) => {
 
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
 // Used to be sourced from SportMonks team schedules; that provider was
-// removed and nothing replaces it, so this just reports no fixtures rather
-// than 404 on the frontend's existing per-match fetch — same degraded-but-
-// not-broken shape as /storylines below.
-router.get("/team-upcoming", async (_req: Request, res: Response) => {
-  res.json({ fixtures: [] });
+// removed. Football now resolves it via GOAL API: the frontend passes the
+// fixture's matchId + which side (home/away) it wants, so this resolves
+// that side's real team id off the fixture (goalapi-football-<fixtureId>)
+// and asks GOAL API for that team's upcoming fixtures directly.
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "");
+  const side = req.query["side"] === "away" ? "away" : "home";
+  const limit = Math.max(1, Math.min(20, Number(req.query["limit"]) || 5));
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const fixture = await goalApi.getFixtureById(fixtureId);
+    const teamId = side === "home" ? fixture.homeTeam?.id : fixture.awayTeam?.id;
+    if (!teamId) {
+      res.json({ fixtures: [] });
+      return;
+    }
+    const upcoming = await goalApi.getTeamUpcoming(teamId);
+    res.json({ fixtures: buildGoalApiTeamUpcoming(upcoming, teamId).slice(0, limit) });
+  } catch (err) {
+    logger.error({ err, matchId, side }, "[goal-api] team-upcoming fetch failed");
+    res.json({ fixtures: [] });
+  }
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
@@ -12358,6 +12767,60 @@ router.get("/player-profile/:id", async (req: Request, res: Response) => {
 // not-broken shape as /volleyball-results etc. above.
 router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
   res.json({ storyline: null });
+});
+
+// ─── Lineups ────────────────────────────────────────────────────────────────
+// Same dead-until-now situation as /storylines above, but football now has a
+// real replacement: GOAL API's /fixtures/:id/lineups. That endpoint's exact
+// field names haven't been confirmed against a real response yet (unlike
+// every other GOAL API endpoint wired into this file), so the raw payload is
+// logged here for verification/correction — buildGoalApiLineups reads it
+// defensively. Non-football matchIds (or GOAL API not configured) get the
+// same empty-but-valid shape the frontend already treats as "not available".
+const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
+// ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
+// GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
+// by GOAL API's own leagueId (fx.leagueId, now populated on the football
+// upcoming/live builders above), not by league name like the legacy
+// /league-standings route.
+router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
+  const leagueId = req.params.leagueId ?? "";
+  if (!leagueId || !CONFIG.GOAL_API_KEY) {
+    res.json({ scorers: [] });
+    return;
+  }
+  try {
+    const raw = await goalApi.getLeagueTopScorers(leagueId);
+    res.json({ scorers: buildGoalApiTopScorers(raw) });
+  } catch (err) {
+    logger.error({ err, leagueId }, "[goal-api] top-scorers fetch failed");
+    res.json({ scorers: [] });
+  }
+});
+
+router.get("/lineups/:matchId", async (req: Request, res: Response) => {
+  const matchId = req.params.matchId ?? "";
+  const empty = {
+    confirmed: false,
+    home: { starters: [], bench: [] },
+    away: { starters: [], bench: [] },
+  };
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json(empty);
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const [raw, fixture] = await Promise.all([
+      goalApi.getFixtureLineups(fixtureId),
+      goalApi.getFixtureById(fixtureId).catch(() => null),
+    ]);
+    logger.info({ fixtureId, raw }, "[goal-api] lineups raw response");
+    res.json(buildGoalApiLineups(raw, fixture?.homeTeamSystem, fixture?.awayTeamSystem));
+  } catch (err) {
+    logger.error({ err, fixtureId }, "[goal-api] lineups fetch failed");
+    res.json(empty);
+  }
 });
 
 // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────
