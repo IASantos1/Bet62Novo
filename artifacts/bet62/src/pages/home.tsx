@@ -615,6 +615,43 @@ function teamNamePt(name: string): string {
   return TEAM_NAME_PT[n] ?? n;
 }
 
+// Odds-button team labels used the last word of the full name (e.g.
+// "Manchester United" -> "United"), which works for most club names but
+// breaks for PropLine's international team names: "Macedónia do Norte" ->
+// "Norte" (meaningless alone), "Chile (W)" -> "(W)" (the whole label is
+// just the gender marker), and two teams sharing a mascot word both
+// collapsing to the same label ("Ust Golden Spikers" / "DLSU Green
+// Spikers" -> "Spikers" for both). Falls back to the first word that
+// actually differs between the two names only when the last-word approach
+// would produce a generic/collided/gender-only label — keeps existing
+// well-known club labels (e.g. "Real Madrid" -> "Madrid") unchanged.
+const TEAM_LABEL_GENERIC_WORDS = new Set([
+  "norte", "sul", "leste", "oeste", "north", "south", "east", "west",
+  "do", "da", "de", "dos", "das", "del", "united", "city", "fc", "sc",
+]);
+function shortTeamLabelPair(nameA: string, nameB: string): [string, string] {
+  const stripGenderSuffix = (n: string) => n.replace(/\s*\((?:w|women|f|fem)\)\s*$/i, "").trim();
+  const a = stripGenderSuffix(nameA) || nameA;
+  const b = stripGenderSuffix(nameB) || nameB;
+  const wordsA = a.split(" ").filter(Boolean);
+  const wordsB = b.split(" ").filter(Boolean);
+  const lastA = wordsA[wordsA.length - 1] ?? a;
+  const lastB = wordsB[wordsB.length - 1] ?? b;
+  const isBadLabel = (w: string) => TEAM_LABEL_GENERIC_WORDS.has(w.toLowerCase()) || /^\(.*\)$/.test(w) || w.length <= 2;
+  if (lastA.toLowerCase() !== lastB.toLowerCase() && !isBadLabel(lastA) && !isBadLabel(lastB)) {
+    return [lastA, lastB];
+  }
+  const maxLen = Math.max(wordsA.length, wordsB.length);
+  for (let i = 0; i < maxLen; i++) {
+    const wa = wordsA[i];
+    const wb = wordsB[i];
+    if (wa && wb && wa.toLowerCase() !== wb.toLowerCase()) return [wa, wb];
+    if (wa && !wb) return [wa, lastB];
+    if (!wa && wb) return [lastA, wb];
+  }
+  return [wordsA[0] ?? a, wordsB[0] ?? b];
+}
+
 const LEAGUE_NAME_PT: Record<string, string> = {
   // ── Internacional ──
   "FIFA World Cup": "Copa do Mundo FIFA",
@@ -9816,6 +9853,7 @@ export default function Home({
     const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
+    const [shortHomeLabel, shortAwayLabel] = shortTeamLabelPair(homeName, awayName);
     const isNationalMatch = isSelectionMatch(match);
     const homeFlag = isNationalMatch ? getCountryFlagUrl(match.home.toLowerCase()) : null;
     const awayFlag = isNationalMatch ? getCountryFlagUrl(match.away.toLowerCase()) : null;
@@ -10454,7 +10492,7 @@ export default function Home({
                   selection="pen-home"
                   odd={match.markets!.penExtra!.winner.home}
                   market="penaltis"
-                  label={homeName.split(" ").slice(-1)[0]!}
+                  label={shortHomeLabel}
                   grow
                   variant="worldcup"
                 />
@@ -10463,7 +10501,7 @@ export default function Home({
                   selection="pen-away"
                   odd={match.markets!.penExtra!.winner.away}
                   market="penaltis"
-                  label={awayName.split(" ").slice(-1)[0]!}
+                  label={shortAwayLabel}
                   grow
                   variant="worldcup"
                 />
@@ -10485,7 +10523,7 @@ export default function Home({
                     selection="home"
                     odd={match.odds.home}
                     market="result"
-                    label={homeName.split(" ").slice(-1)[0]!}
+                    label={shortHomeLabel}
                     grow
                     variant="worldcup"
                   />
@@ -10505,7 +10543,7 @@ export default function Home({
                     selection="away"
                     odd={match.odds.away}
                     market="result"
-                    label={awayName.split(" ").slice(-1)[0]!}
+                    label={shortAwayLabel}
                     grow
                     variant="worldcup"
                   />
