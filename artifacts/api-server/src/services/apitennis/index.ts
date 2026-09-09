@@ -133,6 +133,69 @@ export type ApiTennisTournament = {
   event_type_type: string;
 };
 
+/** /get_news's result item — confirmed real 2026-09-09. Ultra-plan-only per
+ * the provider's docs; any subscription-tier or other failure is handled
+ * the same way every other provider call in this file already is (caught,
+ * empty fallback), not specially guarded here. */
+export type ApiTennisNewsArticle = {
+  news_key: string;
+  title: string;
+  content: string;
+  published_at: string;
+  entity_type: string | null;
+  entity_key: string | null;
+  player_key: string | null;
+  player_name: string | null;
+  tournament_key: string | null;
+  tournament_name: string | null;
+  event_key: string | null;
+  event_result: string | null;
+  event_round: string | null;
+  sources: string[];
+};
+
+/** /get_draw's bracket — confirmed real 2026-09-09. A player slot is null
+ * for a not-yet-decided future round (shown as "TBD" in the UI); a BYE
+ * status entry has only first_player set. next_slot_key links a match's
+ * winner forward to the round it feeds into. */
+export type ApiTennisDrawPlayer = {
+  player_key: number;
+  name: string;
+  seed: string | null;
+  logo: string | null;
+};
+export type ApiTennisDrawMatch = {
+  draw_key: number;
+  match_number: number;
+  match_key: number | null;
+  status: string;
+  live: boolean;
+  first_player: ApiTennisDrawPlayer | null;
+  second_player: ApiTennisDrawPlayer | null;
+  result: string | null;
+  game_score: string | null;
+  winner_player_key: number | null;
+  next_slot_key: number | null;
+};
+export type ApiTennisDrawRound = { round_name: string; matches: ApiTennisDrawMatch[] };
+export type ApiTennisDrawBracket = {
+  stage: string;
+  qualification: boolean;
+  draw_size: number;
+  rounds: ApiTennisDrawRound[];
+};
+export type ApiTennisDraw = {
+  tournament: {
+    tournament_key: string;
+    tournament_name: string;
+    tournament_surface: string | null;
+    tournament_country: string | null;
+    tournament_season: string;
+  };
+  source: "draw_feed" | "reconstructed_from_results";
+  brackets: ApiTennisDrawBracket[];
+};
+
 const API_TENNIS_TTL = {
   FIXTURES: 60,
   LIVE: 10,
@@ -266,6 +329,25 @@ export class ApiTennisClient {
   }): Promise<ApiTennisLiveOddsResult> {
     return this.cachedGet<ApiTennisLiveOddsResult>("get_live_odds", params, API_TENNIS_TTL.LIVE);
   }
+
+  getNews(params: {
+    player_key?: string;
+    tournament_key?: string;
+    match_key?: string;
+    date_start: string;
+    date_stop: string;
+  }): Promise<ApiTennisNewsArticle[]> {
+    return this.cachedGet<ApiTennisNewsArticle[]>("get_news", params, API_TENNIS_TTL.REFERENCE);
+  }
+
+  getDraw(params: {
+    tournament_key: string;
+    tournament_season?: string;
+    include_qualification?: number;
+    timezone?: string;
+  }): Promise<ApiTennisDraw> {
+    return this.cachedGet<ApiTennisDraw>("get_draw", params, API_TENNIS_TTL.REFERENCE);
+  }
 }
 
 let _client: ApiTennisClient | null = null;
@@ -290,4 +372,6 @@ export const apiTennis = {
   getPlayers: (params?: Parameters<ApiTennisClient["getPlayers"]>[0]) => getApiTennisClient().getPlayers(params),
   getOdds: (params: Parameters<ApiTennisClient["getOdds"]>[0]) => getApiTennisClient().getOdds(params),
   getLiveOdds: (params?: Parameters<ApiTennisClient["getLiveOdds"]>[0]) => getApiTennisClient().getLiveOdds(params),
+  getNews: (params: Parameters<ApiTennisClient["getNews"]>[0]) => getApiTennisClient().getNews(params),
+  getDraw: (params: Parameters<ApiTennisClient["getDraw"]>[0]) => getApiTennisClient().getDraw(params),
 };

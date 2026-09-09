@@ -32,6 +32,14 @@ type RecentMatch = {
   rating: number | null;
 };
 
+type TennisStats = {
+  season: string;
+  rank: string | null;
+  titles: number | null;
+  matchesWon: number | null;
+  matchesLost: number | null;
+};
+
 type PlayerProfile = {
   id: string;
   name: string;
@@ -47,6 +55,8 @@ type PlayerProfile = {
   competition: string | null;
   seasonStats: SeasonStats;
   recentMatches: RecentMatch[];
+  sport?: "football" | "tennis";
+  tennisStats?: TennisStats | null;
 };
 
 function ageFromBirthDate(dateOfBirth: string | null): number | null {
@@ -75,9 +85,11 @@ function StatBox({ label, value }: { label: string; value: number | null }) {
 
 export default function PlayerProfileModal({
   playerId,
+  sport = "football",
   onClose,
 }: {
   playerId: string | null;
+  sport?: string;
   onClose: () => void;
 }) {
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
@@ -89,12 +101,12 @@ export default function PlayerProfileModal({
     setProfile(null);
     setErrored(false);
     setLoading(true);
-    fetch(`/api/matches/player-profile/${playerId}`)
+    fetch(`/api/matches/player-profile/${playerId}?sport=${encodeURIComponent(sport)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => setProfile(d as PlayerProfile))
       .catch(() => setErrored(true))
       .finally(() => setLoading(false));
-  }, [playerId]);
+  }, [playerId, sport]);
 
   if (playerId == null) return null;
   const age = profile ? ageFromBirthDate(profile.dateOfBirth) : null;
@@ -172,19 +184,35 @@ export default function PlayerProfileModal({
             </div>
 
             <div className="p-4 space-y-4">
-              <div>
-                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">
-                  Temporada Atual{profile.competition ? ` · ${profile.competition}` : ""}
+              {profile.sport === "tennis" ? (
+                <div>
+                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">
+                    {profile.tennisStats?.season
+                      ? `Temporada ${profile.tennisStats.season}`
+                      : "Estatísticas"}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <StatBox label="Ranking" value={profile.tennisStats?.rank ? Number(profile.tennisStats.rank) : null} />
+                    <StatBox label="Títulos" value={profile.tennisStats?.titles ?? null} />
+                    <StatBox label="Vitórias" value={profile.tennisStats?.matchesWon ?? null} />
+                    <StatBox label="Derrotas" value={profile.tennisStats?.matchesLost ?? null} />
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <StatBox label="Jogos" value={profile.seasonStats.appearances} />
-                  <StatBox label="Gols" value={profile.seasonStats.goals} />
-                  <StatBox label="Assist." value={profile.seasonStats.assists} />
-                  <StatBox label="Amarelos" value={profile.seasonStats.yellowCards} />
-                  <StatBox label="Vermelhos" value={profile.seasonStats.redCards} />
-                  <StatBox label="Minutos" value={profile.seasonStats.minutesPlayed} />
+              ) : (
+                <div>
+                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">
+                    Temporada Atual{profile.competition ? ` · ${profile.competition}` : ""}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <StatBox label="Jogos" value={profile.seasonStats.appearances} />
+                    <StatBox label="Gols" value={profile.seasonStats.goals} />
+                    <StatBox label="Assist." value={profile.seasonStats.assists} />
+                    <StatBox label="Amarelos" value={profile.seasonStats.yellowCards} />
+                    <StatBox label="Vermelhos" value={profile.seasonStats.redCards} />
+                    <StatBox label="Minutos" value={profile.seasonStats.minutesPlayed} />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {profile.recentMatches.length > 0 && (
                 <div>

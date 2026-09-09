@@ -6114,6 +6114,7 @@ export default function Home({
   const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
+  const [playerProfileSport, setPlayerProfileSport] = useState<string>("football");
 
   const extractLiveKeyStats = (
     groups: V2StatsGroup[],
@@ -21158,7 +21159,10 @@ export default function Home({
                                   </span>
                                   {ev.playerId ? (
                                     <button
-                                      onClick={() => setPlayerProfileId(ev.playerId!)}
+                                      onClick={() => {
+                                        setPlayerProfileId(ev.playerId!);
+                                        setPlayerProfileSport(expandedMatch.sport ?? "football");
+                                      }}
                                       className="flex-1 text-left text-zinc-200 font-semibold truncate hover:text-red-400 hover:underline"
                                     >
                                       {ev.player}
@@ -26903,6 +26907,7 @@ export default function Home({
 
       <PlayerProfileModal
         playerId={playerProfileId}
+        sport={playerProfileSport}
         onClose={() => setPlayerProfileId(null)}
       />
 
