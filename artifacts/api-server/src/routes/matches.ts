@@ -7490,6 +7490,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         markets: baseMarkets,
         isWomens: isWomensLeague(fx.leagueName ?? ""),
         isPriorityLeague: true,
+        homeLogoUrl: fx.homeTeam?.badge,
+        awayLogoUrl: fx.awayTeam?.badge,
       });
     }
   }
@@ -7629,6 +7631,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       _lastSeenAt: Date.now(),
       marketSuspension,
       _suspensionReason: suspensionReason,
+      homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
+      awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
     };
     liveMatchState.set(id, state);
     results.push(state);
