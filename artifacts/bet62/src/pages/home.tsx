@@ -7055,13 +7055,15 @@ export default function Home({
     setAllOddsSectionOpen({});
   }, [matchViewTab, expandedMatch?.id]);
 
-  // The /v2-lineups backend endpoint (SportsAPI Pro V2) was removed — there
-  // is no replacement source for lineups, so the "lineups" tab now always
-  // settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
     setLineupsData(null);
-    setLineupsLoading(false);
+    setLineupsLoading(true);
+    fetch(`/api/matches/lineups/${expandedMatch.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setLineupsData(d as LineupsV2 | null))
+      .catch(() => setLineupsData(null))
+      .finally(() => setLineupsLoading(false));
   }, [matchViewTab, expandedMatch?.id]);
 
   // Fetch live storyline when a live football match is expanded

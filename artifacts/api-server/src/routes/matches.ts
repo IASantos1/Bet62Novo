@@ -49,6 +49,7 @@ import {
   goalApiKickoffDateTime,
   buildGoalApiMatchStats,
   buildGoalApiEvents,
+  buildGoalApiLineups,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -12737,6 +12738,40 @@ router.get("/player-profile/:id", async (req: Request, res: Response) => {
 // not-broken shape as /volleyball-results etc. above.
 router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
   res.json({ storyline: null });
+});
+
+// ─── Lineups ────────────────────────────────────────────────────────────────
+// Same dead-until-now situation as /storylines above, but football now has a
+// real replacement: GOAL API's /fixtures/:id/lineups. That endpoint's exact
+// field names haven't been confirmed against a real response yet (unlike
+// every other GOAL API endpoint wired into this file), so the raw payload is
+// logged here for verification/correction — buildGoalApiLineups reads it
+// defensively. Non-football matchIds (or GOAL API not configured) get the
+// same empty-but-valid shape the frontend already treats as "not available".
+const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
+router.get("/lineups/:matchId", async (req: Request, res: Response) => {
+  const matchId = req.params.matchId ?? "";
+  const empty = {
+    confirmed: false,
+    home: { starters: [], bench: [] },
+    away: { starters: [], bench: [] },
+  };
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json(empty);
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const [raw, fixture] = await Promise.all([
+      goalApi.getFixtureLineups(fixtureId),
+      goalApi.getFixtureById(fixtureId).catch(() => null),
+    ]);
+    logger.info({ fixtureId, raw }, "[goal-api] lineups raw response");
+    res.json(buildGoalApiLineups(raw, fixture?.homeTeamSystem, fixture?.awayTeamSystem));
+  } catch (err) {
+    logger.error({ err, fixtureId }, "[goal-api] lineups fetch failed");
+    res.json(empty);
+  }
 });
 
 // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────

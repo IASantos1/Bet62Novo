@@ -1,6 +1,15 @@
 // Shared, sport-agnostic (well — football is the only sport this provider
 // covers) extraction helpers for GOAL API responses.
-import type { GoalApiFixture, GoalApiOdds, GoalApiFixtureStatistics, GoalApiMatchEvent, GoalApiSubstitution } from "./index.js";
+import type {
+  GoalApiFixture,
+  GoalApiOdds,
+  GoalApiFixtureStatistics,
+  GoalApiMatchEvent,
+  GoalApiSubstitution,
+  GoalApiLineups,
+  GoalApiLineupTeam,
+  GoalApiLineupPlayerEntry,
+} from "./index.js";
 
 /** Shapes GOAL API's per-fixture statistics into the frontend's existing
  * generic stats-row renderer (home.tsx's V2StatsGroup type) — previously
@@ -101,6 +110,53 @@ export function extractGoalApiBothTeamsToScore(
     if (b && b.yes != null && b.no != null) return { yes: b.yes, no: b.no };
   }
   return null;
+}
+
+export type BuiltLineupPlayer = { name: string; shortName?: string; position: string; number: string; rating?: number };
+export type BuiltLineupTeam = { formation?: string; starters: BuiltLineupPlayer[]; bench: BuiltLineupPlayer[] };
+export type BuiltLineups = { confirmed: boolean; home: BuiltLineupTeam; away: BuiltLineupTeam };
+
+function buildLineupPlayer(entry: GoalApiLineupPlayerEntry): BuiltLineupPlayer {
+  // Some providers wrap each entry as { player: {...} } — unwrap once if so.
+  const e = entry.player ?? entry;
+  const name = e.name ?? e.playerName ?? "?";
+  const number = e.number ?? e.shirtNumber;
+  const rating = e.rating != null ? Number(e.rating) : undefined;
+  return {
+    name,
+    shortName: e.shortName,
+    position: e.position ?? e.pos ?? "",
+    number: number != null ? String(number) : "",
+    rating: rating != null && Number.isFinite(rating) ? rating : undefined,
+  };
+}
+
+function buildLineupTeam(team: GoalApiLineupTeam | undefined, formationFallback?: string | null): BuiltLineupTeam {
+  const starters = (team?.starters ?? team?.startXI ?? []).map(buildLineupPlayer);
+  const bench = (team?.substitutes ?? team?.bench ?? []).map(buildLineupPlayer);
+  return { formation: team?.formation ?? formationFallback ?? undefined, starters, bench };
+}
+
+/** Maps GOAL API's /fixtures/:id/lineups response into the frontend's
+ * existing LineupsV2 shape (home.tsx) — previously fed by the deleted
+ * SportsAPI Pro V2 integration and hardcoded to null ever since. Unlike
+ * every other GoalApi* raw shape used in this file, this endpoint's exact
+ * field names haven't been confirmed against a real response yet, so this
+ * reads several plausible key names defensively rather than assuming one —
+ * callers log the raw payload so the mapping can be corrected once a real
+ * lineup is seen. formationFallback lets the fixture's own
+ * homeTeamSystem/awayTeamSystem (confirmed real) show even before lineups
+ * are officially published. */
+export function buildGoalApiLineups(
+  raw: GoalApiLineups | null | undefined,
+  homeFormationFallback?: string | null,
+  awayFormationFallback?: string | null,
+): BuiltLineups {
+  return {
+    confirmed: raw?.confirmed ?? false,
+    home: buildLineupTeam(raw?.home, homeFormationFallback),
+    away: buildLineupTeam(raw?.away, awayFormationFallback),
+  };
 }
 
 /** ISO-8601 kickoffUtc → { date: "DD.MM.YYYY", time: "HH:MM" } in

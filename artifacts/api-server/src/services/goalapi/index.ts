@@ -26,6 +26,10 @@ export type GoalApiFixture = {
   // a string) accompanies it.
   matchStatus: string;
   matchLive?: string;
+  // Formation strings (e.g. "4-2-3-1"), confirmed real on the same response —
+  // populated once lineups are known, null/absent before that.
+  homeTeamSystem?: string | null;
+  awayTeamSystem?: string | null;
   matchDate?: string;
   matchTime?: string;
   /** ISO-8601 UTC instant — the field to use; matchDate/matchTime are
@@ -83,6 +87,38 @@ export type GoalApiTeamStats = {
 export type GoalApiFixtureStatistics = {
   home: GoalApiTeamStats;
   away: GoalApiTeamStats;
+};
+
+// The /fixtures/:id/lineups response shape is documented to exist but no
+// raw example has been captured yet (unlike every other GoalApi* type in
+// this file) — fields here are the plausible names, read defensively in
+// common.ts's buildGoalApiLineups, and the route that calls this logs the
+// raw payload so the mapping can be corrected once a real example is seen.
+export type GoalApiLineupPlayerEntry = {
+  name?: string;
+  playerName?: string;
+  shortName?: string;
+  number?: string | number;
+  shirtNumber?: string | number;
+  position?: string;
+  pos?: string;
+  rating?: string | number;
+  // Some football APIs wrap each entry as { player: {...} } instead of
+  // flattening the fields — handled defensively since the real shape here
+  // is unconfirmed.
+  player?: GoalApiLineupPlayerEntry;
+};
+export type GoalApiLineupTeam = {
+  formation?: string;
+  startXI?: GoalApiLineupPlayerEntry[];
+  starters?: GoalApiLineupPlayerEntry[];
+  substitutes?: GoalApiLineupPlayerEntry[];
+  bench?: GoalApiLineupPlayerEntry[];
+};
+export type GoalApiLineups = {
+  confirmed?: boolean;
+  home?: GoalApiLineupTeam;
+  away?: GoalApiLineupTeam;
 };
 
 const GOAL_API_TTL = {
@@ -198,6 +234,10 @@ export class GoalApiClient {
     );
   }
 
+  getFixtureLineups(id: string): Promise<GoalApiLineups> {
+    return this.cachedGet<GoalApiLineups>(`/fixtures/${encodeURIComponent(id)}/lineups`, undefined, GOAL_API_TTL.LIVE);
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -264,6 +304,7 @@ export const goalApi = {
   getFixtureEvents: (id: string) => getGoalApiClient().getFixtureEvents(id),
   getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
+  getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
