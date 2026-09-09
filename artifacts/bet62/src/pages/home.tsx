@@ -7183,6 +7183,23 @@ export default function Home({
       .finally(() => setConfrontosLoading(false));
   }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch football results scoped to the currently viewed match's own league
+  // (via /results/league/:id) when GOAL API knows its leagueId, falling back
+  // to the global yesterday feed otherwise — replaces the page-load-once,
+  // unscoped fetch this used to be (every competition worldwide mixed
+  // together, regardless of which match's panel was open).
+  useEffect(() => {
+    if (!expandedMatch || (expandedMatch.sport ?? "football") !== "football") return;
+    setFootballResults([]);
+    const leagueId = expandedMatch.leagueId;
+    const p = new URLSearchParams({ range: "yesterday" });
+    if (leagueId) p.set("leagueId", leagueId);
+    fetch(`/api/matches/football-results?${p}`)
+      .then((r) => (r.ok ? r.json() : { results: [] }))
+      .then((d) => setFootballResults(d.results ?? []))
+      .catch(() => setFootballResults([]));
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Próximos Jogos — each team's next fixtures. Used to be sourced from
   // SportMonks (sportmonks-football-* matchIds); that provider was removed
   // 2026-09-08 and /api/matches/team-upcoming now always returns [], but the
@@ -7303,12 +7320,6 @@ export default function Home({
       fetch("/api/matches/mlb-results")
         .then((r) => (r.ok ? r.json() : { results: [] }))
         .then((d) => setMlbResults(d.results ?? []))
-        .catch(() => {
-          /* non-critical */
-        });
-      fetch("/api/matches/football-results?range=yesterday")
-        .then((r) => (r.ok ? r.json() : { results: [] }))
-        .then((d) => setFootballResults(d.results ?? []))
         .catch(() => {
           /* non-critical */
         });
