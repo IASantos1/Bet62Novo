@@ -23,6 +23,8 @@ import crypto from "crypto";
 import { CONFIG } from "./lib/config.js";
 import { timingSafeEqualString } from "./lib/security.js";
 import { userIdFromMemberAccount } from "./routes/casino.js";
+import { verifyGoalApiSignature, parseGoalApiWebhookBody } from "./services/goalapi/webhook.js";
+import { applyGoalApiWebhookEvent } from "./routes/matches.js";
 
 const app: Express = express();
 
@@ -307,6 +309,38 @@ app.post(
       logger.error({ err, userId, serialNumber }, "[casino-callback] processing error");
       res.status(500).json({ code: 1, msg: "Processing failed" });
     }
+  },
+);
+
+// ── GOAL API webhook MUST be registered before express.json() ──────────────
+// Same raw-body-signature requirement as Stripe/casino above — the
+// signature is an HMAC over the exact bytes the provider sent.
+app.post(
+  "/api/webhooks/goal-api",
+  express.raw({ type: "application/json" }),
+  async (req: Request, res: Response) => {
+    const rawBody = req.body as Buffer;
+    const verification = verifyGoalApiSignature(
+      rawBody,
+      req.headers["x-goal-signature"],
+      CONFIG.GOAL_API_WEBHOOK_SECRET,
+    );
+    if (verification.valid === false) {
+      logger.warn({ reason: verification.reason }, "[goal-api-webhook] signature verification failed");
+      res.sendStatus(401);
+      return;
+    }
+    const event = parseGoalApiWebhookBody(rawBody);
+    if (!event) {
+      res.sendStatus(400);
+      return;
+    }
+    // Respond fast (the provider's own docs specify an 8s timeout and
+    // retries on anything but 2xx) — do the actual work after responding.
+    res.sendStatus(200);
+    applyGoalApiWebhookEvent(event).catch((err) => {
+      logger.error({ err, event: event.event }, "[goal-api-webhook] event handling failed");
+    });
   },
 );
 

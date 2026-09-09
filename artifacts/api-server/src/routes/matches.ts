@@ -5841,7 +5841,7 @@ async function persistFinishedMatchRecord(
   } catch {}
 }
 
-async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
+export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   const finishedAt = Date.now();
   const htScore = state._liveExtra?.htScore;
   // Tennis/basketball/volleyball can never legitimately end 0-0 (sets or
@@ -7610,6 +7610,78 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
   }
 
   return results;
+}
+
+/** Dispatch target for the GOAL API webhook receiver (app.ts's
+ * /api/webhooks/goal-api route). The webhook payload shapes for each event
+ * aren't fully documented beyond the event names, so rather than trust and
+ * parse per-event fields that might not match reality, this treats every
+ * event as a "refresh this data now" signal and re-derives state from the
+ * same REST calls buildFootballLiveFromGoalApi already uses — one source
+ * of truth for suspension/red-card logic regardless of trigger.
+ * match.finished is the one case worth short-circuiting: waiting for the
+ * fixture to merely vanish from /fixtures/live and ride out
+ * GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS defeats the entire point of a
+ * push-based finished signal, so it finalizes immediately instead. */
+export async function applyGoalApiWebhookEvent(event: {
+  event: string;
+  data?: { fixtureId?: string };
+}): Promise<void> {
+  const fixtureId = event.data?.fixtureId;
+  if (!fixtureId) return;
+  const id = `goalapi-football-${fixtureId}`;
+
+  if (event.event === "match.finished") {
+    let state = liveMatchState.get(id);
+    if (!state) {
+      try {
+        const fx = await goalApi.getFixtureById(fixtureId);
+        const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+        const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+        if (!home || !away) return;
+        const scoreParts = (fx.score ?? "").split("-").map((s) => Number(s.trim()));
+        state = {
+          id,
+          home,
+          away,
+          league: fx.leagueName ?? "Futebol",
+          country: "Internacional",
+          sport: "football",
+          homeScore: Number.isFinite(scoreParts[0]) ? (scoreParts[0] as number) : 0,
+          awayScore: Number.isFinite(scoreParts[1]) ? (scoreParts[1] as number) : 0,
+          minute: fx.minute ?? 90,
+          status: fx.status,
+          hasRealOdds: false,
+          odds: makeOddsFromTeams(home, away),
+          markets: makeAdvancedMarketsFromTeams(home, away),
+          events: [],
+          _lastSeenAt: Date.now(),
+        };
+      } catch (err) {
+        logger.error({ err, fixtureId }, "[goal-api] webhook match.finished: fixture fetch failed");
+        return;
+      }
+    }
+    try {
+      await finalizeStaleLiveMatch(state);
+    } catch (err) {
+      logger.error({ err, id }, "[goal-api] webhook-triggered finalizeStaleLiveMatch failed");
+    }
+    liveMatchState.delete(id);
+    return;
+  }
+
+  // match.started / goal.scored / score.changed / match.status_changed —
+  // refresh the whole live feed now instead of waiting for the next poll
+  // tick. Refreshes every live fixture, not just this one, but GOAL API's
+  // documented rate limits are generous relative to how many fixtures are
+  // ever live at once, and this guarantees the webhook and poll paths can
+  // never disagree about how a score/status change gets applied.
+  try {
+    await buildFootballLiveFromGoalApi();
+  } catch (err) {
+    logger.error({ err, fixtureId, event: event.event }, "[goal-api] webhook-triggered live refresh failed");
+  }
 }
 
 const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
