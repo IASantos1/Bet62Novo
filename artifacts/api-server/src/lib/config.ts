@@ -122,6 +122,25 @@ const PROPLINE_DEFAULT_BOOKMAKERS = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+// GOAL API (api.goal-api.com) — dedicated football provider (2026-09-09).
+// Auth is Bearer (not X-API-Key/query param like PropLine). Odds have no
+// realtime push even over WebSocket — the provider's own docs confirm live
+// odds only refresh every ~2 minutes — so GOAL_API_ODDS_POLL_MS matches that
+// cadence rather than polling faster for no benefit. GOAL_API_MAX_WS_MATCHES
+// mirrors the account's plan tier (FREE=0, BASIC=5, PRO=20, ENTERPRISE=1000
+// concurrent match subscriptions) — defaults to 0 (FREE) so the WebSocket
+// Data Collector stays inert until this is raised, with no code change
+// needed when upgrading plans.
+const GOAL_API_KEY = process.env["GOAL_API_KEY"] ?? "";
+const GOAL_API_BASE_URL =
+  process.env["GOAL_API_BASE_URL"]?.trim() || "https://api.goal-api.com/v1";
+const GOAL_API_WS_URL =
+  process.env["GOAL_API_WS_URL"]?.trim() || "wss://api.goal-api.com/ws";
+const GOAL_API_WEBHOOK_SECRET = process.env["GOAL_API_WEBHOOK_SECRET"] ?? "";
+const GOAL_API_MAX_WS_MATCHES = Number(process.env["GOAL_API_MAX_WS_MATCHES"] ?? "0") || 0;
+const GOAL_API_ODDS_POLL_MS = Number(process.env["GOAL_API_ODDS_POLL_MS"] ?? "120000") || 120_000;
+const GOAL_API_MAX_ODDS_DELTA_PCT = Number(process.env["GOAL_API_MAX_ODDS_DELTA_PCT"] ?? "40") || 40;
+
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
 // provider for each job independently. Currently the matches/ routes still
@@ -167,6 +186,13 @@ export const CONFIG = {
   PROPLINE_API_VERSION,
   PROPLINE_ENABLED_SPORTS,
   PROPLINE_DEFAULT_BOOKMAKERS,
+  GOAL_API_KEY,
+  GOAL_API_BASE_URL,
+  GOAL_API_WS_URL,
+  GOAL_API_WEBHOOK_SECRET,
+  GOAL_API_MAX_WS_MATCHES,
+  GOAL_API_ODDS_POLL_MS,
+  GOAL_API_MAX_ODDS_DELTA_PCT,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
