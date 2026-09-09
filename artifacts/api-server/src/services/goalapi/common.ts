@@ -16,6 +16,7 @@ import type {
   GoalApiPlayer,
   GoalApiPlayerStatistics,
   GoalApiResultsStats,
+  GoalApiPrediction,
 } from "./index.js";
 
 /** GOAL API's own English stat labels (match.fullTime[].type, confirmed
@@ -610,5 +611,51 @@ export function buildGoalApiResultsStats(raw: GoalApiResultsStats | null | undef
     mostCommonScore: raw.mostCommonScore
       ? { score: raw.mostCommonScore.score, percentage: raw.mostCommonScore.percentage }
       : null,
+  };
+}
+
+export type BuiltFootballPrediction = {
+  result: { home: number; draw: number; away: number };
+  doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  overUnder25: { over: number; under: number };
+  bothTeamsScore: { yes: number; no: number };
+  handicap: { line: number; home: number; away: number } | null;
+};
+
+/** Maps /fixtures/:id/predictions into the "Previsão" card — confirmed real
+ * 2026-09-09. All prob* fields are 0-100 percentages already computed by
+ * the provider's own model, not decimal odds — a completely different
+ * (informational, not bettable) data source from this file's other
+ * "real data patches synthetic" odds extractors.
+ *
+ * asianHandicap's flat prob_ah_{h,a}_{sign}{line} keys were decoded against
+ * the other prob* fields on the same real response (2026-09-09): the "-"
+ * variant at a given line is a complementary pair — prob_ah_h_-15 (home
+ * covers -1.5, i.e. wins by 2+) and prob_ah_a_-15 (away covers +1.5, i.e.
+ * doesn't lose by 2+) sum to ~100 — while the un-prefixed variant at the
+ * same line is the OTHER complementary pair (home +1.5 / away -1.5). The
+ * -1.5/+1.5 line is picked as the single representative handicap shown,
+ * matching the industry-standard "main line" display convention. */
+export function buildGoalApiPrediction(raw: GoalApiPrediction | null | undefined): BuiltFootballPrediction | null {
+  if (!raw) return null;
+  const home = Number(raw.probHW);
+  const draw = Number(raw.probD);
+  const away = Number(raw.probAW);
+  if (!Number.isFinite(home) || !Number.isFinite(draw) || !Number.isFinite(away)) return null;
+  const handicapHome = Number(raw.asianHandicap?.["prob_ah_h_-15"]);
+  const handicapAway = Number(raw.asianHandicap?.["prob_ah_a_-15"]);
+  return {
+    result: { home, draw, away },
+    doubleChance: {
+      homeOrDraw: Number(raw.probHWD) || 0,
+      awayOrDraw: Number(raw.probAWD) || 0,
+      homeOrAway: Number(raw.probHWAW) || 0,
+    },
+    overUnder25: { over: Number(raw.probO) || 0, under: Number(raw.probU) || 0 },
+    bothTeamsScore: { yes: Number(raw.probBts) || 0, no: Number(raw.probOts) || 0 },
+    handicap:
+      Number.isFinite(handicapHome) && Number.isFinite(handicapAway)
+        ? { line: 1.5, home: handicapHome, away: handicapAway }
+        : null,
   };
 }

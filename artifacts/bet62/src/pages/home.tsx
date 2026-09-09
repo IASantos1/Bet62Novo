@@ -162,6 +162,7 @@ const brestBanner = mk("Photorealistic 16:9 football stadium banner for Stade Br
 import MatchStatsPanel from "@/components/MatchStatsPanel";
 import PlayerProfileModal from "@/components/PlayerProfileModal";
 import SuggestedCombos from "@/components/SuggestedCombos";
+import PredictionCard from "@/components/PredictionCard";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
 const TEAM_BANNERS: Record<string, string> = {
@@ -21175,6 +21176,16 @@ export default function Home({
                       </div>
                     )}
                   </div>
+                )}
+
+                {/* ── Previsão — probabilidades reais do modelo GOAL API ── */}
+                {matchViewTab === "markets" && (!expandedMatch.sport || expandedMatch.sport === "football") && (
+                  <PredictionCard
+                    matchId={expandedMatch.id}
+                    sport={expandedMatch.sport}
+                    home={expandedMatch.home}
+                    away={expandedMatch.away}
+                  />
                 )}
 
                 {/* ── Múltiplas Sugeridas — entre o card do jogo e as abas de mercados ── */}
