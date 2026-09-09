@@ -1,7 +1,7 @@
 /**
  * Modal de perfil de jogador — bio, estatísticas da temporada atual e
  * últimos jogos. Busca /api/matches/player-profile/:id (dados reais
- * SportMonks). Aberto a partir do nome de um jogador nos eventos ao vivo.
+ * GOAL API). Aberto a partir do nome de um jogador nos eventos ao vivo.
  */
 
 import { useEffect, useState } from "react";
@@ -17,7 +17,7 @@ type SeasonStats = {
 };
 
 type RecentMatch = {
-  fixtureId: number;
+  fixtureId: string;
   date: string;
   opponent: string;
   competition: string;
@@ -33,7 +33,7 @@ type RecentMatch = {
 };
 
 type PlayerProfile = {
-  id: number;
+  id: string;
   name: string;
   imageUrl: string | null;
   nationality: string | null;
@@ -77,7 +77,7 @@ export default function PlayerProfileModal({
   playerId,
   onClose,
 }: {
-  playerId: number | null;
+  playerId: string | null;
   onClose: () => void;
 }) {
   const [profile, setProfile] = useState<PlayerProfile | null>(null);

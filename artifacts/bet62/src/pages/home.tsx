@@ -3740,7 +3740,7 @@ type Match = {
     team: string;
     minute: number;
     player: string;
-    playerId?: number;
+    playerId?: string;
     detail?: string;
   }>;
   // Real match statistics (GOAL API football only) — replaces the deleted
@@ -6075,7 +6075,7 @@ export default function Home({
   };
   const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
-  const [playerProfileId, setPlayerProfileId] = useState<number | null>(null);
+  const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
 
   const extractLiveKeyStats = (
     groups: V2StatsGroup[],

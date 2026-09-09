@@ -55,6 +55,7 @@ import {
   buildGoalApiForm,
   buildGoalApiStandings,
   buildGoalApiStandingZoneMap,
+  buildGoalApiPlayerProfile,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -392,7 +393,7 @@ export type LiveMatchState = {
   hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
-  events: Array<{ type: string; team: string; minute: number; player: string; playerId?: number; detail?: string }>;
+  events: Array<{ type: string; team: string; minute: number; player: string; playerId?: string; detail?: string }>;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -12795,15 +12796,31 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
-// Used to be sourced from SportMonks; that provider was removed and nothing
-// replaces it, so this reports "unavailable" rather than a stale/fake profile.
+// Used to be sourced from SportMonks (numeric ids); that provider was
+// removed and left this hardcoded to 404 ever since. GOAL API's /players/:id
+// (confirmed real 2026-09-09) is the real replacement — ids are opaque cuid
+// strings, not numbers, hence the frontend's playerId type moving from
+// number to string alongside this fix.
 router.get("/player-profile/:id", async (req: Request, res: Response) => {
-  const playerId = Number(req.params.id);
-  if (!Number.isFinite(playerId) || playerId <= 0) {
-    res.status(400).json({ error: "invalid player id" });
+  const playerId = String(req.params.id ?? "");
+  if (!playerId || !CONFIG.GOAL_API_KEY) {
+    res.status(404).json({ error: "player profile unavailable" });
     return;
   }
-  res.status(404).json({ error: "player profile unavailable" });
+  try {
+    const [player, stats] = await Promise.all([
+      goalApi.getPlayerById(playerId),
+      goalApi.getPlayerStatistics(playerId).catch(() => null),
+    ]);
+    if (!player?.id) {
+      res.status(404).json({ error: "player profile unavailable" });
+      return;
+    }
+    res.json(buildGoalApiPlayerProfile(player, stats));
+  } catch (err) {
+    logger.error({ err, playerId }, "[goal-api] player profile fetch failed");
+    res.status(404).json({ error: "player profile unavailable" });
+  }
 });
 
 // ─── Live Storylines ────────────────────────────────────────────────────────

@@ -13,6 +13,8 @@ import type {
   GoalApiTeamResults,
   GoalApiStanding,
   GoalApiStandingZones,
+  GoalApiPlayer,
+  GoalApiPlayerStatistics,
 } from "./index.js";
 
 /** GOAL API's own English stat labels (match.fullTime[].type, confirmed
@@ -101,10 +103,11 @@ function parseGoalApiEventMinute(time: string): number {
 export function buildGoalApiEvents(
   events: GoalApiMatchEvent[] | null | undefined,
   substitutions?: GoalApiSubstitution[] | null,
-): Array<{ type: string; team: string; minute: number; player: string; detail?: string }> {
+): Array<{ type: string; team: string; minute: number; player: string; playerId?: string; detail?: string }> {
   const fromEvents = (events ?? []).map((e) => {
     const team: "home" | "away" = e.homeScorer ? "home" : e.awayScorer ? "away" : e.info === "away" ? "away" : "home";
     const player = (team === "home" ? e.homeScorer : e.awayScorer) ?? "?";
+    const playerId = (team === "home" ? e.homeScorerId : e.awayScorerId) ?? undefined;
     const assist = team === "home" ? e.homeAssist : e.awayAssist;
     const detailParts = [assist ? `Assistência: ${assist}` : null, e.info === "Penalty" ? "Grande Penalidade" : null].filter(
       (v): v is string => Boolean(v),
@@ -114,6 +117,7 @@ export function buildGoalApiEvents(
       team,
       minute: e.timeNum ?? parseGoalApiEventMinute(e.time),
       player,
+      playerId,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : undefined,
     };
   });
@@ -441,4 +445,85 @@ export function goalApiKickoffDateTime(fixture: GoalApiFixture): { date: string;
     if (y && m && d) return { date: `${d}.${m}.${y}`, time: fixture.matchTime };
   }
   return { date: "", time: "" };
+}
+
+export type BuiltPlayerRecentMatch = {
+  fixtureId: string;
+  date: string;
+  opponent: string;
+  competition: string;
+  isHome: boolean;
+  teamScore: number | null;
+  opponentScore: number | null;
+  goals: number;
+  assists: number;
+  yellowCards: number;
+  redCards: number;
+  minutesPlayed: number | null;
+  rating: number | null;
+};
+
+export type BuiltPlayerProfile = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  nationality: string | null;
+  nationalityFlagUrl: string | null;
+  position: string | null;
+  height: number | null;
+  weight: number | null;
+  dateOfBirth: string | null;
+  team: string | null;
+  teamLogoUrl: string | null;
+  competition: string | null;
+  seasonStats: {
+    appearances: number | null;
+    goals: number | null;
+    assists: number | null;
+    yellowCards: number | null;
+    redCards: number | null;
+    minutesPlayed: number | null;
+  };
+  recentMatches: BuiltPlayerRecentMatch[];
+};
+
+/** Maps GOAL API's /players/:id + /players/:id/statistics (confirmed real
+ * 2026-09-09) into the Player Profile modal's shape — previously sourced
+ * from SportMonks, removed and left as a hardcoded 404 stub ever since
+ * ("player profile unavailable" for every id). Identity/team fields come
+ * from the plain player object (real nulls); "performance" from the
+ * statistics call backs seasonStats. height/weight/competition/
+ * nationalityFlagUrl aren't present in either raw response, so stay null
+ * rather than guessed. recentMatches has never been observed non-empty in
+ * a real statistics response — mapped as empty until a populated example
+ * confirms its item shape; the modal already hides that section when
+ * empty. */
+export function buildGoalApiPlayerProfile(
+  player: GoalApiPlayer,
+  stats: GoalApiPlayerStatistics | null | undefined,
+): BuiltPlayerProfile {
+  const perf = stats?.performance;
+  return {
+    id: player.id,
+    name: player.name,
+    imageUrl: player.image ?? null,
+    nationality: player.country ?? null,
+    nationalityFlagUrl: null,
+    position: player.type ?? null,
+    height: null,
+    weight: null,
+    dateOfBirth: player.birthdate ?? null,
+    team: player.team?.name ?? null,
+    teamLogoUrl: player.team?.badge ?? null,
+    competition: null,
+    seasonStats: {
+      appearances: perf?.matchPlayed ?? null,
+      goals: perf?.goals ?? null,
+      assists: perf?.assists ?? null,
+      yellowCards: perf?.yellowCards ?? null,
+      redCards: perf?.redCards ?? null,
+      minutesPlayed: perf?.minutes ?? null,
+    },
+    recentMatches: [],
+  };
 }
