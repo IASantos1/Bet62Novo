@@ -7,6 +7,8 @@ import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 import { propline } from "../services/propline/index.js";
 import { proplineAllActiveSports } from "../services/propline/football.js";
+import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goalapi/websocketClient.js";
+import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -93,6 +95,27 @@ server.listen(port, () => {
 
   void proplineStartupAndPeriodicCheck("startup");
   setInterval(() => void proplineStartupAndPeriodicCheck("periodic"), 60 * 60 * 1000);
+
+  // GOAL API Data Collector — no-op while GOAL_API_MAX_WS_MATCHES is 0
+  // (the FREE plan's real concurrent-match limit for WebSocket
+  // subscriptions), so this activates automatically once the account
+  // upgrades, with no code change. Every match_update just triggers a
+  // refresh through the same REST-derived state path the webhook receiver
+  // and poll loop use (routes/matches.ts's applyGoalApiWebhookEvent) —
+  // one source of truth for state regardless of what woke it up.
+  if (CONFIG.GOAL_API_KEY) {
+    startGoalApiWebSocket((fixtureId) => {
+      applyGoalApiWebhookEvent({ event: "score.changed", data: { fixtureId } }).catch((err) => {
+        logger.error({ err, fixtureId }, "[goal-api-ws] update handling failed");
+      });
+    });
+    setInterval(() => {
+      const ids = [...liveMatchState.keys()]
+        .filter((id) => id.startsWith("goalapi-football-"))
+        .map((id) => id.slice("goalapi-football-".length));
+      syncGoalApiSubscriptions(ids);
+    }, 30_000);
+  }
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY
