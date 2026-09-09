@@ -64,6 +64,13 @@ import {
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
+import { apiTennis, type ApiTennisMatch } from "../services/apitennis/index.js";
+import {
+  buildApiTennisSets,
+  parseApiTennisGameResult,
+  parseApiTennisServer,
+  extractApiTennisMoneyline,
+} from "../services/apitennis/common.js";
 
 
 const router: IRouter = Router();
@@ -3092,7 +3099,7 @@ function computeTennisExtras(
       a02: overrides?.xa02 ?? es02!,
       a12: overrides?.xa12 ?? es12!,
     },
-    setHandicap: { home: shhm15!, away: shaw15! },
+    setHandicap: { line: 1.5, home: shhm15!, away: shaw15! },
     totalGames: {
       line: overrides?.gamesLineRound ?? mainGamesLine.line,
       over: overrides?.oGames ?? mainGamesLine.over,
@@ -7912,6 +7919,219 @@ export async function applyGoalApiWebhookEvent(event: {
   }
 }
 
+// ── Tennis (api-tennis.com) — first real tennis provider this platform has
+// ever had; every prior attempt (PulseScore, SportMonks) was removed. ──────
+
+const API_TENNIS_ID_PREFIX = "apitennis-tennis-";
+const API_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Deterministic pseudo-random baseline win probability for a pair of
+ * players with no real odds yet — same seededRng/hashStr utilities every
+ * other synthetic generator in this file already uses (e.g.
+ * makeMmaMoneylineFromTeams), kept within a competitive 35-65% band rather
+ * than ever showing a coin-flip 50/50 for every unpriced match. */
+function apiTennisSyntheticP(home: string, away: string): number {
+  const rng = seededRng(`apitennis:${home}:${away}`);
+  return mc(0.5 + (rng(1) - 0.5) * 0.6, 0.35, 0.65);
+}
+
+/** Tennis has no draw and none of football's goal-based markets — same
+ * "zeroed generic fields + sport-specific extension" pattern as
+ * makeMmaMarketsFromTeams. tennisExtra itself (~30 fields) comes from
+ * computeTennisExtras, which already existed but had no caller until this
+ * provider. */
+function makeTennisMarketsFromPlayers(home: string, away: string, p?: number): AdvancedMarkets {
+  const tennisExtra = computeTennisExtras(p ?? apiTennisSyntheticP(home, away));
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals: {
+      over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+      over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
+      over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    tennisExtra,
+  };
+}
+
+function makeTennisMoneylineFromP(p: number): { home: number; draw: number; away: number } {
+  const [home, away] = probsToDecimalOdds([p, 1 - p], 1.06);
+  return { home: home!, draw: 0, away: away! };
+}
+
+/** Tennis prematch from api-tennis.com — real moneyline via
+ * extractApiTennisMoneyline (get_odds's "Home/Away" group) wherever a
+ * bookmaker has priced the match; synthetic Poisson-ish baseline
+ * (computeTennisExtras) otherwise, same "real data patches synthetic"
+ * convention every other provider in this file follows. */
+async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.TENNIS_API_KEY) return [];
+  const today = new Date();
+  const dateStart = today.toISOString().slice(0, 10);
+  const stop = new Date(today);
+  stop.setDate(stop.getDate() + 7);
+  const dateStop = stop.toISOString().slice(0, 10);
+
+  const fixtures = await apiTennis
+    .getFixtures({ date_start: dateStart, date_stop: dateStop })
+    .catch(() => [] as ApiTennisMatch[]);
+  logger.info({ count: fixtures.length }, "[api-tennis] tennis upcoming raw fixture count");
+
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const fx of fixtures) {
+    if (fx.event_live === "1") continue; // live matches come from buildTennisLiveFromApiTennis
+    const home = fx.event_first_player;
+    const away = fx.event_second_player;
+    if (!home || !away) continue;
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    try {
+      const oddsResult = await apiTennis.getOdds({ match_key: fx.event_key });
+      const candidate = extractApiTennisMoneyline(oddsResult[fx.event_key]?.["Home/Away"]);
+      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
+    } catch {
+      /* no odds yet for this fixture — synthetic fallback below */
+    }
+
+    // De-vig the real price into a probability so computeTennisExtras'
+    // whole market grid (set betting, exact sets, total games, ...) stays
+    // internally consistent with the real moneyline instead of only the
+    // headline home/away price reflecting reality.
+    const p = resultOdds
+      ? mc(1 / resultOdds.home / (1 / resultOdds.home + 1 / resultOdds.away), 0.02, 0.98)
+      : apiTennisSyntheticP(home, away);
+    const markets = makeTennisMarketsFromPlayers(home, away, p);
+    const odds = resultOdds ?? makeTennisMoneylineFromP(p);
+
+    results.push({
+      id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
+      home,
+      away,
+      league: fx.tournament_name || fx.event_type_type || "Tênis",
+      country: "Internacional",
+      time: fx.event_time || "",
+      date: fx.event_date || dateStart,
+      sport: "tennis",
+      hasRealOdds: !!resultOdds,
+      odds,
+      markets,
+      homeLogoUrl: fx.event_first_player_logo ?? undefined,
+      awayLogoUrl: fx.event_second_player_logo ?? undefined,
+    });
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+/** Tennis live from api-tennis.com — get_livescore already embeds
+ * pointbypoint/scores/statistics inline, no separate per-match call
+ * needed. Sets won (not games) is what settlement/UI expect on
+ * homeScore/awayScore (getTennisSetsFromExtras reads _liveExtra.sets, not
+ * these two fields directly, but the frontend's live list and progress
+ * indicators use homeScore/awayScore as "sets won" the same way every
+ * other sport uses them as its own scoring unit).
+ *
+ * CRITICAL — same lesson as the football live-odds bug fixed this session
+ * (a team down several goals still showing competitive odds because the
+ * poll refresh overwrote the drift engine's corrected price every ~1-2s):
+ * this function must never overwrite state.odds/state.markets after the
+ * first tick. The drift engine (applyTieredMarketDrift) is the sole owner
+ * of what's displayed; this only feeds it fresh facts (sets, current
+ * point, server) and a fresh _baseOdds anchor when a real price arrives. */
+async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
+  if (!CONFIG.TENNIS_API_KEY) return [];
+  const matches = await apiTennis.getLivescore().catch(() => [] as ApiTennisMatch[]);
+  logger.info({ count: matches.length }, "[api-tennis] tennis live raw match count");
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const fx of matches) {
+    const home = fx.event_first_player;
+    const away = fx.event_second_player;
+    if (!home || !away) continue;
+
+    const id = `${API_TENNIS_ID_PREFIX}${fx.event_key}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const sets = buildApiTennisSets(fx.scores);
+    const homeScore = sets.filter(([h, a]) => h > a).length;
+    const awayScore = sets.filter(([h, a]) => a > h).length;
+    const currentPoints = parseApiTennisGameResult(fx.event_game_result);
+    const serving = parseApiTennisServer(fx.event_serve);
+
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    try {
+      const oddsResult = await apiTennis.getOdds({ match_key: fx.event_key });
+      const candidate = extractApiTennisMoneyline(oddsResult[fx.event_key]?.["Home/Away"]);
+      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
+    } catch {
+      /* no real odds this tick — keep whatever anchor already exists */
+    }
+
+    const syntheticP = apiTennisSyntheticP(home, away);
+    const baseOdds = makeTennisMoneylineFromP(syntheticP);
+    const baseMarkets = makeTennisMarketsFromPlayers(home, away, syntheticP);
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: fx.tournament_name || fx.event_type_type || "Tênis",
+      country: "Internacional",
+      sport: "tennis",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: fx.event_status || "",
+      hasRealOdds: !!resultOdds,
+      odds: existing?.odds ?? resultOdds ?? baseOdds,
+      markets: existing?.markets ?? baseMarkets,
+      _baseOdds: existing?._baseOdds ?? resultOdds ?? baseOdds,
+      _baseMarkets: existing?._baseMarkets ?? baseMarkets,
+      events: existing?.events ?? [],
+      _liveExtra: {
+        ...existing?._liveExtra,
+        sets,
+        currentPoints,
+        serving,
+      },
+      homeLogoUrl: fx.event_first_player_logo ?? existing?.homeLogoUrl,
+      awayLogoUrl: fx.event_second_player_logo ?? existing?.awayLogoUrl,
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith(API_TENNIS_ID_PREFIX)) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > API_TENNIS_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[api-tennis] finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
 
 /** Basketball prematch from PropLine — NBA/WNBA/NCAAB, real moneyline via
@@ -8652,9 +8872,18 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       football = _lastGoodFootballUpcoming;
     }
-    // Tennis: no dedicated provider yet (a separate, higher-quality tennis
-    // provider is planned per user decision 2026-09-09) — stays empty.
-    const tennis: UpcomingMatch[] = chooseUpcomingProvider("tennis", []);
+    // api-tennis.com restored 2026-09-09 for tennis — first real tennis
+    // provider this platform has ever had.
+    let tennis: UpcomingMatch[] = [];
+    try {
+      const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.TENNIS_API_KEY) {
+        tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
+      }
+      tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+    } catch (err) {
+      logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
+    }
     _lastGoodTennisUpcoming = tennis;
     // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
     // (football and tennis excluded from PropLine's scope per user decision
@@ -8791,7 +9020,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     logger.error({ err }, "[tri-fallback] volleyball live failed this tick");
   }
   const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
-  const tennisLiveRaw: LiveMatchState[] = chooseLiveProvider("tennis", []);
+  let tennisLiveRaw: LiveMatchState[] = [];
+  try {
+    const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.TENNIS_API_KEY) {
+      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
+    }
+    tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] tennis live failed this tick");
+  }
   const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
   let mmaLiveRaw: LiveMatchState[] = [];
   try {
