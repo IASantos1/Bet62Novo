@@ -244,6 +244,28 @@ export type GoalApiStanding = {
   league?: { id: string; name: string; season?: string | null };
 };
 
+/** /standings/:leagueId/zones — confirmed real 2026-09-09. Each zone array
+ * holds the same GoalApiStanding rows as the main endpoint, just bucketed;
+ * summary is a redundant per-zone team count. */
+export type GoalApiStandingZones = {
+  leagueId: string;
+  zones: {
+    promotion: GoalApiStanding[];
+    europeanQualification: GoalApiStanding[];
+    safe: GoalApiStanding[];
+    relegationPlayoff: GoalApiStanding[];
+    relegation: GoalApiStanding[];
+  };
+  summary?: {
+    totalTeams: number;
+    promotionZone: number;
+    europeanZone: number;
+    safeZone: number;
+    relegationPlayoffZone: number;
+    relegationZone: number;
+  };
+};
+
 /** One entry of /teams/:id/results's recentFixtures — result/score are
  * already resolved server-side (score is literal "home-away", result is
  * W/D/L from the queried team's perspective); confirmed real via a raw
@@ -409,6 +431,16 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiStanding[]>(`/standings/${encodeURIComponent(leagueId)}`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
+  /** /standings/:leagueId/zones — confirmed real 2026-09-09: the same
+   * canonical standing row (see GoalApiStanding) bucketed into
+   * promotion/europeanQualification/safe/relegationPlayoff/relegation
+   * arrays. A league without a real promotion/relegation structure (e.g.
+   * MLS, a closed franchise league) puts every team in "safe" — this is a
+   * real, meaningful result from the provider, not a failure. */
+  getLeagueStandingsZones(leagueId: string): Promise<GoalApiStandingZones> {
+    return this.cachedGet<GoalApiStandingZones>(`/standings/${encodeURIComponent(leagueId)}/zones`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   /** /teams/:id/upcoming — same canonical fixture DTO confirmed real across
    * /fixtures, /leagues/:id/fixtures and /teams/:id/fixtures, pre-filtered
    * to that team's future matches. */
@@ -495,6 +527,7 @@ export const goalApi = {
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
   getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
   getLeagueStandings: (leagueId: string) => getGoalApiClient().getLeagueStandings(leagueId),
+  getLeagueStandingsZones: (leagueId: string) => getGoalApiClient().getLeagueStandingsZones(leagueId),
   getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
   getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),

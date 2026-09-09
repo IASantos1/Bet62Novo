@@ -54,6 +54,7 @@ import {
   buildGoalApiTeamUpcoming,
   buildGoalApiForm,
   buildGoalApiStandings,
+  buildGoalApiStandingZoneMap,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -11746,8 +11747,12 @@ router.get("/league-standings", async (req: Request, res: Response) => {
   const leagueId = String(req.query["leagueId"] ?? "");
   if (leagueId && CONFIG.GOAL_API_KEY) {
     try {
-      const raw = await goalApi.getLeagueStandings(leagueId);
-      const built = buildGoalApiStandings(raw, league);
+      const [raw, zonesRaw] = await Promise.all([
+        goalApi.getLeagueStandings(leagueId),
+        goalApi.getLeagueStandingsZones(leagueId).catch(() => null),
+      ]);
+      const zoneByTeamId = buildGoalApiStandingZoneMap(zonesRaw);
+      const built = buildGoalApiStandings(raw, league, zoneByTeamId);
       if (built.teams.length > 0) {
         res.json(built);
         return;

@@ -3973,6 +3973,14 @@ type StandingRow = {
   gf: number;
   ga: number;
   pts: number;
+  zone?: "promotion" | "european" | "safe" | "relegationPlayoff" | "relegation";
+};
+
+const STANDING_ZONE_BORDER: Record<string, string> = {
+  promotion: "border-l-green-500",
+  european: "border-l-blue-500",
+  relegationPlayoff: "border-l-orange-500",
+  relegation: "border-l-red-500",
 };
 
 const MarketTabCtx = createContext<string>("");
@@ -19152,10 +19160,13 @@ export default function Home({
                                   row.name,
                                   expandedMatch.away,
                                 );
+                                const zoneBorder = row.zone
+                                  ? (STANDING_ZONE_BORDER[row.zone] ?? "border-l-transparent")
+                                  : "border-l-transparent";
                                 return (
                                   <tr
                                     key={ri}
-                                    className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}
+                                    className={`border-b border-zinc-800/50 border-l-2 ${zoneBorder} ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}
                                   >
                                     <td className="py-2 pr-2 text-zinc-500">
                                       {row.pos}
@@ -19192,11 +19203,34 @@ export default function Home({
                             </tbody>
                           </table>
                         );
+                        const zoneLegendLabels: Record<string, string> = {
+                          promotion: "Promoção",
+                          european: "Vaga Europeia",
+                          relegationPlayoff: "Play-off Descida",
+                          relegation: "Descida",
+                        };
+                        const presentZones = Array.from(
+                          new Set(
+                            (standings ?? [])
+                              .map((r) => r.zone)
+                              .filter((z): z is NonNullable<typeof z> => !!z && z !== "safe"),
+                          ),
+                        );
                         return (
                           <div>
                             <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
                               {standingsLeague}
                             </div>
+                            {presentZones.length > 0 && (
+                              <div className="flex flex-wrap gap-3 mb-3">
+                                {presentZones.map((zone) => (
+                                  <div key={zone} className="flex items-center gap-1.5 text-[9px] text-zinc-500">
+                                    <span className={`w-2 h-2 rounded-sm ${STANDING_ZONE_BORDER[zone]?.replace("border-l-", "bg-") ?? ""}`} />
+                                    {zoneLegendLabels[zone]}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {standingsGroups && standingsGroups.length > 0 ? (
                               <div className="space-y-4">
                                 {standingsGroups.map((group) => (

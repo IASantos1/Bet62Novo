@@ -12,6 +12,7 @@ import type {
   GoalApiTopScorer,
   GoalApiTeamResults,
   GoalApiStanding,
+  GoalApiStandingZones,
 } from "./index.js";
 
 /** GOAL API's own English stat labels (match.fullTime[].type, confirmed
@@ -250,11 +251,29 @@ export function buildGoalApiTopScorers(raw: GoalApiTopScorer[] | null | undefine
   }));
 }
 
-export type BuiltStandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+/** Promotion/relegation zone classification from /standings/:leagueId/zones
+ * (confirmed real 2026-09-09) — "european" is a shortened form of the raw
+ * "europeanQualification" bucket name, everything else matches verbatim.
+ * A league with no real zone structure (e.g. MLS, a closed franchise
+ * league) puts every team in "safe", which renders as no highlight. */
+export type StandingZone = "promotion" | "european" | "safe" | "relegationPlayoff" | "relegation";
+
+export type BuiltStandingRow = {
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+  zone?: StandingZone;
+};
 export type BuiltStandingsGroup = { name: string; rows: BuiltStandingRow[] };
 export type BuiltStandings = { league: string; teams: BuiltStandingRow[]; groups: BuiltStandingsGroup[] | null };
 
-function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
+function buildStandingRow(row: GoalApiStanding, zoneByTeamId?: Map<string, StandingZone>): BuiltStandingRow {
   return {
     pos: Number(row.overallLeaguePosition) || 0,
     name: row.team?.name ?? row.teamName,
@@ -265,7 +284,26 @@ function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
     gf: Number(row.overallLeagueGF) || 0,
     ga: Number(row.overallLeagueGA) || 0,
     pts: Number(row.overallLeaguePTS) || 0,
+    zone: zoneByTeamId?.get(row.teamId),
   };
+}
+
+/** Maps /standings/:leagueId/zones (confirmed real 2026-09-09) into a
+ * teamId → zone lookup for buildGoalApiStandings to attach per-row.
+ * Skipped entirely (empty map) on fetch failure — a missing zone is just
+ * "no highlight", never worth failing the standings table over. */
+export function buildGoalApiStandingZoneMap(raw: GoalApiStandingZones | null | undefined): Map<string, StandingZone> {
+  const map = new Map<string, StandingZone>();
+  if (!raw?.zones) return map;
+  const assign = (rows: GoalApiStanding[] | undefined, zone: StandingZone) => {
+    for (const row of rows ?? []) map.set(row.teamId, zone);
+  };
+  assign(raw.zones.promotion, "promotion");
+  assign(raw.zones.europeanQualification, "european");
+  assign(raw.zones.safe, "safe");
+  assign(raw.zones.relegationPlayoff, "relegationPlayoff");
+  assign(raw.zones.relegation, "relegation");
+  return map;
 }
 
 /** Maps GOAL API's /standings/:leagueId response (confirmed real,
@@ -279,8 +317,13 @@ function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
  * once per group in the flat array — "leagueRound" carries the group name
  * in that case, so rows are split into groups by that field; a league
  * with a single table (no distinct leagueRound values) is returned as one
- * flat sorted list instead. */
-export function buildGoalApiStandings(raw: GoalApiStanding[] | null | undefined, leagueName: string): BuiltStandings {
+ * flat sorted list instead. zoneByTeamId (from buildGoalApiStandingZoneMap)
+ * is optional so this still works standalone if the zones fetch fails. */
+export function buildGoalApiStandings(
+  raw: GoalApiStanding[] | null | undefined,
+  leagueName: string,
+  zoneByTeamId?: Map<string, StandingZone>,
+): BuiltStandings {
   if (!raw || raw.length === 0) return { league: leagueName, teams: [], groups: null };
   const league = raw[0]?.league?.name ?? leagueName;
   const roundNames = new Set(raw.map((row) => row.leagueRound).filter((r): r is string => !!r));
@@ -289,12 +332,12 @@ export function buildGoalApiStandings(raw: GoalApiStanding[] | null | undefined,
       name,
       rows: raw
         .filter((row) => row.leagueRound === name)
-        .map(buildStandingRow)
+        .map((row) => buildStandingRow(row, zoneByTeamId))
         .sort((a, b) => a.pos - b.pos),
     }));
     return { league, teams: groups.flatMap((g) => g.rows), groups };
   }
-  const teams = raw.map(buildStandingRow).sort((a, b) => a.pos - b.pos);
+  const teams = raw.map((row) => buildStandingRow(row, zoneByTeamId)).sort((a, b) => a.pos - b.pos);
   return { league, teams, groups: null };
 }
 
