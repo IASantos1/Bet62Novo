@@ -1,6 +1,6 @@
 // Shared, sport-agnostic (well — football is the only sport this provider
 // covers) extraction helpers for GOAL API responses.
-import type { GoalApiFixture, GoalApiOdds, GoalApiFixtureStatistics, GoalApiMatchEvent } from "./index.js";
+import type { GoalApiFixture, GoalApiOdds, GoalApiFixtureStatistics, GoalApiMatchEvent, GoalApiSubstitution } from "./index.js";
 
 /** Shapes GOAL API's per-fixture statistics into the frontend's existing
  * generic stats-row renderer (home.tsx's V2StatsGroup type) — previously
@@ -31,20 +31,31 @@ export function buildGoalApiMatchStats(
   return [{ title: "Estatísticas do Jogo", rows }];
 }
 
-/** Maps GOAL API's raw match events into the shape routes/matches.ts's
- * LiveMatchState.events field already expects (same field every other
- * provider in this file populates). */
+/** Maps GOAL API's raw match events (+ substitutions, a separate
+ * documented endpoint — /fixtures/:id/substitutions) into the shape
+ * routes/matches.ts's LiveMatchState.events field already expects (same
+ * field every other provider in this file populates), sorted by minute so
+ * the incident timeline reads chronologically regardless of which
+ * endpoint contributed each entry. */
 export function buildGoalApiEvents(
   events: GoalApiMatchEvent[] | null | undefined,
+  substitutions?: GoalApiSubstitution[] | null,
 ): Array<{ type: string; team: string; minute: number; player: string; detail?: string }> {
-  if (!events) return [];
-  return events.map((e) => ({
+  const fromEvents = (events ?? []).map((e) => ({
     type: e.type,
     team: e.team,
     minute: e.minute,
     player: e.player,
     detail: e.detail,
   }));
+  const fromSubs = (substitutions ?? []).map((s) => ({
+    type: "substitution",
+    team: s.team,
+    minute: s.minute,
+    player: s.playerIn,
+    detail: `Saiu: ${s.playerOut}`,
+  }));
+  return [...fromEvents, ...fromSubs].sort((a, b) => a.minute - b.minute);
 }
 
 /** Picks the first bookmaker entry that actually has a 1x2 price — GOAL

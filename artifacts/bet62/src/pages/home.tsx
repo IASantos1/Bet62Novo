@@ -6957,6 +6957,7 @@ export default function Home({
       const incidents: V2Incident[] = rawEvents.map((e, i) => {
         const isGoal = e.type === "goal";
         const isCard = e.type === "card";
+        const isSub = e.type === "substitution";
         const isRed = isCard && (e.detail ?? "").toLowerCase().includes("red");
         const team: "home" | "away" | "neutral" =
           e.team === "home" || e.team === "away" ? e.team : "neutral";
@@ -6965,10 +6966,10 @@ export default function Home({
           time: `${e.minute}'`,
           minute: e.minute,
           team,
-          kind: isGoal ? "goal" : isCard ? "card" : "other",
+          kind: isGoal ? "goal" : isCard ? "card" : isSub ? "sub" : "other",
           card: isCard ? (isRed ? "red" : "yellow") : null,
-          title: isGoal ? "Golo" : isCard ? (isRed ? "Cartão Vermelho" : "Cartão Amarelo") : e.type,
-          detail: e.player ?? "",
+          title: isGoal ? "Golo" : isCard ? (isRed ? "Cartão Vermelho" : "Cartão Amarelo") : isSub ? "Substituição" : e.type,
+          detail: isSub ? `${e.player} (${e.detail ?? ""})` : (e.player ?? ""),
         };
       });
       setV2Incidents(incidents);
