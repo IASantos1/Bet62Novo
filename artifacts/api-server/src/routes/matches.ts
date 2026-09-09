@@ -7429,6 +7429,10 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
     proplineFetchBasketballPeriodOddsAllLeagues("q1"),
     proplineFetchBasketballPeriodOddsAllLeagues("h1"),
   ]);
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] basketball upcoming raw event counts",
+  );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { sportKey, events } of perLeague) {
@@ -7584,6 +7588,10 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
     proplineFetchHockeyOddsAllLeagues(),
     proplineFetchHockeyPeriod1OddsAllLeagues(),
   ]);
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] hockey upcoming raw event counts",
+  );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { events } of perLeague) {
@@ -7884,6 +7892,10 @@ async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
  * this app's single "mma" tab. */
 async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
   const perLeague = await proplineFetchMmaOddsAllLeagues();
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] mma upcoming raw event counts",
+  );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const { sportKey, events } of perLeague) {
@@ -7914,7 +7926,11 @@ async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
         hasRealOdds: !!resultOdds,
         odds,
         markets,
-        mmaExtra: { toDistance: { yes: 0, no: 0 }, totalRoundsLines: [] },
+        // No PropLine data source for "goes the distance"/total-rounds yet
+        // — omit mmaExtra entirely (it's fully optional) rather than a
+        // {yes:0,no:0} placeholder, which the frontend renders as a real
+        // 0.00 market instead of hiding it (only checks the object's
+        // presence, not its values).
       });
     }
   }
@@ -7967,7 +7983,9 @@ async function buildMmaLiveFromPropLine(): Promise<LiveMatchState[]> {
         hasRealOdds: !!resultOdds,
         odds: resultOdds ?? { ...makeMmaMoneylineFromTeams(home, away), draw: 0 },
         markets,
-        mmaExtra: { toDistance: { yes: 0, no: 0 }, totalRoundsLines: [] },
+        // See buildMmaUpcomingFromPropLine's comment — omit mmaExtra
+        // entirely rather than a {yes:0,no:0} placeholder the frontend
+        // renders as a real 0.00 market.
         events: [],
         _lastSeenAt: Date.now(),
       };
