@@ -5804,6 +5804,16 @@ export default function Home({
   }> | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [standingsLeague, setStandingsLeague] = useState("");
+  type TopScorerRow = {
+    rank: number;
+    playerName: string;
+    teamName: string;
+    goals: number;
+    assists: number;
+    penaltyGoals: number;
+  };
+  const [topScorers, setTopScorers] = useState<TopScorerRow[] | null>(null);
+  const [topScorersLoading, setTopScorersLoading] = useState(false);
   type AllOddsMarket = {
     name: string;
     group: string;
@@ -6797,6 +6807,8 @@ export default function Home({
     setStandingsGroups(null);
     setStandingsLoading(false);
     setStandingsLeague("");
+    setTopScorers(null);
+    setTopScorersLoading(false);
     setConfrontosData(null);
     setConfrontosLoading(false);
     setAllOddsData(null);
@@ -6919,6 +6931,8 @@ export default function Home({
       sport: expandedMatch.sport ?? "football",
       league: expandedMatch.league ?? "",
       country: expandedMatch.country ?? "",
+      ...(expandedMatch.homeTeamId ? { homeTeamId: expandedMatch.homeTeamId } : {}),
+      ...(expandedMatch.awayTeamId ? { awayTeamId: expandedMatch.awayTeamId } : {}),
     });
     fetch(`/api/matches/stats?${p}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -7012,15 +7026,17 @@ export default function Home({
       setStandingsGroups(safeGroups);
       return true;
     };
+    const leagueId = expandedMatch.leagueId;
     const loadV1 = () =>
       fetch(
-        `/api/matches/league-standings?league=${encodeURIComponent(league)}`,
+        `/api/matches/league-standings?league=${encodeURIComponent(league)}${leagueId ? `&leagueId=${encodeURIComponent(leagueId)}` : ""}`,
       )
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (!d || !Array.isArray(d.teams)) return;
+          const groups = Array.isArray(d.groups) ? (d.groups as Array<{ name: string; rows: StandingRow[] }>) : null;
           if (
-            !acceptStandings(d.teams as StandingRow[], null, d.league ?? league)
+            !acceptStandings(d.teams as StandingRow[], groups, d.league ?? league)
           ) {
             setStandings([]);
             setStandingsGroups(null);
@@ -7028,9 +7044,11 @@ export default function Home({
           }
         });
     // The /v2-standings backend endpoint (SportsAPI Pro V2) was removed.
-    // Football still resolves standings via the V1 league-standings route;
-    // other sports had no other source for per-match standings, so they now
-    // settle straight to "not available".
+    // Football still resolves standings via the league-standings route —
+    // real GOAL API data when leagueId is known (see buildGoalApiStandings
+    // on the backend), synthetic otherwise; other sports had no other
+    // source for per-match standings, so they now settle straight to "not
+    // available".
     const sport = expandedMatch.sport ?? "football";
     if (sport === "football") {
       loadV1()
@@ -7043,6 +7061,26 @@ export default function Home({
     }
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch top scorers (Artilheiros) when the stats tab is active — same
+  // trigger condition as standings above, and same reasoning: the panel
+  // embeds this as a sub-tab, so the data needs to be ready before the user
+  // navigates there. Football only — GOAL API's leagueId is only populated
+  // on football matches.
+  useEffect(() => {
+    if (matchViewTab !== "stats" || !expandedMatch || topScorers) return;
+    const sport = expandedMatch.sport ?? "football";
+    const leagueId = expandedMatch.leagueId;
+    if (sport !== "football" || !leagueId) {
+      setTopScorers([]);
+      return;
+    }
+    setTopScorersLoading(true);
+    fetch(`/api/matches/top-scorers/${encodeURIComponent(leagueId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setTopScorers(Array.isArray(d?.scorers) ? d.scorers : []))
+      .catch(() => setTopScorers([]))
+      .finally(() => setTopScorersLoading(false));
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The /v2-match-odds backend endpoint (SportsAPI Pro V2) was removed —
   // there is no replacement source for the full markets list, so the
@@ -7055,13 +7093,15 @@ export default function Home({
     setAllOddsSectionOpen({});
   }, [matchViewTab, expandedMatch?.id]);
 
-  // The /v2-lineups backend endpoint (SportsAPI Pro V2) was removed — there
-  // is no replacement source for lineups, so the "lineups" tab now always
-  // settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
     setLineupsData(null);
-    setLineupsLoading(false);
+    setLineupsLoading(true);
+    fetch(`/api/matches/lineups/${expandedMatch.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setLineupsData(d as LineupsV2 | null))
+      .catch(() => setLineupsData(null))
+      .finally(() => setLineupsLoading(false));
   }, [matchViewTab, expandedMatch?.id]);
 
   // Fetch live storyline when a live football match is expanded
@@ -19030,6 +19070,8 @@ export default function Home({
                     standingsGroups={standingsGroups}
                     standingsLoading={standingsLoading}
                     standingsLeague={standingsLeague}
+                    topScorers={topScorers}
+                    topScorersLoading={topScorersLoading}
                     onAddInsight={(market, odds) => {
                       if (!expandedMatch) return;
                       toggleBet(expandedMatch, market, odds, "insight", market);
