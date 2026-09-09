@@ -1570,7 +1570,12 @@ export default function MatchStatsPanel({
                     relegationPlayoff: "Play-off Descida",
                     relegation: "Descida",
                   };
-                  const presentZones = Array.from(new Set((standings ?? []).map((r) => r.zone).filter((z): z is NonNullable<typeof z> => !!z && z !== "safe")));
+                  const presentZones: Array<"promotion" | "european" | "relegationPlayoff" | "relegation"> = [];
+                  for (const row of standings ?? []) {
+                    if (row.zone && row.zone !== "safe" && !presentZones.includes(row.zone)) {
+                      presentZones.push(row.zone);
+                    }
+                  }
                   return (
                     <div>
                       <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
