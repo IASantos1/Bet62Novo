@@ -12,6 +12,9 @@ import type {
   GoalApiTopScorer,
   GoalApiTeamResults,
   GoalApiStanding,
+  GoalApiStandingZones,
+  GoalApiPlayer,
+  GoalApiPlayerStatistics,
 } from "./index.js";
 
 /** GOAL API's own English stat labels (match.fullTime[].type, confirmed
@@ -100,10 +103,11 @@ function parseGoalApiEventMinute(time: string): number {
 export function buildGoalApiEvents(
   events: GoalApiMatchEvent[] | null | undefined,
   substitutions?: GoalApiSubstitution[] | null,
-): Array<{ type: string; team: string; minute: number; player: string; detail?: string }> {
+): Array<{ type: string; team: string; minute: number; player: string; playerId?: string; detail?: string }> {
   const fromEvents = (events ?? []).map((e) => {
     const team: "home" | "away" = e.homeScorer ? "home" : e.awayScorer ? "away" : e.info === "away" ? "away" : "home";
     const player = (team === "home" ? e.homeScorer : e.awayScorer) ?? "?";
+    const playerId = (team === "home" ? e.homeScorerId : e.awayScorerId) ?? undefined;
     const assist = team === "home" ? e.homeAssist : e.awayAssist;
     const detailParts = [assist ? `Assistência: ${assist}` : null, e.info === "Penalty" ? "Grande Penalidade" : null].filter(
       (v): v is string => Boolean(v),
@@ -113,6 +117,7 @@ export function buildGoalApiEvents(
       team,
       minute: e.timeNum ?? parseGoalApiEventMinute(e.time),
       player,
+      playerId,
       detail: detailParts.length > 0 ? detailParts.join(" · ") : undefined,
     };
   });
@@ -250,11 +255,29 @@ export function buildGoalApiTopScorers(raw: GoalApiTopScorer[] | null | undefine
   }));
 }
 
-export type BuiltStandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+/** Promotion/relegation zone classification from /standings/:leagueId/zones
+ * (confirmed real 2026-09-09) — "european" is a shortened form of the raw
+ * "europeanQualification" bucket name, everything else matches verbatim.
+ * A league with no real zone structure (e.g. MLS, a closed franchise
+ * league) puts every team in "safe", which renders as no highlight. */
+export type StandingZone = "promotion" | "european" | "safe" | "relegationPlayoff" | "relegation";
+
+export type BuiltStandingRow = {
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+  zone?: StandingZone;
+};
 export type BuiltStandingsGroup = { name: string; rows: BuiltStandingRow[] };
 export type BuiltStandings = { league: string; teams: BuiltStandingRow[]; groups: BuiltStandingsGroup[] | null };
 
-function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
+function buildStandingRow(row: GoalApiStanding, zoneByTeamId?: Map<string, StandingZone>): BuiltStandingRow {
   return {
     pos: Number(row.overallLeaguePosition) || 0,
     name: row.team?.name ?? row.teamName,
@@ -265,7 +288,26 @@ function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
     gf: Number(row.overallLeagueGF) || 0,
     ga: Number(row.overallLeagueGA) || 0,
     pts: Number(row.overallLeaguePTS) || 0,
+    zone: zoneByTeamId?.get(row.teamId),
   };
+}
+
+/** Maps /standings/:leagueId/zones (confirmed real 2026-09-09) into a
+ * teamId → zone lookup for buildGoalApiStandings to attach per-row.
+ * Skipped entirely (empty map) on fetch failure — a missing zone is just
+ * "no highlight", never worth failing the standings table over. */
+export function buildGoalApiStandingZoneMap(raw: GoalApiStandingZones | null | undefined): Map<string, StandingZone> {
+  const map = new Map<string, StandingZone>();
+  if (!raw?.zones) return map;
+  const assign = (rows: GoalApiStanding[] | undefined, zone: StandingZone) => {
+    for (const row of rows ?? []) map.set(row.teamId, zone);
+  };
+  assign(raw.zones.promotion, "promotion");
+  assign(raw.zones.europeanQualification, "european");
+  assign(raw.zones.safe, "safe");
+  assign(raw.zones.relegationPlayoff, "relegationPlayoff");
+  assign(raw.zones.relegation, "relegation");
+  return map;
 }
 
 /** Maps GOAL API's /standings/:leagueId response (confirmed real,
@@ -279,8 +321,13 @@ function buildStandingRow(row: GoalApiStanding): BuiltStandingRow {
  * once per group in the flat array — "leagueRound" carries the group name
  * in that case, so rows are split into groups by that field; a league
  * with a single table (no distinct leagueRound values) is returned as one
- * flat sorted list instead. */
-export function buildGoalApiStandings(raw: GoalApiStanding[] | null | undefined, leagueName: string): BuiltStandings {
+ * flat sorted list instead. zoneByTeamId (from buildGoalApiStandingZoneMap)
+ * is optional so this still works standalone if the zones fetch fails. */
+export function buildGoalApiStandings(
+  raw: GoalApiStanding[] | null | undefined,
+  leagueName: string,
+  zoneByTeamId?: Map<string, StandingZone>,
+): BuiltStandings {
   if (!raw || raw.length === 0) return { league: leagueName, teams: [], groups: null };
   const league = raw[0]?.league?.name ?? leagueName;
   const roundNames = new Set(raw.map((row) => row.leagueRound).filter((r): r is string => !!r));
@@ -289,12 +336,12 @@ export function buildGoalApiStandings(raw: GoalApiStanding[] | null | undefined,
       name,
       rows: raw
         .filter((row) => row.leagueRound === name)
-        .map(buildStandingRow)
+        .map((row) => buildStandingRow(row, zoneByTeamId))
         .sort((a, b) => a.pos - b.pos),
     }));
     return { league, teams: groups.flatMap((g) => g.rows), groups };
   }
-  const teams = raw.map(buildStandingRow).sort((a, b) => a.pos - b.pos);
+  const teams = raw.map((row) => buildStandingRow(row, zoneByTeamId)).sort((a, b) => a.pos - b.pos);
   return { league, teams, groups: null };
 }
 
@@ -398,4 +445,85 @@ export function goalApiKickoffDateTime(fixture: GoalApiFixture): { date: string;
     if (y && m && d) return { date: `${d}.${m}.${y}`, time: fixture.matchTime };
   }
   return { date: "", time: "" };
+}
+
+export type BuiltPlayerRecentMatch = {
+  fixtureId: string;
+  date: string;
+  opponent: string;
+  competition: string;
+  isHome: boolean;
+  teamScore: number | null;
+  opponentScore: number | null;
+  goals: number;
+  assists: number;
+  yellowCards: number;
+  redCards: number;
+  minutesPlayed: number | null;
+  rating: number | null;
+};
+
+export type BuiltPlayerProfile = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  nationality: string | null;
+  nationalityFlagUrl: string | null;
+  position: string | null;
+  height: number | null;
+  weight: number | null;
+  dateOfBirth: string | null;
+  team: string | null;
+  teamLogoUrl: string | null;
+  competition: string | null;
+  seasonStats: {
+    appearances: number | null;
+    goals: number | null;
+    assists: number | null;
+    yellowCards: number | null;
+    redCards: number | null;
+    minutesPlayed: number | null;
+  };
+  recentMatches: BuiltPlayerRecentMatch[];
+};
+
+/** Maps GOAL API's /players/:id + /players/:id/statistics (confirmed real
+ * 2026-09-09) into the Player Profile modal's shape — previously sourced
+ * from SportMonks, removed and left as a hardcoded 404 stub ever since
+ * ("player profile unavailable" for every id). Identity/team fields come
+ * from the plain player object (real nulls); "performance" from the
+ * statistics call backs seasonStats. height/weight/competition/
+ * nationalityFlagUrl aren't present in either raw response, so stay null
+ * rather than guessed. recentMatches has never been observed non-empty in
+ * a real statistics response — mapped as empty until a populated example
+ * confirms its item shape; the modal already hides that section when
+ * empty. */
+export function buildGoalApiPlayerProfile(
+  player: GoalApiPlayer,
+  stats: GoalApiPlayerStatistics | null | undefined,
+): BuiltPlayerProfile {
+  const perf = stats?.performance;
+  return {
+    id: player.id,
+    name: player.name,
+    imageUrl: player.image ?? null,
+    nationality: player.country ?? null,
+    nationalityFlagUrl: null,
+    position: player.type ?? null,
+    height: null,
+    weight: null,
+    dateOfBirth: player.birthdate ?? null,
+    team: player.team?.name ?? null,
+    teamLogoUrl: player.team?.badge ?? null,
+    competition: null,
+    seasonStats: {
+      appearances: perf?.matchPlayed ?? null,
+      goals: perf?.goals ?? null,
+      assists: perf?.assists ?? null,
+      yellowCards: perf?.yellowCards ?? null,
+      redCards: perf?.redCards ?? null,
+      minutesPlayed: perf?.minutes ?? null,
+    },
+    recentMatches: [],
+  };
 }

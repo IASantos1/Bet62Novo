@@ -244,6 +244,78 @@ export type GoalApiStanding = {
   league?: { id: string; name: string; season?: string | null };
 };
 
+/** /standings/:leagueId/zones — confirmed real 2026-09-09. Each zone array
+ * holds the same GoalApiStanding rows as the main endpoint, just bucketed;
+ * summary is a redundant per-zone team count. */
+export type GoalApiStandingZones = {
+  leagueId: string;
+  zones: {
+    promotion: GoalApiStanding[];
+    europeanQualification: GoalApiStanding[];
+    safe: GoalApiStanding[];
+    relegationPlayoff: GoalApiStanding[];
+    relegation: GoalApiStanding[];
+  };
+  summary?: {
+    totalTeams: number;
+    promotionZone: number;
+    europeanZone: number;
+    safeZone: number;
+    relegationPlayoffZone: number;
+    relegationZone: number;
+  };
+};
+
+/** /players/:id — confirmed real 2026-09-09. Most stat fields (goals,
+ * assists, cards, etc.) are numeric strings when populated but null for
+ * most players — the provider only tracks per-player stats for a subset
+ * of competitions. "country" (nationality) is null far more often than
+ * populated in practice. */
+export type GoalApiPlayer = {
+  id: string;
+  apiId?: string;
+  name: string;
+  image?: string | null;
+  number?: string | null;
+  country?: string | null;
+  type?: string | null;
+  age?: string | null;
+  birthdate?: string | null;
+  teamId?: string | null;
+  isActive?: boolean;
+  injured?: string | null;
+  isCaptain?: boolean;
+  team?: { id: string; name: string; badge?: string | null; country?: string };
+};
+
+/** /players/:id/statistics — confirmed real 2026-09-09. "basic" duplicates
+ * fields already on GoalApiPlayer but substitutes the string "N/A" for
+ * missing values instead of null, so buildGoalApiPlayerProfile reads
+ * identity/team fields from GoalApiPlayer instead and only uses this for
+ * "performance". recentMatches has never been observed non-empty in a
+ * real response — its item shape is unconfirmed. */
+export type GoalApiPlayerStatistics = {
+  basic?: Record<string, unknown>;
+  performance?: {
+    matchPlayed?: number;
+    minutes?: number;
+    rating?: string;
+    goals?: number;
+    assists?: number;
+    yellowCards?: number;
+    redCards?: number;
+    substituteOut?: number;
+    substitutesOnBench?: number;
+    minutesPerMatch?: number | null;
+  };
+  attacking?: Record<string, unknown>;
+  defending?: Record<string, unknown>;
+  passing?: Record<string, unknown>;
+  duels?: Record<string, unknown>;
+  goalkeeper?: unknown;
+  recentMatches?: unknown[];
+};
+
 /** One entry of /teams/:id/results's recentFixtures — result/score are
  * already resolved server-side (score is literal "home-away", result is
  * W/D/L from the queried team's perspective); confirmed real via a raw
@@ -409,6 +481,16 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiStanding[]>(`/standings/${encodeURIComponent(leagueId)}`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
+  /** /standings/:leagueId/zones — confirmed real 2026-09-09: the same
+   * canonical standing row (see GoalApiStanding) bucketed into
+   * promotion/europeanQualification/safe/relegationPlayoff/relegation
+   * arrays. A league without a real promotion/relegation structure (e.g.
+   * MLS, a closed franchise league) puts every team in "safe" — this is a
+   * real, meaningful result from the provider, not a failure. */
+  getLeagueStandingsZones(leagueId: string): Promise<GoalApiStandingZones> {
+    return this.cachedGet<GoalApiStandingZones>(`/standings/${encodeURIComponent(leagueId)}/zones`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   /** /teams/:id/upcoming — same canonical fixture DTO confirmed real across
    * /fixtures, /leagues/:id/fixtures and /teams/:id/fixtures, pre-filtered
    * to that team's future matches. */
@@ -447,6 +529,22 @@ export class GoalApiClient {
 
   getFixturePrediction(id: string): Promise<GoalApiPrediction> {
     return this.cachedGet<GoalApiPrediction>(`/fixtures/${encodeURIComponent(id)}/predictions`, undefined, GOAL_API_TTL.PREDICTIONS);
+  }
+
+  // ── Players ──────────────────────────────────────────────────────────────
+
+  /** /players/:id — confirmed real 2026-09-09. Backs the Player Profile
+   * modal (previously SportMonks, removed and left as a hardcoded 404
+   * stub — this is the real replacement). */
+  getPlayerById(id: string): Promise<GoalApiPlayer> {
+    return this.cachedGet<GoalApiPlayer>(`/players/${encodeURIComponent(id)}`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
+  /** /players/:id/statistics — confirmed real 2026-09-09. "recentMatches"
+   * has never been observed non-empty in a real response, so
+   * buildGoalApiPlayerProfile doesn't attempt to map it yet. */
+  getPlayerStatistics(id: string): Promise<GoalApiPlayerStatistics> {
+    return this.cachedGet<GoalApiPlayerStatistics>(`/players/${encodeURIComponent(id)}/statistics`, undefined, GOAL_API_TTL.STATISTICS);
   }
 
   // ── WebSocket connection token ───────────────────────────────────────────
@@ -495,11 +593,14 @@ export const goalApi = {
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
   getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
   getLeagueStandings: (leagueId: string) => getGoalApiClient().getLeagueStandings(leagueId),
+  getLeagueStandingsZones: (leagueId: string) => getGoalApiClient().getLeagueStandingsZones(leagueId),
   getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
   getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
   getFixturePrediction: (id: string) => getGoalApiClient().getFixturePrediction(id),
+  getPlayerById: (id: string) => getGoalApiClient().getPlayerById(id),
+  getPlayerStatistics: (id: string) => getGoalApiClient().getPlayerStatistics(id),
   requestWsToken: () => getGoalApiClient().requestWsToken(),
 };
