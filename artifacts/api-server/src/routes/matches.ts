@@ -52,6 +52,7 @@ import {
   buildGoalApiLineups,
   buildGoalApiTopScorers,
   buildGoalApiTeamUpcoming,
+  buildGoalApiForm,
 } from "../services/goalapi/common.js";
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
@@ -9815,6 +9816,8 @@ router.get("/stats", async (req: Request, res: Response) => {
   const homeOdd = parseFloat(String(req.query["homeOdd"] ?? "2")) || 2;
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
+  const homeTeamIdQuery = String(req.query["homeTeamId"] ?? "");
+  const awayTeamIdQuery = String(req.query["awayTeamId"] ?? "");
 
   const rawHome = 1 / homeOdd;
   const rawDraw = 1 / drawOdd;
@@ -10039,6 +10042,23 @@ router.get("/stats", async (req: Request, res: Response) => {
 
   let homeForm: FormEntry[] = [];
   let awayForm: FormEntry[] = [];
+
+  // Real replacement for the synthetic fallback below (GOAL API,
+  // 2026-09-09): when the frontend has real GOAL API team ids for this
+  // fixture (populated on the football live/upcoming builders), fetch each
+  // team's actual last results and derive real form from them instead.
+  if (sport === "football" && homeTeamIdQuery && awayTeamIdQuery && CONFIG.GOAL_API_KEY) {
+    try {
+      const [homeResults, awayResults] = await Promise.all([
+        goalApi.getTeamResults(homeTeamIdQuery).catch(() => []),
+        goalApi.getTeamResults(awayTeamIdQuery).catch(() => []),
+      ]);
+      homeForm = buildGoalApiForm(homeResults, homeTeamIdQuery);
+      awayForm = buildGoalApiForm(awayResults, awayTeamIdQuery);
+    } catch (err) {
+      logger.error({ err, homeTeamIdQuery, awayTeamIdQuery }, "[goal-api] team form fetch failed");
+    }
+  }
 
   const realHomeCount = homeForm.length;
   const realAwayCount = awayForm.length;

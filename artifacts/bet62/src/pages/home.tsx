@@ -6931,6 +6931,8 @@ export default function Home({
       sport: expandedMatch.sport ?? "football",
       league: expandedMatch.league ?? "",
       country: expandedMatch.country ?? "",
+      ...(expandedMatch.homeTeamId ? { homeTeamId: expandedMatch.homeTeamId } : {}),
+      ...(expandedMatch.awayTeamId ? { awayTeamId: expandedMatch.awayTeamId } : {}),
     });
     fetch(`/api/matches/stats?${p}`)
       .then((r) => (r.ok ? r.json() : null))

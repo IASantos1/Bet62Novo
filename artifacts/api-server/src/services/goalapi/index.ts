@@ -264,6 +264,15 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiFixture[]>(`/teams/${encodeURIComponent(teamId)}/upcoming`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
+  /** /teams/:id/results — confirmed real (raw response pasted 2026-09-09).
+   * The envelope also carries a sibling "stats" field (W/D/L/points
+   * aggregates) alongside "data" — discarded here the same way this client
+   * already discards "pagination" (see file header comment); data is the
+   * same canonical fixture DTO, most recent first. */
+  getTeamResults(teamId: string): Promise<GoalApiFixture[]> {
+    return this.cachedGet<GoalApiFixture[]>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -333,6 +342,7 @@ export const goalApi = {
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
   getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
   getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
+  getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),

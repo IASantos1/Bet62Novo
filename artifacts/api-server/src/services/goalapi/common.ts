@@ -205,6 +205,39 @@ export function buildGoalApiTeamUpcoming(fixtures: GoalApiFixture[] | null | und
   });
 }
 
+export type BuiltFormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; home: boolean };
+
+/** Maps GOAL API's /teams/:id/results (confirmed real, most-recent-first)
+ * into the "Forma" tab's FormEntry shape — that tab has never shown real
+ * data ("homeForm/awayForm are never populated... this is always false",
+ * per /stats's own comment) since the StatPal enrichment that used to feed
+ * it was removed; this is the real replacement. Only FINISHED matches with
+ * both scores present count — skips AFTER_ET/AFTER_PEN score fields on
+ * purpose (homeTeamScore/awayTeamScore already reflect the final result
+ * including extra time/penalties for those, so no special-casing needed),
+ * caps at 5 to match the tab's existing expectations. */
+export function buildGoalApiForm(fixtures: GoalApiFixture[] | null | undefined, teamId: string): BuiltFormEntry[] {
+  if (!fixtures) return [];
+  const entries: BuiltFormEntry[] = [];
+  for (const fx of fixtures) {
+    if (entries.length >= 5) break;
+    if (fx.matchStatus !== "FINISHED" && fx.matchStatus !== "AFTER_ET" && fx.matchStatus !== "AFTER_PEN") continue;
+    const isHome = fx.homeTeam?.id === teamId;
+    const teamScore = Number(isHome ? fx.homeTeamScore : fx.awayTeamScore);
+    const oppScore = Number(isHome ? fx.awayTeamScore : fx.homeTeamScore);
+    if (!Number.isFinite(teamScore) || !Number.isFinite(oppScore)) continue;
+    const result: "W" | "D" | "L" = teamScore > oppScore ? "W" : teamScore < oppScore ? "L" : "D";
+    const opponent = isHome ? fx.awayTeam?.name : fx.homeTeam?.name;
+    entries.push({
+      result,
+      score: isHome ? `${teamScore}-${oppScore}` : `${oppScore}-${teamScore}`,
+      opponent: opponent ?? "?",
+      home: isHome,
+    });
+  }
+  return entries;
+}
+
 /** ISO-8601 kickoffUtc → { date: "DD.MM.YYYY", time: "HH:MM" } in
  * Europe/Lisbon — same shape/timezone every other provider in this app
  * already uses (see routes/matches.ts's proplineEventDateTime). Falls back
