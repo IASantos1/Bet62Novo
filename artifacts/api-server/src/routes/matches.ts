@@ -12291,6 +12291,27 @@ router.get("/tournaments/:id", async (req: Request, res: Response) => {
   }
 });
 
+// Raw get_draw passthrough (rounds → matches → seeds/TBD/next_slot) for the
+// TournamentBracket component — /tournaments/:id above flattens the same
+// data into the pre-existing TournamentMatch[] list, which loses the round
+// grouping/seeding/progression this renders instead. apiTennis.getDraw
+// already caches internally, so this shares that cache with
+// getTournamentDetail rather than doubling the network calls.
+router.get("/tournaments/:id/draw", async (req: Request, res: Response) => {
+  const id = String(req.params["id"]);
+  if (!CONFIG.TENNIS_API_KEY) {
+    res.status(404).json({ error: "Chave do torneio indisponível" });
+    return;
+  }
+  try {
+    const draw = await apiTennis.getDraw({ tournament_key: id });
+    res.json(draw);
+  } catch (err) {
+    logger.error({ err, id }, "[api-tennis] raw draw fetch failed");
+    res.status(404).json({ error: "Chave do torneio indisponível" });
+  }
+});
+
 router.get("/results", async (_req: Request, res: Response) => {
   try {
     const results = await getTennisDailyResults();
