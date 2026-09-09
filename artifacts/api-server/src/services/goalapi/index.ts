@@ -16,9 +16,20 @@ export type GoalApiFixture = {
   leagueName?: string;
   homeTeam: GoalApiTeamRef;
   awayTeam: GoalApiTeamRef;
-  score?: string;
-  status: string;
-  minute?: number;
+  // The real payload has no combined "score" string — home/away are
+  // separate fields, strings (e.g. "2"), null before kickoff. Confirmed
+  // from a real /leagues/:id/fixtures response (2026-09-09).
+  homeTeamScore?: string | null;
+  awayTeamScore?: string | null;
+  // The real field is matchStatus, not status — e.g. "SCHEDULED", "FINISHED",
+  // "AFTER_ET" (confirmed from the same real response). matchLive ("0"/"1",
+  // a string) accompanies it.
+  matchStatus: string;
+  matchLive?: string;
+  // Formation strings (e.g. "4-2-3-1"), confirmed real on the same response —
+  // populated once lineups are known, null/absent before that.
+  homeTeamSystem?: string | null;
+  awayTeamSystem?: string | null;
   matchDate?: string;
   matchTime?: string;
   /** ISO-8601 UTC instant — the field to use; matchDate/matchTime are
@@ -28,34 +39,238 @@ export type GoalApiFixture = {
   kickoffUtc?: string;
 };
 
-export type GoalApiOddsOutcome = { home?: number; draw?: number; away?: number };
-
+/** One bookmaker's odds entry on /fixtures/:id/odds and /:id/live-odds —
+ * confirmed real via a raw response pasted 2026-09-09, and flat: every
+ * price is a top-level numeric-string field, not the nested
+ * {home,draw,away}/{over,under} objects this client originally (and
+ * wrongly, never checked against a real response) assumed. overUnder and
+ * asianHandicap are themselves flat string->string maps keyed by market
+ * line (e.g. "o+2.5"/"u+2.5", "ah0_1"/"ah-1_2"/"ah+0.5_1"), not one entry
+ * per line with nested outcome fields. */
 export type GoalApiOdds = {
   id: string;
+  matchApiId?: string;
   fixtureId?: string;
   bookmaker?: string;
-  "1x2"?: GoalApiOddsOutcome;
-  overUnder?: Record<string, { over?: number; under?: number }>;
-  bothTeamsToScore?: { yes?: number; no?: number };
-  doubleChance?: { homeOrDraw?: number; awayOrDraw?: number; homeOrAway?: number };
-  asianHandicap?: Record<string, { home?: number; away?: number }>;
+  oddDate?: string;
+  odd1?: string | null;
+  oddX?: string | null;
+  odd2?: string | null;
+  odd1x?: string | null;
+  odd12?: string | null;
+  oddX2?: string | null;
+  btsYes?: string | null;
+  btsNo?: string | null;
+  asianHandicap?: Record<string, string> | null;
+  overUnder?: Record<string, string> | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
+/** /fixtures/:id/predictions — confirmed real 2026-09-09; not wired into
+ * any route yet (getFixturePrediction below is unused dead code today),
+ * but the type is corrected here so it's right whenever that changes.
+ * All prob* fields are 0-100 percentage strings, not decimal odds —
+ * completely different field names/units than this client originally
+ * (and, since unused, harmlessly) assumed. */
 export type GoalApiPrediction = {
   fixtureId: string;
-  homeWin?: string;
-  draw?: string;
-  awayWin?: string;
-  bothTeamsToScore?: string;
-  over25?: string;
+  matchStatus?: string;
+  probHW?: string;
+  probD?: string;
+  probAW?: string;
+  probHWD?: string;
+  probAWD?: string;
+  probHWAW?: string;
+  probO?: string;
+  probU?: string;
+  probO1?: string;
+  probU1?: string;
+  probO3?: string;
+  probU3?: string;
+  probBts?: string;
+  probOts?: string;
+  asianHandicap?: Record<string, string>;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
+/** /fixtures/:id/events's real item shape — confirmed via the same
+ * "events" array embedded per-fixture on /fixtures/live (raw response
+ * pasted 2026-09-09); the canonical Event DTO this provider reuses
+ * everywhere, same pattern as its canonical Fixture DTO. This replaces an
+ * earlier, wrong assumption ({minute,team,type,player,detail}) that was
+ * never checked against a real response. "time" is a string ("3", "45+2"
+ * for stoppage time); side is which of homeScorer/awayScorer is set (only
+ * "GOAL" events have been observed so far, so other types may carry
+ * different populated fields). */
 export type GoalApiMatchEvent = {
+  id?: string;
+  fixtureId?: string;
+  time: string;
+  /** Numeric form of "time" — confirmed present on /fixtures/:id/events's
+   * dedicated-endpoint response (2026-09-09) but not observed on the
+   * embedded "events" array under /fixtures/live, so read defensively. */
+  timeNum?: number;
+  type: string;
+  homeScorer?: string | null;
+  homeScorerId?: string | null;
+  homeAssist?: string | null;
+  homeAssistId?: string | null;
+  awayScorer?: string | null;
+  awayScorerId?: string | null;
+  awayAssist?: string | null;
+  awayAssistId?: string | null;
+  score?: string;
+  info?: string | null;
+  scoreInfoTime?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type GoalApiSubstitution = {
   minute: number;
   team: "home" | "away";
-  type: "goal" | "card" | string;
-  player: string;
-  detail?: string;
+  playerOut: string;
+  playerIn: string;
+};
+
+/** One row of /fixtures/:id/statistics's match.fullTime/firstHalf/
+ * secondHalf arrays — confirmed real 2026-09-09: a generic, provider-
+ * labelled {type,home,away} triple (home/away are numeric or "NN%"
+ * strings), not the fixed named fields ({shotsOnGoal,possession,corners,
+ * fouls}) this client originally assumed without ever checking a real
+ * response. */
+export type GoalApiMatchStatRow = { type: string; home: string; away: string };
+
+export type GoalApiFixtureStatistics = {
+  match: {
+    fullTime: GoalApiMatchStatRow[];
+    firstHalf?: GoalApiMatchStatRow[];
+    secondHalf?: GoalApiMatchStatRow[];
+  };
+  hasStatistics?: boolean;
+};
+
+/** One row of /fixtures/:id/lineups's home/away.startingLineups/
+ * substitutes/coach arrays — the same flat entry is also embedded
+ * directly on /fixtures/:id's own "lineups" array. Confirmed real
+ * 2026-09-09 for "type":"coach"; starting/substitute player entries
+ * weren't populated in the confirmed sample (an unstarted fixture) but
+ * are assumed to share this exact flat shape with type
+ * "starting"/"substitute" and populated lineupNumber/lineupPosition —
+ * consistent with every other GOAL API resource in this file reusing one
+ * canonical DTO across its embedded and dedicated-endpoint forms. */
+export type GoalApiLineupEntry = {
+  id?: string;
+  fixtureId?: string;
+  playerId?: string | null;
+  playerKey?: string | null;
+  lineupPlayer: string;
+  lineupNumber?: string | number | null;
+  lineupPosition?: string | null;
+  team: "home" | "away";
+  type: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+export type GoalApiLineupTeam = {
+  startingLineups: GoalApiLineupEntry[];
+  substitutes: GoalApiLineupEntry[];
+  coach: GoalApiLineupEntry[];
+  missingPlayers?: GoalApiLineupEntry[];
+};
+export type GoalApiLineups = {
+  home: GoalApiLineupTeam;
+  away: GoalApiLineupTeam;
+  homeFormation?: string | null;
+  awayFormation?: string | null;
+  hasLineups?: boolean;
+};
+
+// /leagues/:id/top-scorers — confirmed real (2026-09-09): goals/assists/
+// penaltyGoals arrive as numeric strings, same convention as fixture scores.
+export type GoalApiTopScorer = {
+  playerPlace: string;
+  playerName: string;
+  teamName: string;
+  goals: string;
+  assists: string;
+  penaltyGoals: string;
+};
+
+/** One row of /standings/:leagueId (and /standings/:leagueId/team/:teamId,
+ * /standings/:leagueId/home, /standings/:leagueId/away) — confirmed real
+ * 2026-09-09. All numeric fields are strings, same convention as every
+ * other GOAL API resource in this file. overallLeague-, homeLeague- and
+ * awayLeague-prefixed fields are pre-computed splits; leagueRound carries a
+ * group/conference/division name when the league has one (e.g. MLS's
+ * "Eastern Conference"/"Western Conference"), in which case the same
+ * position repeats once per group in the flat array. */
+export type GoalApiStanding = {
+  id?: string;
+  leagueId?: string;
+  teamId: string;
+  teamName: string;
+  leagueRound?: string | null;
+  stageName?: string | null;
+  season?: string | null;
+  overallPromotion?: string | null;
+  overallLeaguePosition: string;
+  overallLeaguePlayed: string;
+  overallLeagueW: string;
+  overallLeagueD: string;
+  overallLeagueL: string;
+  overallLeagueGF: string;
+  overallLeagueGA: string;
+  overallLeaguePTS: string;
+  homeLeaguePosition?: string;
+  homeLeaguePlayed?: string;
+  homeLeagueW?: string;
+  homeLeagueD?: string;
+  homeLeagueL?: string;
+  homeLeagueGF?: string;
+  homeLeagueGA?: string;
+  homeLeaguePTS?: string;
+  awayLeaguePosition?: string;
+  awayLeaguePlayed?: string;
+  awayLeagueW?: string;
+  awayLeagueD?: string;
+  awayLeagueL?: string;
+  awayLeagueGF?: string;
+  awayLeagueGA?: string;
+  awayLeaguePTS?: string;
+  team?: { id: string; name: string; badge?: string | null; country?: string };
+  league?: { id: string; name: string; season?: string | null };
+};
+
+/** One entry of /teams/:id/results's recentFixtures — result/score are
+ * already resolved server-side (score is literal "home-away", result is
+ * W/D/L from the queried team's perspective); confirmed real via a raw
+ * response pasted 2026-09-09. */
+export type GoalApiTeamResultFixture = {
+  id: string;
+  date?: string;
+  opponent: string;
+  opponentBadge?: string | null;
+  score: string;
+  isHome: boolean;
+  result: "W" | "D" | "L";
+  league?: string;
+};
+
+/** /teams/:id/results's actual "data" shape — a single aggregate object,
+ * NOT a flat fixture array (that was this client's original, wrong,
+ * assumption). overall/home/away are W/D/L + goals aggregates; only
+ * recentFixtures is consumed today. */
+export type GoalApiTeamResults = {
+  overall?: unknown;
+  home?: unknown;
+  away?: unknown;
+  form?: string;
+  recentFixtures: GoalApiTeamResultFixture[];
+  totalMatches?: number;
+  season?: string;
 };
 
 const GOAL_API_TTL = {
@@ -63,6 +278,7 @@ const GOAL_API_TTL = {
   LIVE: 10,
   ODDS: 120,
   PREDICTIONS: 300,
+  STATISTICS: 30,
 };
 
 export class GoalApiClient {
@@ -154,6 +370,62 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiMatchEvent[]>(`/fixtures/${encodeURIComponent(id)}/events`, undefined, GOAL_API_TTL.LIVE);
   }
 
+  getFixtureStatistics(id: string): Promise<GoalApiFixtureStatistics> {
+    return this.cachedGet<GoalApiFixtureStatistics>(
+      `/fixtures/${encodeURIComponent(id)}/statistics`,
+      undefined,
+      GOAL_API_TTL.STATISTICS,
+    );
+  }
+
+  getFixtureSubstitutions(id: string): Promise<GoalApiSubstitution[]> {
+    return this.cachedGet<GoalApiSubstitution[]>(
+      `/fixtures/${encodeURIComponent(id)}/substitutions`,
+      undefined,
+      GOAL_API_TTL.LIVE,
+    );
+  }
+
+  getFixtureLineups(id: string): Promise<GoalApiLineups> {
+    return this.cachedGet<GoalApiLineups>(`/fixtures/${encodeURIComponent(id)}/lineups`, undefined, GOAL_API_TTL.LIVE);
+  }
+
+  getLeagueTopScorers(leagueId: string): Promise<GoalApiTopScorer[]> {
+    return this.cachedGet<GoalApiTopScorer[]>(
+      `/leagues/${encodeURIComponent(leagueId)}/top-scorers`,
+      undefined,
+      GOAL_API_TTL.PREDICTIONS,
+    );
+  }
+
+  /** /standings/:leagueId — confirmed real 2026-09-09: one flat array, one
+   * row per team, with separate overall/home/away splits already computed
+   * server-side (overallLeague-, homeLeague- and awayLeague-prefixed
+   * fields, all numeric strings). A league with conferences/groups (e.g.
+   * MLS) repeats each
+   * position once per group — "leagueRound" carries the group name
+   * ("Eastern Conference"/"Western Conference") to split on. */
+  getLeagueStandings(leagueId: string): Promise<GoalApiStanding[]> {
+    return this.cachedGet<GoalApiStanding[]>(`/standings/${encodeURIComponent(leagueId)}`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
+  /** /teams/:id/upcoming — same canonical fixture DTO confirmed real across
+   * /fixtures, /leagues/:id/fixtures and /teams/:id/fixtures, pre-filtered
+   * to that team's future matches. */
+  getTeamUpcoming(teamId: string): Promise<GoalApiFixture[]> {
+    return this.cachedGet<GoalApiFixture[]>(`/teams/${encodeURIComponent(teamId)}/upcoming`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
+  /** /teams/:id/results — confirmed real (raw response pasted 2026-09-09).
+   * "data" is a single aggregate object ({overall,home,away,form,
+   * recentFixtures,totalMatches,season}), NOT a flat fixture array — an
+   * earlier pass of this client wrongly assumed the latter before a fuller
+   * raw response surfaced the real shape. Only recentFixtures is consumed
+   * (see buildGoalApiForm). */
+  getTeamResults(teamId: string): Promise<GoalApiTeamResults> {
+    return this.cachedGet<GoalApiTeamResults>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
+  }
+
   // ── Odds ───────────────────────────────────────────────────────────────────
 
   getFixtureOdds(id: string): Promise<GoalApiOdds[]> {
@@ -218,6 +490,13 @@ export const goalApi = {
   getFixturesByDate: (date: string) => getGoalApiClient().getFixturesByDate(date),
   getFixtureById: (id: string) => getGoalApiClient().getFixtureById(id),
   getFixtureEvents: (id: string) => getGoalApiClient().getFixtureEvents(id),
+  getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
+  getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
+  getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
+  getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
+  getLeagueStandings: (leagueId: string) => getGoalApiClient().getLeagueStandings(leagueId),
+  getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
+  getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
   getFixtureOdds: (id: string) => getGoalApiClient().getFixtureOdds(id),
   getFixtureLiveOdds: (id: string) => getGoalApiClient().getFixtureLiveOdds(id),
   getLeagueFixtures: (leagueId: string) => getGoalApiClient().getLeagueFixtures(leagueId),
