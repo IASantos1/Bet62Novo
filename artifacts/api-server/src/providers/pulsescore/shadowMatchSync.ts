@@ -26,7 +26,7 @@ import {
   type MatchedLiveFootballFixture,
   type UnmatchedGoalApiMatch,
 } from "../../lib/canonicalMatchCatalog.js";
-import { matchGoalApiFixtureToPulseScore, type GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
+import { matchGoalApiFixtureToPulseScore, debugBestCandidate, type GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
 import { isVirtualPulseScoreLeague } from "./filters.js";
 import { normalizePulseScoreEvent, type NormalizedMarketGroup } from "./normalizer.js";
 import { pulseScore } from "./client.js";
@@ -61,6 +61,30 @@ type MatchingPhaseResult = {
   matched: number;
   unmatched: number;
   avgConfidence: number | null;
+  /** Diagnostic breakdown — see the header note on getUnmatchedGoalApiFootballMatches's
+   * status field: most of `unmatched` is expected to be scheduled fixtures
+   * that simply haven't kicked off yet (PulseScore's candidate pool is
+   * live-only), so counting those as "misses" would be misleading. These
+   * fields only ever describe the subset that's actually live right now. */
+  liveAttempted: number;
+  /** Live fixtures where even the best PulseScore candidate's team-name
+   * similarity never cleared NAME_FLOOR — no kickoff/league agreement
+   * could have rescued these; likely a real name-normalization gap. */
+  liveNameFloorMisses: number;
+  /** Live fixtures where the best candidate's name cleared NAME_FLOOR but
+   * the combined confidence still fell short of MIN_REPORTABLE_CONFIDENCE
+   * — plausible pairs the threshold is (for now) rejecting. */
+  liveBelowThresholdMisses: number;
+};
+
+type NearMissSample = {
+  matchId: number;
+  goalApiFixture: string;
+  bestPulseScoreEventId: string | null;
+  confidence: number | null;
+  nameSim: number | null;
+  passedNameFloor: boolean;
+  kickoffDeltaMinutes: number | null;
 };
 
 async function runMatchingPhase(
@@ -69,6 +93,10 @@ async function runMatchingPhase(
 ): Promise<MatchingPhaseResult> {
   let matched = 0;
   let totalConfidence = 0;
+  let liveAttempted = 0;
+  let liveNameFloorMisses = 0;
+  let liveBelowThresholdMisses = 0;
+  const nearMissSamples: NearMissSample[] = [];
 
   for (const goalApiMatch of unmatched) {
     const fixture: GoalApiFixtureRef = {
@@ -79,7 +107,27 @@ async function runMatchingPhase(
       kickoffUtc: goalApiMatch.kickoffUtc ? goalApiMatch.kickoffUtc.toISOString() : null,
     };
     const candidate = matchGoalApiFixtureToPulseScore(fixture, candidates);
-    if (!candidate) continue;
+
+    if (!candidate) {
+      // Only diagnose LIVE fixtures — a scheduled one correctly has
+      // nothing to match yet against PulseScore's live-only candidate pool.
+      if (goalApiMatch.status === "live") {
+        liveAttempted++;
+        const diag = debugBestCandidate(fixture, candidates);
+        if (diag.passedNameFloor) liveBelowThresholdMisses++;
+        else liveNameFloorMisses++;
+        nearMissSamples.push({
+          matchId: goalApiMatch.matchId,
+          goalApiFixture: `${goalApiMatch.home} vs ${goalApiMatch.away}`,
+          bestPulseScoreEventId: diag.pulseScoreEventId,
+          confidence: diag.confidence,
+          nameSim: diag.nameSim,
+          passedNameFloor: diag.passedNameFloor,
+          kickoffDeltaMinutes: diag.kickoffDeltaMinutes,
+        });
+      }
+      continue;
+    }
 
     const pulseScoreEvent = candidates.find((ev) => ev.eventId === candidate.pulseScoreEventId);
     if (!pulseScoreEvent) continue; // shouldn't happen — defensive only
@@ -109,11 +157,21 @@ async function runMatchingPhase(
     matched,
     unmatched: unmatched.length - matched,
     avgConfidence: matched > 0 ? Math.round(totalConfidence / matched) : null,
+    liveAttempted,
+    liveNameFloorMisses,
+    liveBelowThresholdMisses,
   };
   logger.info(
     { ...result, candidatePoolSize: candidates.length },
     "[pulsescore-shadow-match] matching round complete",
   );
+  if (nearMissSamples.length > 0) {
+    nearMissSamples.sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+    logger.info(
+      { samples: nearMissSamples.slice(0, 8), totalLiveMisses: nearMissSamples.length },
+      "[pulsescore-shadow-match] closest near-misses among live, still-unmatched fixtures (diagnostic only)",
+    );
+  }
   return result;
 }
 
