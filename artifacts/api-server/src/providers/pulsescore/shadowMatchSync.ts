@@ -93,8 +93,14 @@ type NearMissSample = {
   matchId: number;
   goalApiFixture: string;
   bestPulseScoreEventId: string | null;
+  /** The best candidate's actual team names — side by side with
+   * goalApiFixture above, this is what actually lets a reader tell a
+   * genuine non-match apart from a name-normalization gap. */
+  pulseScoreFixture: string | null;
   confidence: number | null;
   nameSim: number | null;
+  homeNameSimilarity: number | null;
+  awayNameSimilarity: number | null;
   passedNameFloor: boolean;
   kickoffDeltaMinutes: number | null;
 };
@@ -132,8 +138,14 @@ async function runMatchingPhase(
           matchId: goalApiMatch.matchId,
           goalApiFixture: `${goalApiMatch.home} vs ${goalApiMatch.away}`,
           bestPulseScoreEventId: diag.pulseScoreEventId,
+          pulseScoreFixture:
+            diag.pulseScoreHome != null && diag.pulseScoreAway != null
+              ? `${diag.pulseScoreHome} vs ${diag.pulseScoreAway}`
+              : null,
           confidence: diag.confidence,
           nameSim: diag.nameSim,
+          homeNameSimilarity: diag.homeNameSimilarity,
+          awayNameSimilarity: diag.awayNameSimilarity,
           passedNameFloor: diag.passedNameFloor,
           kickoffDeltaMinutes: diag.kickoffDeltaMinutes,
         });

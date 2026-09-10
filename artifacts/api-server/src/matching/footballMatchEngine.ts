@@ -129,8 +129,19 @@ export function matchGoalApiFixtureToPulseScore(
 
 export type MatchDiagnostic = {
   pulseScoreEventId: string | null;
+  /** The actual team names on the best candidate's side — the whole point
+   * of this diagnostic is answering "is this really a different match, or
+   * is it a name-formatting gap in nameSimilarity", which needs both raw
+   * strings side by side, not just a similarity number. */
+  pulseScoreHome: string | null;
+  pulseScoreAway: string | null;
   confidence: number | null;
   nameSim: number | null;
+  /** Per-side breakdown — nameSim is the min of these two, so seeing which
+   * side actually dragged it down (vs both being moderately off) matters
+   * for deciding what to fix in nameSimilarity/normalizeTeamName. */
+  homeNameSimilarity: number | null;
+  awayNameSimilarity: number | null;
   /** false means NAME_FLOOR alone ruled out every candidate — no amount of
    * kickoff/league agreement could have rescued the pair. true + a low
    * confidence means the name was plausible but kickoff/league (or just
@@ -145,18 +156,36 @@ export type MatchDiagnostic = {
  * nothing for a real live fixture (see shadowMatchSync's diagnostic log). */
 export function debugBestCandidate(fixture: GoalApiFixtureRef, pulseScoreEvents: PulseScoreEvent[]): MatchDiagnostic {
   let best: (FootballMatchCandidate & { nameSim: number }) | null = null;
+  let bestEvent: PulseScoreEvent | null = null;
   for (const ev of pulseScoreEvents) {
     if (isVirtualPulseScoreLeague(ev.league)) continue;
     const raw = scoreCandidateRaw(fixture, ev);
-    if (!best || raw.confidence > best.confidence) best = raw;
+    if (!best || raw.confidence > best.confidence) {
+      best = raw;
+      bestEvent = ev;
+    }
   }
   if (!best) {
-    return { pulseScoreEventId: null, confidence: null, nameSim: null, passedNameFloor: false, kickoffDeltaMinutes: null };
+    return {
+      pulseScoreEventId: null,
+      pulseScoreHome: null,
+      pulseScoreAway: null,
+      confidence: null,
+      nameSim: null,
+      homeNameSimilarity: null,
+      awayNameSimilarity: null,
+      passedNameFloor: false,
+      kickoffDeltaMinutes: null,
+    };
   }
   return {
     pulseScoreEventId: best.pulseScoreEventId,
+    pulseScoreHome: bestEvent?.home ?? null,
+    pulseScoreAway: bestEvent?.away ?? null,
     confidence: best.confidence,
     nameSim: Math.round(best.nameSim * 100) / 100,
+    homeNameSimilarity: Math.round(best.signals.homeNameSimilarity * 100) / 100,
+    awayNameSimilarity: Math.round(best.signals.awayNameSimilarity * 100) / 100,
     passedNameFloor: best.nameSim >= NAME_FLOOR,
     kickoffDeltaMinutes: best.signals.kickoffDeltaMinutes,
   };
