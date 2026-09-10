@@ -48,7 +48,7 @@ export type FootballMatchCandidate = {
  * kickoff or league agreement can never rescue a name mismatch this
  * weak, since plenty of unrelated fixtures share a kickoff slot or a
  * loosely-similar league name. */
-const NAME_FLOOR = 0.55;
+const NAME_FLOOR = 0.4;
 /** Confidence below this is not returned at all — better to report "no
  * match found" than a low-confidence guess a caller might act on. */
 const MIN_REPORTABLE_CONFIDENCE = 60;

@@ -429,7 +429,7 @@ export type LiveMatchState = {
   minute: number;
   status: string;
   hasRealOdds: boolean;
-  odds: { home: number; draw: number; away: number };
+  odds: { home: number; draw: number; away: number } | null;
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string; playerId?: string; detail?: string }>;
   date?: string;
@@ -646,7 +646,7 @@ export type UpcomingMatch = {
   date: string;
   sport: string;
   hasRealOdds: boolean;
-  odds: { home: number; draw: number; away: number };
+  odds: { home: number; draw: number; away: number } | null;
   markets: AdvancedMarkets;
   leagueId?: string;
   isWomens?: boolean;
@@ -7802,7 +7802,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
 
       const prematchPrice = getPrematchPulsePrice(fx.id);
       let resultOdds: { home: number; draw: number; away: number } | null = null;
-      let finalMarkets = makeAdvancedMarketsFromTeams(home, away);
+      let finalMarkets: Markets | null = null;
       let hasRealOdds = false;
       let priceSource: "pulsescore" | undefined;
       let pulseScoreEventId: string | undefined;
@@ -7813,25 +7813,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         hasRealOdds = true;
         priceSource = "pulsescore";
         pulseScoreEventId = prematchPrice.pulseScoreEventId;
-      } else {
-        try {
-          const oddsList = await goalApi.getFixtureOdds(fx.id);
-          resultOdds = extractGoalApi1x2Odds(oddsList);
-          const overUnder = extractGoalApiOverUnder25(oddsList);
-          if (overUnder) {
-            finalMarkets.totalGoals.over25 = overUnder.over;
-            finalMarkets.totalGoals.under25 = overUnder.under;
-          }
-          const bts = extractGoalApiBothTeamsToScore(oddsList);
-          if (bts) {
-            finalMarkets.bothTeamsScore = { yes: bts.yes, no: bts.no };
-          }
-        } catch {
-          /* no odds yet for this fixture — synthetic fallback below */
-        }
-        if (resultOdds) hasRealOdds = true;
       }
-      const baseOdds = makeOddsFromTeams(home, away);
       const { date, time } = goalApiKickoffDateTime(fx);
 
       results.push({
@@ -7844,8 +7826,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         date,
         sport: "football",
         hasRealOdds,
-        odds: resultOdds ?? baseOdds,
-        markets: finalMarkets,
+        odds: resultOdds,
+        markets: finalMarkets ?? makeAdvancedMarketsFromTeams(home, away),
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
@@ -8051,6 +8033,9 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       oddsAgeMs: existing?._oddsUpdatedAt ? Date.now() - existing._oddsUpdatedAt : undefined,
     });
 
+    const wasPulseBefore = existing?._priceSource === "pulsescore";
+    const displayOdds = wasPulseBefore ? existing.odds : null;
+    const displayMarkets = wasPulseBefore ? existing.markets : baseMarkets;
     const state: LiveMatchState = {
       id,
       home,
@@ -8062,26 +8047,12 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       awayScore: awayScore as number,
       minute: estimateGoalApiLiveMinute(fx),
       status: fx.matchStatus,
-      hasRealOdds: !!resultOdds,
-      // CRITICAL: this function runs every ~1-2s (broadcastLive()'s forced-fresh
-      // cache rebuild — see LIVE_UPDATE_INTERVAL), far more often than the
-      // background drift engine (applyTieredMarketDrift, 8-15s+ per market)
-      // recomputes a new price. odds/markets must therefore be preserved from
-      // the existing state on every tick after the first — the drift engine is
-      // the SOLE owner of what's displayed. Overwriting them here with a fresh
-      // baseOdds/baseMarkets every cycle (the bug this replaces) meant a team
-      // down several goals late in the match could show near-competitive odds,
-      // because the drift engine's Poisson-corrected value got discarded again
-      // within 1-2s of being computed, almost every cycle.
-      odds: existing?.odds ?? resultOdds ?? baseOdds,
-      markets: existing?.markets ?? baseMarkets,
-      // Stable anchors the drift engine derives lambdas/oscillation from
-      // (LiveMatchState._baseOdds/_baseMarkets) — frozen on first sighting of
-      // this fixture, not reset every tick, so the model has a real reference
-      // instead of feeding back its own last displayed value into itself.
-      _baseOdds: existing?._baseOdds ?? resultOdds ?? baseOdds,
-      _baseOddsAreReal: existing?._baseOddsAreReal ?? !!resultOdds,
-      _baseMarkets: existing?._baseMarkets ?? baseMarkets,
+      hasRealOdds: wasPulseBefore,
+      odds: displayOdds,
+      markets: displayMarkets,
+      _baseOdds: wasPulseBefore ? (existing?._baseOdds ?? displayOdds) : null,
+      _baseOddsAreReal: wasPulseBefore,
+      _baseMarkets: wasPulseBefore ? (existing?._baseMarkets ?? displayMarkets) : baseMarkets,
       events: matchEvents,
       matchStats,
       redCardsHome,
