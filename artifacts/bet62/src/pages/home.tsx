@@ -4975,7 +4975,11 @@ export default function Home({
       return bySport && bySearch;
     };
     const actualLive = liveMatches.filter(
-      (m) => m.startsIn === undefined && filterBySport(m),
+      (m) => {
+        const s = String(m.status ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+        const isFinished = /final|fin|finished|ended|complete|full.?time|after.?extra|after.?penalt|retir|abandon|cancel|award|default|ft|aet|ap/.test(s);
+        return m.startsIn === undefined && !isFinished && filterBySport(m);
+      },
     );
     // Dedup key: match id when every source actually has a stable one,
     // team-name pair otherwise — a bare team-name key alone would silently
@@ -4986,7 +4990,11 @@ export default function Home({
       m.id !== undefined && m.id !== null && m.id !== "" ? `id:${m.id}` : `${m.home}|${m.away}`;
     // Em Breve: live-feed entries + ALL upcoming matches within 7 days
     const _emBreveFromLive = liveMatches.filter(
-      (m) => m.startsIn !== undefined && filterBySport(m),
+      (m) => {
+        const s = String(m.status ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+        const isFinished = /final|fin|finished|ended|complete|full.?time|after.?extra|after.?penalt|retir|abandon|cancel|award|default|ft|aet|ap/.test(s);
+        return m.startsIn !== undefined && !isFinished && filterBySport(m);
+      },
     );
     const _liveBreveKeys = new Set(_emBreveFromLive.map(matchKey));
     const _minsUntil = (date?: string, time?: string): number => {
@@ -10610,6 +10618,7 @@ export default function Home({
 
     const isObviousLiveResult =
       match.isLive &&
+      match.hasRealOdds === true &&
       (match.sport === "football" || !match.sport) &&
       (() => {
         const minOdd = Math.min(match.odds.home, match.odds.away);
