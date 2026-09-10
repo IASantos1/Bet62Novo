@@ -224,16 +224,32 @@ function extractPulseScoreOverUnderByLine(
  * actually present on both sides; only logs a fixture if at least one
  * market pair was genuinely compared, never a line/market either side is
  * missing. */
+type OddsComparisonSample = {
+  matchId: number;
+  fixture: string;
+  matchConfidence: number;
+  result: Record<string, unknown>;
+};
+
 type OddsComparisonPhaseResult = {
   compared: number;
   totalMatched: number;
+  /** Same data as the per-fixture "[pulsescore-shadow-odds] live market
+   * comparison" log line, kept here too so it's visible via
+   * GET /api/admin/pulsescore-status without needing log access. Capped
+   * (see SAMPLE_CAP) — this is a shadow-observability snapshot, not an
+   * unbounded audit log. */
+  samples: OddsComparisonSample[];
 };
+
+const ODDS_SAMPLE_CAP = 25;
 
 async function runOddsComparisonPhase(
   matchedFixtures: MatchedLiveFootballFixture[],
   candidates: PulseScoreEvent[],
 ): Promise<OddsComparisonPhaseResult> {
   let compared = 0;
+  const samples: OddsComparisonSample[] = [];
 
   for (const fixture of matchedFixtures) {
     const liveState = liveMatchState.get(`goalapi-football-${fixture.goalApiProviderMatchId}`);
@@ -314,10 +330,18 @@ async function runOddsComparisonPhase(
       { matchId: fixture.matchId, matchConfidence: fixture.otherProviderConfidence, ...result },
       "[pulsescore-shadow-odds] live market comparison",
     );
+    if (samples.length < ODDS_SAMPLE_CAP) {
+      samples.push({
+        matchId: fixture.matchId,
+        fixture: `${liveState.home} vs ${liveState.away}`,
+        matchConfidence: fixture.otherProviderConfidence,
+        result,
+      });
+    }
   }
 
-  const result: OddsComparisonPhaseResult = { compared, totalMatched: matchedFixtures.length };
-  logger.debug(result, "[pulsescore-shadow-odds] comparison round complete");
+  const result: OddsComparisonPhaseResult = { compared, totalMatched: matchedFixtures.length, samples };
+  logger.debug({ compared, totalMatched: matchedFixtures.length }, "[pulsescore-shadow-odds] comparison round complete");
   return result;
 }
 
