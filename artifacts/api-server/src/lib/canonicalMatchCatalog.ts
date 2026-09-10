@@ -167,6 +167,63 @@ export async function getUnmatchedGoalApiFootballMatches(
   return goalApiRows.filter((r) => !alreadyMapped.has(r.matchId));
 }
 
+export type MatchedLiveFootballFixture = {
+  matchId: number;
+  goalApiProviderMatchId: string;
+  otherProviderMatchId: string;
+  otherProviderConfidence: number;
+};
+
+/** Currently-live football canonical matches that have BOTH a goalapi
+ * mapping and a mapping from `otherProvider` — the worklist for comparing
+ * a second provider's odds against what's currently live, once matching
+ * has already found the pair (see getUnmatchedGoalApiFootballMatches).
+ * Same two-query + in-process join style as that function, for the same
+ * reason: small result set, clarity over a marginal query-count saving. */
+export async function getMatchedLiveFootballFixtures(
+  otherProvider: string,
+): Promise<MatchedLiveFootballFixture[]> {
+  const otherProviderRows = await db
+    .select({ matchId: matchProviderMappingTable.matchId, providerMatchId: matchProviderMappingTable.providerMatchId, confidence: matchProviderMappingTable.confidence })
+    .from(matchProviderMappingTable)
+    .where(eq(matchProviderMappingTable.provider, otherProvider));
+  if (otherProviderRows.length === 0) return [];
+  const otherByMatchId = new Map<number, (typeof otherProviderRows)[number]>(
+    otherProviderRows.map((r) => [r.matchId, r]),
+  );
+
+  const liveMatchIds = (
+    await db
+      .select({ matchId: matchesTable.id })
+      .from(matchesTable)
+      .where(and(eq(matchesTable.sport, "football"), eq(matchesTable.status, "live")))
+  ).map((r) => r.matchId);
+  if (liveMatchIds.length === 0) return [];
+
+  const goalApiRows = await db
+    .select({ matchId: matchProviderMappingTable.matchId, providerMatchId: matchProviderMappingTable.providerMatchId })
+    .from(matchProviderMappingTable)
+    .where(
+      and(
+        eq(matchProviderMappingTable.provider, "goalapi"),
+        inArray(matchProviderMappingTable.matchId, liveMatchIds),
+      ),
+    );
+
+  const result: MatchedLiveFootballFixture[] = [];
+  for (const row of goalApiRows) {
+    const other = otherByMatchId.get(row.matchId);
+    if (!other) continue;
+    result.push({
+      matchId: row.matchId,
+      goalApiProviderMatchId: row.providerMatchId,
+      otherProviderMatchId: other.providerMatchId,
+      otherProviderConfidence: other.confidence,
+    });
+  }
+  return result;
+}
+
 export type ProviderMappingInput = {
   matchId: number;
   provider: string;
