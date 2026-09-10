@@ -7833,6 +7833,25 @@ function estimateGoalApiLiveMinute(fx: GoalApiFixture): number {
  * same choice the deleted SportMonks/API-Football cross-reference made for
  * the same reason (a red card swings the match materially more than a
  * routine goal). */
+// Diagnostic for the PulseScore odds shadow-compare finding (2026-09-10):
+// every fixture sampled so far reported bet62OddsAreReal:false — i.e.
+// getFixtureLiveOdds never once returned a usable 1X2 price. The catch
+// block below silently swallowed every failure with zero logging, so
+// there was no way to tell "the call is failing" from "no bookmaker has
+// priced this match" without this. Throttled per fixture (the TTL=120s
+// cache only re-fires the real network call on failure, so unthrottled
+// logging here would fire every ~1-2s poll tick while a fixture stays
+// live) — this is diagnostic-only, never used to decide anything.
+const liveOddsDiagnosticLastLoggedAt = new Map<string, number>();
+const LIVE_ODDS_DIAGNOSTIC_THROTTLE_MS = 5 * 60_000;
+function logLiveOddsDiagnosticOnce(fixtureId: string, fields: Record<string, unknown>, msg: string): void {
+  const last = liveOddsDiagnosticLastLoggedAt.get(fixtureId) ?? 0;
+  const now = Date.now();
+  if (now - last < LIVE_ODDS_DIAGNOSTIC_THROTTLE_MS) return;
+  liveOddsDiagnosticLastLoggedAt.set(fixtureId, now);
+  logger.warn({ fixtureId, ...fields }, msg);
+}
+
 async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
   if (!CONFIG.GOAL_API_KEY) return [];
   const fixtures = await goalApi.getLiveFixtures().catch(() => [] as GoalApiFixture[]);
@@ -7914,6 +7933,12 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
           );
           resultOdds = previousReal;
         }
+      } else {
+        logLiveOddsDiagnosticOnce(
+          fx.id,
+          { oddsListLength: oddsList?.length ?? 0, firstEntryKeys: oddsList?.[0] ? Object.keys(oddsList[0]) : null },
+          "[goal-api] live-odds call succeeded but no bookmaker entry had a usable 1X2 price",
+        );
       }
       // Unlike the prematch builder, these two markets are NOT patched onto
       // baseMarkets here — live, the bettor must only ever see BET62's own
@@ -7928,8 +7953,12 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
           ...(bts ? { bttsYes: bts.yes, bttsNo: bts.no } : {}),
         };
       }
-    } catch {
-      /* fall back to synthetic below */
+    } catch (err) {
+      logLiveOddsDiagnosticOnce(
+        fx.id,
+        { err: err instanceof Error ? { message: err.message, name: err.name } : String(err) },
+        "[goal-api] live-odds call failed — falling back to synthetic",
+      );
     }
 
     const oddsUpdatedAt = resultOdds ? Date.now() : existing?._oddsUpdatedAt;
