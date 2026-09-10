@@ -38,6 +38,9 @@ import {
   resolveProplineSportKey,
   proplineAllActiveSports,
 } from "../services/propline/football.js";
+import { getGoalApiProviderHealth } from "../health/providerHealth.js";
+import { getPulseScoreHealth } from "../providers/pulsescore/health.js";
+import { getPulseScoreShadowSyncStatus } from "../providers/pulsescore/shadowMatchSync.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2668,6 +2671,19 @@ router.get("/propline-usage", adminMiddleware, async (_req: AdminRequest, res) =
     return;
   }
   res.json({ configured: true, usage: propline.usage() });
+});
+
+// BET62 PulseScore Fase 1 — read-only status probe: confirms whether GOAL
+// API and PulseScore are both actually reachable, and what the shadow-match
+// sync's last round found (match rate, confidence, odds comparisons). Pure
+// observability — reading this never affects the odds a bettor sees. See
+// providers/pulsescore/shadowMatchSync.ts for what the numbers mean.
+router.get("/pulsescore-status", adminMiddleware, async (_req: AdminRequest, res) => {
+  res.json({
+    goalApi: getGoalApiProviderHealth(),
+    pulseScore: getPulseScoreHealth(),
+    shadowSync: getPulseScoreShadowSyncStatus(),
+  });
 });
 
 router.get("/propline-sports", adminMiddleware, async (_req: AdminRequest, res) => {

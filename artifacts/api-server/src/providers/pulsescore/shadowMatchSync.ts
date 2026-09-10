@@ -56,7 +56,17 @@ async function fetchLivePulseScoreCandidates(): Promise<PulseScoreEvent[]> {
   return candidates;
 }
 
-async function runMatchingPhase(unmatched: UnmatchedGoalApiMatch[], candidates: PulseScoreEvent[]): Promise<void> {
+type MatchingPhaseResult = {
+  attempted: number;
+  matched: number;
+  unmatched: number;
+  avgConfidence: number | null;
+};
+
+async function runMatchingPhase(
+  unmatched: UnmatchedGoalApiMatch[],
+  candidates: PulseScoreEvent[],
+): Promise<MatchingPhaseResult> {
   let matched = 0;
   let totalConfidence = 0;
 
@@ -94,16 +104,17 @@ async function runMatchingPhase(unmatched: UnmatchedGoalApiMatch[], candidates: 
     }
   }
 
+  const result: MatchingPhaseResult = {
+    attempted: unmatched.length,
+    matched,
+    unmatched: unmatched.length - matched,
+    avgConfidence: matched > 0 ? Math.round(totalConfidence / matched) : null,
+  };
   logger.info(
-    {
-      attempted: unmatched.length,
-      candidatePoolSize: candidates.length,
-      matched,
-      unmatched: unmatched.length - matched,
-      avgConfidence: matched > 0 ? Math.round(totalConfidence / matched) : null,
-    },
+    { ...result, candidatePoolSize: candidates.length },
     "[pulsescore-shadow-match] matching round complete",
   );
+  return result;
 }
 
 function pctDelta(candidate: number, reference: number): number | null {
@@ -155,10 +166,15 @@ function extractPulseScoreOverUnderByLine(
  * actually present on both sides; only logs a fixture if at least one
  * market pair was genuinely compared, never a line/market either side is
  * missing. */
+type OddsComparisonPhaseResult = {
+  compared: number;
+  totalMatched: number;
+};
+
 async function runOddsComparisonPhase(
   matchedFixtures: MatchedLiveFootballFixture[],
   candidates: PulseScoreEvent[],
-): Promise<void> {
+): Promise<OddsComparisonPhaseResult> {
   let compared = 0;
 
   for (const fixture of matchedFixtures) {
@@ -242,32 +258,64 @@ async function runOddsComparisonPhase(
     );
   }
 
-  logger.debug(
-    { compared, totalMatched: matchedFixtures.length },
-    "[pulsescore-shadow-odds] comparison round complete",
-  );
+  const result: OddsComparisonPhaseResult = { compared, totalMatched: matchedFixtures.length };
+  logger.debug(result, "[pulsescore-shadow-odds] comparison round complete");
+  return result;
+}
+
+export type ShadowSyncStatus = {
+  lastRunAt: number | null;
+  lastRunOk: boolean;
+  lastError: string | null;
+  matching: MatchingPhaseResult | null;
+  oddsComparison: OddsComparisonPhaseResult | null;
+};
+
+let lastStatus: ShadowSyncStatus = {
+  lastRunAt: null,
+  lastRunOk: true,
+  lastError: null,
+  matching: null,
+  oddsComparison: null,
+};
+
+/** Read-only snapshot of the most recent round — what the admin status
+ * endpoint (GET /api/admin/pulsescore-status) reports. */
+export function getPulseScoreShadowSyncStatus(): ShadowSyncStatus {
+  return lastStatus;
 }
 
 /** Exported for direct testability (bypasses the in-flight guard below,
  * same reason canonicalMatchCatalog.ts exports ensureCanonicalMatch
  * alongside its own throttled wrapper). */
 export async function runOnce(): Promise<void> {
-  const [unmatched, matchedFixtures] = await Promise.all([
-    getUnmatchedGoalApiFootballMatches(PROVIDER),
-    getMatchedLiveFootballFixtures(PROVIDER),
-  ]);
-  if (unmatched.length === 0 && matchedFixtures.length === 0) {
-    logger.debug("[pulsescore-shadow] nothing to match or compare — skipping fetch");
-    return;
-  }
+  try {
+    const [unmatched, matchedFixtures] = await Promise.all([
+      getUnmatchedGoalApiFootballMatches(PROVIDER),
+      getMatchedLiveFootballFixtures(PROVIDER),
+    ]);
+    if (unmatched.length === 0 && matchedFixtures.length === 0) {
+      logger.debug("[pulsescore-shadow] nothing to match or compare — skipping fetch");
+      lastStatus = { lastRunAt: Date.now(), lastRunOk: true, lastError: null, matching: null, oddsComparison: null };
+      return;
+    }
 
-  const candidates = await fetchLivePulseScoreCandidates();
+    const candidates = await fetchLivePulseScoreCandidates();
 
-  if (unmatched.length > 0) {
-    await runMatchingPhase(unmatched, candidates);
-  }
-  if (matchedFixtures.length > 0) {
-    await runOddsComparisonPhase(matchedFixtures, candidates);
+    const matching = unmatched.length > 0 ? await runMatchingPhase(unmatched, candidates) : null;
+    const oddsComparison =
+      matchedFixtures.length > 0 ? await runOddsComparisonPhase(matchedFixtures, candidates) : null;
+
+    lastStatus = { lastRunAt: Date.now(), lastRunOk: true, lastError: null, matching, oddsComparison };
+  } catch (err) {
+    lastStatus = {
+      lastRunAt: Date.now(),
+      lastRunOk: false,
+      lastError: err instanceof Error ? err.message : String(err),
+      matching: null,
+      oddsComparison: null,
+    };
+    throw err;
   }
 }
 
