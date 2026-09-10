@@ -171,6 +171,13 @@ const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss
 const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
 const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net";
+// Confirmed real in production (2026-09-10): the account's PRO plan enforces
+// 1 request/second per bookmaker (HTTP 429 "Too many requests..." on the
+// second request), and PulseScoreClient had no throttling — the shadow-match
+// sync's own pagination loop tripped it (two requests 27ms apart). Default
+// is slightly over 1000ms to leave margin for clock/network jitter.
+const PULSESCORE_MIN_REQUEST_INTERVAL_MS =
+  Number(process.env["PULSESCORE_MIN_REQUEST_INTERVAL_MS"] ?? "1100") || 1100;
 
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
@@ -229,6 +236,7 @@ export const CONFIG = {
   TENNIS_API_WS_URL,
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
+  PULSESCORE_MIN_REQUEST_INTERVAL_MS,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,

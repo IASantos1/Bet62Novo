@@ -25,6 +25,16 @@ import type {
 
 export class PulseScoreClient {
   readonly baseUrl: string;
+  /** Serializes every request through this client instance and enforces
+   * CONFIG.PULSESCORE_MIN_REQUEST_INTERVAL_MS between them — confirmed real
+   * in production (2026-09-10): the account's PRO plan allows only 1
+   * request/second per bookmaker, and two requests fired back-to-back
+   * (the live-events pagination loop, no delay between pages) tripped an
+   * HTTP 429. A promise chain rather than a last-timestamp check: the
+   * latter races under concurrent callers (two calls can both read the same
+   * "last request" time before either updates it), this doesn't. */
+  private requestChain: Promise<void> = Promise.resolve();
+  private lastRequestAt = 0;
 
   constructor(private readonly apiKey: string, baseUrl?: string) {
     this.baseUrl = (baseUrl ?? CONFIG.PULSESCORE_BASE_URL).replace(/\/+$/, "");
@@ -44,11 +54,27 @@ export class PulseScoreClient {
     return url.toString();
   }
 
+  private async throttle(): Promise<void> {
+    const previous = this.requestChain;
+    let release!: () => void;
+    this.requestChain = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    const waitMs = this.lastRequestAt + CONFIG.PULSESCORE_MIN_REQUEST_INTERVAL_MS - Date.now();
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    this.lastRequestAt = Date.now();
+    release();
+  }
+
   private async rawGet<T>(
     path: string,
     params?: Record<string, string | number | undefined>,
     timeoutMs = 8_000,
   ): Promise<T> {
+    await this.throttle();
     try {
       const url = this.buildUrl(path, params);
       const resp = await fetch(url, {
