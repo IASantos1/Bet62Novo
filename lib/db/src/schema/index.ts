@@ -31,6 +31,8 @@ export * from "./kycDocuments.js";
 export * from "./ledgerEntries.js";
 export * from "./competitions.js";
 export * from "./providerCompetitions.js";
+export * from "./matches.js";
+export * from "./matchProviderMapping.js";
 export * from "./competitionConfigs.js";
 export * from "./competitionAliases.js";
 export * from "./eventRuntimeStates.js";

@@ -1,0 +1,144 @@
+// BET62 Fase 0 (hybrid GOAL API + PulseScore architecture, 2026-09-10) —
+// background sync of canonical_matches / match_provider_mapping, mirroring
+// liveCompetitionCatalog.ts's syncLiveCompetitionCatalog throttle/in-flight
+// pattern exactly (same interval, same fire-and-forget shape), one level
+// down (matches instead of whole competitions).
+//
+// Lookup key is deliberately the PROVIDER MAPPING (provider + providerSport
+// + providerMatchId), never team names on the canonical table itself — two
+// teams play many distinct matches across a season, so a canonical row
+// keyed by (sport, home, away) would silently merge different matches
+// between the same two teams into one row. A new provider mapping row
+// always means either "first time seeing this provider match id" (insert
+// a new canonical match) or "seen before" (touch lastSeenAt on the
+// existing one) — never a team-name-based conflict resolution.
+//
+// GOAL API is the only provider writing here today (confidence 100 — a
+// single source has nothing to disambiguate against). Small known race:
+// two near-simultaneous first-sightings of the same new fixture could each
+// insert a canonical_matches row before either's mapping insert lands;
+// the mapping table's unique index prevents a duplicate MAPPING row, but
+// not a duplicate orphaned canonical row. Acceptable for this phase (low
+// write frequency via the throttle below, not yet a source of truth for
+// anything) — revisit if/when a second provider needs real matching.
+import { db, matchesTable, matchProviderMappingTable } from "../../../../lib/db/src/index.js";
+import { and, eq } from "drizzle-orm";
+import { logger } from "./logger.js";
+import { normalizeCatalogValue } from "./liveCompetitionCatalog.js";
+
+export type SeenMatchInput = {
+  sport: string;
+  provider: string;
+  providerMatchId: string;
+  home: string;
+  away: string;
+  leagueName?: string | null;
+  competitionId?: number | null;
+  kickoffUtc?: Date | null;
+  status?: string | null;
+};
+
+export async function ensureCanonicalMatch(input: SeenMatchInput): Promise<number | null> {
+  const sport = normalizeCatalogValue(input.sport);
+  const provider = String(input.provider ?? "").trim();
+  const providerMatchId = String(input.providerMatchId ?? "").trim();
+  const home = String(input.home ?? "").trim();
+  const away = String(input.away ?? "").trim();
+  if (!sport || !provider || !providerMatchId || !home || !away) return null;
+
+  const [existingMapping] = await db
+    .select({ matchId: matchProviderMappingTable.matchId })
+    .from(matchProviderMappingTable)
+    .where(
+      and(
+        eq(matchProviderMappingTable.provider, provider),
+        eq(matchProviderMappingTable.providerSport, sport),
+        eq(matchProviderMappingTable.providerMatchId, providerMatchId),
+      ),
+    )
+    .limit(1);
+
+  if (existingMapping) {
+    await db
+      .update(matchProviderMappingTable)
+      .set({ homeNameRaw: home, awayNameRaw: away, lastSeenAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(matchProviderMappingTable.provider, provider),
+          eq(matchProviderMappingTable.providerSport, sport),
+          eq(matchProviderMappingTable.providerMatchId, providerMatchId),
+        ),
+      );
+    if (input.status) {
+      await db
+        .update(matchesTable)
+        .set({ status: input.status, updatedAt: new Date() })
+        .where(eq(matchesTable.id, existingMapping.matchId));
+    }
+    return existingMapping.matchId;
+  }
+
+  const [inserted] = await db
+    .insert(matchesTable)
+    .values({
+      sport,
+      homeName: home,
+      awayName: away,
+      normalizedHomeName: normalizeCatalogValue(home),
+      normalizedAwayName: normalizeCatalogValue(away),
+      competitionId: input.competitionId ?? null,
+      leagueName: input.leagueName ?? null,
+      kickoffUtc: input.kickoffUtc ?? null,
+      status: input.status ?? "scheduled",
+      updatedAt: new Date(),
+    })
+    .returning({ id: matchesTable.id });
+  if (!inserted) return null;
+
+  await db
+    .insert(matchProviderMappingTable)
+    .values({
+      provider,
+      providerSport: sport,
+      providerMatchId,
+      matchId: inserted.id,
+      homeNameRaw: home,
+      awayNameRaw: away,
+      confidence: 100,
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing();
+
+  return inserted.id;
+}
+
+const CANONICAL_MATCH_SYNC_INTERVAL_MS = 60_000; // same cadence as syncLiveCompetitionCatalog
+let lastCanonicalMatchSyncAt = 0;
+let canonicalMatchSyncInFlight: Promise<void> | null = null;
+
+async function syncCanonicalMatchesInternal(inputs: SeenMatchInput[]): Promise<void> {
+  for (const input of inputs) {
+    try {
+      await ensureCanonicalMatch(input);
+    } catch (err) {
+      logger.error({ err, providerMatchId: input.providerMatchId }, "[canonical-match] ensure failed");
+    }
+  }
+}
+
+/** Fire-and-forget, throttled — safe to call on every poll tick with the
+ * full current fixture list, same calling convention as
+ * syncLiveCompetitionCatalog. No-ops silently when DATABASE_URL isn't set
+ * (db.insert/select throw on the mock pool, caught per-item above). */
+export function syncCanonicalMatches(inputs: SeenMatchInput[]): void {
+  if (inputs.length === 0) return;
+  const now = Date.now();
+  if (canonicalMatchSyncInFlight) return;
+  if (now - lastCanonicalMatchSyncAt < CANONICAL_MATCH_SYNC_INTERVAL_MS) return;
+  lastCanonicalMatchSyncAt = now;
+  canonicalMatchSyncInFlight = syncCanonicalMatchesInternal(inputs)
+    .catch((err) => logger.error({ err }, "[canonical-match] sync failed"))
+    .finally(() => {
+      canonicalMatchSyncInFlight = null;
+    });
+}
