@@ -157,6 +157,21 @@ const TENNIS_API_BASE_URL =
   process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";
 const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss.api-tennis.com/live";
 
+// PulseScore (api.pulsescore.net) — dedicated odds/markets/bookmakers
+// provider (2026-09-10), confirmed real via 5 endpoints the user pasted
+// (soccer/leagues, soccer/events list+detail, live-events list+detail).
+// Auth is a plain `x-secret: <key>` header — a third distinct auth style
+// from GOAL API's Bearer and api-tennis's APIkey query param. Every
+// response is already normalized on PulseScore's side into
+// canonicalMarket/canonicalOutcome (MATCH_RESULT, OVER_UNDER,
+// ASIAN_HANDICAP, ...) with numeric `odds` and a raw `rawOdds` string kept
+// alongside — this client only wraps the transport, real market/odds
+// normalization into BET62's own shape is a separate, later step (see
+// providers/pulsescore/README.md).
+const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
+const PULSESCORE_BASE_URL =
+  process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net";
+
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
 // provider for each job independently. Currently the matches/ routes still
@@ -212,6 +227,8 @@ export const CONFIG = {
   TENNIS_API_KEY,
   TENNIS_API_BASE_URL,
   TENNIS_API_WS_URL,
+  PULSESCORE_API_KEY,
+  PULSESCORE_BASE_URL,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
