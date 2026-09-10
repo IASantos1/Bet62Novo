@@ -26,6 +26,7 @@ import { logger } from "../../lib/logger.js";
 import { CONFIG } from "../../lib/config.js";
 import {
   attachProviderMapping,
+  ensureCanonicalMatch,
   getMatchedLiveFootballFixtures,
   getUnmatchedGoalApiFootballMatches,
   type MatchedLiveFootballFixture,
@@ -746,38 +747,38 @@ export async function runPrematchPulseScoreSync(goalApiFixtures: PrematchGoalApi
       kickoffUtc: gx.kickoffUtc ? gx.kickoffUtc.toISOString() : null,
     };
 
-    // First try an existing mapping (fast path) — this avoids re-running
-    // the fuzzy match every 3 min for fixtures already matched last round.
     const existingMatched = await getMatchedLiveFootballFixtures(PROVIDER);
-    let prior = existingMatched.find((m) => m.goalApiProviderMatchId === gx.providerMatchId);
+    const prior = existingMatched.find((m) => m.goalApiProviderMatchId === gx.providerMatchId);
     let pulseMatchId = prior?.otherProviderMatchId;
-    let confidence = prior?.confidence ?? null;
+    let confidence: number | null = prior?.otherProviderConfidence ?? null;
 
     if (!pulseMatchId) {
-      const r = matchGoalApiFixtureToPulseScore(ref, candidates);
-      if (r.match) {
-        pulseMatchId = r.match.otherProviderMatchId;
-        confidence = r.match.confidence;
+      const candidate = matchGoalApiFixtureToPulseScore(ref, candidates);
+      if (candidate) {
+        pulseMatchId = candidate.pulseScoreEventId;
+        confidence = candidate.confidence;
         try {
-          await attachProviderMapping({
-            canonicalMatchId: `goalapi-football-${gx.providerMatchId}`,
-            provider: PROVIDER,
-            providerSport: PROVIDER_SPORT,
-            providerMatchId: pulseMatchId,
+          const canonicalId = await ensureCanonicalMatch({
+            sport: "football",
+            provider: "goalapi",
+            providerMatchId: gx.providerMatchId,
             home: gx.home,
             away: gx.away,
-            leagueName: gx.leagueName,
+            leagueName: gx.leagueName ?? null,
             kickoffUtc: gx.kickoffUtc ?? null,
-            confidence: confidence ?? 1,
-            confidenceBreakdown: {
-              homeNameSimilarity: r.match.homeNameSimilarity,
-              awayNameSimilarity: r.match.awayNameSimilarity,
-              kickoffDeltaMinutes: r.match.kickoffDeltaMinutes,
-              leagueSimilarity: r.match.leagueSimilarity,
-              exactIdMatch: r.match.exactIdMatch,
-            },
-            source: "pulsescore-shadow-prematch",
+            status: "scheduled",
           });
+          if (canonicalId != null) {
+            await attachProviderMapping({
+              matchId: canonicalId,
+              provider: PROVIDER,
+              providerSport: PROVIDER_SPORT,
+              providerMatchId: pulseMatchId,
+              home: gx.home,
+              away: gx.away,
+              confidence: typeof confidence === "number" ? confidence : 1,
+            });
+          }
           matched++;
         } catch (_err) {
           // Mapping already exists from a parallel run — swallow, keep going.
