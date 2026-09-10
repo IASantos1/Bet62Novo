@@ -7959,8 +7959,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const id = `goalapi-football-${fx.id}`;
     currentIds.add(id);
     const existing = liveMatchState.get(id);
-    const baseOdds = { home: 0, draw: 0, away: 0 };
-    const baseMarkets = zerofillAdvancedMarkets();
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
 
     let redCardsHome = existing?.redCardsHome ?? 0;
     let redCardsAway = existing?.redCardsAway ?? 0;
@@ -8061,10 +8061,16 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       oddsAgeMs: existing?._oddsUpdatedAt ? Date.now() - existing._oddsUpdatedAt : undefined,
     });
 
+    // A real PulseScore price, once set, is never displaced by the
+    // synthetic anchor/drift below (see the drift-loop guard on
+    // `_priceSource === "pulsescore"`) — this only seeds/preserves the
+    // synthetic display value for fixtures PulseScore hasn't priced yet,
+    // so the match still shows a moving, browsable price instead of a
+    // blank "--" while bets.ts continues to refuse real wagers on it
+    // (gate: `_priceSource !== "pulsescore"`).
     const wasPulseBefore = existing?._priceSource === "pulsescore";
-    const ZERO_ODDS = { home: 0, draw: 0, away: 0 };
-    const displayOdds = wasPulseBefore ? existing.odds : ZERO_ODDS;
-    const displayMarkets = wasPulseBefore ? existing.markets : baseMarkets;
+    const displayOdds = wasPulseBefore ? existing.odds : (existing?.odds ?? baseOdds);
+    const displayMarkets = wasPulseBefore ? existing.markets : (existing?.markets ?? baseMarkets);
     const state: LiveMatchState = {
       id,
       home,
@@ -8079,9 +8085,9 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       hasRealOdds: wasPulseBefore,
       odds: displayOdds,
       markets: displayMarkets,
-      _baseOdds: wasPulseBefore ? (existing?._baseOdds ?? displayOdds) : undefined,
+      _baseOdds: wasPulseBefore ? existing?._baseOdds : (existing?._baseOdds ?? baseOdds),
       _baseOddsAreReal: wasPulseBefore,
-      _baseMarkets: wasPulseBefore ? (existing?._baseMarkets ?? displayMarkets) : baseMarkets,
+      _baseMarkets: wasPulseBefore ? existing?._baseMarkets : (existing?._baseMarkets ?? baseMarkets),
       events: matchEvents,
       matchStats,
       redCardsHome,
@@ -13847,8 +13853,65 @@ setInterval(() => {
   let anyChange = false;
   for (const [id, state] of liveMatchState.entries()) {
     if (state.sport !== "football") continue;
+    // A real PulseScore price is never touched by the synthetic Poisson
+    // drift model — shadowMatchSync.ts's runOddsComparisonPhase is the only
+    // writer of odds/markets for these fixtures. Suspension (goal/red-card
+    // delay) is computed independently in buildFootballLiveFromGoalApi off
+    // GOAL API's own event feed and still applies regardless of price
+    // source — skipping the drift loop here doesn't affect that.
     if (state._priceSource === "pulsescore") continue;
-    continue;
+    const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
+    if (skip.includes(state.status)) continue;
+    if (state.marketSuspension) {
+      const coreKeys = ["result", "totalGoals", "handicap"];
+      const allCoresSuspended = coreKeys.every((k) => {
+        const ts = state.marketSuspension?.[k];
+        return ts !== undefined && ts > now;
+      });
+      if (allCoresSuspended) continue;
+    }
+    const updated = applyTieredMarketDrift(state, now);
+    // applyTieredMarketDrift always returns a new object (due to _driftPhase /
+    // _marketNextUpdate advancing), so reference equality is never a useful
+    // change detector here. Instead compare the value-carrying fields that
+    // clients actually care about.
+    //
+    // When a market is NOT due for update, applyTieredMarketDrift returns the
+    // SAME reference for that field (e.g. `updated.odds === state.odds`), so
+    // reference equality on the individual fields correctly tells us whether
+    // anything meaningful actually changed.
+    const oddsChanged = updated.odds !== state.odds;
+    const marketsChanged =
+      updated.markets.totalGoals !== state.markets.totalGoals ||
+      updated.markets.handicap !== state.markets.handicap ||
+      updated.markets.doubleChance !== state.markets.doubleChance ||
+      updated.markets.drawNoBet !== state.markets.drawNoBet ||
+      updated.markets.bothTeamsScore !== state.markets.bothTeamsScore ||
+      updated.markets.halfTime !== state.markets.halfTime ||
+      updated.markets.htft !== state.markets.htft ||
+      updated.markets.correctScore !== state.markets.correctScore ||
+      updated.markets.htCorrectScore !== state.markets.htCorrectScore ||
+      updated.markets.h2CorrectScore !== state.markets.h2CorrectScore ||
+      updated.markets.corners !== state.markets.corners ||
+      updated.markets.cards !== state.markets.cards ||
+      updated.markets.teamGoals !== state.markets.teamGoals;
+
+    if (oddsChanged || marketsChanged) {
+      updated.marketVersion = (state.marketVersion ?? 0) + 1;
+    }
+
+    // Always advance state so _driftPhase / _marketNextUpdate are current
+    liveMatchState.set(id, updated);
+
+    if (oddsChanged || marketsChanged) {
+      broadcastMatchDelta(id, {
+        odds: updated.odds,
+        markets: updated.markets,
+        marketVersion: updated.marketVersion,
+        _marketNextUpdate: updated._marketNextUpdate,
+      });
+      anyChange = true;
+    }
   }
   if (anyChange) {
     broadcastLive().catch(() => {

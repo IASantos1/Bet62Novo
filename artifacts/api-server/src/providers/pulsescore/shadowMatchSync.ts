@@ -258,6 +258,62 @@ function extractPulseScoreOverUnderByLine(
   return byLine;
 }
 
+/** PulseScore's raw CORRECT_SCORE market (1xBet feed) carries every
+ *  scoreline the book prices — commonly 50-60+ combinations up to 10+
+ *  goals, most of them long-tail entries capped at the book's own ~100.00
+ *  ceiling price. Real bookmakers never surface that whole grid in their
+ *  UI; they show a standard low-scoring set (here: 0-0 through 3-3, the
+ *  same 16-cell grid BET62's own legacy synthetic generator used) and
+ *  fold everything else into a single "Outros" bucket. Curating this
+ *  server-side keeps the real PulseScore prices for the cells bettors
+ *  actually pick, without shipping (or rendering) a 60-row wall of mostly
+ *  ~100.00 filler. The "Outros" price is a simple implied-probability
+ *  aggregate of the folded cells' real odds (1/odd summed, then
+ *  inverted) — an approximation, not a book-exact price, since combining
+ *  already-margined odds this way doesn't preserve the book's overround
+ *  exactly, but it's in the right ballpark and never fabricated from
+ *  nothing (every input is a real PulseScore price). */
+const CORRECT_SCORE_STANDARD_MAX_GOALS = 3;
+
+function curateCorrectScoreGrid(
+  raw: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (!raw) return undefined;
+  const out: Record<string, number> = {};
+  let otherImpliedProb = 0;
+  let hasOther = false;
+  for (const [key, odd] of Object.entries(raw)) {
+    const m = key.match(/^(\d+)-(\d+)$/);
+    if (!m) {
+      // Non-numeric keys (e.g. an aggregate "home-any"/"away-any"/
+      // "any-other" bucket PulseScore already provides) pass through as-is
+      // — never double-bucketed on top of our own "Outros".
+      out[key] = odd;
+      continue;
+    }
+    const home = Number(m[1]);
+    const away = Number(m[2]);
+    if (home <= CORRECT_SCORE_STANDARD_MAX_GOALS && away <= CORRECT_SCORE_STANDARD_MAX_GOALS) {
+      out[key] = odd;
+    } else if (odd > 1) {
+      otherImpliedProb += 1 / odd;
+      hasOther = true;
+    }
+  }
+  if (hasOther && otherImpliedProb > 0 && out["Outros"] === undefined) {
+    // Clamped the same way the legacy synthetic generator clamped its own
+    // "Outro" bucket: summing per-cell implied probabilities that each
+    // already carry the book's own margin can push the raw aggregate
+    // outside a valid decimal-odds range (<=1.0, or absurdly high) when
+    // many long-tail cells are folded together — a floor/ceiling keeps the
+    // result a sane, always-valid price regardless of how many cells land
+    // in the bucket.
+    const raw = 1 / otherImpliedProb;
+    out["Outros"] = Math.round(Math.max(1.01, Math.min(500, raw)) * 100) / 100;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** Builds a full LiveMatchState.markets object from PulseScore's real
  *  normalized markets — never partially merged with whatever the fixture's
  *  previous markets were (which could be leftover synthetic-drift values
@@ -326,8 +382,8 @@ export function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Mar
 
   const htft = normalized.htft;
 
-  const correctScore = normalized.correctScore;
-  const htCorrectScore = normalized.htCorrectScore;
+  const correctScore = curateCorrectScoreGrid(normalized.correctScore);
+  const htCorrectScore = curateCorrectScoreGrid(normalized.htCorrectScore);
   const h2CorrectScore: Record<string, number> | undefined = undefined;
 
   const anytimeGoalscorer = normalized.anytimeGoalscorer;

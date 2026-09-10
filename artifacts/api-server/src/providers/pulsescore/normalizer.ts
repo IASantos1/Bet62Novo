@@ -22,7 +22,7 @@
 // to guess here. Those markets are exposed in full (every line, every
 // selection) via `markets` so that decision can be made later with all
 // the real data in hand.
-import type { PulseScoreEvent } from "./types.js";
+import type { PulseScoreEvent, PulseScoreMarket } from "./types.js";
 
 export type NormalizedSelection = {
   /** PulseScore's own canonicalOutcome, reused verbatim (HOME/DRAW/AWAY/
