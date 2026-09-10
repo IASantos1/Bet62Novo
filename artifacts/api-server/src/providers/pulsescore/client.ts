@@ -14,6 +14,7 @@
 // success/error envelope like GOAL API's `{success,data}` — a non-2xx
 // HTTP status is the only failure signal observed so far.
 import { CONFIG } from "../../lib/config.js";
+import { recordPulseScoreRestFailure, recordPulseScoreRestSuccess } from "./health.js";
 import type {
   PulseScoreEvent,
   PulseScoreEventDetailResponse,
@@ -48,21 +49,28 @@ export class PulseScoreClient {
     params?: Record<string, string | number | undefined>,
     timeoutMs = 8_000,
   ): Promise<T> {
-    const url = this.buildUrl(path, params);
-    const resp = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: this.headers(),
-    });
-    if (!resp.ok) {
-      let body = "";
-      try {
-        body = await resp.text();
-      } catch {
-        /* ignore */
+    try {
+      const url = this.buildUrl(path, params);
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: this.headers(),
+      });
+      if (!resp.ok) {
+        let body = "";
+        try {
+          body = await resp.text();
+        } catch {
+          /* ignore */
+        }
+        throw new Error(`[pulsescore] HTTP ${resp.status} on ${path}${body ? ` — ${body.slice(0, 300)}` : ""}`);
       }
-      throw new Error(`[pulsescore] HTTP ${resp.status} on ${path}${body ? ` — ${body.slice(0, 300)}` : ""}`);
+      const data = (await resp.json()) as T;
+      recordPulseScoreRestSuccess();
+      return data;
+    } catch (err) {
+      recordPulseScoreRestFailure(err);
+      throw err;
     }
-    return (await resp.json()) as T;
   }
 
   // ── Soccer (pré-jogo) ────────────────────────────────────────────────────
