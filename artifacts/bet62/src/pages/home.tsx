@@ -9752,6 +9752,40 @@ export default function Home({
     if ((match.sport ?? "football") === "tennis" && selection === "draw")
       return null;
     const now = Date.now();
+    // Diretriz arquitetural: odds bettáveis vêm EXCLUSIVAMENTE da PulseScore real.
+    // Placeholder odds={0,0,0} ou undefined (sem _priceSource=pulsescore /
+    // hasRealOdds=false) devem exibir "--" desabilitado, nunca executar toggleBet.
+    const hasNoPriceSource = !match.hasRealOdds;
+    const oddInvalid = odd <= 0 || !Number.isFinite(odd);
+    if (hasNoPriceSource || oddInvalid) {
+      const isSuspended = match.marketSuspension?.[market ?? "result"];
+      const isSusNow = isSuspended !== undefined && isSuspended > now;
+      if (isSusNow) return null;
+      const isWCVariant = variant === "worldcup";
+      const baseBoxClass = isWCVariant
+        ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
+        : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
+      return (
+        <div
+          className={`relative ${baseBoxClass} ${
+            isWCVariant
+              ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white")
+              : "bg-zinc-800/40 border-zinc-700/30 opacity-70"
+          } cursor-not-allowed select-none`}
+        >
+          <span
+            className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-zinc-500" : "text-[10px] leading-none opacity-50"}`}
+          >
+            {label}
+          </span>
+          <span
+            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-500"} tabular-nums`}
+          >
+            --
+          </span>
+        </div>
+      );
+    }
     const suspendedUntil = match.marketSuspension?.[market];
     const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
     const isSelected = !!bets.find(
