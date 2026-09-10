@@ -7934,9 +7934,22 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
           resultOdds = previousReal;
         }
       } else {
+        // Real values, not just field names — the previous round confirmed
+        // the response shape is completely different from what
+        // extractGoalApi1x2Odds expects (flat odd1/oddX/odd2 per bookmaker):
+        // it's hundreds of individual {oddName, type, value, handicap, ...}
+        // records instead. Need real enum values for oddName/type to write
+        // a correct extractor, not just the field names already captured.
+        const distinctTypes = oddsList
+          ? [...new Set(oddsList.map((e) => (e as Record<string, unknown>).type))].slice(0, 30)
+          : null;
         logLiveOddsDiagnosticOnce(
           fx.id,
-          { oddsListLength: oddsList?.length ?? 0, firstEntryKeys: oddsList?.[0] ? Object.keys(oddsList[0]) : null },
+          {
+            oddsListLength: oddsList?.length ?? 0,
+            distinctTypes,
+            sampleEntries: oddsList?.slice(0, 6) ?? null,
+          },
           "[goal-api] live-odds call succeeded but no bookmaker entry had a usable 1X2 price",
         );
       }
