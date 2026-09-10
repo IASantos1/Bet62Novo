@@ -228,6 +228,15 @@ type OddsComparisonSample = {
   matchId: number;
   fixture: string;
   matchConfidence: number;
+  /** Score/minute each side was reporting AT THE MOMENT of this
+   * comparison — a huge odds divergence is expected and harmless if one
+   * side simply hasn't caught up to a recent goal yet; this is what lets
+   * a reader tell that apart from a genuine pricing disagreement (or a
+   * false-positive match) on an otherwise-agreeing scoreline. */
+  matchState: {
+    goalApi: { home: number | null; away: number | null; minute: number | null };
+    pulseScore: { home: number | null; away: number | null; minute: number | null };
+  };
   result: Record<string, unknown>;
 };
 
@@ -325,9 +334,23 @@ async function runOddsComparisonPhase(
 
     if (Object.keys(result).length === 0) continue; // nothing comparable on both sides this round
 
+    // score/matchClock are string/number per PulseScoreScore/PulseScoreMatchClock
+    // — only populated on the live-events family (see types.ts), which is
+    // exactly what this pool comes from, but still optional defensively.
+    const psHome = pulseScoreEvent.score ? Number(pulseScoreEvent.score.home) : null;
+    const psAway = pulseScoreEvent.score ? Number(pulseScoreEvent.score.away) : null;
+    const matchState: OddsComparisonSample["matchState"] = {
+      goalApi: { home: liveState.homeScore, away: liveState.awayScore, minute: liveState.minute },
+      pulseScore: {
+        home: Number.isFinite(psHome) ? psHome : null,
+        away: Number.isFinite(psAway) ? psAway : null,
+        minute: pulseScoreEvent.matchClock?.minute ?? null,
+      },
+    };
+
     compared++;
     logger.info(
-      { matchId: fixture.matchId, matchConfidence: fixture.otherProviderConfidence, ...result },
+      { matchId: fixture.matchId, matchConfidence: fixture.otherProviderConfidence, matchState, ...result },
       "[pulsescore-shadow-odds] live market comparison",
     );
     if (samples.length < ODDS_SAMPLE_CAP) {
@@ -335,6 +358,7 @@ async function runOddsComparisonPhase(
         matchId: fixture.matchId,
         fixture: `${liveState.home} vs ${liveState.away}`,
         matchConfidence: fixture.otherProviderConfidence,
+        matchState,
         result,
       });
     }
