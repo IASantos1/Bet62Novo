@@ -24,8 +24,20 @@
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { goalApi } from "./index.js";
+// Node's global `WebSocket` client only became stable/enabled by default in
+// Node 22 (experimental and off-by-default in 20/21). Production pins Node
+// 20.18.0 (.nvmrc) — confirmed real 2026-09-10: PulseScore's WS client
+// (same bare-global pattern this file used) threw "WebSocket is not
+// defined" the first time it tried to connect there. This client is
+// currently inert (CONFIG.GOAL_API_MAX_WS_MATCHES defaults to 0) so it
+// hadn't been caught yet, but would hit the identical error the moment
+// that cap is raised above 0. Import the class explicitly from the `ws`
+// package (already a dependency, used the same way for the server side in
+// routes/matches.ts) instead of relying on a runtime global that may not
+// exist.
+import { WebSocket as WsClient } from "ws";
 
-let ws: WebSocket | null = null;
+let ws: WsClient | null = null;
 let connected = false;
 let retryDelayMs = 2_000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,9 +79,9 @@ async function connect(): Promise<void> {
     return;
   }
 
-  let socket: WebSocket;
+  let socket: WsClient;
   try {
-    socket = new WebSocket(`${CONFIG.GOAL_API_WS_URL}?wsToken=${encodeURIComponent(token)}`);
+    socket = new WsClient(`${CONFIG.GOAL_API_WS_URL}?wsToken=${encodeURIComponent(token)}`);
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
     scheduleReconnect();
@@ -77,15 +89,15 @@ async function connect(): Promise<void> {
   }
   ws = socket;
 
-  socket.addEventListener("open", () => {
+  socket.on("open", () => {
     socket.send(JSON.stringify({ type: "auth", token }));
   });
 
-  socket.addEventListener("message", (evt) => {
+  socket.on("message", (data) => {
     lastFrameAt = Date.now();
     let msg: GoalApiWsMessage;
     try {
-      msg = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
+      msg = JSON.parse(data.toString());
     } catch {
       return; // non-JSON keepalive — ignore
     }
@@ -118,7 +130,7 @@ async function connect(): Promise<void> {
     }
   });
 
-  socket.addEventListener("close", (evt) => {
+  socket.on("close", (code) => {
     connected = false;
     ws = null;
     // 4001/4003/4004/4010/4029 followed the same non-retryable convention
@@ -128,8 +140,7 @@ async function connect(): Promise<void> {
     // defensive no-op safety net rather than a confirmed mapping: if it
     // never matches, reconnect-with-backoff still runs exactly as if this
     // check weren't here.
-    const code = (evt as { code?: number }).code;
-    const nonRetryable = code !== undefined && [4001, 4003, 4004, 4010, 4029].includes(code);
+    const nonRetryable = [4001, 4003, 4004, 4010, 4029].includes(code);
     if (nonRetryable) {
       lastError = `closed with non-retryable code ${code}`;
       logger.error({ code }, "[goal-api-ws] closed (non-retryable) — not reconnecting");
@@ -139,7 +150,7 @@ async function connect(): Promise<void> {
     scheduleReconnect();
   });
 
-  socket.addEventListener("error", () => {
+  socket.on("error", () => {
     connected = false;
     ws = null;
   });

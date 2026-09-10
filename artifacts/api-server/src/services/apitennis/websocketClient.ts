@@ -19,8 +19,20 @@
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import type { ApiTennisMatch } from "./index.js";
+// Node's global `WebSocket` client only became stable/enabled by default in
+// Node 22 (experimental and off-by-default in 20/21). Production pins Node
+// 20.18.0 (.nvmrc) — confirmed real 2026-09-10: PulseScore's WS client
+// (same bare-global pattern this file used) threw "WebSocket is not
+// defined" the first time it tried to connect there. Unlike GOAL API's WS
+// (dormant while its cap is 0), this one connects on every server start
+// whenever TENNIS_API_KEY is set, so it was likely actively broken in
+// production. Import the class explicitly from the `ws` package (already
+// a dependency, used the same way for the server side in
+// routes/matches.ts) instead of relying on a runtime global that may not
+// exist.
+import { WebSocket as WsClient } from "ws";
 
-let ws: WebSocket | null = null;
+let ws: WsClient | null = null;
 let connected = false;
 let retryDelayMs = 2_000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,10 +65,10 @@ function scheduleReconnect(): void {
 function connect(): void {
   if (!CONFIG.TENNIS_API_KEY || connected) return;
 
-  let socket: WebSocket;
+  let socket: WsClient;
   try {
     const url = `${CONFIG.TENNIS_API_WS_URL}?APIkey=${encodeURIComponent(CONFIG.TENNIS_API_KEY)}`;
-    socket = new WebSocket(url);
+    socket = new WsClient(url);
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
     scheduleReconnect();
@@ -64,17 +76,17 @@ function connect(): void {
   }
   ws = socket;
 
-  socket.addEventListener("open", () => {
+  socket.on("open", () => {
     connected = true;
     retryDelayMs = 2_000;
     logger.info("[api-tennis-ws] connected");
   });
 
-  socket.addEventListener("message", (evt) => {
+  socket.on("message", (data) => {
     lastFrameAt = Date.now();
     let parsed: unknown;
     try {
-      parsed = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
+      parsed = JSON.parse(data.toString());
     } catch {
       return; // non-JSON keepalive frame — ignore
     }
@@ -87,15 +99,14 @@ function connect(): void {
     }
   });
 
-  socket.addEventListener("close", (evt) => {
+  socket.on("close", (code) => {
     connected = false;
     ws = null;
-    const code = (evt as { code?: number }).code;
     logger.warn({ code, retryMs: retryDelayMs }, "[api-tennis-ws] closed — reconnecting");
     scheduleReconnect();
   });
 
-  socket.addEventListener("error", () => {
+  socket.on("error", () => {
     connected = false;
     ws = null;
     // "close" always follows "error" for WebSocket — reconnect is scheduled there.
