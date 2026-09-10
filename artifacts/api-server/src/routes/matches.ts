@@ -10,6 +10,8 @@ import {
   getCompetitionCatalogDecisions,
   syncLiveCompetitionCatalog,
 } from "../lib/liveCompetitionCatalog.js";
+import { syncCanonicalMatches, type SeenMatchInput } from "../lib/canonicalMatchCatalog.js";
+import { computeFootballMarketSuspension } from "../markets/suspensionEngine.js";
 import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
@@ -470,6 +472,19 @@ export type LiveMatchState = {
   _baseOdds?: { home: number; draw: number; away: number };
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
+  // BET62 Fase 0 (2026-09-10) — monotonic counter, bumped only when
+  // odds/markets actually changed value (never on every tick — see the
+  // oddsChanged/marketsChanged reference-equality check in the football
+  // drift broadcast interval below, the only place this is currently
+  // bumped). Exposed to the frontend alongside odds so a client can notice
+  // its displayed price went stale before even submitting a bet — this is
+  // a UX signal, NOT the correctness backstop: that's detectOddsDrift's
+  // job at bet acceptance (routes/bets.ts), which already compares the
+  // client-submitted price against the server's current one directly and
+  // was unaffected by this addition. Football only for now — other sports'
+  // live builders compute odds inline per tick without a separate
+  // central "did the value change" pass to hook a counter into.
+  marketVersion?: number;
   _driftPhase?: number;
   // Per-market independent update schedule: key → next allowed update time (ms)
   // Ensures each market group updates at its own cadence, never all at once
@@ -7699,6 +7714,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
   );
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
+  const canonicalInputs: SeenMatchInput[] = [];
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
       if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
@@ -7709,6 +7725,16 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      canonicalInputs.push({
+        sport: "football",
+        provider: "goalapi",
+        providerMatchId: fx.id,
+        home,
+        away,
+        leagueName: fx.leagueName ?? null,
+        kickoffUtc: fx.kickoffUtc ? new Date(fx.kickoffUtc) : null,
+        status: "scheduled",
+      });
 
       let resultOdds: { home: number; draw: number; away: number } | null = null;
       const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
@@ -7758,6 +7784,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
     }
   }
   results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  syncCanonicalMatches(canonicalInputs);
   return results;
 }
 
@@ -7803,6 +7830,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
   logger.info({ count: fixtures.length }, "[goal-api] football live raw fixture count");
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
+  const canonicalInputs: SeenMatchInput[] = [];
 
   for (const fx of fixtures) {
     if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
@@ -7812,6 +7840,16 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const homeScore = Number(fx.homeTeamScore);
     const awayScore = Number(fx.awayTeamScore);
     if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
+    canonicalInputs.push({
+      sport: "football",
+      provider: "goalapi",
+      providerMatchId: fx.id,
+      home,
+      away,
+      leagueName: fx.leagueName ?? null,
+      kickoffUtc: fx.kickoffUtc ? new Date(fx.kickoffUtc) : null,
+      status: "live",
+    });
 
     const id = `goalapi-football-${fx.id}`;
     currentIds.add(id);
@@ -7885,24 +7923,15 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       /* fall back to synthetic below */
     }
 
-    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
-      ? { ...existing.marketSuspension }
-      : undefined;
-    if (marketSuspension) {
-      const active = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()));
-      marketSuspension = Object.keys(active).length > 0 ? active : undefined;
-    }
-    let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
-
-    if (newRedCard) {
-      const now = Date.now();
-      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)]));
-      suspensionReason = "CARTÃO VERMELHO!";
-    } else if (goalScored) {
-      const now = Date.now();
-      marketSuspension = Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)]));
-      suspensionReason = "GOL!";
-    }
+    const oddsUpdatedAt = resultOdds ? Date.now() : existing?._oddsUpdatedAt;
+    const { marketSuspension, suspensionReason } = computeFootballMarketSuspension({
+      now: Date.now(),
+      existingSuspension: existing?.marketSuspension,
+      existingReason: existing?._suspensionReason,
+      newRedCard,
+      goalScored,
+      oddsAgeMs: existing?._oddsUpdatedAt ? Date.now() - existing._oddsUpdatedAt : undefined,
+    });
 
     const state: LiveMatchState = {
       id,
@@ -7939,6 +7968,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       redCardsHome,
       redCardsAway,
       _providerReferenceOdds: providerReferenceOdds,
+      _oddsUpdatedAt: oddsUpdatedAt,
       _lastSeenAt: Date.now(),
       marketSuspension,
       _suspensionReason: suspensionReason,
@@ -7972,6 +8002,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     }
   }
 
+  syncCanonicalMatches(canonicalInputs);
   return results;
 }
 
@@ -13705,6 +13736,10 @@ setInterval(() => {
       updated.markets.cards !== state.markets.cards ||
       updated.markets.teamGoals !== state.markets.teamGoals;
 
+    if (oddsChanged || marketsChanged) {
+      updated.marketVersion = (state.marketVersion ?? 0) + 1;
+    }
+
     // Always advance state so _driftPhase / _marketNextUpdate are current
     liveMatchState.set(id, updated);
 
@@ -13712,6 +13747,7 @@ setInterval(() => {
       broadcastMatchDelta(id, {
         odds: updated.odds,
         markets: updated.markets,
+        marketVersion: updated.marketVersion,
         _marketNextUpdate: updated._marketNextUpdate,
       });
       anyChange = true;

@@ -2012,6 +2012,30 @@ router.post(
         });
         return;
       }
+
+      // BET62 Fase 0 (2026-09-10): marketVersion is a second, coarser
+      // signal alongside detectOddsDrift above — that check already
+      // compares the actual submitted odd against the server's current
+      // value (the precise guarantee), so this is defense-in-depth for
+      // the moment the frontend starts round-tripping the version it read
+      // the odd at. Optional and backward-compatible on purpose: no
+      // frontend build sends sel.marketVersion yet, so this silently
+      // no-ops today and only activates once the bet slip is updated to
+      // include it.
+      const submittedMarketVersion = Number(
+        (sel as { marketVersion?: unknown }).marketVersion,
+      );
+      if (
+        Number.isFinite(submittedMarketVersion) &&
+        typeof liveSt.marketVersion === "number" &&
+        submittedMarketVersion < liveSt.marketVersion
+      ) {
+        res.status(409).json({
+          error: "As odds mudaram. Reveja o boletim e tente novamente.",
+          reason: "ODDS DESATUALIZADAS",
+        });
+        return;
+      }
     }
 
     const useFreebets = isFreebet === true;

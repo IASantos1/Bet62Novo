@@ -7,6 +7,7 @@
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { kvCache } from "../cache/kvCache.js";
+import { recordGoalApiRestFailure, recordGoalApiRestSuccess } from "../../health/providerHealth.js";
 
 export type GoalApiTeamRef = { id?: string; name: string; badge?: string };
 
@@ -423,25 +424,31 @@ export class GoalApiClient {
     params?: Record<string, string | number | undefined>,
     timeoutMs = 8_000,
   ): Promise<T> {
-    const url = this.buildUrl(path, params);
-    const resp = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: this.headers(),
-    });
-    if (!resp.ok) {
-      let body = "";
-      try {
-        body = await resp.text();
-      } catch {
-        /* ignore */
+    try {
+      const url = this.buildUrl(path, params);
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: this.headers(),
+      });
+      if (!resp.ok) {
+        let body = "";
+        try {
+          body = await resp.text();
+        } catch {
+          /* ignore */
+        }
+        throw new Error(`[goal-api] HTTP ${resp.status} on ${path}${body ? ` — ${body.slice(0, 300)}` : ""}`);
       }
-      throw new Error(`[goal-api] HTTP ${resp.status} on ${path}${body ? ` — ${body.slice(0, 300)}` : ""}`);
+      const json = (await resp.json()) as { success: boolean; data: T; message?: string };
+      if (!json.success) {
+        throw new Error(`[goal-api] success:false on ${path}${json.message ? ` — ${json.message}` : ""}`);
+      }
+      recordGoalApiRestSuccess();
+      return json.data;
+    } catch (err) {
+      recordGoalApiRestFailure(err);
+      throw err;
     }
-    const json = (await resp.json()) as { success: boolean; data: T; message?: string };
-    if (!json.success) {
-      throw new Error(`[goal-api] success:false on ${path}${json.message ? ` — ${json.message}` : ""}`);
-    }
-    return json.data;
   }
 
   private async cachedGet<T>(
