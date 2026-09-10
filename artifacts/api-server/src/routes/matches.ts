@@ -397,6 +397,34 @@ type AdvancedMarkets = {
   }>;
 };
 
+function zerofillAdvancedMarkets(): AdvancedMarkets {
+  const totalGoals = {
+    over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+    over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
+    over65: 0, under65: 0,
+  };
+  const handicap = { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 };
+  const halfTime = { home: 0, draw: 0, away: 0 };
+  const firstGoal = { home: 0, noGoal: 0, away: 0 };
+  const secondHalf = { home: 0, draw: 0, away: 0 };
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals,
+    handicap,
+    halfTime,
+    firstGoal,
+    secondHalf,
+    correctScore: {},
+    htCorrectScore: {},
+    h2CorrectScore: {},
+    teamGoals: {
+      homeOver05: 0, homeUnder05: 0, homeOver15: 0, homeUnder15: 0, homeOver25: 0, homeUnder25: 0,
+      awayOver05: 0, awayUnder05: 0, awayOver15: 0, awayUnder15: 0, awayOver25: 0, awayUnder25: 0,
+    },
+  };
+}
+
 export type LiveMatchState = {
   id: string;
   home: string;
@@ -7827,7 +7855,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         sport: "football",
         hasRealOdds,
         odds: resultOdds,
-        markets: finalMarkets ?? makeAdvancedMarketsFromTeams(home, away),
+        markets: finalMarkets ?? zerofillAdvancedMarkets(),
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
@@ -7931,8 +7959,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const id = `goalapi-football-${fx.id}`;
     currentIds.add(id);
     const existing = liveMatchState.get(id);
-    const baseOdds = makeOddsFromTeams(home, away);
-    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    const baseOdds = { home: 0, draw: 0, away: 0 };
+    const baseMarkets = zerofillAdvancedMarkets();
 
     let redCardsHome = existing?.redCardsHome ?? 0;
     let redCardsAway = existing?.redCardsAway ?? 0;
@@ -8138,8 +8166,8 @@ export async function applyGoalApiWebhookEvent(event: {
           minute: 90,
           status: fx.matchStatus,
           hasRealOdds: false,
-          odds: makeOddsFromTeams(home, away),
-          markets: makeAdvancedMarketsFromTeams(home, away),
+          odds: { home: 0, draw: 0, away: 0 },
+          markets: zerofillAdvancedMarkets(),
           events: [],
           _lastSeenAt: Date.now(),
         };

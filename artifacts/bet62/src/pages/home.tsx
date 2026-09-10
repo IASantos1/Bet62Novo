@@ -13027,34 +13027,82 @@ export default function Home({
                       { key: "prolongamento", label: "⏱ Prorrogação" },
                     ]
                   : // Regular time — all markets, but only popular markets after 85'
-                    isLateGame
-                    ? [
+                    (() => {
+                      const mk = match.markets;
+                      const baseTabs: Array<{ key: string; label: string; icon?: string }> = [
                         { key: "todos", label: "Todos" },
-                        { key: "resultado", label: "Resultado" },
-                        { key: "gols", label: "Gols" },
-                        { key: "handicap", label: "Handicap" },
-                      ]
-                    : [
-                        { key: "todos", label: "Todos" },
-                        { key: "betbuilder", label: "Bet Builder", icon: "🧩" },
-                        { key: "resultado", label: "Resultado" },
-                        { key: "dupla", label: "Dupla Chance" },
-                        { key: "gols", label: "Gols" },
-                        { key: "especiais", label: "Especiais" },
-                        { key: "handicap", label: "Handicap" },
-                        ...(show1tempo
-                          ? [{ key: "1tempo", label: "1º Tempo" }]
-                          : []),
-                        ...(show2tempo
-                          ? [{ key: "2tempo", label: "2º Tempo" }]
-                          : []),
-                        { key: "htft", label: "HT/FT" },
-                        { key: "placar", label: "Placar Exato" },
-                        { key: "marcadores", label: "Marcadores" },
-                        { key: "escanteios", label: "Escanteios" },
-                        { key: "cartoes", label: "Cartões" },
-                        { key: "asiatico", label: "Asiático" },
                       ];
+                      const hasResult = !!match.hasRealOdds && ((match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01);
+                      if (hasResult) baseTabs.push({ key: "resultado", label: "Resultado" });
+                      const hasDupla =
+                        (!!(mk?.doubleChance?.homeOrDraw ?? 0) > 1.01) ||
+                        (!!(mk?.doubleChance?.awayOrDraw ?? 0) > 1.01) ||
+                        (!!(mk?.doubleChance?.homeOrAway ?? 0) > 1.01) ||
+                        (!!(mk?.bothTeamsScore?.yes ?? 0) > 1.01);
+                      if (hasDupla) baseTabs.push({ key: "dupla", label: "Dupla Chance" });
+                      const hasGols =
+                        (!!(mk?.totalGoals?.over05 ?? 0) > 1.01) ||
+                        (!!(mk?.totalGoals?.over15 ?? 0) > 1.01) ||
+                        (!!(mk?.totalGoals?.over25 ?? 0) > 1.01) ||
+                        (!!(mk?.totalGoals?.over35 ?? 0) > 1.01) ||
+                        (!!(mk?.totalGoals?.over45 ?? 0) > 1.01) ||
+                        (!!(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (!!(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (!!(mk?.toWinBothHalves?.home ?? 0) > 1.01) ||
+                        (!!(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
+                        (!!(mk?.exactGoals?.g0 ?? 0) > 1.01);
+                      if (hasGols) baseTabs.push({ key: "gols", label: "Gols" });
+                      const hasEspeciais =
+                        (!!(mk?.btts1H?.yes ?? 0) > 1.01) ||
+                        (!!(mk?.highestScoringHalf?.first ?? 0) > 1.01) ||
+                        (!!(mk?.teamGoals?.homeOver05 ?? 0) > 1.01) ||
+                        (!!(mk?.teamGoals?.awayOver05 ?? 0) > 1.01);
+                      if (hasEspeciais) baseTabs.push({ key: "especiais", label: "Especiais" });
+                      const hasHandicap =
+                        (!!(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
+                        (!!(mk?.handicap?.homeMinusOneHalf ?? 0) > 1.01) ||
+                        (!!(mk?.handicap?.awayPlusOne ?? 0) > 1.01) ||
+                        (!!(mk?.handicap?.awayPlusOneHalf ?? 0) > 1.01);
+                      if (hasHandicap) baseTabs.push({ key: "handicap", label: "Handicap" });
+                      const has1Tempo =
+                        show1tempo &&
+                        ((!!(mk?.halfTime?.home ?? 0) > 1.01) ||
+                          (!!(mk?.halfTime?.draw ?? 0) > 1.01) ||
+                          (!!(mk?.halfTime?.away ?? 0) > 1.01) ||
+                          (!!(mk?.firstGoal?.home ?? 0) > 1.01) ||
+                          (!!(mk?.drawNoBet?.home ?? 0) > 1.01));
+                      if (has1Tempo) baseTabs.push({ key: "1tempo", label: "1º Tempo" });
+                      const has2Tempo =
+                        show2tempo &&
+                        ((!!(mk?.secondHalf?.home ?? 0) > 1.01) ||
+                          (!!(mk?.secondHalf?.draw ?? 0) > 1.01) ||
+                          (!!(mk?.secondHalf?.away ?? 0) > 1.01));
+                      if (has2Tempo) baseTabs.push({ key: "2tempo", label: "2º Tempo" });
+                      const hasHtft = Object.values((mk?.htft ?? {}) as any).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      if (hasHtft) baseTabs.push({ key: "htft", label: "HT/FT" });
+                      const hasPlacar = !!mk?.correctScore && Object.values(mk.correctScore).some((v) => (v ?? 0) > 1.01);
+                      if (hasPlacar) baseTabs.push({ key: "placar", label: "Placar Exato" });
+                      const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length;
+                      if (hasMarcadores) baseTabs.push({ key: "marcadores", label: "Marcadores" });
+                      const hasEscanteios = Object.values(mk?.corners ?? {}).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      if (hasEscanteios) baseTabs.push({ key: "escanteios", label: "Escanteios" });
+                      const hasCartoes = Object.values(mk?.cards ?? {}).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      if (hasCartoes) baseTabs.push({ key: "cartoes", label: "Cartões" });
+                      const hasAsiatico =
+                        (!!(mk?.drawNoBet?.home ?? 0) > 1.01) ||
+                        (!!(mk?.asianHandicap?.home ?? 0) > 1.01) ||
+                        Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      if (hasAsiatico) baseTabs.push({ key: "asiatico", label: "Asiático" });
+                      const hasBetBuilder = hasResult || hasDupla || hasGols || hasHandicap || has1Tempo || hasEspeciais;
+                      if (hasBetBuilder) {
+                        const idx = baseTabs.findIndex((t) => t.key === "resultado");
+                        baseTabs.splice(idx >= 0 ? idx : 1, 0, { key: "betbuilder", label: "Bet Builder", icon: "🧩" });
+                      }
+                      if (isLateGame) {
+                        return baseTabs.filter((t) => ["todos", "resultado", "gols", "handicap"].includes(t.key));
+                      }
+                      return baseTabs;
+                    })();
 
     const m = match.markets;
     const tennisExtra = isTennis
