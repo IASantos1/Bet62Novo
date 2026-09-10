@@ -11,6 +11,7 @@ import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goa
 import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
 import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
 import { runPulseScoreShadowMatchSync } from "../providers/pulsescore/shadowMatchSync.js";
+import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClient.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -133,6 +134,16 @@ server.listen(port, () => {
   // touches the odds a bettor sees — inert until PULSESCORE_API_KEY is set.
   if (CONFIG.PULSESCORE_API_KEY) {
     setInterval(() => runPulseScoreShadowMatchSync(), 120_000);
+  }
+
+  // PulseScore WebSocket — confirmed real via the docs the user pasted
+  // 2026-09-10: the PRO plan (this account's) includes 1 concurrent
+  // connection. Treated purely as a wake-up signal (see
+  // providers/pulsescore/websocketClient.ts's header for why) — not yet
+  // wired into shadowMatchSync's fetch cadence, just connected and logging
+  // for now. Inert until PULSESCORE_API_KEY is set.
+  if (CONFIG.PULSESCORE_API_KEY) {
+    startPulseScoreWebSocket();
   }
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).

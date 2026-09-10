@@ -178,6 +178,14 @@ const PULSESCORE_BASE_URL =
 // is slightly over 1000ms to leave margin for clock/network jitter.
 const PULSESCORE_MIN_REQUEST_INTERVAL_MS =
   Number(process.env["PULSESCORE_MIN_REQUEST_INTERVAL_MS"] ?? "1100") || 1100;
+// Confirmed real via the user-provided PulseScore docs (2026-09-10): the
+// PRO plan (this account's plan) includes 1 concurrent WebSocket
+// connection per bookmaker, auth via a `key` QUERY PARAM (not the REST
+// client's `x-secret` header) — this is the 1xBet ("onexbet") bookmaker's
+// endpoint specifically, matching every REST path this integration already
+// uses.
+const PULSESCORE_WS_URL =
+  process.env["PULSESCORE_WS_URL"]?.trim() || "wss://api.pulsescore.net/api/onexbet/ws/live";
 
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
@@ -237,6 +245,7 @@ export const CONFIG = {
   PULSESCORE_API_KEY,
   PULSESCORE_BASE_URL,
   PULSESCORE_MIN_REQUEST_INTERVAL_MS,
+  PULSESCORE_WS_URL,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
