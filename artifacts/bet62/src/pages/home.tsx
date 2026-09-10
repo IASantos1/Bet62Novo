@@ -13044,63 +13044,63 @@ export default function Home({
                       const hasResult = !!match.hasRealOdds && ((match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01);
                       if (hasResult) baseTabs.push({ key: "resultado", label: "Resultado" });
                       const hasDupla =
-                        (!!(mk?.doubleChance?.homeOrDraw ?? 0) > 1.01) ||
-                        (!!(mk?.doubleChance?.awayOrDraw ?? 0) > 1.01) ||
-                        (!!(mk?.doubleChance?.homeOrAway ?? 0) > 1.01) ||
-                        (!!(mk?.bothTeamsScore?.yes ?? 0) > 1.01);
+                        (Number(mk?.doubleChance?.homeOrDraw ?? 0) > 1.01) ||
+                        (Number(mk?.doubleChance?.awayOrDraw ?? 0) > 1.01) ||
+                        (Number(mk?.doubleChance?.homeOrAway ?? 0) > 1.01) ||
+                        (Number(mk?.bothTeamsScore?.yes ?? 0) > 1.01);
                       if (hasDupla) baseTabs.push({ key: "dupla", label: "Dupla Chance" });
                       const hasGols =
-                        (!!(mk?.totalGoals?.over05 ?? 0) > 1.01) ||
-                        (!!(mk?.totalGoals?.over15 ?? 0) > 1.01) ||
-                        (!!(mk?.totalGoals?.over25 ?? 0) > 1.01) ||
-                        (!!(mk?.totalGoals?.over35 ?? 0) > 1.01) ||
-                        (!!(mk?.totalGoals?.over45 ?? 0) > 1.01) ||
-                        (!!(mk?.winToNil?.home ?? 0) > 1.01) ||
-                        (!!(mk?.cleanSheet?.home ?? 0) > 1.01) ||
-                        (!!(mk?.toWinBothHalves?.home ?? 0) > 1.01) ||
-                        (!!(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
-                        (!!(mk?.exactGoals?.g0 ?? 0) > 1.01);
+                        (Number(mk?.totalGoals?.over05 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over15 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over25 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over35 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over45 ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.toWinBothHalves?.home ?? 0) > 1.01) ||
+                        (Number(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
+                        (Number(mk?.exactGoals?.g0 ?? 0) > 1.01);
                       if (hasGols) baseTabs.push({ key: "gols", label: "Gols" });
                       const hasEspeciais =
-                        (!!(mk?.btts1H?.yes ?? 0) > 1.01) ||
-                        (!!(mk?.highestScoringHalf?.first ?? 0) > 1.01) ||
-                        (!!(mk?.teamGoals?.homeOver05 ?? 0) > 1.01) ||
-                        (!!(mk?.teamGoals?.awayOver05 ?? 0) > 1.01);
+                        (Number(mk?.btts1H?.yes ?? 0) > 1.01) ||
+                        (Number(mk?.highestScoringHalf?.first ?? 0) > 1.01) ||
+                        (Number(mk?.teamGoals?.homeOver05 ?? 0) > 1.01) ||
+                        (Number(mk?.teamGoals?.awayOver05 ?? 0) > 1.01);
                       if (hasEspeciais) baseTabs.push({ key: "especiais", label: "Especiais" });
                       const hasHandicap =
-                        (!!(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
-                        (!!(mk?.handicap?.homeMinusOneHalf ?? 0) > 1.01) ||
-                        (!!(mk?.handicap?.awayPlusOne ?? 0) > 1.01) ||
-                        (!!(mk?.handicap?.awayPlusOneHalf ?? 0) > 1.01);
+                        (Number(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
+                        (Number(mk?.handicap?.homeMinusOneHalf ?? 0) > 1.01) ||
+                        (Number(mk?.handicap?.awayPlusOne ?? 0) > 1.01) ||
+                        (Number(mk?.handicap?.awayPlusOneHalf ?? 0) > 1.01);
                       if (hasHandicap) baseTabs.push({ key: "handicap", label: "Handicap" });
                       const has1Tempo =
                         show1tempo &&
-                        ((!!(mk?.halfTime?.home ?? 0) > 1.01) ||
-                          (!!(mk?.halfTime?.draw ?? 0) > 1.01) ||
-                          (!!(mk?.halfTime?.away ?? 0) > 1.01) ||
-                          (!!(mk?.firstGoal?.home ?? 0) > 1.01) ||
-                          (!!(mk?.drawNoBet?.home ?? 0) > 1.01));
+                        ((Number(mk?.halfTime?.home ?? 0) > 1.01) ||
+                          (Number(mk?.halfTime?.draw ?? 0) > 1.01) ||
+                          (Number(mk?.halfTime?.away ?? 0) > 1.01) ||
+                          (Number(mk?.firstGoal?.home ?? 0) > 1.01) ||
+                          (Number(mk?.drawNoBet?.home ?? 0) > 1.01));
                       if (has1Tempo) baseTabs.push({ key: "1tempo", label: "1º Tempo" });
                       const has2Tempo =
                         show2tempo &&
-                        ((!!(mk?.secondHalf?.home ?? 0) > 1.01) ||
-                          (!!(mk?.secondHalf?.draw ?? 0) > 1.01) ||
-                          (!!(mk?.secondHalf?.away ?? 0) > 1.01));
+                        ((Number(mk?.secondHalf?.home ?? 0) > 1.01) ||
+                          (Number(mk?.secondHalf?.draw ?? 0) > 1.01) ||
+                          (Number(mk?.secondHalf?.away ?? 0) > 1.01));
                       if (has2Tempo) baseTabs.push({ key: "2tempo", label: "2º Tempo" });
-                      const hasHtft = Object.values((mk?.htft ?? {}) as any).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      const hasHtft = Object.values((mk?.htft ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasHtft) baseTabs.push({ key: "htft", label: "HT/FT" });
-                      const hasPlacar = !!mk?.correctScore && Object.values(mk.correctScore).some((v) => (v ?? 0) > 1.01);
+                      const hasPlacar = !!mk?.correctScore && Object.values(mk.correctScore).some((v) => (Number(v) ?? 0) > 1.01);
                       if (hasPlacar) baseTabs.push({ key: "placar", label: "Placar Exato" });
                       const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length;
                       if (hasMarcadores) baseTabs.push({ key: "marcadores", label: "Marcadores" });
-                      const hasEscanteios = Object.values(mk?.corners ?? {}).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      const hasEscanteios = Object.values(mk?.corners ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasEscanteios) baseTabs.push({ key: "escanteios", label: "Escanteios" });
-                      const hasCartoes = Object.values(mk?.cards ?? {}).some((v: any) => ((v as number) ?? 0) > 1.01);
+                      const hasCartoes = Object.values(mk?.cards ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasCartoes) baseTabs.push({ key: "cartoes", label: "Cartões" });
                       const hasAsiatico =
-                        (!!(mk?.drawNoBet?.home ?? 0) > 1.01) ||
-                        (!!(mk?.asianHandicap?.home ?? 0) > 1.01) ||
-                        Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => ((v as number) ?? 0) > 1.01);
+                        (Number(mk?.drawNoBet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.asianHandicap?.home ?? 0) > 1.01) ||
+                        Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasAsiatico) baseTabs.push({ key: "asiatico", label: "Asiático" });
                       const hasBetBuilder = hasResult || hasDupla || hasGols || hasHandicap || has1Tempo || hasEspeciais;
                       if (hasBetBuilder) {
@@ -13129,7 +13129,14 @@ export default function Home({
     const hasTennisMarkets =
       match.sport === "tennis" && !!m?.tennisExtra?.firstSet?.home;
     const hasComputedMarkets = hasPlayableMarketOdds(m);
-    if (!matchHasPlayableOdds(match) && !hasTennisMarkets && !hasComputedMarkets) {
+    const isFootballLike =
+      (match.sport ?? "football") === "football" ||
+      (match.sport ?? "football") === "baseball" ||
+      (match.sport ?? "football") === "basketball" ||
+      (match.sport ?? "football") === "volleyball" ||
+      (match.sport ?? "football") === "hockey" ||
+      (match.sport ?? "football") === "mma";
+    if (!isFootballLike && !matchHasPlayableOdds(match) && !hasTennisMarkets && !hasComputedMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
