@@ -13,11 +13,24 @@ import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
 import { runPulseScoreShadowMatchSync, triggerPrematchPulseScoreSync } from "../providers/pulsescore/shadowMatchSync.js";
 import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClient.js";
 import { goalApi } from "../services/goalapi/index.js";
-import {
-  stripGenderTeamSuffix,
-  isBlockedLeague,
-  isWomensLeague,
-} from "../services/goalapi/common.js";
+
+function isBlockedLeague(name: string): boolean {
+  const n = name.toLowerCase();
+  if (/\bu(1[5-9]|2[013])\b/.test(n)) return true;
+  if (/\bunder[- ]?(1[5-9]|2[013])\b/.test(n)) return true;
+  if (/\bjuni(or|oren|oer|or)\b/.test(n)) return true;
+  if (/\bacademy|reserve|b[- ]team|squadra\s*b|équipe\s*b|equipo\s*b\b/.test(n)) return true;
+  return false;
+}
+function isWomensLeague(name: string): boolean {
+  return /women|feminine|féminin|feminino|femminile|frauen|femenin|damall|nwsl|wsl/i.test(name);
+}
+function stripGenderTeamSuffix(name: string | null | undefined): string | null {
+  if (name == null) return null;
+  const n = name.trim();
+  if (!n) return n;
+  return n.replace(/\s*[-–—]\s*(Women|Men|Mulheres|Homens|Femenino|Masculino|Damen|Herren|Donne|Uomini|Femme|Homme)\s*$/i, "").trim() || n;
+}
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
