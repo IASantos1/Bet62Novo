@@ -22,7 +22,7 @@
 // write frequency via the throttle below, not yet a source of truth for
 // anything) — revisit if/when a second provider needs real matching.
 import { db, matchesTable, matchProviderMappingTable } from "../../../../lib/db/src/index.js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { logger } from "./logger.js";
 import { normalizeCatalogValue } from "./liveCompetitionCatalog.js";
 
@@ -110,6 +110,133 @@ export async function ensureCanonicalMatch(input: SeenMatchInput): Promise<numbe
     .onConflictDoNothing();
 
   return inserted.id;
+}
+
+export type UnmatchedGoalApiMatch = {
+  matchId: number;
+  providerMatchId: string;
+  home: string;
+  away: string;
+  leagueName: string | null;
+  kickoffUtc: Date | null;
+};
+
+/** Scheduled/live football canonical matches that already have a GOAL API
+ * mapping (the only provider that creates canonical rows today) but no
+ * mapping yet from any other provider — the exact worklist a second
+ * provider's matching job needs. Two simple queries + an in-process filter
+ * rather than one query with a NOT EXISTS subquery: the result set is small
+ * (order of tens/hundreds of live+upcoming matches at once), so clarity
+ * wins over a marginal query-count saving. */
+export async function getUnmatchedGoalApiFootballMatches(
+  excludeProvider: string,
+): Promise<UnmatchedGoalApiMatch[]> {
+  const goalApiRows = await db
+    .select({
+      matchId: matchesTable.id,
+      providerMatchId: matchProviderMappingTable.providerMatchId,
+      home: matchProviderMappingTable.homeNameRaw,
+      away: matchProviderMappingTable.awayNameRaw,
+      leagueName: matchesTable.leagueName,
+      kickoffUtc: matchesTable.kickoffUtc,
+    })
+    .from(matchesTable)
+    .innerJoin(
+      matchProviderMappingTable,
+      and(
+        eq(matchProviderMappingTable.matchId, matchesTable.id),
+        eq(matchProviderMappingTable.provider, "goalapi"),
+      ),
+    )
+    .where(and(eq(matchesTable.sport, "football"), inArray(matchesTable.status, ["scheduled", "live"])));
+
+  if (goalApiRows.length === 0) return [];
+
+  const matchIds = goalApiRows.map((r) => r.matchId);
+  const alreadyMappedRows = await db
+    .select({ matchId: matchProviderMappingTable.matchId })
+    .from(matchProviderMappingTable)
+    .where(
+      and(
+        eq(matchProviderMappingTable.provider, excludeProvider),
+        inArray(matchProviderMappingTable.matchId, matchIds),
+      ),
+    );
+  const alreadyMapped = new Set(alreadyMappedRows.map((r) => r.matchId));
+
+  return goalApiRows.filter((r) => !alreadyMapped.has(r.matchId));
+}
+
+export type ProviderMappingInput = {
+  matchId: number;
+  provider: string;
+  providerSport: string;
+  providerMatchId: string;
+  home: string;
+  away: string;
+  /** Caller-computed confidence (e.g. from a real matching engine) — unlike
+   * ensureCanonicalMatch's fixed 100 for a single, unambiguous source. */
+  confidence: number;
+};
+
+/** Attaches a SECOND (or later) provider's mapping to an EXISTING canonical
+ * match. Never creates a new canonical_matches row — only
+ * ensureCanonicalMatch does that, and only for the provider that owns match
+ * identity (GOAL API today), preserving the rule that GOAL API stays the
+ * source of truth for which matches exist at all. */
+export async function attachProviderMapping(input: ProviderMappingInput): Promise<void> {
+  const provider = String(input.provider ?? "").trim();
+  const providerSport = normalizeCatalogValue(input.providerSport);
+  const providerMatchId = String(input.providerMatchId ?? "").trim();
+  const home = String(input.home ?? "").trim();
+  const away = String(input.away ?? "").trim();
+  if (!provider || !providerSport || !providerMatchId || !home || !away) return;
+
+  const [existing] = await db
+    .select({ matchId: matchProviderMappingTable.matchId })
+    .from(matchProviderMappingTable)
+    .where(
+      and(
+        eq(matchProviderMappingTable.provider, provider),
+        eq(matchProviderMappingTable.providerSport, providerSport),
+        eq(matchProviderMappingTable.providerMatchId, providerMatchId),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(matchProviderMappingTable)
+      .set({
+        homeNameRaw: home,
+        awayNameRaw: away,
+        confidence: input.confidence,
+        lastSeenAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(matchProviderMappingTable.provider, provider),
+          eq(matchProviderMappingTable.providerSport, providerSport),
+          eq(matchProviderMappingTable.providerMatchId, providerMatchId),
+        ),
+      );
+    return;
+  }
+
+  await db
+    .insert(matchProviderMappingTable)
+    .values({
+      provider,
+      providerSport,
+      providerMatchId,
+      matchId: input.matchId,
+      homeNameRaw: home,
+      awayNameRaw: away,
+      confidence: input.confidence,
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing();
 }
 
 const CANONICAL_MATCH_SYNC_INTERVAL_MS = 60_000; // same cadence as syncLiveCompetitionCatalog
