@@ -10,6 +10,7 @@ import { proplineAllActiveSports } from "../services/propline/football.js";
 import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goalapi/websocketClient.js";
 import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
 import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
+import { runPulseScoreShadowMatchSync } from "../providers/pulsescore/shadowMatchSync.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -123,6 +124,15 @@ server.listen(port, () => {
   // never a hard dependency (see websocketClient.ts's own comment).
   if (CONFIG.TENNIS_API_KEY) {
     startApiTennisWebSocket();
+  }
+
+  // PulseScore Fase 1 — shadow matching only (see
+  // providers/pulsescore/shadowMatchSync.ts's header): records which
+  // PulseScore live event corresponds to which GOAL-API-sourced canonical
+  // match, with a real confidence score, purely for observability. Never
+  // touches the odds a bettor sees — inert until PULSESCORE_API_KEY is set.
+  if (CONFIG.PULSESCORE_API_KEY) {
+    setInterval(() => runPulseScoreShadowMatchSync(), 120_000);
   }
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
