@@ -15,6 +15,7 @@
     "skipLibCheck": true,
     "strict": false,
     "noImplicitAny": false,
+    "types": ["react", "react-dom", "vite/client"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],

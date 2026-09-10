@@ -62,7 +62,8 @@ async function fetchLivePulseScoreCandidates(): Promise<PulseScoreEvent[]> {
   return candidates;
 }
 
-type MatchingPhaseResult = {
+/** @public — used by routes/test for odds comparison. */
+export type MatchingPhaseResult = {
   attempted: number;
   matched: number;
   unmatched: number;
@@ -267,7 +268,8 @@ function extractPulseScoreOverUnderByLine(
  *  PulseScore doesn't cover this round are zeroed/left absent (never
  *  fabricated) so the frontend (home.tsx) can hide the rows safely with
  *  its existing truthy/>0/safe() guards. */
-function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Markets {
+/** @public — used by routes/test for odds comparison. */
+export function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Markets {
   const psOverUnder = extractPulseScoreOverUnderByLine(normalized.markets);
   const totalGoals: Markets["totalGoals"] = {
     over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
@@ -730,12 +732,36 @@ async function fetchPrematchPulseScoreCandidates(): Promise<PulseScoreEvent[]> {
   const candidates: PulseScoreEvent[] = [];
   let page = 1;
   for (; page <= MAX_PREMATCH_PAGES; page++) {
-    const resp = await pulseScore.getSoccerEvents({ page, limit: 50 });
-    for (const ev of resp.events) {
-      if (isVirtualPulseScoreLeague(ev.league)) continue;
-      candidates.push(ev);
+    let attempt = 0;
+    while (true) {
+      try {
+        const resp = await pulseScore.getSoccerEvents({ page, limit: 50 });
+        for (const ev of resp.events) {
+          if (isVirtualPulseScoreLeague(ev.league)) continue;
+          candidates.push(ev);
+        }
+        if (!resp.hasNextPage) return candidates;
+        break;
+      } catch (err: any) {
+        const msg = err?.message ?? "";
+        const is429 =
+          msg.includes("429") ||
+          msg.includes("Too many requests") ||
+          msg.includes("rate limit");
+        attempt++;
+        if (is429 && attempt <= 3) {
+          const waitMs = attempt === 1 ? 5000 : attempt === 2 ? 12000 : 30000;
+          logger.warn(
+            { page, attempt, waitMs, msg: msg.slice(0, 180) },
+            "[pulsescore-prematch] HTTP 429 — aguardando retry",
+          );
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        throw err;
+      }
     }
-    if (!resp.hasNextPage) break;
+    await new Promise((r) => setTimeout(r, 1050));
   }
   return candidates;
 }

@@ -157,6 +157,7 @@ server.listen(port, () => {
   // fetched data get re-applied more often. Inert until PULSESCORE_API_KEY
   // is set.
   if (CONFIG.PULSESCORE_API_KEY) {
+    void runPulseScoreShadowMatchSync();
     setInterval(() => runPulseScoreShadowMatchSync(), 15_000);
   }
 
