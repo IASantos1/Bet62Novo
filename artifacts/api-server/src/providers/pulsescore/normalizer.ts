@@ -60,10 +60,39 @@ export type NormalizedFootballEvent = {
   doubleChance?: { homeOrDraw: number; homeOrAway: number; drawOrAway: number };
   bothTeamsToScore?: { yes: number; no: number };
   totalGoalsOddEven?: { even: number; odd: number };
+  drawNoBet?: { home: number; away: number };
+  firstGoalTeam?: { home: number; noGoal: number; away: number };
+  htft?: {
+    hh: number; hd: number; ha: number;
+    dh: number; dd: number; da: number;
+    ah: number; ad: number; aa: number;
+  };
+  correctScore?: Record<string, number>;
+  htCorrectScore?: Record<string, number>;
+  anytimeGoalscorer?: Array<{ player: string; odds: number }>;
+  firstGoalscorer?: Array<{ player: string; odds: number }>;
+  lastGoalscorer?: Array<{ player: string; odds: number }>;
+  asianHandicapFull?: { line: number; home: number; away: number };
+  handicapLines?: Map<number, { home: number; away: number }>;
+  cornersLines?: Map<number, { over: number; under: number }>;
+  cardsLines?: Map<number, { over: number; under: number }>;
+  asianTotalLines?: Map<number, { over: number; under: number }>;
 };
 
 function findMarket(ev: PulseScoreEvent, canonicalMarket: string, period: string) {
   return ev.markets.find((m) => m.canonicalMarket === canonicalMarket && m.period === period);
+}
+
+/** Heuristic market finder: tries exact canonical match first, then falls back
+ *  to substring case-insensitive match for markets PulseScore renames
+ *  internally (e.g. BOOKINGS_TOTAL vs TOTAL_CARDS). */
+function findMarketLoose(ev: PulseScoreEvent, needles: string[], period: string): PulseScoreMarket | undefined {
+  for (const m of ev.markets) {
+    if (m.period !== period) continue;
+    if (needles.some((n) => m.canonicalMarket.toLowerCase().includes(n.toLowerCase()))) return m;
+    if (needles.some((n) => m.rawName.toLowerCase().includes(n.toLowerCase()))) return m;
+  }
+  return undefined;
 }
 
 function findOutcomeOdds(
@@ -128,6 +157,170 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
       })()
     : undefined;
 
+  const dnbMarket = findMarketLoose(ev, ["DRAW_NO_BET", "DRAWNOBET", "HOME_AWAY_DRAW_NO"], "FULL_TIME");
+  const drawNoBet = dnbMarket
+    ? (() => {
+        const home =
+          findOutcomeOdds(dnbMarket.selections, "HOME") ??
+          findOutcomeOdds(dnbMarket.selections, "HOME_WIN") ??
+          findOutcomeOdds(dnbMarket.selections, "1");
+        const away =
+          findOutcomeOdds(dnbMarket.selections, "AWAY") ??
+          findOutcomeOdds(dnbMarket.selections, "AWAY_WIN") ??
+          findOutcomeOdds(dnbMarket.selections, "2");
+        if (home == null || away == null) return undefined;
+        return { home, away };
+      })()
+    : undefined;
+
+  const fgTeamMarket = findMarketLoose(ev, ["NEXT_GOAL_TEAM", "FIRST_GOAL_TEAM", "NEXT_GOAL", "WHICH_TEAM_SCORES_NEXT"], "FULL_TIME");
+  const firstGoalTeam = fgTeamMarket
+    ? (() => {
+        const home =
+          findOutcomeOdds(fgTeamMarket.selections, "HOME") ??
+          findOutcomeOdds(fgTeamMarket.selections, "HOME_FIRST") ??
+          findOutcomeOdds(fgTeamMarket.selections, "HOME_NEXT");
+        const away =
+          findOutcomeOdds(fgTeamMarket.selections, "AWAY") ??
+          findOutcomeOdds(fgTeamMarket.selections, "AWAY_FIRST") ??
+          findOutcomeOdds(fgTeamMarket.selections, "AWAY_NEXT");
+        const noGoal =
+          findOutcomeOdds(fgTeamMarket.selections, "NO_GOAL") ??
+          findOutcomeOdds(fgTeamMarket.selections, "NONE") ??
+          findOutcomeOdds(fgTeamMarket.selections, "NO_MORE_GOALS");
+        if (home == null || away == null || noGoal == null) return undefined;
+        return { home, noGoal, away };
+      })()
+    : undefined;
+
+  const htftMarket = findMarketLoose(ev, ["HALF_TIME_FULL_TIME", "HT_FT", "HTFT"], "FULL_TIME");
+  const htft: NormalizedFootballEvent["htft"] = htftMarket
+    ? (() => {
+        const g = (h: string, f: string) => {
+          const sel = htftMarket.selections.find((s) => {
+            const k = (s.canonicalOutcome ?? "").replace(/[^A-Z]/g, "");
+            return k === `${h}${f}` || k === `${h}/${f}` || s.rawName.startsWith(`${h}/${f}`) || s.rawName.startsWith(`${h} ${f}`);
+          });
+          return sel?.odds;
+        };
+        const rows = [
+          ["HH", "HOME", "HOME"], ["HD", "HOME", "DRAW"], ["HA", "HOME", "AWAY"],
+          ["DH", "DRAW", "HOME"], ["DD", "DRAW", "DRAW"], ["DA", "DRAW", "AWAY"],
+          ["AH", "AWAY", "HOME"], ["AD", "AWAY", "DRAW"], ["AA", "AWAY", "AWAY"],
+        ] as const;
+        const out: Record<string, number> = {};
+        for (const [k, h, a] of rows) {
+          const v = g(h, a);
+          if (v != null) out[k.toLowerCase()] = v;
+        }
+        return (Object.keys(out).length === 9 ? out : undefined) as NormalizedFootballEvent["htft"];
+      })()
+    : undefined;
+
+  const correctScoreMarket = findMarketLoose(ev, ["CORRECT_SCORE", "EXACT_SCORE"], "FULL_TIME");
+  const correctScore: Record<string, number> | undefined = correctScoreMarket
+    ? (() => {
+        const out: Record<string, number> = {};
+        for (const s of correctScoreMarket.selections) {
+          const m = s.canonicalOutcome.match(/^(\d+)[-_:](\d+)$/) ?? s.rawName.match(/(\d+)\s*[-:x]\s*(\d+)/);
+          if (m) {
+            out[`${parseInt(m[1], 10)}-${parseInt(m[2], 10)}`] = s.odds;
+            continue;
+          }
+          const up = s.canonicalOutcome.toUpperCase();
+          if (up.includes("HOME_WIN") || up.startsWith("HOME ") || up === "OTHER_HOME") out["home-any"] = s.odds;
+          else if (up.includes("AWAY_WIN") || up.startsWith("AWAY ") || up === "OTHER_AWAY") out["away-any"] = s.odds;
+          else if (up === "ANY_OTHER" || up === "OTHER" || up.includes("DRAW_OTHER")) out["any-other"] = s.odds;
+        }
+        return Object.keys(out).length > 0 ? out : undefined;
+      })()
+    : undefined;
+
+  const htCorrectScoreMarket = findMarketLoose(ev, ["CORRECT_SCORE", "EXACT_SCORE"], "FIRST_HALF");
+  const htCorrectScore: Record<string, number> | undefined = htCorrectScoreMarket
+    ? (() => {
+        const out: Record<string, number> = {};
+        for (const s of htCorrectScoreMarket.selections) {
+          const m = s.canonicalOutcome.match(/^(\d+)[-_:](\d+)$/) ?? s.rawName.match(/(\d+)\s*[-:x]\s*(\d+)/);
+          if (m) out[`${parseInt(m[1], 10)}-${parseInt(m[2], 10)}`] = s.odds;
+        }
+        return Object.keys(out).length > 0 ? out : undefined;
+      })()
+    : undefined;
+
+  const anytimeGsMarket = findMarketLoose(ev, ["ANYTIME_GOALSCORER", "ANYTIME_GOALS", "GOALSCORER_ANYTIME"], "FULL_TIME");
+  const firstGsMarket = findMarketLoose(ev, ["FIRST_GOALSCORER", "FIRST_GOALS"], "FULL_TIME");
+  const lastGsMarket = findMarketLoose(ev, ["LAST_GOALSCORER", "LAST_GOALS"], "FULL_TIME");
+  const pluckPlayers = (mkt: PulseScoreMarket | undefined) =>
+    mkt
+      ? mkt.selections
+          .filter((s) => s.odds != null && Number.isFinite(s.odds) && s.odds > 1)
+          .map((s) => ({ player: s.rawName.replace(/^(anytime|first|last)\s*[:\-]\s*/i, "").trim() || s.canonicalOutcome, odds: s.odds }))
+          .slice(0, 60)
+      : undefined;
+  const anytimeGoalscorer = pluckPlayers(anytimeGsMarket);
+  const firstGoalscorer = pluckPlayers(firstGsMarket);
+  const lastGoalscorer = pluckPlayers(lastGsMarket);
+
+  // Asian handicap full-time line market — pick line 0 first (DNB duplicate),
+  // else the absolute-smallest absolute line the provider emits.
+  const ahMarket = findMarketLoose(ev, ["ASIAN_HANDICAP", "HANDICAP_ASIAN"], "FULL_TIME");
+  const asianHandicapFull: NormalizedFootballEvent["asianHandicapFull"] = (() => {
+    if (!ahMarket) return undefined;
+    const byLine = new Map<number, { home?: number; away?: number }>();
+    for (const s of ahMarket.selections) {
+      if (s.line == null || !Number.isFinite(s.line)) continue;
+      const rec = byLine.get(s.line) ?? {};
+      if (s.canonicalOutcome === "HOME" || s.canonicalOutcome === "1") rec.home = s.odds;
+      else if (s.canonicalOutcome === "AWAY" || s.canonicalOutcome === "2") rec.away = s.odds;
+      byLine.set(s.line, rec);
+    }
+    const available: Array<{ line: number; home: number; away: number }> = [];
+    for (const [line, v] of byLine.entries()) {
+      if (v.home != null && v.away != null) available.push({ line, home: v.home, away: v.away });
+    }
+    if (!available.length) return undefined;
+    available.sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+    return available[0];
+  })();
+
+  // Generic line-market aggregator (over/under or home/away handicap per line):
+  const aggregateLineMarkets = (needles: string[], period: string, kind: "overunder" | "handicap") => {
+    const mkt = findMarketLoose(ev, needles, period);
+    if (!mkt) return undefined;
+    if (kind === "overunder") {
+      const m = new Map<number, { over: number; under: number }>();
+      for (const s of mkt.selections) {
+        if (s.line == null || !Number.isFinite(s.line)) continue;
+        const rec = m.get(s.line) ?? { over: undefined as number | undefined, under: undefined as number | undefined };
+        const out = s.canonicalOutcome.toUpperCase();
+        if (out === "OVER" || out.startsWith("O") || out.startsWith("MORE")) rec.over = s.odds;
+        else if (out === "UNDER" || out.startsWith("U") || out.startsWith("LESS")) rec.under = s.odds;
+        m.set(s.line, rec as { over: number; under: number });
+      }
+      const clean = new Map<number, { over: number; under: number }>();
+      for (const [l, v] of m.entries()) if (v.over != null && v.under != null) clean.set(l, v);
+      return clean.size ? clean : undefined;
+    } else {
+      const m = new Map<number, { home: number; away: number }>();
+      for (const s of mkt.selections) {
+        if (s.line == null || !Number.isFinite(s.line)) continue;
+        const rec = m.get(s.line) ?? { home: undefined as number | undefined, away: undefined as number | undefined };
+        const out = s.canonicalOutcome.toUpperCase();
+        if (out === "HOME" || out === "1") rec.home = s.odds;
+        else if (out === "AWAY" || out === "2") rec.away = s.odds;
+        m.set(s.line, rec as { home: number; away: number });
+      }
+      const clean = new Map<number, { home: number; away: number }>();
+      for (const [l, v] of m.entries()) if (v.home != null && v.away != null) clean.set(l, v);
+      return clean.size ? clean : undefined;
+    }
+  };
+  const handicapLines = aggregateLineMarkets(["MATCH_HANDICAP", "RESULT_HANDICAP", "HOME_AWAY_HANDICAP", "HANDICAP_RESULT"], "FULL_TIME", "handicap");
+  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER"], "FULL_TIME", "overunder");
+  const cardsLines = aggregateLineMarkets(["BOOKINGS_TOTAL", "TOTAL_CARDS", "CARDS_OVER_UNDER"], "FULL_TIME", "overunder");
+  const asianTotalLines = aggregateLineMarkets(["TOTAL_GOALS", "GOALS_TOTAL", "TOTAL"], "FULL_TIME", "overunder");
+
   return {
     eventId: ev.eventId,
     home: ev.home,
@@ -141,5 +334,18 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
     doubleChance,
     bothTeamsToScore,
     totalGoalsOddEven,
+    drawNoBet,
+    firstGoalTeam,
+    htft,
+    correctScore,
+    htCorrectScore,
+    anytimeGoalscorer,
+    firstGoalscorer,
+    lastGoalscorer,
+    asianHandicapFull,
+    handicapLines,
+    cornersLines,
+    cardsLines,
+    asianTotalLines,
   };
 }

@@ -30,6 +30,7 @@ import {
   type SelectionRecord,
 } from "../settlement.js";
 import { detectOddsDrift } from "../lib/config.js";
+import { getPrematchPulsePrice } from "../providers/pulsescore/shadowMatchSync.js";
 
 const router: IRouter = Router();
 
@@ -1872,10 +1873,42 @@ router.post(
 
     const now = Date.now();
 
+    function goalApiFootballId(mId: string): string | null {
+      if (!mId.startsWith("goalapi-football-")) return null;
+      const raw = mId.slice("goalapi-football-".length);
+      return raw === "" ? null : raw;
+    }
+    function rejectMissingPulseScorePrematch(goalApiId: string): boolean {
+      return getPrematchPulsePrice(goalApiId) === undefined;
+    }
+    function rejectMissingPulseScoreLive(st: LiveMatchState): boolean {
+      return st.id.startsWith("goalapi-football-") && st._priceSource !== "pulsescore";
+    }
+
+    const topLevelGoalApiId = goalApiFootballId(canonicalMatchId);
     if (selList.length === 0) {
       const liveSt =
         liveMatchState.get(String(matchId)) ??
         liveMatchState.get(canonicalMatchId);
+      if (topLevelGoalApiId) {
+        if (!liveSt) {
+          if (rejectMissingPulseScorePrematch(topLevelGoalApiId)) {
+            res.status(409).json({
+              error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
+              reason: "AGUARDANDO PULSESCORE (PRÉ-JOGO)",
+            });
+            return;
+          }
+        } else if (liveSt.sport === "football") {
+          if (rejectMissingPulseScoreLive(liveSt)) {
+            res.status(409).json({
+              error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
+              reason: "AGUARDANDO PULSESCORE (AO VIVO)",
+            });
+            return;
+          }
+        }
+      }
       if (
         liveSt?.sport === "tennis" ||
         liveSt?.sport === "football" ||
@@ -1884,9 +1917,6 @@ router.post(
         liveSt?.sport === "baseball" ||
         liveSt?.sport === "volleyball"
       ) {
-        // Same "already missing from the feed, don't accept a doomed bet"
-        // guard as the per-selection loop below (see its comment) —
-        // ticket BT62-000074, 2026-08-11.
         if (liveSt._missingSinceAt) {
           res.status(409).json({
             error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
@@ -1925,7 +1955,29 @@ router.post(
         sel.matchId ?? canonicalMatchId,
         (sel as { sport?: unknown }).sport ?? topLevelSport,
       );
+      const selGoalApiId = goalApiFootballId(mId);
       const liveSt = liveMatchState.get(mId);
+
+      if (selGoalApiId) {
+        if (!liveSt) {
+          if (rejectMissingPulseScorePrematch(selGoalApiId)) {
+            res.status(409).json({
+              error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
+              reason: "AGUARDANDO PULSESCORE (PRÉ-JOGO)",
+            });
+            return;
+          }
+          continue;
+        }
+        if (liveSt.sport === "football" && rejectMissingPulseScoreLive(liveSt)) {
+          res.status(409).json({
+            error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
+            reason: "AGUARDANDO PULSESCORE (AO VIVO)",
+          });
+          return;
+        }
+      }
+
       if (!liveSt) continue;
       if (
         liveSt.sport !== "tennis" &&
@@ -1937,17 +1989,6 @@ router.post(
       )
         continue;
 
-      // Real incident, 2026-08-11 (ticket BT62-000074): a match already
-      // missing from the provider feed (liveSt._missingSinceAt set) is on
-      // its way to being voided by finalizeStaleLiveMatch (matches.ts) —
-      // for tennis/basketball/volleyball that's typically within 15s (see
-      // TENNIS_DISAPPEAR_GRACE_MS and friends). Accepting a bet on it isn't
-      // wrong exactly (it gets a correct void+refund once finalized, not a
-      // false loss), but it's pointless and confusing: the user ties up
-      // stake on a bet already headed for an instant void. Reject up front
-      // instead — same shape as the suspension response below, since from
-      // the bettor's perspective "can't bet on this right now" is the same
-      // message either way.
       if (liveSt._missingSinceAt) {
         res.status(409).json({
           error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
@@ -1988,15 +2029,6 @@ router.post(
         return;
       }
 
-      // Odds-drift guard (audit finding, 2026-08-10): the suspension check
-      // above is the ONLY thing that stood between an accepted bet and
-      // whatever odds the client submitted — nothing compared sel.odd
-      // against the server's own current price. A market with no
-      // suspension covering it (or one whose suspension window already
-      // lapsed a tick before this request landed) would silently accept a
-      // stale or arbitrarily-inflated client-submitted odd. Belt-and-braces
-      // on top of suspension, not a replacement for it — suspension is
-      // still the primary, immediate-reaction guard.
       const submittedOdd = Number((sel as { odd?: unknown }).odd);
       const curOdd = currentOddForSelection(sel as unknown as SelectionRecord, liveSt);
       if (
@@ -2013,15 +2045,6 @@ router.post(
         return;
       }
 
-      // BET62 Fase 0 (2026-09-10): marketVersion is a second, coarser
-      // signal alongside detectOddsDrift above — that check already
-      // compares the actual submitted odd against the server's current
-      // value (the precise guarantee), so this is defense-in-depth for
-      // the moment the frontend starts round-tripping the version it read
-      // the odd at. Optional and backward-compatible on purpose: no
-      // frontend build sends sel.marketVersion yet, so this silently
-      // no-ops today and only activates once the bet slip is updated to
-      // include it.
       const submittedMarketVersion = Number(
         (sel as { marketVersion?: unknown }).marketVersion,
       );

@@ -10,8 +10,14 @@ import { proplineAllActiveSports } from "../services/propline/football.js";
 import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goalapi/websocketClient.js";
 import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
 import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
-import { runPulseScoreShadowMatchSync } from "../providers/pulsescore/shadowMatchSync.js";
+import { runPulseScoreShadowMatchSync, triggerPrematchPulseScoreSync } from "../providers/pulsescore/shadowMatchSync.js";
 import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClient.js";
+import { goalApi } from "../services/goalapi/index.js";
+import {
+  stripGenderTeamSuffix,
+  isBlockedLeague,
+  isWomensLeague,
+} from "../services/goalapi/common.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -149,6 +155,61 @@ server.listen(port, () => {
   // for now. Inert until PULSESCORE_API_KEY is set.
   if (CONFIG.PULSESCORE_API_KEY) {
     startPulseScoreWebSocket();
+  }
+
+  // PulseScore Fase 2 — PRÉ-JOGO (upcoming 8 dias): mesma arquitetura híbrida
+  // do Fase 1 mas cadência mais longa (3 min vs 15s do live) — prematch não
+  // se move tão rápido e 80 páginas de PulseScore por rodada custam ~80s com
+  // o 1req/s throttle. Executa 1x no startup e depois a cada 3 min, mesmo
+  // sem tráfego de usuários, garantindo que todos os jogos de hoje já estão
+  // com odds reais no Map cache quando o primeiro usuário abrir a home.
+  // Requer ambas as chaves (GOAL_API fixtures + PULSESCORE_API odds).
+  if (CONFIG.PULSESCORE_API_KEY && CONFIG.GOAL_API_KEY) {
+    async function runPrematchCron(): Promise<void> {
+      const today = new Date();
+      const dates = Array.from({ length: 8 }, (_, i) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+      const perDay = await Promise.all(
+        dates.map((date) => goalApi.getFixturesByDate(date).catch(() => [])),
+      );
+      const seen = new Set<string>();
+      const refs: {
+        providerMatchId: string;
+        home: string;
+        away: string;
+        leagueName: string;
+        kickoffUtc: Date | null;
+      }[] = [];
+      for (const fixtures of perDay) {
+        for (const fx of fixtures as any[]) {
+          if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+          if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
+          const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+          const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+          if (!home || !away) continue;
+          const key = `${home}|${away}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          refs.push({
+            providerMatchId: String(fx.id),
+            home,
+            away,
+            leagueName: fx.leagueName ?? "",
+            kickoffUtc: fx.kickoffUtc ? new Date(fx.kickoffUtc) : null,
+          });
+        }
+      }
+      logger.info(
+        { count: refs.length },
+        "[pulsescore-prematch-cron] disparando sync de referências upcoming",
+      );
+      void triggerPrematchPulseScoreSync(refs);
+    }
+    void runPrematchCron();
+    setInterval(() => void runPrematchCron(), 3 * 60 * 1000);
   }
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).

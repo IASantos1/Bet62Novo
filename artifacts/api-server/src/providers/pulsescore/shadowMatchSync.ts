@@ -23,6 +23,7 @@
 // the higher-value target anyway (the harder, more valuable problem for a
 // live book). Pre-match odds are a natural follow-up once this is validated.
 import { logger } from "../../lib/logger.js";
+import { CONFIG } from "../../lib/config.js";
 import {
   attachProviderMapping,
   getMatchedLiveFootballFixtures,
@@ -256,27 +257,20 @@ function extractPulseScoreOverUnderByLine(
 }
 
 /** Builds a full LiveMatchState.markets object from PulseScore's real
- * normalized markets — never partially merged with whatever the fixture's
- * previous markets were (which could be leftover synthetic-drift values
- * from before this fixture had a PulseScore price at all). Markets
- * PulseScore doesn't cover today (handicap, half-time result in BET62's
- * 1X2 shape, first-goalscorer) are zeroed rather than fabricated — the
- * frontend (home.tsx) already hides every one of these betting rows
- * behind a truthy/`>0`/`safe()` guard (confirmed via grep, e.g.
- * `_mk?.halfTime?.home && safe(_mk.halfTime.home)`,
- * `m.totalGoals.over05 > 0 && (...)`), so a zeroed market silently
- * disappears from the UI instead of showing a broken or invented price.
- * Every other optional AdvancedMarkets field (corners, cards,
- * correctScore, goalscorer markets, etc.) is simply left absent. */
+ *  normalized markets — never partially merged with whatever the fixture's
+ *  previous markets were (which could be leftover synthetic-drift values
+ *  from before this fixture had a PulseScore price at all). After the
+ *  2026-09-10 "every oddity must come from PulseScore" decision, we now
+ *  populate 100% of AdvancedMarkets football slots from real PulseScore
+ *  upstream data whenever PulseScore actually carries them. Markets
+ *  PulseScore doesn't cover this round are zeroed/left absent (never
+ *  fabricated) so the frontend (home.tsx) can hide the rows safely with
+ *  its existing truthy/>0/safe() guards. */
 function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Markets {
   const psOverUnder = extractPulseScoreOverUnderByLine(normalized.markets);
   const totalGoals: Markets["totalGoals"] = {
-    over05: 0, under05: 0,
-    over15: 0, under15: 0,
-    over25: 0, under25: 0,
-    over35: 0, under35: 0,
-    over45: 0, under45: 0,
-    over55: 0, under55: 0,
+    over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+    over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
     over65: 0, under65: 0,
   };
   for (const { line, bet62Over, bet62Under } of OVER_UNDER_LINES) {
@@ -285,23 +279,94 @@ function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Markets {
     if (ps?.under != null) totalGoals[bet62Under] = ps.under;
   }
 
+  const doubleChance = normalized.doubleChance
+    ? {
+        homeOrDraw: normalized.doubleChance.homeOrDraw,
+        awayOrDraw: normalized.doubleChance.drawOrAway,
+        homeOrAway: normalized.doubleChance.homeOrAway,
+      }
+    : { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 };
+
+  const bothTeamsScore = normalized.bothTeamsToScore
+    ? { yes: normalized.bothTeamsToScore.yes, no: normalized.bothTeamsToScore.no }
+    : { yes: 0, no: 0 };
+
+  const handicap: Markets["handicap"] = {
+    homeMinusOne: normalized.handicapLines?.get(-1.0)?.home ?? 0,
+    awayPlusOne: normalized.handicapLines?.get(-1.0)?.away ?? 0,
+    homeMinusOneHalf: normalized.handicapLines?.get(-0.5)?.home ?? 0,
+    awayPlusOneHalf: normalized.handicapLines?.get(-0.5)?.away ?? 0,
+  };
+
+  const halfTime: Markets["halfTime"] = normalized.matchResult1H
+    ? { home: normalized.matchResult1H.home, draw: normalized.matchResult1H.draw, away: normalized.matchResult1H.away }
+    : { home: 0, draw: 0, away: 0 };
+
+  const firstGoal: Markets["firstGoal"] = normalized.firstGoalTeam
+    ? { home: normalized.firstGoalTeam.home, noGoal: normalized.firstGoalTeam.noGoal, away: normalized.firstGoalTeam.away }
+    : { home: 0, noGoal: 0, away: 0 };
+
+  const drawNoBet = normalized.drawNoBet;
+
+  const asianHandicap = normalized.asianHandicapFull;
+
+  const atl = normalized.asianTotalLines;
+  const asianTotals: NonNullable<Markets["asianTotals"]> | undefined = atl
+    ? {
+        o05: atl.get(0.5)?.over ?? 0, u05: atl.get(0.5)?.under ?? 0,
+        o45: atl.get(4.5)?.over ?? 0, u45: atl.get(4.5)?.under ?? 0,
+        o55: atl.get(5.5)?.over ?? 0, u55: atl.get(5.5)?.under ?? 0,
+        o225: atl.get(2.25)?.over ?? 0, u225: atl.get(2.25)?.under ?? 0,
+        o275: atl.get(2.75)?.over ?? 0, u275: atl.get(2.75)?.under ?? 0,
+      }
+    : undefined;
+
+  const htft = normalized.htft;
+
+  const correctScore = normalized.correctScore;
+  const htCorrectScore = normalized.htCorrectScore;
+  const h2CorrectScore: Record<string, number> | undefined = undefined;
+
+  const anytimeGoalscorer = normalized.anytimeGoalscorer;
+  const firstGoalscorer = normalized.firstGoalscorer;
+  const lastGoalscorer = normalized.lastGoalscorer;
+
+  const cl = normalized.cornersLines;
+  const corners: NonNullable<Markets["corners"]> | undefined = cl
+    ? {
+        o85: cl.get(8.5)?.over ?? 0, u85: cl.get(8.5)?.under ?? 0,
+        o95: cl.get(9.5)?.over ?? 0, u95: cl.get(9.5)?.under ?? 0,
+        o105: cl.get(10.5)?.over ?? 0, u105: cl.get(10.5)?.under ?? 0,
+      }
+    : undefined;
+
+  const kl = normalized.cardsLines;
+  const cards: NonNullable<Markets["cards"]> | undefined = kl
+    ? {
+        o35: kl.get(3.5)?.over ?? 0, u35: kl.get(3.5)?.under ?? 0,
+        o45: kl.get(4.5)?.over ?? 0, u45: kl.get(4.5)?.under ?? 0,
+      }
+    : undefined;
+
   return {
-    // Same field-name remap already used by the comparison phase below:
-    // PulseScore's drawOrAway === BET62's awayOrDraw.
-    doubleChance: normalized.doubleChance
-      ? {
-          homeOrDraw: normalized.doubleChance.homeOrDraw,
-          awayOrDraw: normalized.doubleChance.drawOrAway,
-          homeOrAway: normalized.doubleChance.homeOrAway,
-        }
-      : { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-    bothTeamsScore: normalized.bothTeamsToScore
-      ? { yes: normalized.bothTeamsToScore.yes, no: normalized.bothTeamsToScore.no }
-      : { yes: 0, no: 0 },
+    doubleChance,
+    bothTeamsScore,
     totalGoals,
-    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
-    halfTime: { home: 0, draw: 0, away: 0 },
-    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    handicap,
+    halfTime,
+    firstGoal,
+    drawNoBet,
+    asianHandicap,
+    asianTotals,
+    htft,
+    correctScore,
+    htCorrectScore,
+    h2CorrectScore,
+    anytimeGoalscorer,
+    firstGoalscorer,
+    lastGoalscorer,
+    corners,
+    cards,
   };
 }
 
@@ -598,6 +663,174 @@ export async function runOnce(): Promise<void> {
     };
     throw err;
   }
+}
+
+// ── PREMATCH (Upcoming) Phase ────────────────────────────────────────────────
+//
+// After the 2026-09-10 "every oddity (prematch + live) must come from
+// PulseScore" decision, we extend the shadow-sync to upcoming football
+// fixtures: paginate PulseScore's pre-match /soccer/events (currently ~3450
+// events across ~690 pages at limit=5, per the user's response samples,
+// so we cap pagination at MAX_PREMATCH_PAGES and match only against the
+// GOAL-API fixtures already present in upcomingMatches (no need to pull
+// the whole planet — we only care about games BET62 already shows).
+//
+// The upcoming round follows EXACTLY the same two-phase pattern as LIVE:
+//   1. Matching  → attachProviderMapping(goalapiProviderMatchId ↔ pulsescore eventId)
+//   2. Odds write → inject PulseScore markets directly into UpcomingMatch
+//      via an in-memory Map (upcomingPrematchPulsePrices) that
+//      buildFootballUpcomingFromGoalApi() reads right after building the
+//      base UpcomingMatch row. Same `_priceSource === "pulsescore"` rule
+//      as live.
+
+const MAX_PREMATCH_PAGES = 80;
+export type PrematchPulsePrice = {
+  odds: { home: number; draw: number; away: number };
+  markets: Markets;
+  pulseScoreEventId: string;
+};
+const upcomingPrematchPulsePrices: Map<string, PrematchPulsePrice> = new Map();
+export function getPrematchPulsePrice(goalApiProviderMatchId: string | number): PrematchPulsePrice | undefined {
+  return upcomingPrematchPulsePrices.get(String(goalApiProviderMatchId));
+}
+const prematchMatchedFixtureIds: Set<string> = new Set();
+export function getPrematchPulseScorePricedFixtureIds(): Set<string> {
+  return prematchMatchedFixtureIds;
+}
+
+async function fetchPrematchPulseScoreCandidates(): Promise<PulseScoreEvent[]> {
+  const candidates: PulseScoreEvent[] = [];
+  let page = 1;
+  for (; page <= MAX_PREMATCH_PAGES; page++) {
+    const resp = await pulseScore.getSoccerEvents({ page, limit: 50 });
+    for (const ev of resp.events) {
+      if (isVirtualPulseScoreLeague(ev.league)) continue;
+      candidates.push(ev);
+    }
+    if (!resp.hasNextPage) break;
+  }
+  return candidates;
+}
+
+type PrematchGoalApiFixture = {
+  providerMatchId: string;
+  home: string;
+  away: string;
+  leagueName: string;
+  kickoffUtc: Date | null;
+};
+
+/** Matches a list of upcoming GOAL-API fixtures already built by the
+ *  upcoming builder against PulseScore's pre-match catalog, then injects
+ *  real PulseScore markets directly into the in-memory Map the upcoming
+ *  builder reads. Returns a quick status summary so the caller can log
+ *  what matched / what didn't without wading through the full debug log. */
+export async function runPrematchPulseScoreSync(goalApiFixtures: PrematchGoalApiFixture[]): Promise<{
+  processed: number;
+  matched: number;
+  priced: number;
+}> {
+  if (!CONFIG.PULSESCORE_API_KEY) return { processed: 0, matched: 0, priced: 0 };
+  if (goalApiFixtures.length === 0) return { processed: 0, matched: 0, priced: 0 };
+
+  const candidates = await fetchPrematchPulseScoreCandidates();
+  let matched = 0;
+  let priced = 0;
+
+  for (const gx of goalApiFixtures) {
+    const ref: GoalApiFixtureRef = {
+      id: gx.providerMatchId,
+      homeTeamName: gx.home,
+      awayTeamName: gx.away,
+      leagueName: gx.leagueName,
+      kickoffUtc: gx.kickoffUtc ? gx.kickoffUtc.toISOString() : null,
+    };
+
+    // First try an existing mapping (fast path) — this avoids re-running
+    // the fuzzy match every 3 min for fixtures already matched last round.
+    const existingMatched = await getMatchedLiveFootballFixtures(PROVIDER);
+    let prior = existingMatched.find((m) => m.goalApiProviderMatchId === gx.providerMatchId);
+    let pulseMatchId = prior?.otherProviderMatchId;
+    let confidence = prior?.confidence ?? null;
+
+    if (!pulseMatchId) {
+      const r = matchGoalApiFixtureToPulseScore(ref, candidates);
+      if (r.match) {
+        pulseMatchId = r.match.otherProviderMatchId;
+        confidence = r.match.confidence;
+        try {
+          await attachProviderMapping({
+            canonicalMatchId: `goalapi-football-${gx.providerMatchId}`,
+            provider: PROVIDER,
+            providerSport: PROVIDER_SPORT,
+            providerMatchId: pulseMatchId,
+            home: gx.home,
+            away: gx.away,
+            leagueName: gx.leagueName,
+            kickoffUtc: gx.kickoffUtc ?? null,
+            confidence: confidence ?? 1,
+            confidenceBreakdown: {
+              homeNameSimilarity: r.match.homeNameSimilarity,
+              awayNameSimilarity: r.match.awayNameSimilarity,
+              kickoffDeltaMinutes: r.match.kickoffDeltaMinutes,
+              leagueSimilarity: r.match.leagueSimilarity,
+              exactIdMatch: r.match.exactIdMatch,
+            },
+            source: "pulsescore-shadow-prematch",
+          });
+          matched++;
+        } catch (_err) {
+          // Mapping already exists from a parallel run — swallow, keep going.
+        }
+      }
+    } else {
+      matched++;
+    }
+
+    if (!pulseMatchId) continue;
+
+    const ev = candidates.find((c) => c.eventId === pulseMatchId);
+    if (!ev) continue;
+
+    const normalized = normalizePulseScoreEvent(ev);
+    const mr = normalized.matchResult;
+    const all1x2LegsReal = mr
+      && Number.isFinite(mr.home) && mr.home > 1
+      && Number.isFinite(mr.draw) && mr.draw > 1
+      && Number.isFinite(mr.away) && mr.away > 1;
+    if (!all1x2LegsReal) continue;
+
+    const newOdds = { home: mr.home, draw: mr.draw, away: mr.away };
+    const newMarkets = buildPulseScoreMarkets(normalized);
+    upcomingPrematchPulsePrices.set(String(gx.providerMatchId), {
+      odds: newOdds,
+      markets: newMarkets,
+      pulseScoreEventId: pulseMatchId,
+    });
+    prematchMatchedFixtureIds.add(String(gx.providerMatchId));
+    priced++;
+  }
+  return { processed: goalApiFixtures.length, matched, priced };
+}
+
+// Separate runOnce wrapper for prematch — distinct from the live one so
+// they can run at different cadences (3min prematch vs 15s live).
+let prematchInFlight: Promise<any> | null = null;
+export function triggerPrematchPulseScoreSync(goalApiFixtures: PrematchGoalApiFixture[]): Promise<{
+  processed: number;
+  matched: number;
+  priced: number;
+}> {
+  if (prematchInFlight) return prematchInFlight;
+  prematchInFlight = runPrematchPulseScoreSync(goalApiFixtures)
+    .catch((err) => {
+      logger.error({ err }, "[pulsescore-shadow-prematch] sync failed");
+      return { processed: 0, matched: 0, priced: 0 };
+    })
+    .finally(() => {
+      prematchInFlight = null;
+    });
+  return prematchInFlight;
 }
 
 let syncInFlight: Promise<void> | null = null;

@@ -73,6 +73,10 @@ import {
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
 import {
+  getPrematchPulsePrice,
+  triggerPrematchPulseScoreSync,
+} from "../providers/pulsescore/shadowMatchSync.js";
+import {
   apiTennis,
   type ApiTennisMatch,
   type ApiTennisStanding,
@@ -675,6 +679,16 @@ export type UpcomingMatch = {
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
+  /** PulseScore-only: when this upcoming fixture's odds/markets have been
+   *  replaced with real PulseScore upstream data (every oddity only from
+   *  PulseScore per user's 2026-09-10 rule). `undefined` / absent means
+   *  fixture is still showing anchor odds (Poisson synthetic +
+   *  goalApi.getFixtureOdds 1X2/O.2.5/BTTS legacy values) — visible in
+   *  the list but bets are blocked (gate in bets.ts POST /bets). */
+  _priceSource?: "pulsescore";
+  /** Traceability: the raw PulseScore event id used for this fixture's
+   *  real markets (matches getPrematchPulsePrice + canonical DB mapping). */
+  _pulseScoreEventId?: string;
 };
 
 type ProviderQualitySnapshot = {
@@ -7736,6 +7750,13 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   const canonicalInputs: SeenMatchInput[] = [];
+  const prematchRefs: {
+    providerMatchId: string;
+    home: string;
+    away: string;
+    leagueName: string;
+    kickoffUtc: Date | null;
+  }[] = [];
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
       if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
@@ -7746,6 +7767,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      const kickoffUtcDate = fx.kickoffUtc ? new Date(fx.kickoffUtc) : null;
       canonicalInputs.push({
         sport: "football",
         provider: "goalapi",
@@ -7753,30 +7775,61 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         home,
         away,
         leagueName: fx.leagueName ?? null,
-        kickoffUtc: fx.kickoffUtc ? new Date(fx.kickoffUtc) : null,
+        kickoffUtc: kickoffUtcDate,
         status: "scheduled",
       });
+      prematchRefs.push({
+        providerMatchId: fx.id,
+        home,
+        away,
+        leagueName: fx.leagueName ?? "",
+        kickoffUtc: kickoffUtcDate,
+      });
+    }
+  }
+  void triggerPrematchPulseScoreSync(prematchRefs);
 
+  for (const fixtures of perDay) {
+    for (const fx of fixtures) {
+      if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+      if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
+      const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+      const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (!seen.has(key)) continue;
+      seen.delete(key);
+
+      const prematchPrice = getPrematchPulsePrice(fx.id);
       let resultOdds: { home: number; draw: number; away: number } | null = null;
-      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-      try {
-        const oddsList = await goalApi.getFixtureOdds(fx.id);
-        resultOdds = extractGoalApi1x2Odds(oddsList);
-        // Same "real data patches synthetic" convention as resultOdds above —
-        // only the two markets GOAL API's flat odds shape actually carries
-        // (over/under 2.5 and BTTS) get patched; everything else stays the
-        // Poisson-model synthetic baseline.
-        const overUnder = extractGoalApiOverUnder25(oddsList);
-        if (overUnder) {
-          baseMarkets.totalGoals.over25 = overUnder.over;
-          baseMarkets.totalGoals.under25 = overUnder.under;
+      let finalMarkets = makeAdvancedMarketsFromTeams(home, away);
+      let hasRealOdds = false;
+      let priceSource: "pulsescore" | undefined;
+      let pulseScoreEventId: string | undefined;
+
+      if (prematchPrice) {
+        resultOdds = prematchPrice.odds;
+        finalMarkets = prematchPrice.markets;
+        hasRealOdds = true;
+        priceSource = "pulsescore";
+        pulseScoreEventId = prematchPrice.pulseScoreEventId;
+      } else {
+        try {
+          const oddsList = await goalApi.getFixtureOdds(fx.id);
+          resultOdds = extractGoalApi1x2Odds(oddsList);
+          const overUnder = extractGoalApiOverUnder25(oddsList);
+          if (overUnder) {
+            finalMarkets.totalGoals.over25 = overUnder.over;
+            finalMarkets.totalGoals.under25 = overUnder.under;
+          }
+          const bts = extractGoalApiBothTeamsToScore(oddsList);
+          if (bts) {
+            finalMarkets.bothTeamsScore = { yes: bts.yes, no: bts.no };
+          }
+        } catch {
+          /* no odds yet for this fixture — synthetic fallback below */
         }
-        const bts = extractGoalApiBothTeamsToScore(oddsList);
-        if (bts) {
-          baseMarkets.bothTeamsScore = { yes: bts.yes, no: bts.no };
-        }
-      } catch {
-        /* no odds yet for this fixture — synthetic fallback below */
+        if (resultOdds) hasRealOdds = true;
       }
       const baseOdds = makeOddsFromTeams(home, away);
       const { date, time } = goalApiKickoffDateTime(fx);
@@ -7790,9 +7843,9 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         time,
         date,
         sport: "football",
-        hasRealOdds: !!resultOdds,
+        hasRealOdds,
         odds: resultOdds ?? baseOdds,
-        markets: baseMarkets,
+        markets: finalMarkets,
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
@@ -7801,6 +7854,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         awayTeamId: fx.awayTeam?.id,
         stadium: fx.matchStadium ?? undefined,
         referee: fx.matchReferee ?? undefined,
+        _priceSource: priceSource,
+        _pulseScoreEventId: pulseScoreEventId,
       });
     }
   }
