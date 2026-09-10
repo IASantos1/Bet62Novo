@@ -1,23 +1,27 @@
-// PulseScore Fase 1 — shadow matching + odds comparison against real live
-// football data. Per the approved plan, and its natural follow-up: this
-// ONLY records which PulseScore event corresponds to which GOAL-API-sourced
-// canonical match, and logs how PulseScore's live 1X2 compares to what's
-// currently live — it never touches routes/matches.ts's live odds,
-// routes/bets.ts, or anything a bettor sees. Same "capture as an internal
-// benchmark, never surface" convention LiveMatchState already uses for
-// GOAL API's own O/U2.5+BTTS reference odds (_providerReferenceOdds) and
-// api-tennis's live odds reference (_apiTennisLiveOddsRef) — this is that
-// same pattern, just logged instead of stored on the match state, since
-// nothing downstream needs to read it yet.
+// PulseScore Fase 1 — shadow matching, and (as of 2026-09-10, per the
+// user's explicit decision) the REAL live football odds source. This
+// records which PulseScore event corresponds to which GOAL-API-sourced
+// canonical match, and — once a fixture is matched — writes PulseScore's
+// own match-result/BTTS/double-chance/total-goals prices directly into
+// routes/matches.ts's `liveMatchState`, the same Map routes/bets.ts reads
+// at bet acceptance. GOAL API's own live-odds endpoint was confirmed
+// broken this session (wrong response shape entirely — see
+// routes/matches.ts's live-odds diagnostic) and, independent of that bug,
+// the user decided PulseScore should be the sole live odds source going
+// forward regardless: no synthetic Poisson fallback, no dual-source
+// conflict. A fixture only becomes bettable once PulseScore has actually
+// priced its match-result market — see runOddsComparisonPhase and
+// buildLivePayload's visibility filter (routes/matches.ts), which requires
+// `_priceSource === "pulsescore"` before a football fixture appears in the
+// live betting list at all.
 //
 // Scoped to LIVE football only for this first pass: PulseScore's pre-match
 // /soccer/events has ~3450 events across ~690 pages at the limit=5 tested
 // by the user — paginating all of that without knowing the provider's real
-// max page size isn't reasonable yet. /live-events has ~30 total, a much
-// smaller and more tractable pool, and live matches are the higher-value
-// target anyway (the harder, more valuable problem for a live book). Pre-
-// match matching and odds comparison are a natural follow-up once the live
-// version of both is validated.
+// max page size isn't reasonable yet. /live-events has ~30-58 observed in
+// production, a much smaller and more tractable pool, and live matches are
+// the higher-value target anyway (the harder, more valuable problem for a
+// live book). Pre-match odds are a natural follow-up once this is validated.
 import { logger } from "../../lib/logger.js";
 import {
   attachProviderMapping,
@@ -28,10 +32,10 @@ import {
 } from "../../lib/canonicalMatchCatalog.js";
 import { matchGoalApiFixtureToPulseScore, debugBestCandidate, type GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
 import { isVirtualPulseScoreLeague } from "./filters.js";
-import { normalizePulseScoreEvent, type NormalizedMarketGroup } from "./normalizer.js";
+import { normalizePulseScoreEvent, type NormalizedFootballEvent, type NormalizedMarketGroup } from "./normalizer.js";
 import { pulseScore } from "./client.js";
 import type { PulseScoreEvent } from "./types.js";
-import { liveMatchState, type LiveMatchState } from "../../routes/matches.js";
+import { liveMatchState, broadcastMatchDelta, type LiveMatchState } from "../../routes/matches.js";
 
 type Markets = LiveMatchState["markets"];
 
@@ -251,14 +255,68 @@ function extractPulseScoreOverUnderByLine(
   return byLine;
 }
 
-/** Compares PulseScore's live markets against what's currently live in
- * LiveMatchState (routes/matches.ts) — the exact prices a bettor sees
- * right now — for every fixture already matched to a PulseScore event.
- * Read-only on LiveMatchState: nothing here writes back to it or to any
- * route. Builds the comparison incrementally from whichever markets are
- * actually present on both sides; only logs a fixture if at least one
- * market pair was genuinely compared, never a line/market either side is
- * missing. */
+/** Builds a full LiveMatchState.markets object from PulseScore's real
+ * normalized markets — never partially merged with whatever the fixture's
+ * previous markets were (which could be leftover synthetic-drift values
+ * from before this fixture had a PulseScore price at all). Markets
+ * PulseScore doesn't cover today (handicap, half-time result in BET62's
+ * 1X2 shape, first-goalscorer) are zeroed rather than fabricated — the
+ * frontend (home.tsx) already hides every one of these betting rows
+ * behind a truthy/`>0`/`safe()` guard (confirmed via grep, e.g.
+ * `_mk?.halfTime?.home && safe(_mk.halfTime.home)`,
+ * `m.totalGoals.over05 > 0 && (...)`), so a zeroed market silently
+ * disappears from the UI instead of showing a broken or invented price.
+ * Every other optional AdvancedMarkets field (corners, cards,
+ * correctScore, goalscorer markets, etc.) is simply left absent. */
+function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Markets {
+  const psOverUnder = extractPulseScoreOverUnderByLine(normalized.markets);
+  const totalGoals: Markets["totalGoals"] = {
+    over05: 0, under05: 0,
+    over15: 0, under15: 0,
+    over25: 0, under25: 0,
+    over35: 0, under35: 0,
+    over45: 0, under45: 0,
+    over55: 0, under55: 0,
+    over65: 0, under65: 0,
+  };
+  for (const { line, bet62Over, bet62Under } of OVER_UNDER_LINES) {
+    const ps = psOverUnder.get(line);
+    if (ps?.over != null) totalGoals[bet62Over] = ps.over;
+    if (ps?.under != null) totalGoals[bet62Under] = ps.under;
+  }
+
+  return {
+    // Same field-name remap already used by the comparison phase below:
+    // PulseScore's drawOrAway === BET62's awayOrDraw.
+    doubleChance: normalized.doubleChance
+      ? {
+          homeOrDraw: normalized.doubleChance.homeOrDraw,
+          awayOrDraw: normalized.doubleChance.drawOrAway,
+          homeOrAway: normalized.doubleChance.homeOrAway,
+        }
+      : { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: normalized.bothTeamsToScore
+      ? { yes: normalized.bothTeamsToScore.yes, no: normalized.bothTeamsToScore.no }
+      : { yes: 0, no: 0 },
+    totalGoals,
+    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+  };
+}
+
+/** Prices every fixture already matched to a PulseScore event: writes
+ * PulseScore's real markets into LiveMatchState (routes/matches.ts) — the
+ * same Map routes/bets.ts reads at bet acceptance — whenever the fixture
+ * has a real match-result (1X2) price this round, then logs what's now
+ * showing. A fixture with no matchResult this round is left exactly as it
+ * was (never partially priced) and stays out of the bettable live list
+ * (buildLivePayload's visibility filter requires `_priceSource ===
+ * "pulsescore"`). The logged "comparison" is mostly a sanity echo once a
+ * fixture is priced — bet62 and pulseScore are the same number by
+ * construction going forward — but kept in this shape since it's already
+ * wired into GET /api/admin/pulsescore-status and still useful to confirm
+ * a write actually landed with the right values. */
 type OddsComparisonSample = {
   matchId: number;
   fixture: string;
@@ -272,13 +330,11 @@ type OddsComparisonSample = {
     goalApi: { home: number | null; away: number | null; minute: number | null };
     pulseScore: { home: number | null; away: number | null; minute: number | null };
   };
-  /** Whether the "bet62" odds in `result` are anchored to a real price GOAL
-   * API's own live-odds endpoint returned (LiveMatchState.hasRealOdds), or
-   * fell back to makeOddsFromTeams — a purely synthetic Poisson estimate
-   * with no real market grounding at all, frozen as the drift engine's
-   * anchor on first sighting. A huge deltaPct against a synthetic anchor
-   * says nothing about PulseScore's accuracy; only a real-anchor
-   * divergence is a genuine two-source disagreement worth trusting. */
+  /** Whether this fixture is showing a real PulseScore price right now
+   * (`LiveMatchState._priceSource === "pulsescore"`) — false means this
+   * round had no matchResult to price with, so the fixture is still
+   * exactly where it was before (and, per buildLivePayload's filter,
+   * absent from the bettable live list). */
   bet62OddsAreReal: boolean;
   result: Record<string, unknown>;
 };
@@ -286,12 +342,19 @@ type OddsComparisonSample = {
 type OddsComparisonPhaseResult = {
   compared: number;
   totalMatched: number;
+  /** How many of `compared` fixtures actually got a real price written
+   * this round (had a matchResult to price with). */
+  priced: number;
   /** Same data as the per-fixture "[pulsescore-shadow-odds] live market
    * comparison" log line, kept here too so it's visible via
    * GET /api/admin/pulsescore-status without needing log access. Capped
    * (see SAMPLE_CAP) — this is a shadow-observability snapshot, not an
    * unbounded audit log. */
   samples: OddsComparisonSample[];
+  /** GOAL API providerMatchIds priced this round — the caller (runOnce)
+   * folds this into the module-level Set getPulseScorePricedFixtureIds()
+   * reads, so buildLivePayload's visibility filter has an O(1) lookup. */
+  pricedFixtureIds: string[];
 };
 
 const ODDS_SAMPLE_CAP = 25;
@@ -301,16 +364,51 @@ async function runOddsComparisonPhase(
   candidates: PulseScoreEvent[],
 ): Promise<OddsComparisonPhaseResult> {
   let compared = 0;
+  let priced = 0;
   const samples: OddsComparisonSample[] = [];
+  const pricedFixtureIds: string[] = [];
 
   for (const fixture of matchedFixtures) {
-    const liveState = liveMatchState.get(`goalapi-football-${fixture.goalApiProviderMatchId}`);
+    const liveMatchId = `goalapi-football-${fixture.goalApiProviderMatchId}`;
+    let liveState = liveMatchState.get(liveMatchId);
     if (!liveState) continue; // no longer live on the GOAL API side this round
 
     const pulseScoreEvent = candidates.find((ev) => ev.eventId === fixture.otherProviderMatchId);
     if (!pulseScoreEvent) continue; // no longer in PulseScore's live pool this round
 
     const normalized = normalizePulseScoreEvent(pulseScoreEvent);
+
+    // The actual pricing write — see buildPulseScoreMarkets's header for
+    // why markets PulseScore doesn't cover are zeroed, not fabricated.
+    // Only a real matchResult (the headline 1X2) makes this fixture
+    // "priced" — a fixture with only e.g. totalGoals data this round stays
+    // exactly as it was (unpriced fixtures never entered the bettable live
+    // list in the first place, per buildLivePayload's filter).
+    if (normalized.matchResult) {
+      const newOdds = { home: normalized.matchResult.home, draw: normalized.matchResult.draw, away: normalized.matchResult.away };
+      const newMarkets = buildPulseScoreMarkets(normalized);
+      const oddsChanged = JSON.stringify(newOdds) !== JSON.stringify(liveState.odds);
+      const marketsChanged = JSON.stringify(newMarkets) !== JSON.stringify(liveState.markets);
+      const versionBumped = oddsChanged || marketsChanged || liveState._priceSource !== "pulsescore";
+      const updatedState: LiveMatchState = {
+        ...liveState,
+        odds: newOdds,
+        markets: newMarkets,
+        _priceSource: "pulsescore",
+        marketVersion: versionBumped ? (liveState.marketVersion ?? 0) + 1 : liveState.marketVersion,
+      };
+      liveMatchState.set(liveMatchId, updatedState);
+      if (oddsChanged || marketsChanged) {
+        broadcastMatchDelta(liveMatchId, {
+          odds: updatedState.odds,
+          markets: updatedState.markets,
+          marketVersion: updatedState.marketVersion,
+        });
+      }
+      liveState = updatedState;
+      pricedFixtureIds.push(fixture.goalApiProviderMatchId);
+      priced++;
+    }
     const bet62Markets = liveState.markets;
 
     const result: Record<string, unknown> = {};
@@ -391,11 +489,7 @@ async function runOddsComparisonPhase(
       },
     };
 
-    // See LiveMatchState._baseOddsAreReal's own comment — this is the
-    // anchor set once on first sighting, unlike the per-tick `hasRealOdds`
-    // which can be true/false independently of what's actually frozen as
-    // the displayed odds/_baseOdds.
-    const bet62OddsAreReal = liveState._baseOddsAreReal ?? false;
+    const bet62OddsAreReal = liveState._priceSource === "pulsescore";
 
     compared++;
     logger.info(
@@ -420,8 +514,17 @@ async function runOddsComparisonPhase(
     }
   }
 
-  const result: OddsComparisonPhaseResult = { compared, totalMatched: matchedFixtures.length, samples };
-  logger.debug({ compared, totalMatched: matchedFixtures.length }, "[pulsescore-shadow-odds] comparison round complete");
+  const result: OddsComparisonPhaseResult = {
+    compared,
+    totalMatched: matchedFixtures.length,
+    priced,
+    samples,
+    pricedFixtureIds,
+  };
+  logger.debug(
+    { compared, totalMatched: matchedFixtures.length, priced },
+    "[pulsescore-shadow-odds] comparison round complete",
+  );
   return result;
 }
 

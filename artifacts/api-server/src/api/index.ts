@@ -127,13 +127,18 @@ server.listen(port, () => {
     startApiTennisWebSocket();
   }
 
-  // PulseScore Fase 1 — shadow matching only (see
-  // providers/pulsescore/shadowMatchSync.ts's header): records which
-  // PulseScore live event corresponds to which GOAL-API-sourced canonical
-  // match, with a real confidence score, purely for observability. Never
-  // touches the odds a bettor sees — inert until PULSESCORE_API_KEY is set.
+  // PulseScore Fase 1 — matching + the REAL live football odds source as
+  // of 2026-09-10 (see providers/pulsescore/shadowMatchSync.ts's header):
+  // once a fixture is matched, this round also writes PulseScore's own
+  // price into liveMatchState/routes/bets.ts's read path. 15s (down from
+  // the original 120s, which was sized for matching cadence, not odds
+  // freshness) — PulseScore's own REST throttle (1 req/sec via the
+  // client's serialized queue) already caps real request volume regardless
+  // of how often this fires, so the shorter interval only makes already-
+  // fetched data get re-applied more often. Inert until PULSESCORE_API_KEY
+  // is set.
   if (CONFIG.PULSESCORE_API_KEY) {
-    setInterval(() => runPulseScoreShadowMatchSync(), 120_000);
+    setInterval(() => runPulseScoreShadowMatchSync(), 15_000);
   }
 
   // PulseScore WebSocket — confirmed real via the docs the user pasted
