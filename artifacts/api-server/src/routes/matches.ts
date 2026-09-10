@@ -6197,10 +6197,34 @@ function calculateLiveFootballMarkets(state: {
   home: number;
   draw: number;
   away: number;
+  over05: number;
+  under05: number;
+  over15: number;
+  under15: number;
   over25: number;
   under25: number;
+  over35: number;
+  under35: number;
+  over45: number;
+  under45: number;
+  over55: number;
+  under55: number;
+  over65: number;
+  under65: number;
   bttsYes: number;
   bttsNo: number;
+  homeOver05: number;
+  homeUnder05: number;
+  homeOver15: number;
+  homeUnder15: number;
+  homeOver25: number;
+  homeUnder25: number;
+  awayOver05: number;
+  awayUnder05: number;
+  awayOver15: number;
+  awayUnder15: number;
+  awayOver25: number;
+  awayUnder25: number;
 } {
   const r = (n: number) => Math.round(n * 100) / 100;
   const vigFactor = 1 - LIVE_MARGIN;
@@ -6238,9 +6262,18 @@ function calculateLiveFootballMarkets(state: {
     Math.max(0.4, 1 - 0.12 * state.redCardsAway + 0.04 * state.redCardsHome);
 
   // 5. Poisson convolution over remaining goals, conditioned on current score.
-  //    One grid, three markets read off the same (kH, kA) cells:
+  //    One grid, every market reads off the same (kH, kA) cells:
   //    - 1X2 from the net-goal-difference sign (unchanged from before).
-  //    - Over/Under 2.5 from the final total (current score + remaining goals).
+  //    - Over/Under, EVERY standard line (0.5-6.5), from the final total
+  //      (current score + remaining goals) — a line already crossed by the
+  //      current score alone (e.g. Over 0.5 after any goal) naturally
+  //      converges to p≈1 here since every (kH,kA) cell satisfies it, which
+  //      is what correctly prices it down to the 1.04 floor instead of
+  //      leaving it at whatever a score-blind model guessed. Previously
+  //      only the 2.5 line was priced this way; every other line fell back
+  //      to a team-name-only model with no awareness of the actual score
+  //      (audit finding, 2026-09-10: a live Over 0.5 kept a normal-looking
+  //      price long after the outcome was already mathematically decided).
   //    - BTTS from whether each side's final tally is ≥ 1.
   //    This guarantees P(Draw) ≥ P(losing team wins) by construction — because
   //    to draw from N goals down requires N net goals; to win requires N+1 net goals.
@@ -6248,12 +6281,16 @@ function calculateLiveFootballMarkets(state: {
   const pH = poissonPmf(muH, MAX_G);
   const pA = poissonPmf(muA, MAX_G);
   const diff = state.homeGoals - state.awayGoals; // positive = home leading
+  const OU_LINES = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5] as const;
+  const TEAM_OU_LINES = [0.5, 1.5, 2.5] as const;
 
   let pHomeWin = 0,
     pDraw = 0,
     pAwayWin = 0,
-    pOver25 = 0,
     pBttsYes = 0;
+  const pOverByLine = new Map<number, number>(OU_LINES.map((l) => [l, 0]));
+  const pHomeOverByLine = new Map<number, number>(TEAM_OU_LINES.map((l) => [l, 0]));
+  const pAwayOverByLine = new Map<number, number>(TEAM_OU_LINES.map((l) => [l, 0]));
   for (let kH = 0; kH <= MAX_G; kH++) {
     for (let kA = 0; kA <= MAX_G; kA++) {
       const p = pH[kH]! * pA[kA]!;
@@ -6264,7 +6301,14 @@ function calculateLiveFootballMarkets(state: {
 
       const finalHome = state.homeGoals + kH;
       const finalAway = state.awayGoals + kA;
-      if (finalHome + finalAway > 2.5) pOver25 += p;
+      const finalTotal = finalHome + finalAway;
+      for (const line of OU_LINES) {
+        if (finalTotal > line) pOverByLine.set(line, pOverByLine.get(line)! + p);
+      }
+      for (const line of TEAM_OU_LINES) {
+        if (finalHome > line) pHomeOverByLine.set(line, pHomeOverByLine.get(line)! + p);
+        if (finalAway > line) pAwayOverByLine.set(line, pAwayOverByLine.get(line)! + p);
+      }
       if (finalHome >= 1 && finalAway >= 1) pBttsYes += p;
     }
   }
@@ -6274,13 +6318,30 @@ function calculateLiveFootballMarkets(state: {
   pHomeWin /= total;
   pDraw /= total;
   pAwayWin /= total;
-  pOver25 /= total;
+  for (const line of OU_LINES) pOverByLine.set(line, pOverByLine.get(line)! / total);
+  for (const line of TEAM_OU_LINES) {
+    pHomeOverByLine.set(line, pHomeOverByLine.get(line)! / total);
+    pAwayOverByLine.set(line, pAwayOverByLine.get(line)! / total);
+  }
   pBttsYes /= total;
 
   // Global hard cap: no 1X2 odd exceeds 30.00.
   // Late-game draw rule: at 80+ min with a level score, cap further at 10.00.
   const isLevelLate = state.minute >= 80 && state.homeGoals === state.awayGoals;
   const cap = isLevelLate ? 10.0 : 30.0;
+  const pOver05 = pOverByLine.get(0.5)!;
+  const pOver15 = pOverByLine.get(1.5)!;
+  const pOver25 = pOverByLine.get(2.5)!;
+  const pOver35 = pOverByLine.get(3.5)!;
+  const pOver45 = pOverByLine.get(4.5)!;
+  const pOver55 = pOverByLine.get(5.5)!;
+  const pOver65 = pOverByLine.get(6.5)!;
+  const pHomeOver05 = pHomeOverByLine.get(0.5)!;
+  const pHomeOver15 = pHomeOverByLine.get(1.5)!;
+  const pHomeOver25 = pHomeOverByLine.get(2.5)!;
+  const pAwayOver05 = pAwayOverByLine.get(0.5)!;
+  const pAwayOver15 = pAwayOverByLine.get(1.5)!;
+  const pAwayOver25 = pAwayOverByLine.get(2.5)!;
   return {
     home: Math.min(cap, Math.max(1.04, r((1 / pHomeWin) * vigFactor))),
     draw:
@@ -6288,10 +6349,34 @@ function calculateLiveFootballMarkets(state: {
         ? Math.min(cap, Math.max(1.04, r((1 / pDraw) * vigFactor)))
         : 0,
     away: Math.min(cap, Math.max(1.04, r((1 / pAwayWin) * vigFactor))),
+    over05: toOdd(pOver05, 30.0),
+    under05: toOdd(1 - pOver05, 30.0),
+    over15: toOdd(pOver15, 30.0),
+    under15: toOdd(1 - pOver15, 30.0),
     over25: toOdd(pOver25, 30.0),
     under25: toOdd(1 - pOver25, 30.0),
+    over35: toOdd(pOver35, 30.0),
+    under35: toOdd(1 - pOver35, 30.0),
+    over45: toOdd(pOver45, 30.0),
+    under45: toOdd(1 - pOver45, 30.0),
+    over55: toOdd(pOver55, 30.0),
+    under55: toOdd(1 - pOver55, 30.0),
+    over65: toOdd(pOver65, 30.0),
+    under65: toOdd(1 - pOver65, 30.0),
     bttsYes: toOdd(pBttsYes, 30.0),
     bttsNo: toOdd(1 - pBttsYes, 30.0),
+    homeOver05: toOdd(pHomeOver05, 30.0),
+    homeUnder05: toOdd(1 - pHomeOver05, 30.0),
+    homeOver15: toOdd(pHomeOver15, 30.0),
+    homeUnder15: toOdd(1 - pHomeOver15, 30.0),
+    homeOver25: toOdd(pHomeOver25, 30.0),
+    homeUnder25: toOdd(1 - pHomeOver25, 30.0),
+    awayOver05: toOdd(pAwayOver05, 30.0),
+    awayUnder05: toOdd(1 - pAwayOver05, 30.0),
+    awayOver15: toOdd(pAwayOver15, 30.0),
+    awayUnder15: toOdd(1 - pAwayOver15, 30.0),
+    awayOver25: toOdd(pAwayOver25, 30.0),
+    awayUnder25: toOdd(1 - pAwayOver25, 30.0),
   };
 }
 
@@ -6498,30 +6583,46 @@ function applyTieredMarketDrift(
             state.status,
             state.markets.totalGoals,
           );
-          // Football's 2.5 line specifically comes from the same Poisson
-          // grid as the 1X2 anchor and BTTS above, for internal consistency
-          // (a 3-0 scoreline reads the same Over 2.5 probability the 1X2
-          // market itself is priced from). Every other line (0.5-6.5, plus
-          // any sport other than football) keeps the existing team-name-only
-          // recalcLiveTotalGoals model above — extending the grid to those
-          // lines too is out of scope for this pass.
-          const liveOver25 = liveFootballMarkets?.over25 ?? live.over25;
-          const liveUnder25 = liveFootballMarkets?.under25 ?? live.under25;
+          // Football: every standard line (0.5-6.5) comes from the same
+          // Poisson grid as the 1X2 anchor and BTTS above, for internal
+          // consistency (a 3-0 scoreline reads the same Over 2.5 probability
+          // the 1X2 market itself is priced from) and so a line the current
+          // score has already decided (e.g. Over 0.5 after any goal) prices
+          // down to the 1.04 floor instead of a score-blind guess (audit
+          // finding, 2026-09-10 — see calculateLiveFootballMarkets's own
+          // comment). Any other sport keeps the team-name-only
+          // recalcLiveTotalGoals model, same as before.
+          const pick = (lfKey: keyof NonNullable<typeof liveFootballMarkets>, fallback: number) =>
+            liveFootballMarkets ? liveFootballMarkets[lfKey] : fallback;
+          const liveOver05 = pick("over05", live.over05);
+          const liveUnder05 = pick("under05", live.under05);
+          const liveOver15 = pick("over15", live.over15);
+          const liveUnder15 = pick("under15", live.under15);
+          const liveOver25 = pick("over25", live.over25);
+          const liveUnder25 = pick("under25", live.under25);
+          const liveOver35 = pick("over35", live.over35);
+          const liveUnder35 = pick("under35", live.under35);
+          const liveOver45 = pick("over45", live.over45);
+          const liveUnder45 = pick("under45", live.under45);
+          const liveOver55 = pick("over55", live.over55);
+          const liveUnder55 = pick("under55", live.under55);
+          const liveOver65 = pick("over65", live.over65);
+          const liveUnder65 = pick("under65", live.under65);
           return {
-            over05: live.over05 > 0 ? Math.min(5.0, s1(live.over05)) : 0,
-            under05: live.under05 > 0 ? s1(live.under05) : 0,
-            over15: live.over15 > 0 ? Math.min(49.99, s1(live.over15)) : 0,
-            under15: live.under15 > 0 ? s1(live.under15) : 0,
+            over05: liveOver05 > 0 ? Math.min(5.0, s1(liveOver05)) : 0,
+            under05: liveUnder05 > 0 ? s1(liveUnder05) : 0,
+            over15: liveOver15 > 0 ? Math.min(49.99, s1(liveOver15)) : 0,
+            under15: liveUnder15 > 0 ? s1(liveUnder15) : 0,
             over25: liveOver25 > 0 ? Math.min(49.99, s1(liveOver25)) : 0,
             under25: liveUnder25 > 0 ? s1(liveUnder25) : 0,
-            over35: live.over35 > 0 ? Math.min(49.99, s1(live.over35)) : 0,
-            under35: live.under35 > 0 ? s1(live.under35) : 0,
-            over45: live.over45 > 0 ? Math.min(49.99, s1(live.over45)) : 0,
-            under45: live.under45 > 0 ? s1(live.under45) : 0,
-            over55: live.over55 > 0 ? Math.min(49.99, s1(live.over55)) : 0,
-            under55: live.under55 > 0 ? s1(live.under55) : 0,
-            over65: live.over65 > 0 ? Math.min(49.99, s1(live.over65)) : 0,
-            under65: live.under65 > 0 ? s1(live.under65) : 0,
+            over35: liveOver35 > 0 ? Math.min(49.99, s1(liveOver35)) : 0,
+            under35: liveUnder35 > 0 ? s1(liveUnder35) : 0,
+            over45: liveOver45 > 0 ? Math.min(49.99, s1(liveOver45)) : 0,
+            under45: liveUnder45 > 0 ? s1(liveUnder45) : 0,
+            over55: liveOver55 > 0 ? Math.min(49.99, s1(liveOver55)) : 0,
+            under55: liveUnder55 > 0 ? s1(liveUnder55) : 0,
+            over65: liveOver65 > 0 ? Math.min(49.99, s1(liveOver65)) : 0,
+            under65: liveUnder65 > 0 ? s1(liveUnder65) : 0,
           };
         })()
       : state.markets.totalGoals,
@@ -6538,19 +6639,36 @@ function applyTieredMarketDrift(
               state.status,
               state.markets.teamGoals,
             );
+            // Football: same Poisson grid as totalGoals/1X2/BTTS above —
+            // see calculateLiveFootballMarkets's comment. Other sports keep
+            // the team-name-only recalcLiveTeamGoals model.
+            const pickTg = (lfKey: keyof NonNullable<typeof liveFootballMarkets>, fallback: number) =>
+              liveFootballMarkets ? liveFootballMarkets[lfKey] : fallback;
+            const hO05 = pickTg("homeOver05", live.homeOver05);
+            const hU05 = pickTg("homeUnder05", live.homeUnder05);
+            const hO15 = pickTg("homeOver15", live.homeOver15);
+            const hU15 = pickTg("homeUnder15", live.homeUnder15);
+            const hO25 = pickTg("homeOver25", live.homeOver25);
+            const hU25 = pickTg("homeUnder25", live.homeUnder25);
+            const aO05 = pickTg("awayOver05", live.awayOver05);
+            const aU05 = pickTg("awayUnder05", live.awayUnder05);
+            const aO15 = pickTg("awayOver15", live.awayOver15);
+            const aU15 = pickTg("awayUnder15", live.awayUnder15);
+            const aO25 = pickTg("awayOver25", live.awayOver25);
+            const aU25 = pickTg("awayUnder25", live.awayUnder25);
             return {
-              homeOver05: live.homeOver05 > 0 ? s1(live.homeOver05) : 0,
-              homeUnder05: live.homeUnder05 > 0 ? s1(live.homeUnder05) : 0,
-              homeOver15: live.homeOver15 > 0 ? s1(live.homeOver15) : 0,
-              homeUnder15: live.homeUnder15 > 0 ? s1(live.homeUnder15) : 0,
-              homeOver25: live.homeOver25 > 0 ? s1(live.homeOver25) : 0,
-              homeUnder25: live.homeUnder25 > 0 ? s1(live.homeUnder25) : 0,
-              awayOver05: live.awayOver05 > 0 ? s1(live.awayOver05) : 0,
-              awayUnder05: live.awayUnder05 > 0 ? s1(live.awayUnder05) : 0,
-              awayOver15: live.awayOver15 > 0 ? s1(live.awayOver15) : 0,
-              awayUnder15: live.awayUnder15 > 0 ? s1(live.awayUnder15) : 0,
-              awayOver25: live.awayOver25 > 0 ? s1(live.awayOver25) : 0,
-              awayUnder25: live.awayUnder25 > 0 ? s1(live.awayUnder25) : 0,
+              homeOver05: hO05 > 0 ? s1(hO05) : 0,
+              homeUnder05: hU05 > 0 ? s1(hU05) : 0,
+              homeOver15: hO15 > 0 ? s1(hO15) : 0,
+              homeUnder15: hU15 > 0 ? s1(hU15) : 0,
+              homeOver25: hO25 > 0 ? s1(hO25) : 0,
+              homeUnder25: hU25 > 0 ? s1(hU25) : 0,
+              awayOver05: aO05 > 0 ? s1(aO05) : 0,
+              awayUnder05: aU05 > 0 ? s1(aU05) : 0,
+              awayOver15: aO15 > 0 ? s1(aO15) : 0,
+              awayUnder15: aU15 > 0 ? s1(aU15) : 0,
+              awayOver25: aO25 > 0 ? s1(aO25) : 0,
+              awayUnder25: aU25 > 0 ? s1(aU25) : 0,
             };
           })()
         : state.markets.teamGoals,
@@ -7943,6 +8061,16 @@ export async function applyGoalApiWebhookEvent(event: {
 const API_TENNIS_ID_PREFIX = "apitennis-tennis-";
 const API_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
 
+// event_status values that mean the match is actually over — confirmed real
+// terminal values ("Finished") plus the early-termination ones the frontend
+// already special-cases (retired/walkover). api-tennis.com's get_livescore()
+// can keep returning a match under this status for a while after it ends
+// (reported 2026-09-09: a finished doubles match still showing "ao vivo"
+// with pre-match-looking odds) — the disappearance-only GC below never even
+// starts its grace-period countdown for a match that's still present in the
+// feed, so a status-based check is required in addition to it, not instead.
+const API_TENNIS_TERMINAL_STATUSES = new Set(["finished", "retired", "walkover", "walk over", "w/o", "wo", "cancelled"]);
+
 /** Deterministic pseudo-random baseline win probability for a pair of
  * players with no real odds yet — same seededRng/hashStr utilities every
  * other synthetic generator in this file already uses (e.g.
@@ -8076,7 +8204,6 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
 
     const id = `${API_TENNIS_ID_PREFIX}${fx.event_key}`;
-    currentIds.add(id);
     const existing = liveMatchState.get(id);
 
     // Prefer the WebSocket's pushed snapshot when one exists for this
@@ -8084,6 +8211,36 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     // to the REST fixture untouched when the socket is disconnected or
     // hasn't seen this match yet.
     const liveFx = getApiTennisWsMatch(fx.event_key) ?? fx;
+
+    const statusLower = String(liveFx.event_status ?? "").trim().toLowerCase();
+    if (API_TENNIS_TERMINAL_STATUSES.has(statusLower)) {
+      // Already over, but get_livescore() is still returning it — finalize
+      // now instead of leaving it "ao vivo" with stale odds until it
+      // eventually disappears from the feed. Idempotent across repeat
+      // ticks: buildMatchSettlementJobId derives the same job id from the
+      // same final score, so re-finalizing while the provider keeps
+      // returning this match a while longer is a safe no-op.
+      if (existing) {
+        const finalSets = buildApiTennisSets(liveFx.scores);
+        const finalHomeScore = finalSets.filter(([h, a]) => h > a).length;
+        const finalAwayScore = finalSets.filter(([h, a]) => a > h).length;
+        const finalState: LiveMatchState = {
+          ...existing,
+          homeScore: finalHomeScore,
+          awayScore: finalAwayScore,
+          status: liveFx.event_status || "Finished",
+          _liveExtra: { ...existing._liveExtra, sets: finalSets },
+        };
+        try {
+          await finalizeStaleLiveMatch(finalState);
+        } catch (err) {
+          logger.error({ err, id }, "[api-tennis] finalizeStaleLiveMatch failed (status-based)");
+        }
+        liveMatchState.delete(id);
+      }
+      continue; // never re-enters currentIds/results — no longer "ao vivo"
+    }
+    currentIds.add(id);
 
     const sets = buildApiTennisSets(liveFx.scores);
     const homeScore = sets.filter(([h, a]) => h > a).length;
