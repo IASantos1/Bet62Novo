@@ -14,8 +14,18 @@ import {
 import { normalizePulseScoreEvent, type NormalizedFootballEvent } from "../../providers/pulsescore/normalizer.js";
 import { liveMatchState, buildUpcomingMatches } from "../matches.js";
 import { matchGoalApiFixtureToPulseScore } from "../../matching/footballMatchEngine.js";
+import { adminMiddleware } from "../../middlewares/adminAuth.js";
 
 const router: IRouter = Router();
+
+// These are debug/diagnostic routes only — several of them (notably
+// /run-prematch-sync-now and /match-fuzzy-by-name) trigger real, rate-limited
+// upstream calls to GOAL API/PulseScore on demand. Left unauthenticated,
+// anyone on the internet could hammer this to exhaust the shared PulseScore
+// 1-req/sec quota that the real live/prematch sync pipelines depend on —
+// gate the whole router behind the same admin auth every other diagnostic
+// endpoint in this codebase uses.
+router.use(adminMiddleware);
 
 function ok(data: unknown): { ok: true; generatedAt: string; data: unknown } {
   return { ok: true, generatedAt: new Date().toISOString(), data };
