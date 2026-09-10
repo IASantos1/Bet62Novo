@@ -9731,19 +9731,37 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
-  // Per the user's decision (2026-09-10): PulseScore is the sole live
-  // football odds source now, with no synthetic fallback — a GOAL-API
-  // football fixture only enters the bettable live list once it carries a
-  // real PulseScore price (`_priceSource === "pulsescore"`, set by
-  // shadowMatchSync.ts's runOddsComparisonPhase). The fixture still exists
-  // in GOAL API's own feed (score/stats keep updating) — it's just not
-  // bettable yet. Other sports/providers are untouched by this check.
+  // Hybrid visibility gate, 2026-09-10 — two explicit goals:
+  //
+  //   1. A fixture is ALWAYS shown (never hidden from the Ao Vivo list) as
+  //      long as GOAL API reports it live — score, events, stats, and
+  //      lineups come from there regardless of odds state. Hiding a live
+  //      fixture entirely because its odds aren't ready yet creates the
+  //      exact "no live games" UX the user reported, even though all the
+  //      non-betting content (match tracker) is perfectly valid.
+  //   2. A fixture is only BETTABLE if PulseScore has actually priced its
+  //      headline 1X2 market (`_priceSource === "pulsescore"`). When
+  //      PulseScore hasn't matched/priced a live fixture yet, the match
+  //      still appears in the live list with the market-suspension banner
+  //      shown — routes/bets.ts already refuses bets on any fixture where
+  //      `marketSuspension` is truthy OR `_priceSource !== "pulsescore"`,
+  //      so there is zero integrity risk from showing it.
+  //
+  // This matches the hybrid diagram exactly: GOAL API is the SOLE tracker
+  // (always visible); PulseScore is the SOLE odds source (only bets after
+  // inject). Any fixture flagged liveDecisions.visible=false by admin still
+  // gets hidden by the outer filter regardless of provider.
   const isBettableFootballFixture = (m: LiveMatchState): boolean =>
-    !(m.sport === "football" && m.id.startsWith("goalapi-football-")) || m._priceSource === "pulsescore";
+    !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
+    || m._priceSource === "pulsescore";
+
+  const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
+    !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
+    || true; // NEVER hide a GOAL-API live fixture — tracker is authoritative
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
-      (m) => (liveDecisions.get(String(m.id))?.visible ?? true) && isBettableFootballFixture(m),
+      (m) => (liveDecisions.get(String(m.id))?.visible ?? true) && isVisibleFootballFixture(m),
     ),
     liveDecisions,
   );

@@ -384,8 +384,24 @@ async function runOddsComparisonPhase(
     // "priced" — a fixture with only e.g. totalGoals data this round stays
     // exactly as it was (unpriced fixtures never entered the bettable live
     // list in the first place, per buildLivePayload's filter).
-    if (normalized.matchResult) {
-      const newOdds = { home: normalized.matchResult.home, draw: normalized.matchResult.draw, away: normalized.matchResult.away };
+    //
+    // Extra safety guard (2026-09-10): the normalizer also zero-fills
+    // missing legs (see normalizePulseScoreEvent in normalizer.ts), so a
+    // half-populated shape like { home: 2.1, draw: 0, away: 0 } is
+    // possible for providers that only carry 2-way markets. Treat those
+    // as unpriced too — `_priceSource === "pulsescore"` must mean ALL
+    // three 1X2 legs came from real upstream data, because
+    // applyTieredMarketDrift skips the drift loop entirely once set,
+    // which would otherwise lock in the zero (infinite-odds bug) until
+    // the next comparison round. buildPulseScoreMarkets itself also
+    // sanity checks all three legs before writing `markets.result`.
+    const mr = normalized.matchResult;
+    const all1x2LegsReal = mr
+      && Number.isFinite(mr.home) && mr.home > 1
+      && Number.isFinite(mr.draw) && mr.draw > 1
+      && Number.isFinite(mr.away) && mr.away > 1;
+    if (all1x2LegsReal) {
+      const newOdds = { home: mr.home, draw: mr.draw, away: mr.away };
       const newMarkets = buildPulseScoreMarkets(normalized);
       const oddsChanged = JSON.stringify(newOdds) !== JSON.stringify(liveState.odds);
       const marketsChanged = JSON.stringify(newMarkets) !== JSON.stringify(liveState.markets);

@@ -189,27 +189,45 @@ const PULSESCORE_WS_URL =
 
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
-// provider for each job independently. Currently the matches/ routes still
-// read providers in their own order (see matches.ts header comment), so
-// these exist primarily for readability + future explicit routing:
+// provider for each job independently. These are NOW the SOURCE OF TRUTH
+// for matches.ts scheduling (2026-09-10) — no more "matches.ts reads
+// providers in its own order" caveat; we collapsed the routing here so a
+// single env-var flip re-routes both upcoming and live pipelines.
 //
-//   DAILY     = where to fetch today's pre-match odds, market list, and
-//               fixture schedule. PropLine is the default because it's the
-//               broadest aggregator (24 books) and costs nothing extra vs
-//               PulseScore under the $79 Streaming plan — falls back to
-//               PulseScore (cota ilimitada) if the PropLine key is empty.
-//               Falls back to StatPal only when both higher-tier keys are
-//               missing.
-//   REFERENCE = canonical source for H2H, standings, league metadata,
-//               settled results, and stats. StatPal has the deepest soccer
-//               coverage (Brasileirão Série C/D, state cups, ...) and the
-//               richest /statistics payload, so it's the reference of
-//               record; PulseScore is the next fallback because its
-//               /tournament endpoints include season standings as well.
-type FootballProvider = "propline" | "pulsescore" | "statpal";
+// Legend (matches the hybrid architecture diagram exactly):
+//
+//   DAILY FIXTURES / LIVE TRACKER (partidas, score, eventos, estatísticas,
+//     commentary, xG) — GOAL API is the authority. PulseScore and PropLine
+//     NEVER return fixture schedules or match state, only odds/markets +
+//     their own scoreboards (treated as 2nd class cross-check, never the
+//     user-visible clock). Fallback chain: goalapi → propline (bask/hock/
+//     volley/mma only) → pulsescore → statpal.
+//   ODDS / MERCADOS (1X2, Handicap, O/U, BTTS, Correct Score, Corners,
+//     Cards, Next Goal, Asian, Goalscorers, ...) — PULSESCORE live +
+//     PropLine cross-book fallback for player props/+EV/history. FOOTBALL
+//     ODDS are ALWAYS gated on a real upstream price; the synthetic Poisson
+//     baseline is now ONLY used as (a) the anchor for drift calculations
+//     inside a live match and (b) a preview/placeholder in the UI before a
+//     real price loads — routes/bets.ts NEVER accepts a bet without a real
+//     upstream source tagged in _priceSource.
+//   REFERENCE / STATS / HISTORICAL (H2H, standings, settled results,
+//     league metadata, deep statistics per team) — STATPAL first (richest
+//     soccer payload in the stack, Brasileirão Série C/D + state cups OK),
+//     then PulseScore tournament endpoints, then GOAL API's own stats as a
+//     last resort (its stats payload is live-only, no historical pull).
+//
+// Env override knobs (all 3 are explicit so Railway can flip any single
+// tier without code):
+//   FOOTBALL_DAILY_PROVIDER     = "goalapi" | "propline" | "pulsescore" | "statpal"
+//   FOOTBALL_ODDS_PROVIDER      = "pulsescore" | "propline" | "goalapi" | "statpal"   ← NEW
+//   FOOTBALL_REFERENCE_PROVIDER = "statpal" | "pulsescore" | "goalapi"
+type FootballProvider = "goalapi" | "propline" | "pulsescore" | "statpal";
 const FOOTBALL_DAILY_PROVIDER: FootballProvider =
   (process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() as FootballProvider | undefined) ??
-  (PROPLINE_API_KEY ? "propline" : "pulsescore");
+  (GOAL_API_KEY ? "goalapi" : PROPLINE_API_KEY ? "propline" : "pulsescore");
+const FOOTBALL_ODDS_PROVIDER: FootballProvider =
+  (process.env["FOOTBALL_ODDS_PROVIDER"]?.trim() as FootballProvider | undefined) ??
+  (PULSESCORE_API_KEY ? "pulsescore" : PROPLINE_API_KEY ? "propline" : "goalapi");
 const FOOTBALL_REFERENCE_PROVIDER: FootballProvider =
   (process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() as FootballProvider | undefined) ??
   "statpal";
@@ -247,6 +265,7 @@ export const CONFIG = {
   PULSESCORE_MIN_REQUEST_INTERVAL_MS,
   PULSESCORE_WS_URL,
   FOOTBALL_DAILY_PROVIDER,
+  FOOTBALL_ODDS_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
