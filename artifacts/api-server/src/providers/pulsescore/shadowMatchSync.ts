@@ -28,10 +28,12 @@ import {
 } from "../../lib/canonicalMatchCatalog.js";
 import { matchGoalApiFixtureToPulseScore, type GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
 import { isVirtualPulseScoreLeague } from "./filters.js";
-import { normalizePulseScoreEvent } from "./normalizer.js";
+import { normalizePulseScoreEvent, type NormalizedMarketGroup } from "./normalizer.js";
 import { pulseScore } from "./client.js";
 import type { PulseScoreEvent } from "./types.js";
-import { liveMatchState } from "../../routes/matches.js";
+import { liveMatchState, type LiveMatchState } from "../../routes/matches.js";
+
+type Markets = LiveMatchState["markets"];
 
 const PROVIDER = "pulsescore";
 const PROVIDER_SPORT = "football";
@@ -109,10 +111,50 @@ function pctDelta(candidate: number, reference: number): number | null {
   return Math.round(((candidate - reference) / reference) * 1000) / 10;
 }
 
-/** Compares PulseScore's live 1X2 against what's currently live in
- * LiveMatchState (routes/matches.ts) — the exact price a bettor sees right
- * now — for every fixture already matched to a PulseScore event. Read-only
- * on LiveMatchState: nothing here writes back to it or to any route. */
+/** BET62's totalGoals only tracks fixed .5-increment lines (see
+ * routes/matches.ts's AdvancedMarkets) — this is the wiring-time decision
+ * the normalizer's header comment deliberately deferred: PulseScore emits
+ * many lines per market (confirmed real: 5.5, 5.75, AND 6.25 on the same
+ * fixture), so only the lines BET62 already has a slot for are compared;
+ * anything else is neither fabricated nor forced into the wrong slot. */
+const OVER_UNDER_LINES: Array<{
+  line: number;
+  bet62Over: keyof Markets["totalGoals"];
+  bet62Under: keyof Markets["totalGoals"];
+}> = [
+  { line: 0.5, bet62Over: "over05", bet62Under: "under05" },
+  { line: 1.5, bet62Over: "over15", bet62Under: "under15" },
+  { line: 2.5, bet62Over: "over25", bet62Under: "under25" },
+  { line: 3.5, bet62Over: "over35", bet62Under: "under35" },
+  { line: 4.5, bet62Over: "over45", bet62Under: "under45" },
+  { line: 5.5, bet62Over: "over55", bet62Under: "under55" },
+  { line: 6.5, bet62Over: "over65", bet62Under: "under65" },
+];
+
+function extractPulseScoreOverUnderByLine(
+  markets: NormalizedMarketGroup[],
+): Map<number, { over?: number; under?: number }> {
+  const group = markets.find((m) => m.market === "OVER_UNDER" && m.period === "FULL_TIME");
+  const byLine = new Map<number, { over?: number; under?: number }>();
+  if (!group) return byLine;
+  for (const sel of group.selections) {
+    if (sel.line == null || (sel.outcome !== "OVER" && sel.outcome !== "UNDER")) continue;
+    const entry = byLine.get(sel.line) ?? {};
+    if (sel.outcome === "OVER") entry.over = sel.odds;
+    else entry.under = sel.odds;
+    byLine.set(sel.line, entry);
+  }
+  return byLine;
+}
+
+/** Compares PulseScore's live markets against what's currently live in
+ * LiveMatchState (routes/matches.ts) — the exact prices a bettor sees
+ * right now — for every fixture already matched to a PulseScore event.
+ * Read-only on LiveMatchState: nothing here writes back to it or to any
+ * route. Builds the comparison incrementally from whichever markets are
+ * actually present on both sides; only logs a fixture if at least one
+ * market pair was genuinely compared, never a line/market either side is
+ * missing. */
 async function runOddsComparisonPhase(
   matchedFixtures: MatchedLiveFootballFixture[],
   candidates: PulseScoreEvent[],
@@ -127,24 +169,76 @@ async function runOddsComparisonPhase(
     if (!pulseScoreEvent) continue; // no longer in PulseScore's live pool this round
 
     const normalized = normalizePulseScoreEvent(pulseScoreEvent);
-    if (!normalized.matchResult) continue; // PulseScore has no FULL_TIME 1X2 market right now
+    const bet62Markets = liveState.markets;
 
-    const bet62Odds = liveState.odds;
-    const pulseScoreOdds = normalized.matchResult;
+    const result: Record<string, unknown> = {};
+
+    if (normalized.matchResult) {
+      const ps = normalized.matchResult;
+      const bet62 = liveState.odds;
+      result.matchResult1X2 = {
+        bet62,
+        pulseScore: ps,
+        deltaPct: { home: pctDelta(ps.home, bet62.home), draw: pctDelta(ps.draw, bet62.draw), away: pctDelta(ps.away, bet62.away) },
+      };
+    }
+
+    if (normalized.bothTeamsToScore && bet62Markets.bothTeamsScore) {
+      const ps = normalized.bothTeamsToScore;
+      const bet62 = bet62Markets.bothTeamsScore;
+      result.bothTeamsToScore = {
+        bet62,
+        pulseScore: ps,
+        deltaPct: { yes: pctDelta(ps.yes, bet62.yes), no: pctDelta(ps.no, bet62.no) },
+      };
+    }
+
+    if (normalized.doubleChance && bet62Markets.doubleChance) {
+      const ps = normalized.doubleChance;
+      const bet62 = bet62Markets.doubleChance;
+      // Same concept, different field name on BET62's side: awayOrDraw
+      // (bet62) === drawOrAway (PulseScore normalizer's naming).
+      result.doubleChance = {
+        bet62,
+        pulseScore: ps,
+        deltaPct: {
+          homeOrDraw: pctDelta(ps.homeOrDraw, bet62.homeOrDraw),
+          drawOrAway: pctDelta(ps.drawOrAway, bet62.awayOrDraw),
+          homeOrAway: pctDelta(ps.homeOrAway, bet62.homeOrAway),
+        },
+      };
+    }
+
+    const psOverUnder = extractPulseScoreOverUnderByLine(normalized.markets);
+    if (psOverUnder.size > 0) {
+      const totalGoalsComparisons: Array<{
+        line: number;
+        bet62: { over: number; under: number };
+        pulseScore: { over: number; under: number };
+        deltaPct: { over: number | null; under: number | null };
+      }> = [];
+      for (const { line, bet62Over, bet62Under } of OVER_UNDER_LINES) {
+        const ps = psOverUnder.get(line);
+        if (!ps || ps.over == null || ps.under == null) continue;
+        const bet62Over_ = bet62Markets.totalGoals[bet62Over];
+        const bet62Under_ = bet62Markets.totalGoals[bet62Under];
+        if (bet62Over_ == null || bet62Under_ == null) continue;
+        totalGoalsComparisons.push({
+          line,
+          bet62: { over: bet62Over_, under: bet62Under_ },
+          pulseScore: { over: ps.over, under: ps.under },
+          deltaPct: { over: pctDelta(ps.over, bet62Over_), under: pctDelta(ps.under, bet62Under_) },
+        });
+      }
+      if (totalGoalsComparisons.length > 0) result.totalGoals = totalGoalsComparisons;
+    }
+
+    if (Object.keys(result).length === 0) continue; // nothing comparable on both sides this round
+
     compared++;
     logger.info(
-      {
-        matchId: fixture.matchId,
-        matchConfidence: fixture.otherProviderConfidence,
-        bet62Odds,
-        pulseScoreOdds,
-        deltaPct: {
-          home: pctDelta(pulseScoreOdds.home, bet62Odds.home),
-          draw: pctDelta(pulseScoreOdds.draw, bet62Odds.draw),
-          away: pctDelta(pulseScoreOdds.away, bet62Odds.away),
-        },
-      },
-      "[pulsescore-shadow-odds] live 1X2 comparison",
+      { matchId: fixture.matchId, matchConfidence: fixture.otherProviderConfidence, ...result },
+      "[pulsescore-shadow-odds] live market comparison",
     );
   }
 
