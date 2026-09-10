@@ -19,8 +19,16 @@
 // once a real frame has been captured and compared field-for-field.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
+// Node's global `WebSocket` client only became stable/enabled by default in
+// Node 22 (experimental and off-by-default in 20/21). Production pins Node
+// 20.18.0 (.nvmrc) — confirmed real, this exact gap threw "WebSocket is not
+// defined" the first time this client tried to connect there. Import the
+// class explicitly from the `ws` package (already a dependency, used the
+// same way for the server side in routes/matches.ts) instead of relying on
+// a runtime global that may not exist.
+import { WebSocket as WsClient } from "ws";
 
-let ws: WebSocket | null = null;
+let ws: WsClient | null = null;
 let connected = false;
 let retryDelayMs = 2_000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,10 +62,10 @@ function scheduleReconnect(): void {
 function connect(): void {
   if (!CONFIG.PULSESCORE_API_KEY || connected) return;
 
-  let socket: WebSocket;
+  let socket: WsClient;
   try {
     const url = `${CONFIG.PULSESCORE_WS_URL}?key=${encodeURIComponent(CONFIG.PULSESCORE_API_KEY)}&sport=soccer`;
-    socket = new WebSocket(url);
+    socket = new WsClient(url);
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
     scheduleReconnect();
@@ -65,17 +73,17 @@ function connect(): void {
   }
   ws = socket;
 
-  socket.addEventListener("open", () => {
+  socket.on("open", () => {
     connected = true;
     retryDelayMs = 2_000;
     logger.info("[pulsescore-ws] connected");
   });
 
-  socket.addEventListener("message", (evt) => {
+  socket.on("message", (data) => {
     lastFrameAt = Date.now();
     let msg: PulseScoreWsMessage;
     try {
-      msg = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
+      msg = JSON.parse(data.toString());
     } catch {
       return; // non-JSON keepalive — ignore
     }
@@ -90,11 +98,10 @@ function connect(): void {
     }
   });
 
-  socket.addEventListener("close", (evt) => {
+  socket.on("close", (code) => {
     connected = false;
     ws = null;
-    const code = (evt as { code?: number }).code;
-    if (code != null && NON_RETRYABLE_CLOSE_CODES.has(code)) {
+    if (NON_RETRYABLE_CLOSE_CODES.has(code)) {
       lastError = `closed with non-retryable code ${code}`;
       logger.error({ code }, "[pulsescore-ws] closed (non-retryable) — not reconnecting");
       return;
@@ -103,7 +110,7 @@ function connect(): void {
     scheduleReconnect();
   });
 
-  socket.addEventListener("error", () => {
+  socket.on("error", () => {
     connected = false;
     ws = null;
     // "close" always follows "error" for WebSocket — reconnect is scheduled there.
