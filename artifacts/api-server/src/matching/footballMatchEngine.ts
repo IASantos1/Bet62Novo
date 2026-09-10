@@ -67,11 +67,14 @@ function kickoffProximityScore(aIso?: string | null, bIso?: string | null): { sc
   return { score, deltaMinutes };
 }
 
-function scoreCandidate(fixture: GoalApiFixtureRef, ev: PulseScoreEvent): FootballMatchCandidate | null {
+/** Always scores the pair, even below NAME_FLOOR — the filtering happens
+ * in the two callers below (one strict, one diagnostic-only). Carries
+ * `nameSim` alongside the public candidate shape so a caller can tell
+ * whether NAME_FLOOR was the reason a pair was rejected. */
+function scoreCandidateRaw(fixture: GoalApiFixtureRef, ev: PulseScoreEvent): FootballMatchCandidate & { nameSim: number } {
   const homeNameSimilarity = nameSimilarity(fixture.homeTeamName, ev.home);
   const awayNameSimilarity = nameSimilarity(fixture.awayTeamName, ev.away);
   const nameSim = Math.min(homeNameSimilarity, awayNameSimilarity);
-  if (nameSim < NAME_FLOOR) return null;
 
   const { score: kickoffScore, deltaMinutes: kickoffDeltaMinutes } = kickoffProximityScore(
     fixture.kickoffUtc,
@@ -89,6 +92,7 @@ function scoreCandidate(fixture: GoalApiFixtureRef, ev: PulseScoreEvent): Footba
   return {
     pulseScoreEventId: ev.eventId,
     confidence,
+    nameSim,
     signals: {
       homeNameSimilarity,
       awayNameSimilarity,
@@ -96,6 +100,12 @@ function scoreCandidate(fixture: GoalApiFixtureRef, ev: PulseScoreEvent): Footba
       leagueSimilarity,
     },
   };
+}
+
+function scoreCandidate(fixture: GoalApiFixtureRef, ev: PulseScoreEvent): FootballMatchCandidate | null {
+  const raw = scoreCandidateRaw(fixture, ev);
+  if (raw.nameSim < NAME_FLOOR) return null;
+  return raw;
 }
 
 /** Returns the best PulseScore candidate for a GOAL API fixture, or null
@@ -115,4 +125,39 @@ export function matchGoalApiFixtureToPulseScore(
   }
   if (!best || best.confidence < MIN_REPORTABLE_CONFIDENCE) return null;
   return best;
+}
+
+export type MatchDiagnostic = {
+  pulseScoreEventId: string | null;
+  confidence: number | null;
+  nameSim: number | null;
+  /** false means NAME_FLOOR alone ruled out every candidate — no amount of
+   * kickoff/league agreement could have rescued the pair. true + a low
+   * confidence means the name was plausible but kickoff/league (or just
+   * MIN_REPORTABLE_CONFIDENCE itself) pulled the score down. */
+  passedNameFloor: boolean;
+  kickoffDeltaMinutes: number | null;
+};
+
+/** Debug-only: the single best-scoring candidate regardless of whether it
+ * clears NAME_FLOOR/MIN_REPORTABLE_CONFIDENCE — never used to decide an
+ * actual match, only to explain why matchGoalApiFixtureToPulseScore found
+ * nothing for a real live fixture (see shadowMatchSync's diagnostic log). */
+export function debugBestCandidate(fixture: GoalApiFixtureRef, pulseScoreEvents: PulseScoreEvent[]): MatchDiagnostic {
+  let best: (FootballMatchCandidate & { nameSim: number }) | null = null;
+  for (const ev of pulseScoreEvents) {
+    if (isVirtualPulseScoreLeague(ev.league)) continue;
+    const raw = scoreCandidateRaw(fixture, ev);
+    if (!best || raw.confidence > best.confidence) best = raw;
+  }
+  if (!best) {
+    return { pulseScoreEventId: null, confidence: null, nameSim: null, passedNameFloor: false, kickoffDeltaMinutes: null };
+  }
+  return {
+    pulseScoreEventId: best.pulseScoreEventId,
+    confidence: best.confidence,
+    nameSim: Math.round(best.nameSim * 100) / 100,
+    passedNameFloor: best.nameSim >= NAME_FLOOR,
+    kickoffDeltaMinutes: best.signals.kickoffDeltaMinutes,
+  };
 }

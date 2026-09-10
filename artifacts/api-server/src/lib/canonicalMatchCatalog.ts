@@ -119,6 +119,11 @@ export type UnmatchedGoalApiMatch = {
   away: string;
   leagueName: string | null;
   kickoffUtc: Date | null;
+  /** "scheduled" | "live" — lets callers distinguish a fixture that hasn't
+   * kicked off yet (expected to stay unmatched against a live-only
+   * candidate pool, see shadowMatchSync's fetchLivePulseScoreCandidates)
+   * from one that's live right now and genuinely failed to match. */
+  status: string;
 };
 
 /** Scheduled/live football canonical matches that already have a GOAL API
@@ -139,6 +144,7 @@ export async function getUnmatchedGoalApiFootballMatches(
       away: matchProviderMappingTable.awayNameRaw,
       leagueName: matchesTable.leagueName,
       kickoffUtc: matchesTable.kickoffUtc,
+      status: matchesTable.status,
     })
     .from(matchesTable)
     .innerJoin(
