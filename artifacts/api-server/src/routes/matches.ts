@@ -7802,7 +7802,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
 
       const prematchPrice = getPrematchPulsePrice(fx.id);
       let resultOdds: { home: number; draw: number; away: number } | null = null;
-      let finalMarkets: Markets | null = null;
+      let finalMarkets: AdvancedMarkets | null = null;
       let hasRealOdds = false;
       let priceSource: "pulsescore" | undefined;
       let pulseScoreEventId: string | undefined;
