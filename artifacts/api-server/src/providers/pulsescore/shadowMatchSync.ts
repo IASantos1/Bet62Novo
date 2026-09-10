@@ -264,10 +264,12 @@ function extractPulseScoreOverUnderByLine(
  *  ceiling price. Real bookmakers never surface that whole grid in their
  *  UI; they show a standard low-scoring set (here: 0-0 through 3-3, the
  *  same 16-cell grid BET62's own legacy synthetic generator used) and
- *  fold everything else into a single "Outros" bucket. Curating this
- *  server-side keeps the real PulseScore prices for the cells bettors
- *  actually pick, without shipping (or rendering) a 60-row wall of mostly
- *  ~100.00 filler. The "Outros" price is a simple implied-probability
+ *  fold everything else into a single "Outro" bucket (the exact key
+ *  settlement.ts's correct-score resolver already recognizes as the
+ *  catch-all — see below). Curating this server-side keeps the real
+ *  PulseScore prices for the cells bettors actually pick, without shipping
+ *  (or rendering) a 60-row wall of mostly ~100.00 filler. The "Outro"
+ *  price is a simple implied-probability
  *  aggregate of the folded cells' real odds (1/odd summed, then
  *  inverted) — an approximation, not a book-exact price, since combining
  *  already-margined odds this way doesn't preserve the book's overround
@@ -287,7 +289,7 @@ function curateCorrectScoreGrid(
     if (!m) {
       // Non-numeric keys (e.g. an aggregate "home-any"/"away-any"/
       // "any-other" bucket PulseScore already provides) pass through as-is
-      // — never double-bucketed on top of our own "Outros".
+      // — never double-bucketed on top of our own "Outro".
       out[key] = odd;
       continue;
     }
@@ -300,7 +302,13 @@ function curateCorrectScoreGrid(
       hasOther = true;
     }
   }
-  if (hasOther && otherImpliedProb > 0 && out["Outros"] === undefined) {
+  if (hasOther && otherImpliedProb > 0 && out["Outro"] === undefined) {
+    // Must be the literal key "Outro" (singular) — settlement.ts's FT/HT
+    // correct-score resolver (and the legacy synthetic generator this
+    // curation mirrors) only recognizes that exact key as the catch-all
+    // bucket; any other spelling (e.g. "Outros") would let a client submit
+    // and get accepted a bet that settlement can never resolve.
+    //
     // Clamped the same way the legacy synthetic generator clamped its own
     // "Outro" bucket: summing per-cell implied probabilities that each
     // already carry the book's own margin can push the raw aggregate
@@ -309,7 +317,7 @@ function curateCorrectScoreGrid(
     // result a sane, always-valid price regardless of how many cells land
     // in the bucket.
     const raw = 1 / otherImpliedProb;
-    out["Outros"] = Math.round(Math.max(1.01, Math.min(500, raw)) * 100) / 100;
+    out["Outro"] = Math.round(Math.max(1.01, Math.min(500, raw)) * 100) / 100;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
