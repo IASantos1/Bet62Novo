@@ -27,6 +27,12 @@ import {
   proplineFetchBasketballPeriodOddsAllLeagues,
 } from "../services/propline/basketball.js";
 import {
+  PROPLINE_BASEBALL_LEAGUE_TITLES,
+  extractProplineBaseballOdds,
+  proplineFetchBaseballOddsAllLeagues,
+  proplineFetchBaseballLiveAllLeagues,
+} from "../services/propline/baseball.js";
+import {
   extractProplineHockeyOdds,
   extractProplineHockeyPeriod1Odds,
   proplineFetchHockeyOddsAllLeagues,
@@ -7541,7 +7547,11 @@ function canonicalTennisSetScoreOrder(
 
 // ─── League Filters ────────────────────────────────────────────────────────────
 
-/** Returns true for youth leagues (U15–U21, U23) or blocked tournaments that should be hidden. */
+/** Returns true for youth leagues (U15–U21, U23) or blocked tournaments that
+ * should be hidden. Defined since an earlier provider era but never
+ * actually called from either GOAL API football builder below (audit
+ * finding, 2026-09-10, user report: youth/women's fixtures still showing
+ * up pré-jogo and ao vivo) — now wired into both. */
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
   if (/\bu(1[5-9]|2[013])\b/.test(n)) return true;
@@ -7557,9 +7567,12 @@ function isBlockedLeague(name: string): boolean {
   return false;
 }
 
-/** Returns true for women's football leagues (kept but flagged for frontend). */
+/** Returns true for women's football leagues — blocked outright per user
+ * request (2026-09-10), same as isBlockedLeague's youth leagues. Was
+ * previously "kept but flagged for frontend" (isWomens tag on
+ * UpcomingMatch); now filtered out at the source instead. */
 function isWomensLeague(name: string): boolean {
-  return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(
+  return /women|feminine|féminin|feminino|femminile|frauen|femenin|damall|nwsl|wsl/i.test(
     name,
   );
 }
@@ -7689,6 +7702,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
       if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+      if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
       const home = stripGenderTeamSuffix(fx.homeTeam?.name);
       const away = stripGenderTeamSuffix(fx.awayTeam?.name);
       if (!home || !away) continue;
@@ -7732,7 +7746,6 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         hasRealOdds: !!resultOdds,
         odds: resultOdds ?? baseOdds,
         markets: baseMarkets,
-        isWomens: isWomensLeague(fx.leagueName ?? ""),
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
@@ -7792,6 +7805,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
   const results: LiveMatchState[] = [];
 
   for (const fx of fixtures) {
+    if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
     const home = stripGenderTeamSuffix(fx.homeTeam?.name);
     const away = stripGenderTeamSuffix(fx.awayTeam?.name);
     if (!home || !away) continue;
@@ -8478,6 +8492,151 @@ async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[]> {
         await finalizeStaleLiveMatch(state);
       } catch (err) {
         logger.error({ err, id }, "[propline] basketball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+const PROPLINE_BASEBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Baseball (MLB) prematch from PropLine — real moneyline via
+ * extractProplineBaseballOdds wherever a bookmaker prices it; falls back
+ * to makeMLBMoneylineFromTeams's synthetic model otherwise. This was the
+ * missing counterpart to buildBasketballUpcomingFromPropLine — baseball
+ * had no PropLine module at all (a permanent dead stub regardless of
+ * PROPLINE_API_KEY), even though .env.example's PROPLINE_ENABLED_SPORTS
+ * default has always listed baseball_mlb. */
+async function buildBaseballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const perLeague = await proplineFetchBaseballOddsAllLeagues();
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] baseball upcoming raw event counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const { sportKey, events } of perLeague) {
+    const leagueTitle = PROPLINE_BASEBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    for (const ev of events) {
+      if (ev.live) continue;
+      const home = stripGenderTeamSuffix(ev.home_team);
+      const away = stripGenderTeamSuffix(ev.away_team);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const resultOdds = extractProplineBaseballOdds(ev.bookmakers, ev.home_team, ev.away_team);
+      const markets = makeMLBMarketsFromTeams(home, away, resultOdds?.home, resultOdds?.away);
+      const odds = resultOdds ?? { ...makeMLBMoneylineFromTeams(home, away), draw: 0 };
+      const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      results.push({
+        id: `propline-baseball-${ev.id}`,
+        home,
+        away,
+        league: leagueTitle,
+        country: "EUA",
+        time,
+        date,
+        sport: "baseball",
+        hasRealOdds: !!resultOdds,
+        odds,
+        markets,
+      });
+    }
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+/** Baseball live from PropLine — cross-references /scores with the cached
+ * /odds by event id. Baseball IS in PropLine's confirmed near-real-time
+ * sport list, so this is built with the same confidence as pré-jogo,
+ * mirroring buildBasketballLiveFromPropLine exactly. */
+async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const perLeague = await proplineFetchBaseballLiveAllLeagues();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const { sportKey, events } of perLeague) {
+    if (events.length === 0) continue;
+    const leagueTitle = PROPLINE_BASEBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const oddsEvents = (await proplineFetchBaseballOddsAllLeagues()).find((l) => l.sportKey === sportKey)?.events ?? [];
+
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      const score = extractProplineScore(sc);
+      if (!score) continue;
+
+      const id = `propline-baseball-${sc.id}`;
+      currentIds.add(id);
+      const existing = liveMatchState.get(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractProplineBaseballOdds(oddsEv.bookmakers, home, away) : null;
+      const baseMarkets = makeMLBMarketsFromTeams(home, away, resultOdds?.home, resultOdds?.away);
+
+      let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+        ? { ...existing.marketSuspension }
+        : undefined;
+      if (marketSuspension) {
+        const active = Object.fromEntries(
+          Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+        );
+        marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+      }
+      let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+      const runsScored =
+        !!existing && (score.home !== existing.homeScore || score.away !== existing.awayScore);
+      if (runsScored) {
+        const now = Date.now();
+        marketSuspension = { result: now + 8_000, handicap: now + 8_000, totalGoals: now + 8_000 };
+        suspensionReason = "PONTOS!";
+      }
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: leagueTitle,
+        country: "EUA",
+        sport: "baseball",
+        homeScore: score.home,
+        awayScore: score.away,
+        minute: 0,
+        status: score.status || "Ao vivo",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? { ...makeMLBMoneylineFromTeams(home, away), draw: 0 },
+        markets: baseMarkets,
+        events: [],
+        _lastSeenAt: Date.now(),
+        marketSuspension,
+        _suspensionReason: suspensionReason,
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-baseball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_BASEBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] baseball finalizeStaleLiveMatch failed");
       }
       liveMatchState.delete(id);
     }
@@ -9199,7 +9358,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     logger.error({ err }, "[tri-fallback] hockey live failed this tick");
   }
   const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
-  const baseballLiveRaw: LiveMatchState[] = chooseLiveProvider("baseball", []);
+  let baseballLiveRaw: LiveMatchState[] = [];
+  try {
+    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildBaseballLiveFromPropLine() });
+    }
+    baseballLiveRaw = chooseLiveProvider("baseball", candidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] baseball live failed this tick");
+  }
   const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
   let volleyballLiveRaw: LiveMatchState[] = [];
   try {
@@ -10206,7 +10374,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let hockey: UpcomingMatch[] = [];
   let volleyball: UpcomingMatch[] = [];
   let mma: UpcomingMatch[] = [];
-  const baseball: UpcomingMatch[] = [];
+  let baseball: UpcomingMatch[] = [];
   if (CONFIG.PROPLINE_API_KEY) {
     try {
       basketball = await buildBasketballUpcomingFromPropLine();
@@ -10227,6 +10395,11 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       mma = await buildMmaUpcomingFromPropLine();
     } catch (err) {
       logger.error({ err }, "[refreshUpcomingTop] mma PropLine fetch failed");
+    }
+    try {
+      baseball = await buildBaseballUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] baseball PropLine fetch failed");
     }
   }
   rememberUpcomingFootballEligibility(football);
