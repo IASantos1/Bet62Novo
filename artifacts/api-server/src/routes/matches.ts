@@ -470,6 +470,15 @@ export type LiveMatchState = {
   _apiTennisLiveOddsRef?: ApiTennisLiveOddsEntry[];
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
+  // Whether _baseOdds was anchored to a real provider price on first
+  // sighting, vs a fully synthetic makeOddsFromTeams fallback — frozen
+  // alongside _baseOdds itself (football/GOAL API only; unlike the
+  // per-tick `hasRealOdds` above, this never flips back and forth after
+  // the anchor is set, since the displayed odds/_baseOdds never are
+  // either). Lets a reader tell a genuine two-source odds disagreement
+  // apart from one side just never having had a real market price to
+  // begin with — see PulseScore's odds shadow-compare (shadowMatchSync.ts).
+  _baseOddsAreReal?: boolean;
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
   // BET62 Fase 0 (2026-09-10) — monotonic counter, bumped only when
@@ -7962,6 +7971,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       // this fixture, not reset every tick, so the model has a real reference
       // instead of feeding back its own last displayed value into itself.
       _baseOdds: existing?._baseOdds ?? resultOdds ?? baseOdds,
+      _baseOddsAreReal: existing?._baseOddsAreReal ?? !!resultOdds,
       _baseMarkets: existing?._baseMarkets ?? baseMarkets,
       events: matchEvents,
       matchStats,

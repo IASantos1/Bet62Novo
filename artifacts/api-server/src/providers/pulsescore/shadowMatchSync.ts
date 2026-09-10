@@ -75,6 +75,18 @@ type MatchingPhaseResult = {
    * the combined confidence still fell short of MIN_REPORTABLE_CONFIDENCE
    * — plausible pairs the threshold is (for now) rejecting. */
   liveBelowThresholdMisses: number;
+  /** How many non-virtual live PulseScore events this round actually
+   * compared against — the real, current size of the pool every live
+   * GOAL API fixture was matched against, whatever PulseScore's total
+   * cross-league catalog size might be. */
+  candidatePoolSize: number;
+  /** Same data as the "[pulsescore-shadow-match] closest near-misses"
+   * log line, kept here too so it's visible via
+   * GET /api/admin/pulsescore-status — for each live fixture that found
+   * no match, the single best PulseScore candidate even though it didn't
+   * clear the thresholds, so a reader can tell "no real counterpart in
+   * the pool" apart from "a real pair the name/confidence floor rejected". */
+  nearMisses: NearMissSample[];
 };
 
 type NearMissSample = {
@@ -152,6 +164,7 @@ async function runMatchingPhase(
     }
   }
 
+  nearMissSamples.sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
   const result: MatchingPhaseResult = {
     attempted: unmatched.length,
     matched,
@@ -160,15 +173,25 @@ async function runMatchingPhase(
     liveAttempted,
     liveNameFloorMisses,
     liveBelowThresholdMisses,
+    candidatePoolSize: candidates.length,
+    nearMisses: nearMissSamples.slice(0, 8),
   };
   logger.info(
-    { ...result, candidatePoolSize: candidates.length },
+    {
+      attempted: result.attempted,
+      matched: result.matched,
+      unmatched: result.unmatched,
+      avgConfidence: result.avgConfidence,
+      liveAttempted: result.liveAttempted,
+      liveNameFloorMisses: result.liveNameFloorMisses,
+      liveBelowThresholdMisses: result.liveBelowThresholdMisses,
+      candidatePoolSize: result.candidatePoolSize,
+    },
     "[pulsescore-shadow-match] matching round complete",
   );
-  if (nearMissSamples.length > 0) {
-    nearMissSamples.sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+  if (result.nearMisses.length > 0) {
     logger.info(
-      { samples: nearMissSamples.slice(0, 8), totalLiveMisses: nearMissSamples.length },
+      { samples: result.nearMisses, totalLiveMisses: nearMissSamples.length },
       "[pulsescore-shadow-match] closest near-misses among live, still-unmatched fixtures (diagnostic only)",
     );
   }
@@ -237,6 +260,14 @@ type OddsComparisonSample = {
     goalApi: { home: number | null; away: number | null; minute: number | null };
     pulseScore: { home: number | null; away: number | null; minute: number | null };
   };
+  /** Whether the "bet62" odds in `result` are anchored to a real price GOAL
+   * API's own live-odds endpoint returned (LiveMatchState.hasRealOdds), or
+   * fell back to makeOddsFromTeams — a purely synthetic Poisson estimate
+   * with no real market grounding at all, frozen as the drift engine's
+   * anchor on first sighting. A huge deltaPct against a synthetic anchor
+   * says nothing about PulseScore's accuracy; only a real-anchor
+   * divergence is a genuine two-source disagreement worth trusting. */
+  bet62OddsAreReal: boolean;
   result: Record<string, unknown>;
 };
 
@@ -348,9 +379,21 @@ async function runOddsComparisonPhase(
       },
     };
 
+    // See LiveMatchState._baseOddsAreReal's own comment — this is the
+    // anchor set once on first sighting, unlike the per-tick `hasRealOdds`
+    // which can be true/false independently of what's actually frozen as
+    // the displayed odds/_baseOdds.
+    const bet62OddsAreReal = liveState._baseOddsAreReal ?? false;
+
     compared++;
     logger.info(
-      { matchId: fixture.matchId, matchConfidence: fixture.otherProviderConfidence, matchState, ...result },
+      {
+        matchId: fixture.matchId,
+        matchConfidence: fixture.otherProviderConfidence,
+        matchState,
+        bet62OddsAreReal,
+        ...result,
+      },
       "[pulsescore-shadow-odds] live market comparison",
     );
     if (samples.length < ODDS_SAMPLE_CAP) {
@@ -359,6 +402,7 @@ async function runOddsComparisonPhase(
         fixture: `${liveState.home} vs ${liveState.away}`,
         matchConfidence: fixture.otherProviderConfidence,
         matchState,
+        bet62OddsAreReal,
         result,
       });
     }
