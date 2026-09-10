@@ -40,7 +40,13 @@ import {
 } from "../services/propline/football.js";
 import { getGoalApiProviderHealth } from "../health/providerHealth.js";
 import { getPulseScoreHealth } from "../providers/pulsescore/health.js";
-import { getPulseScoreShadowSyncStatus } from "../providers/pulsescore/shadowMatchSync.js";
+import {
+  getPulseScoreShadowSyncStatus,
+  getPulseScorePrematchStatus,
+  getPrematchPulseScorePricedFixtureIds,
+  getPrematchPulsePrice,
+} from "../providers/pulsescore/shadowMatchSync.js";
+import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2683,6 +2689,109 @@ router.get("/pulsescore-status", adminMiddleware, async (_req: AdminRequest, res
     goalApi: getGoalApiProviderHealth(),
     pulseScore: getPulseScoreHealth(),
     shadowSync: getPulseScoreShadowSyncStatus(),
+    prematchSync: getPulseScorePrematchStatus(),
+  });
+});
+
+router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest, res) => {
+  const liveRows = [...liveMatchState.values()];
+  const liveGoalApiFootball = liveRows.filter(
+    (m) => m.sport === "football" && m.id.startsWith("goalapi-football-"),
+  );
+  const livePulsescoreFootball = liveRows.filter(
+    (m) => m.sport === "football" && m.id.startsWith("pulsescore-football-"),
+  );
+  const liveWithPulse = liveGoalApiFootball.filter(
+    (m) => (m as any)._priceSource === "pulsescore",
+  );
+  const liveWithoutPulse = liveGoalApiFootball.filter(
+    (m) => (m as any)._priceSource !== "pulsescore",
+  );
+  function sampleLive(rows: typeof liveRows, n: number) {
+    return rows.slice(0, n).map((m: any) => ({
+      id: m.id,
+      fixture: `${m.home} vs ${m.away}`,
+      league: m.league,
+      _priceSource: m._priceSource ?? null,
+      _suspensionReason: m._suspensionReason ?? null,
+      hasRealOdds: m.hasRealOdds,
+      odds1x2: m.odds,
+    }));
+  }
+
+  const upcoming = await buildUpcomingMatches().catch(() => [] as any[]);
+  const upFootball = upcoming.filter(
+    (m: any) => m.sport === "football" && String(m.id).startsWith("goalapi-football-"),
+  );
+  const upWithPulse = upFootball.filter((m: any) => m._priceSource === "pulsescore");
+  const upWithoutPulse = upFootball.filter(
+    (m: any) => m._priceSource !== "pulsescore",
+  );
+  const prematchMapCacheSize = getPrematchPulseScorePricedFixtureIds().size;
+  function stripGoalApiPrefix(id: string): string {
+    return id.startsWith("goalapi-football-") ? id.slice("goalapi-football-".length) : id;
+  }
+  function sampleUpcoming(rows: any[], n: number) {
+    return rows.slice(0, n).map((m) => {
+      const gid = stripGoalApiPrefix(String(m.id));
+      const inPrematchMap = gid ? getPrematchPulsePrice(gid) !== undefined : false;
+      return {
+        id: m.id,
+        goalApiFixtureId: gid,
+        fixture: `${m.home} vs ${m.away}`,
+        league: m.league,
+        date: m.date,
+        time: m.time,
+        _priceSource: m._priceSource ?? null,
+        _pulseScoreEventId: m._pulseScoreEventId ?? null,
+        inPrematchMapCache: inPrematchMap,
+        hasRealOdds: m.hasRealOdds,
+        odds1x2: m.odds,
+      };
+    });
+  }
+
+  const pct = (have: number, total: number): number =>
+    total === 0 ? 100 : Number(((have / total) * 100).toFixed(2));
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    live: {
+      totalLiveFootball: liveRows.filter((m) => m.sport === "football").length,
+      goalApiFootballCount: liveGoalApiFootball.length,
+      pulseScoreNativeFootballCount: livePulsescoreFootball.length,
+      goalApiWithPulsePriceSource: liveWithPulse.length,
+      goalApiWithoutPulsePriceSource: liveWithoutPulse.length,
+      coveragePct: pct(
+        liveWithPulse.length,
+        liveGoalApiFootball.length,
+      ),
+      sampleWithPulse: sampleLive(liveWithPulse, 5),
+      sampleWithoutPulse: sampleLive(liveWithoutPulse, 5),
+    },
+    prematch: {
+      prematchSync: getPulseScorePrematchStatus(),
+      prematchMapCacheSize,
+      totalUpcomingFootball: upcoming.filter((m: any) => m.sport === "football").length,
+      goalApiFootballCount: upFootball.length,
+      goalApiWithPulsePriceSource: upWithPulse.length,
+      goalApiWithoutPulsePriceSource: upWithoutPulse.length,
+      coveragePct: pct(
+        upWithPulse.length,
+        upFootball.length,
+      ),
+      sampleWithPulse: sampleUpcoming(upWithPulse, 5),
+      sampleWithoutPulse: sampleUpcoming(upWithoutPulse, 5),
+    },
+    oddsGateInRoutesBetsTs:
+      "APLICADO 100% — POST /api/bets/place bloqueia goalapi-football upcoming sem prematchMap cache E live sem _priceSource === pulsescore",
+    conclusion:
+      liveGoalApiFootball.length + upFootball.length === 0
+        ? "Nenhum fixture goalapi-football encontrado agora (sem jogos ao vivo e cron prematch ainda não rodou 1ª vez no startup). Aguarde 3 min e chame de novo."
+        : pct(liveWithPulse.length, liveGoalApiFootball.length) === 100 &&
+            pct(upWithPulse.length, upFootball.length) === 100
+          ? "✅ 100% COBERTURA PULSESCORE (LIVE + PREMATCH)"
+          : `⚠️ Cobertura incompleta LIVE ${pct(liveWithPulse.length, liveGoalApiFootball.length)}% · PREMATCH ${pct(upWithPulse.length, upFootball.length)}%.`,
   });
 });
 

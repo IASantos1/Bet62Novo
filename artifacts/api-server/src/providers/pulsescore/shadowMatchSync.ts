@@ -632,6 +632,33 @@ export function getPulseScoreShadowSyncStatus(): ShadowSyncStatus {
   return lastStatus;
 }
 
+export type PrematchSyncStatus = {
+  lastRunAt: number | null;
+  lastRunOk: boolean;
+  lastError: string | null;
+  lastCounts: { processed: number; matched: number; priced: number } | null;
+  pricedFixtureIdsSize: number;
+  cacheMapSize: number;
+};
+let lastPrematchStatus: PrematchSyncStatus = {
+  lastRunAt: null,
+  lastRunOk: true,
+  lastError: null,
+  lastCounts: null,
+  pricedFixtureIdsSize: 0,
+  cacheMapSize: 0,
+};
+export function getPulseScorePrematchStatus(): PrematchSyncStatus {
+  return {
+    ...lastPrematchStatus,
+    pricedFixtureIdsSize: prematchMatchedFixtureIds.size,
+    cacheMapSize: upcomingPrematchPulsePrices.size,
+  };
+}
+function updatePrematchStatus(partial: Partial<PrematchSyncStatus>): void {
+  lastPrematchStatus = { ...lastPrematchStatus, ...partial };
+}
+
 /** Exported for direct testability (bypasses the in-flight guard below,
  * same reason canonicalMatchCatalog.ts exports ensureCanonicalMatch
  * alongside its own throttled wrapper). */
@@ -731,14 +758,22 @@ export async function runPrematchPulseScoreSync(goalApiFixtures: PrematchGoalApi
   matched: number;
   priced: number;
 }> {
-  if (!CONFIG.PULSESCORE_API_KEY) return { processed: 0, matched: 0, priced: 0 };
-  if (goalApiFixtures.length === 0) return { processed: 0, matched: 0, priced: 0 };
+  if (!CONFIG.PULSESCORE_API_KEY) {
+    updatePrematchStatus({ lastRunAt: Date.now(), lastRunOk: true, lastError: null, lastCounts: { processed: 0, matched: 0, priced: 0 } });
+    return { processed: 0, matched: 0, priced: 0 };
+  }
+  if (goalApiFixtures.length === 0) {
+    updatePrematchStatus({ lastRunAt: Date.now(), lastRunOk: true, lastError: null, lastCounts: { processed: 0, matched: 0, priced: 0 } });
+    return { processed: 0, matched: 0, priced: 0 };
+  }
 
-  const candidates = await fetchPrematchPulseScoreCandidates();
-  let matched = 0;
-  let priced = 0;
+  const startedAt = Date.now();
+  try {
+    const candidates = await fetchPrematchPulseScoreCandidates();
+    let matched = 0;
+    let priced = 0;
 
-  for (const gx of goalApiFixtures) {
+    for (const gx of goalApiFixtures) {
     const ref: GoalApiFixtureRef = {
       id: gx.providerMatchId,
       homeTeamName: gx.home,
@@ -811,7 +846,13 @@ export async function runPrematchPulseScoreSync(goalApiFixtures: PrematchGoalApi
     prematchMatchedFixtureIds.add(String(gx.providerMatchId));
     priced++;
   }
-  return { processed: goalApiFixtures.length, matched, priced };
+    const counts = { processed: goalApiFixtures.length, matched, priced };
+    updatePrematchStatus({ lastRunAt: startedAt, lastRunOk: true, lastError: null, lastCounts: counts });
+    return counts;
+  } catch (err: any) {
+    updatePrematchStatus({ lastRunAt: startedAt, lastRunOk: false, lastError: err?.message ?? String(err), lastCounts: null });
+    throw err;
+  }
 }
 
 // Separate runOnce wrapper for prematch — distinct from the live one so
