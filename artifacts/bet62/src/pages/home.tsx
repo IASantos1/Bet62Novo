@@ -3691,6 +3691,21 @@ type AdvancedMarkets = {
   penExtra?: {
     winner: { home: number; away: number };
   };
+  // Football extended markets (matches backend AdvancedMarkets shape)
+  winToNil?: { home: number; away: number };
+  cleanSheet?: { home: number; away: number };
+  goalOddEven?: { odd: number; even: number };
+  exactGoals?: { g0: number; g1: number; g2: number; g3: number; g4: number; g5plus: number };
+  btts1H?: { yes: number; no: number };
+  btts2H?: { yes: number; no: number };
+  toWinBothHalves?: { home: number; away: number };
+  highestScoringHalf?: { first: number; second: number; equal: number };
+  htCorrectScore?: Record<string, number>;
+  h2CorrectScore?: Record<string, number>;
+  teamGoals?: Partial<{
+    homeOver05: number; homeUnder05: number; homeOver15: number; homeUnder15: number; homeOver25: number; homeUnder25: number;
+    awayOver05: number; awayUnder05: number; awayOver15: number; awayUnder15: number; awayOver25: number; awayUnder25: number;
+  }>;
   // Tennis-specific live markets (injected server-side)
   tennisExtra?: {
     firstSet?: { home: number; away: number };
