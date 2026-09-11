@@ -46,6 +46,7 @@ import {
   getPrematchPulseScorePricedFixtureIds,
   getPrematchPulsePrice,
 } from "../providers/pulsescore/shadowMatchSync.js";
+import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 
 function escapeCsv(val: unknown): string {
@@ -2690,6 +2691,19 @@ router.get("/pulsescore-status", adminMiddleware, async (_req: AdminRequest, res
     pulseScore: getPulseScoreHealth(),
     shadowSync: getPulseScoreShadowSyncStatus(),
     prematchSync: getPulseScorePrematchStatus(),
+  });
+});
+
+// sports.bzzoiro.com real-ball-position status — read-only, mirrors
+// /pulsescore-status. Added 2026-09-11 to debug real live matches whose
+// _ballPosition never populates despite both providers confirming the
+// match is live: this shows whether the fixture is even subscribed on the
+// bzzoiro WS at all, and if so, whether a real coordinates frame has ever
+// arrived for it.
+router.get("/bzzoiro-status", adminMiddleware, async (_req: AdminRequest, res) => {
+  res.json({
+    sync: getBzzoiroBallSyncStatus(),
+    subscriptions: getBzzoiroSubscriptionDetails(),
   });
 });
 

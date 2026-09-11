@@ -203,3 +203,41 @@ export function getBzzoiroBallSyncStatus(): { ws: ReturnType<typeof getBzzoiroWs
     subscribedMatches: currentSubscriptions.size,
   };
 }
+
+/** Per-subscription breakdown for GET /api/admin/bzzoiro-status — added
+ * 2026-09-11 to answer "is this specific live match's _ballPosition ever
+ * going to populate?" without needing Railway log access: for each
+ * bzzoiro event_id this process currently thinks it's subscribed to, shows
+ * whether a livedata frame with real coordinates has ever landed for it
+ * and how stale that frame now is. A row present here with
+ * ballPositionAgeMs staying null forever (never once populated) points at
+ * the WS subscribe frame or bzzoiro's own coverage for that event, not at
+ * the matching engine — matching already succeeded, or the row wouldn't
+ * exist. */
+export function getBzzoiroSubscriptionDetails(): Array<{
+  bzzoiroEventId: number;
+  liveMatchId: string;
+  fixture: string | null;
+  hasBallPosition: boolean;
+  ballPositionAgeMs: number | null;
+}> {
+  const out: Array<{
+    bzzoiroEventId: number;
+    liveMatchId: string;
+    fixture: string | null;
+    hasBallPosition: boolean;
+    ballPositionAgeMs: number | null;
+  }> = [];
+  for (const [eventId, liveMatchId] of currentSubscriptions.entries()) {
+    const state = liveMatchState.get(liveMatchId);
+    const bp = state?._ballPosition;
+    out.push({
+      bzzoiroEventId: eventId,
+      liveMatchId,
+      fixture: state ? `${state.home} vs ${state.away}` : null,
+      hasBallPosition: !!bp,
+      ballPositionAgeMs: bp ? Date.now() - bp.updatedAt : null,
+    });
+  }
+  return out;
+}
