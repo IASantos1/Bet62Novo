@@ -7,23 +7,36 @@
 // data for BET62's purposes. This provider exists for exactly one thing:
 // real ball x/y to drive the mini pitch tracker.
 
-/** One row of GET /events/ — enough to match a fixture against a live
- * GOAL API match by team name (see matchSync.ts). */
+/** One row of GET /events/live/ — enough to match a fixture against a live
+ * GOAL API match by team name (see matchSync.ts). CORRECTION 2026-09-11:
+ * the generic GET /events/ list (with a ?status= query param) silently
+ * ignores that param server-side — it always returns the same fixed
+ * dump of "notstarted" fixtures regardless of the filter, confirmed via
+ * the user's own real requests (identical count/status distribution with
+ * and without the param). The real live-events resource is this
+ * dedicated /events/live/ path, confirmed via a real live response: its
+ * in-progress status string is "inprogress" (not "live" as assumed
+ * before), and it can also list a just-finished match ("finished"), so
+ * callers still need to filter on `status === "inprogress"` themselves. */
 export type BzzoiroEvent = {
   id: number;
+  league_id: number;
+  league_name: string;
   home_team: string;
   away_team: string;
   home_team_id: number;
   away_team_id: number;
   event_date: string; // ISO
-  status: string; // "live" | "finished" | "upcoming" | ...
+  status: string; // "inprogress" | "finished" | ...
+  live_websocket: boolean;
 };
 
+/** GET /events/live/'s real response shape — {count, events}, NOT the
+ * {count, next, previous, results} DRF-pagination shape assumed before
+ * (that shape belonged to the generic, non-filtering /events/ list). */
 export type BzzoiroEventsListResponse = {
   count: number;
-  next: string | null;
-  previous: string | null;
-  results: BzzoiroEvent[];
+  events: BzzoiroEvent[];
 };
 
 /** The WebSocket `livedata` frame — real ball position + situation, sent
