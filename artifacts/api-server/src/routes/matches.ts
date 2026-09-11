@@ -8281,7 +8281,11 @@ export async function applyGoalApiWebhookEvent(event: {
       liveMatchState.set(id, {
         ...existing,
         marketSuspension: Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)])),
-        _suspensionReason: "VERIFICAÇÃO EM CURSO",
+        // Must contain "VAR" — home.tsx's SuspensionBanner matches this
+        // string against `.includes("VAR")` to show "🎥 REVISÃO VAR"
+        // instead of the generic "SUSPENSO" fallback (bug found via user
+        // screenshots 2026-09-11: the old text never matched).
+        _suspensionReason: "REVISÃO VAR EM CURSO",
       });
     }
   }
@@ -8974,7 +8978,8 @@ async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
       if (goalScored) {
         const now = Date.now();
         marketSuspension = { result: now + 8_000, handicap: now + 8_000, totalGoals: now + 8_000 };
-        suspensionReason = "GOL!";
+        // "GOLO!" not "GOL!" — see suspensionEngine.ts's identical fix.
+        suspensionReason = "GOLO!";
       }
 
       const state: LiveMatchState = {
@@ -9875,33 +9880,19 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
-  // Hybrid visibility gate, 2026-09-10 — two explicit goals:
-  //
-  //   1. A fixture is ALWAYS shown (never hidden from the Ao Vivo list) as
-  //      long as GOAL API reports it live — score, events, stats, and
-  //      lineups come from there regardless of odds state. Hiding a live
-  //      fixture entirely because its odds aren't ready yet creates the
-  //      exact "no live games" UX the user reported, even though all the
-  //      non-betting content (match tracker) is perfectly valid.
-  //   2. A fixture is only BETTABLE if PulseScore has actually priced its
-  //      headline 1X2 market (`_priceSource === "pulsescore"`). When
-  //      PulseScore hasn't matched/priced a live fixture yet, the match
-  //      still appears in the live list with the market-suspension banner
-  //      shown — routes/bets.ts already refuses bets on any fixture where
-  //      `marketSuspension` is truthy OR `_priceSource !== "pulsescore"`,
-  //      so there is zero integrity risk from showing it.
-  //
-  // This matches the hybrid diagram exactly: GOAL API is the SOLE tracker
-  // (always visible); PulseScore is the SOLE odds source (only bets after
-  // inject). Any fixture flagged liveDecisions.visible=false by admin still
-  // gets hidden by the outer filter regardless of provider.
-  const isBettableFootballFixture = (m: LiveMatchState): boolean =>
-    !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
-    || m._priceSource === "pulsescore";
-
+  // Reverted 2026-09-11 per the user's explicit decision: a GOAL-API
+  // football fixture is only shown in the Ao Vivo list once PulseScore has
+  // actually priced its headline 1X2 market (`_priceSource ===
+  // "pulsescore"`). This replaces the 2026-09-10 "hybrid" gate (which
+  // showed every GOAL-API live fixture regardless of pricing, betting or
+  // not) — the user weighed the tradeoff (many minor-league fixtures never
+  // get PulseScore coverage and will simply never appear) and chose to
+  // hide unpriced fixtures entirely rather than show a match nobody can
+  // trust the odds on. Any fixture flagged liveDecisions.visible=false by
+  // admin still gets hidden by the outer filter regardless of provider.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
-    || true; // NEVER hide a GOAL-API live fixture — tracker is authoritative
+    || m._priceSource === "pulsescore";
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(

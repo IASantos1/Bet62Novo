@@ -64,7 +64,12 @@ export function computeFootballMarketSuspension(
     marketSuspension = Object.fromEntries(
       FOOTBALL_SUSP_KEYS.map((k) => [k, input.now + footballSuspensionDelayMs("goal", k)]),
     );
-    suspensionReason = "GOL!";
+    // "GOLO!" not "GOL!" — home.tsx's SuspensionBanner matches this string
+    // against `.includes("GOLO")` to show a dedicated "⚽ GOLO!" banner
+    // instead of the generic "SUSPENSO" fallback; "GOL!" never matched it
+    // (bug found via user screenshots 2026-09-11), so the goal banner
+    // silently always fell through to the generic label.
+    suspensionReason = "GOLO!";
   } else if (
     !marketSuspension &&
     input.oddsAgeMs != null &&
