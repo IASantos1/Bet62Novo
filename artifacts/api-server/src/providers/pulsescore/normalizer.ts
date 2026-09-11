@@ -286,10 +286,20 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   const anytimeGsMarket = findMarketLoose(ev, ["ANYTIME_GOALSCORER", "ANYTIME_GOALS", "GOALSCORER_ANYTIME"], "FULL_TIME");
   const firstGsMarket = findMarketLoose(ev, ["FIRST_GOALSCORER", "FIRST_GOALS"], "FULL_TIME");
   const lastGsMarket = findMarketLoose(ev, ["LAST_GOALSCORER", "LAST_GOALS"], "FULL_TIME");
+  // Real bug fixed 2026-09-11 (user-reported: goalscorer buttons showing
+  // "2nd"/"Anytime"/"Yes" instead of a player name): right after a goal,
+  // bet365 can briefly return this market in a degenerate placeholder
+  // shape — generic rows like "2nd"/"Anytime" instead of the full player
+  // breakdown — before repopulating real players once it settles. Every
+  // genuine player row observed carries a bet365 player id under
+  // `moreInfo.PI`; a placeholder row never does. Requiring it is a
+  // principled filter (a real person, not a category label) rather than
+  // a blocklist of specific known-bad strings that would miss the next
+  // one bet365 invents.
   const pluckPlayers = (mkt: PulseScoreMarket | undefined) =>
     mkt
       ? mkt.selections
-          .filter((s) => s.odds != null && Number.isFinite(s.odds) && s.odds > 1)
+          .filter((s) => s.odds != null && Number.isFinite(s.odds) && s.odds > 1 && !!s.moreInfo?.["PI"])
           .map((s) => ({ player: s.rawName.replace(/^(anytime|first|last)\s*[:\-]\s*/i, "").trim() || s.canonicalOutcome, odds: s.odds }))
           .slice(0, 60)
       : undefined;
