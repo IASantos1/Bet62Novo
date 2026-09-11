@@ -8107,6 +8107,15 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       _baseOdds: wasPulseBefore ? existing?._baseOdds : (existing?._baseOdds ?? baseOdds),
       _baseOddsAreReal: wasPulseBefore,
       _baseMarkets: wasPulseBefore ? existing?._baseMarkets : (existing?._baseMarkets ?? baseMarkets),
+      // Bug fixed 2026-09-11: this object literal previously omitted
+      // _priceSource entirely, so every GOAL API poll (much more frequent
+      // than shadowMatchSync's ~15s PulseScore cycle) silently wiped it
+      // back to undefined right after runOddsComparisonPhase set it — the
+      // very next rebuild then read `existing._priceSource` as unset,
+      // flipping hasRealOdds back to false within seconds of becoming
+      // true. Must mirror hasRealOdds's own wasPulseBefore-gated
+      // preservation exactly.
+      _priceSource: wasPulseBefore ? existing?._priceSource : undefined,
       events: matchEvents,
       matchStats,
       redCardsHome,
