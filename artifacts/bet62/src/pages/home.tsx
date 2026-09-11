@@ -3800,6 +3800,11 @@ type Match = {
   // Live text commentary feed (GOAL API football only) — free-text
   // play-by-play narration, newest entry first. See FootballPitchTracker.
   _commentary?: Array<{ id: string; time: string; text: string }>;
+  // Real ball position (GOAL API + sports.bzzoiro.com hybrid, football
+  // only) — see FootballPitchTracker's realBallPosition prop. Absent
+  // whenever bzzoiro hasn't matched/priced this fixture yet; the tracker
+  // falls back to its own commentary-derived zone guess in that case.
+  _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
   // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
@@ -7583,6 +7588,7 @@ export default function Home({
     _suspensionReason?: string;
     _feedWarning?: string;
     _commentary?: Array<{ id: string; time: string; text: string }>;
+    _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
     _liveExtra?: {
       clockStr?: string;
       sets?: Array<[number, number]>;
@@ -19394,6 +19400,7 @@ export default function Home({
                         commentary={expandedMatch._commentary}
                         v2StatsGroups={v2StatsGroups}
                         confrontosRecentMeetings={confrontosData?.recentMeetings}
+                        realBallPosition={expandedMatch._ballPosition}
                       />
                     </div>
                   )}
@@ -26658,6 +26665,7 @@ export default function Home({
                   commentary={expandedMatch._commentary}
                   v2StatsGroups={v2StatsGroups}
                   confrontosRecentMeetings={confrontosData?.recentMeetings}
+                  realBallPosition={expandedMatch._ballPosition}
                 />
               </div>
             )}

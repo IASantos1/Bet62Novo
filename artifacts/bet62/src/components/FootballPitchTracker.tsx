@@ -58,6 +58,14 @@ export type PitchTrackerH2HMeeting = {
   league: string;
 };
 
+export type PitchTrackerRealBallPosition = {
+  x: number;
+  y: number;
+  side: "home" | "away" | null;
+  situation: string;
+  updatedAt: number; // ms epoch
+};
+
 type Props = {
   home: string;
   away: string;
@@ -66,7 +74,21 @@ type Props = {
   commentary?: PitchTrackerCommentaryEntry[] | null; // newest-first
   v2StatsGroups?: PitchTrackerStatsGroup[] | null;
   confrontosRecentMeetings?: PitchTrackerH2HMeeting[] | null;
+  // GOAL API + sports.bzzoiro.com hybrid (2026-09-11): when present and
+  // fresh, this real x/y (from bzzoiro's WebSocket `livedata` frame)
+  // drives the ball's actual rendered position instead of the
+  // commentary-derived zoneForAction guess below. Absent whenever this
+  // fixture hasn't been matched/isn't covered by bzzoiro yet — the
+  // existing heuristic remains the fallback, never a hard requirement.
+  realBallPosition?: PitchTrackerRealBallPosition | null;
 };
+
+/** How stale realBallPosition can be before falling back to the
+ * commentary-derived guess — bzzoiro's own livedata cadence is ~5s per
+ * the docs, so anything past ~3x that is treated as no longer live
+ * (match ended, fixture unmatched again, WS hiccup, etc.) rather than
+ * shown frozen. */
+const REAL_BALL_POSITION_MAX_AGE_MS = 15_000;
 
 type BallSpot = { x: number; y: number };
 type View = "pitch" | "stats" | "h2h";
@@ -177,6 +199,7 @@ export default function FootballPitchTracker({
   commentary,
   v2StatsGroups,
   confrontosRecentMeetings,
+  realBallPosition,
 }: Props) {
   const ballRef = useRef<BallSpot>(CENTER);
   const [ball, setBall] = useState<BallSpot>(CENTER);
@@ -275,12 +298,25 @@ export default function FootballPitchTracker({
     actionLower.includes("corner") ||
     actionLower.includes("penalty");
 
+  // The ball's actual rendered position — real coordinates when bzzoiro
+  // has a fresh fix on this fixture, otherwise the commentary-derived
+  // zoneForAction guess. Only the ball's resting position and the
+  // momentum arrow's tip use this; the move-trail effect above stays
+  // tied to the commentary/queue state machine (moveOrigin/ball) since
+  // it's about narrating a specific commentary-driven moment, not "where
+  // is the ball right now".
+  const hasFreshRealBall =
+    !!realBallPosition && Date.now() - realBallPosition.updatedAt < REAL_BALL_POSITION_MAX_AGE_MS;
+  const displayBall: BallSpot = hasFreshRealBall
+    ? { x: realBallPosition!.x, y: realBallPosition!.y }
+    : ball;
+
   // How deep into the attacking third the acting side currently is —
   // reuses the same left-to-right/right-to-left mirroring convention as
   // zoneForAction (home attacks toward x≈100, away toward x≈0) so the
   // momentum arrow always points at whichever goal is under pressure,
   // and its color escalates with how threatening the current action is.
-  const attackDepth = parsed ? (parsed.side === "home" ? ball.x : 100 - ball.x) : 0;
+  const attackDepth = parsed ? (parsed.side === "home" ? displayBall.x : 100 - displayBall.x) : 0;
   const momentumTier: "neutral" | "attacking" | "danger" = isDangerZone
     ? "danger"
     : attackDepth > 60
@@ -297,7 +333,7 @@ export default function FootballPitchTracker({
   const arrowClipPath = (() => {
     if (!current || !parsed) return undefined;
     const nearX = parsed.side === "home" ? 0 : 100;
-    const farX = ball.x;
+    const farX = displayBall.x;
     const dir = farX >= nearX ? 1 : -1;
     const bodyEdge = dir === 1 ? Math.max(nearX, farX - ARROW_TAPER) : Math.min(nearX, farX + ARROW_TAPER);
     return `polygon(${nearX}% 0%, ${bodyEdge}% 0%, ${farX}% 50%, ${bodyEdge}% 100%, ${nearX}% 100%)`;
@@ -415,17 +451,17 @@ export default function FootballPitchTracker({
             )}
             <div
               className={`bet62-ball-trail ${parsed?.side === "away" ? "trail-away" : "trail-home"} ${isDangerZone ? "trail-danger" : ""}`}
-              style={{ left: `${ball.x}%`, top: `${ball.y}%` }}
+              style={{ left: `${displayBall.x}%`, top: `${displayBall.y}%` }}
             />
             {goalFlash && (
               <>
-                <div className="bet62-impact-ring ring-2" style={{ left: `${ball.x}%`, top: `${ball.y}%` }} />
-                <div className="bet62-impact-ring" style={{ left: `${ball.x}%`, top: `${ball.y}%` }} />
+                <div className="bet62-impact-ring ring-2" style={{ left: `${displayBall.x}%`, top: `${displayBall.y}%` }} />
+                <div className="bet62-impact-ring" style={{ left: `${displayBall.x}%`, top: `${displayBall.y}%` }} />
               </>
             )}
             <div
               className={`bet62-ball ${goalFlash ? "ball-goal" : ""}`}
-              style={{ left: `${ball.x}%`, top: `${ball.y}%` }}
+              style={{ left: `${displayBall.x}%`, top: `${displayBall.y}%` }}
             >
               ⚽
             </div>

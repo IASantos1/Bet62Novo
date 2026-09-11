@@ -187,6 +187,23 @@ const PULSESCORE_MIN_REQUEST_INTERVAL_MS =
 const PULSESCORE_WS_URL =
   process.env["PULSESCORE_WS_URL"]?.trim() || "wss://api.pulsescore.net/api/onexbet/ws/live";
 
+// sports.bzzoiro.com — dedicated real ball-position provider (2026-09-11),
+// added specifically to drive the mini pitch tracker's ball movement with
+// real x/y coordinates instead of a text-derived zone guess. Confirmed real
+// via the user's own captured REST (`/events/`, `/events/:id/stats/`) and
+// WebSocket (`livedata`/`action` frames with real per-play coordinates)
+// responses the same day. Auth is `Authorization: Token <key>` for REST and
+// a `?token=` query param for the WebSocket (confirmed working against a
+// real match, live-tested by the user 2026-09-11). This is strictly
+// additive: GOAL API remains the source of score/commentary/stats, and
+// PulseScore remains the sole live football odds source — this provider
+// only ever supplies `_ballPosition` on LiveMatchState, nothing else.
+const BZZOIRO_API_KEY = process.env["BZZOIRO_API_KEY"] ?? "";
+const BZZOIRO_BASE_URL =
+  process.env["BZZOIRO_BASE_URL"]?.trim() || "https://sports.bzzoiro.com/api/v2";
+const BZZOIRO_WS_URL =
+  process.env["BZZOIRO_WS_URL"]?.trim() || "wss://sports.bzzoiro.com/live/football/";
+
 // Football (soccer) provider selection knobs — two independent switches so
 // we can mix-and-match sources without code changes, and A/B the best
 // provider for each job independently. These are NOW the SOURCE OF TRUTH
@@ -264,6 +281,9 @@ export const CONFIG = {
   PULSESCORE_BASE_URL,
   PULSESCORE_MIN_REQUEST_INTERVAL_MS,
   PULSESCORE_WS_URL,
+  BZZOIRO_API_KEY,
+  BZZOIRO_BASE_URL,
+  BZZOIRO_WS_URL,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_ODDS_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,

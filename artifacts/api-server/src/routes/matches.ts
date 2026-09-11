@@ -500,6 +500,21 @@ export type LiveMatchState = {
   // queue and replay every truly-new line across polls, not just the one
   // that happens to be newest at fetch time.
   _commentary?: Array<{ id: string; time: string; text: string }>;
+  // Real ball position (football only) — sports.bzzoiro.com's WebSocket
+  // `livedata` frame, confirmed real via a user-captured live connection
+  // 2026-09-11. Only ever written by providers/bzzoiro/ballMatchSync.ts's
+  // WS handler (directly into liveMatchState, independent of this file's
+  // own GOAL API poll cycle) once that fixture has been matched to a
+  // bzzoiro live event — same "written elsewhere, must be explicitly
+  // preserved through the next GOAL API rebuild" pattern as _priceSource,
+  // see buildFootballLiveFromGoalApi's object literal. x/y are 0-100,
+  // same "home defends 0, home attacks 100" orientation as
+  // FootballPitchTracker's own zoneForAction (see bzzoiro's types.ts for
+  // the caveat on this being an inferred, not confirmed, orientation).
+  // Absent entirely until a match is found; the frontend falls back to
+  // its existing commentary-derived zone guess whenever this is missing
+  // or stale.
+  _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -8188,6 +8203,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       events: matchEvents,
       matchStats,
       _commentary: commentary,
+      _ballPosition: existing?._ballPosition,
       redCardsHome,
       redCardsAway,
       _providerReferenceOdds: providerReferenceOdds,
