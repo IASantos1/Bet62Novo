@@ -340,20 +340,23 @@ export default function FootballPitchTracker({
 
         {view === "h2h" && (
           <div className="bet62-mini-panel">
-            {lastThreeMeetings.length === 0 ? (
-              <div className="bet62-mini-empty">Sem confrontos recentes registados.</div>
-            ) : (
-              <div className="bet62-mini-h2h">
-                {lastThreeMeetings.map((m, i) => (
-                  <div key={`${m.date}-${i}`} className="bet62-mini-h2h-row">
-                    <span className="bet62-mini-h2h-date">{m.date || "—"}</span>
-                    <span className="bet62-mini-h2h-score">
-                      {m.team1} <strong>{m.score1} - {m.score2}</strong> {m.team2}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="bet62-mini-h2h-wrap">
+              <div className="bet62-mini-h2h-label">H2H Direto</div>
+              {lastThreeMeetings.length === 0 ? (
+                <div className="bet62-mini-empty">Sem confrontos recentes registados.</div>
+              ) : (
+                <div className="bet62-mini-h2h">
+                  {lastThreeMeetings.map((m, i) => (
+                    <div key={`${m.date}-${i}`} className="bet62-mini-h2h-row">
+                      <span className="bet62-mini-h2h-date">{m.date || "—"}</span>
+                      <span className="bet62-mini-h2h-score">
+                        {m.team1} <strong>{m.score1} - {m.score2}</strong> {m.team2}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -536,6 +539,8 @@ const PITCH_TRACKER_CSS = `
 .bet62-mini-stat-bar { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: #232326; }
 .bet62-mini-stat-bar-home { background: #ff5050; }
 .bet62-mini-stat-bar-away { background: #5096ff; }
+.bet62-mini-h2h-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.bet62-mini-h2h-label { color: #888; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; }
 .bet62-mini-h2h { width: 100%; display: flex; flex-direction: column; gap: 10px; }
 .bet62-mini-h2h-row { display: flex; flex-direction: column; gap: 2px; font-size: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 8px; }
 .bet62-mini-h2h-date { color: #666; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -595,6 +600,7 @@ html.light-mode .bet62-mini-stat-labels span:first-child,
 html.light-mode .bet62-mini-stat-labels span:last-child { color: #18181b; }
 html.light-mode .bet62-mini-stat-name { color: #71717a; }
 html.light-mode .bet62-mini-stat-bar { background: #dadadd; }
+html.light-mode .bet62-mini-h2h-label { color: #71717a; }
 html.light-mode .bet62-mini-h2h-row { border-color: #e4e4e7; }
 html.light-mode .bet62-mini-h2h-date { color: #a1a1aa; }
 html.light-mode .bet62-mini-h2h-score { color: #3f3f46; }
