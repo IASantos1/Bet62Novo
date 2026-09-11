@@ -408,6 +408,65 @@ export type GoalApiResultsStats = {
   mostCommonScore?: { score: string; count: number; percentage: number } | null;
 };
 
+/** One row of /h2h/:id1/:id2's directMatches/team1Recent/team2Recent
+ * arrays — confirmed real 2026-09-11 via a user-captured live response.
+ * Note the team ids here (match_hometeam_id/match_awayteam_id, e.g.
+ * "9446") are a DIFFERENT id scheme from this provider's own canonical
+ * team ids used everywhere else in this app (team1Id/team2Id below,
+ * fx.homeTeam.id, etc. — long cuid-style strings) — apifootball.com's
+ * legacy numeric ids, carried through from whatever upstream source GOAL
+ * API itself aggregates this from. Never compare these against our own
+ * homeTeamId/awayTeamId; match by team name instead (see
+ * buildGoalApiConfrontos). Scores are numeric strings, "" before a match
+ * kicks off. */
+export type GoalApiH2HMatch = {
+  match_id?: string;
+  league_id?: string;
+  country_id?: string;
+  match_date: string;
+  match_live?: string;
+  match_time?: string;
+  league_logo?: string;
+  league_name?: string;
+  country_logo?: string;
+  country_name?: string;
+  match_status?: string;
+  team_away_badge?: string;
+  team_home_badge?: string;
+  match_awayteam_id?: string;
+  match_hometeam_id?: string;
+  match_awayteam_name: string;
+  match_hometeam_name: string;
+  match_awayteam_score?: string;
+  match_hometeam_score?: string;
+  match_awayteam_halftime_score?: string;
+  match_hometeam_halftime_score?: string;
+};
+
+/** /h2h/:id1/:id2's real response shape — confirmed real 2026-09-11.
+ * team1Id/team2Id ARE this provider's own canonical team ids (the same
+ * scheme as fx.homeTeam.id elsewhere), but the URL's own two path
+ * segments don't reliably land in that same order in the response (a
+ * user-captured real call had them swapped) — so team1/team2 orientation
+ * must always be read back from this object, never assumed from call
+ * order. directMatches is the real head-to-head history; team1Recent/
+ * team2Recent are each team's own recent form (not head-to-head), same
+ * data buildGoalApiForm already gets from /teams/:id/results — unused
+ * here since that's already covered. */
+export type GoalApiH2HResult = {
+  id?: string;
+  team1Id: string;
+  team1Name: string;
+  team2Id: string;
+  team2Name: string;
+  lastUpdated?: string;
+  directMatches: GoalApiH2HMatch[];
+  team1Recent?: GoalApiH2HMatch[];
+  team2Recent?: GoalApiH2HMatch[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 const GOAL_API_TTL = {
   FIXTURES: 60,
   LIVE: 10,
@@ -430,6 +489,12 @@ const GOAL_API_TTL = {
   // brand-new commentary content arrive faster than the provider itself
   // produces it, which stays ~2min between real updates regardless.
   COMMENTARY: 3,
+  // /h2h/:id1/:id2 (confirmed real 2026-09-11 — user-captured live
+  // response) is GOAL API's own pre-computed, database-cached head-to-head
+  // record ("source": "database" in the response) — its own lastUpdated/
+  // createdAt fields lag real time by weeks in the captured sample, so this
+  // is genuinely low-churn historical data, not a live feed.
+  H2H: 3600,
 };
 
 export class GoalApiClient {
@@ -601,6 +666,19 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiTeamResults>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
+  /** /h2h/:id1/:id2 — real, dedicated head-to-head endpoint (confirmed
+   * real 2026-09-11, user-captured live response). Superseded a previous
+   * pass of buildGoalApiConfrontos that had to fake this by filtering one
+   * team's own /results for the opponent's name — this is the real thing,
+   * with actual past meetings between exactly these two teams. */
+  getH2H(teamId1: string, teamId2: string): Promise<GoalApiH2HResult> {
+    return this.cachedGet<GoalApiH2HResult>(
+      `/h2h/${encodeURIComponent(teamId1)}/${encodeURIComponent(teamId2)}`,
+      undefined,
+      GOAL_API_TTL.H2H,
+    );
+  }
+
   // ── Results ──────────────────────────────────────────────────────────────
 
   /** /results/today and /results/yesterday — confirmed real 2026-09-09.
@@ -718,6 +796,7 @@ export const goalApi = {
   getLeagueStandingsZones: (leagueId: string) => getGoalApiClient().getLeagueStandingsZones(leagueId),
   getTeamUpcoming: (teamId: string) => getGoalApiClient().getTeamUpcoming(teamId),
   getTeamResults: (teamId: string) => getGoalApiClient().getTeamResults(teamId),
+  getH2H: (teamId1: string, teamId2: string) => getGoalApiClient().getH2H(teamId1, teamId2),
   getResultsToday: () => getGoalApiClient().getResultsToday(),
   getResultsYesterday: () => getGoalApiClient().getResultsYesterday(),
   getResultsStats: () => getGoalApiClient().getResultsStats(),
