@@ -414,7 +414,15 @@ const GOAL_API_TTL = {
   ODDS: 120,
   PREDICTIONS: 300,
   STATISTICS: 30,
-  COMMENTARY: 20,
+  // The provider's own commentary feed batches new rows on a fixed ~120s
+  // cadence internally — confirmed from a real captured response
+  // (2026-09-11): every row's createdAt lands in a cluster exactly 120s
+  // apart from the next cluster (11:04:06, 11:06:06, 11:08:06, ...), never
+  // in between. A shorter TTL than that just re-fetches the same batch
+  // from the provider — 110s (just under the batch cadence) still catches
+  // every new batch within one poll while cutting call volume ~5.5x vs the
+  // previous 20s.
+  COMMENTARY: 110,
 };
 
 export class GoalApiClient {
