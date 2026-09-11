@@ -59,6 +59,7 @@ import {
   goalApiKickoffDateTime,
   buildGoalApiMatchStats,
   buildGoalApiEvents,
+  buildGoalApiCommentary,
   buildGoalApiLineups,
   buildGoalApiTopScorers,
   buildGoalApiTeamUpcoming,
@@ -488,6 +489,13 @@ export type LiveMatchState = {
   // renderer (home.tsx's V2StatsGroup type, previously fed by the deleted
   // SportsAPI Pro V2 integration and always empty since).
   matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
+  // Live text commentary feed (football/GOAL API only) — free-text
+  // play-by-play narration ("Long An in possession", "PVF-CAND dangerous
+  // attack"), distinct from the structured `events` array above. Sourced
+  // from GOAL API's /fixtures/:id/commentary (confirmed real 2026-09-11 via
+  // a user-captured live response). Newest-first, capped at 40 entries —
+  // see buildGoalApiCommentary.
+  _commentary?: Array<{ time: string; text: string }>;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -8028,6 +8036,15 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       /* keep previous stats if unavailable this tick */
     }
 
+    let commentary: LiveMatchState["_commentary"] = existing?._commentary;
+    try {
+      const commentaryRows = await goalApi.getFixtureCommentary(fx.id);
+      const builtCommentary = buildGoalApiCommentary(commentaryRows);
+      if (builtCommentary.length > 0) commentary = builtCommentary;
+    } catch {
+      /* keep previous commentary if unavailable this tick */
+    }
+
     const newRedCard =
       !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
     const goalScored = !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
@@ -8166,6 +8183,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       _priceSource: wasPulseBefore ? existing?._priceSource : undefined,
       events: matchEvents,
       matchStats,
+      _commentary: commentary,
       redCardsHome,
       redCardsAway,
       _providerReferenceOdds: providerReferenceOdds,

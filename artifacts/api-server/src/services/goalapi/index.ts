@@ -105,6 +105,24 @@ export type GoalApiPrediction = {
   updatedAt?: string;
 };
 
+/** /fixtures/:id/commentary's real item shape — confirmed real 2026-09-11
+ * via a user-captured live response (102 rows on a Vietnamese 2nd-division
+ * match at minute 63). Free-text play-by-play narration ("Long An in
+ * possession", "PVF-CAND dangerous attack", "Long An goal"), one row every
+ * ~20-90s — distinct from GoalApiMatchEvent, which only covers structured
+ * goal/card/sub rows. "time" here is "MM:SS" elapsed match clock (not the
+ * same format as GoalApiMatchEvent.time's bare "3"/"45+2"). Rows arrive
+ * oldest-first in the array. */
+export type GoalApiCommentaryEntry = {
+  id?: string;
+  matchApiId?: string;
+  fixtureId?: string;
+  time: string;
+  text: string;
+  state?: string;
+  createdAt?: string;
+};
+
 /** /fixtures/:id/events's real item shape — confirmed via the same
  * "events" array embedded per-fixture on /fixtures/live (raw response
  * pasted 2026-09-09); the canonical Event DTO this provider reuses
@@ -396,6 +414,7 @@ const GOAL_API_TTL = {
   ODDS: 120,
   PREDICTIONS: 300,
   STATISTICS: 30,
+  COMMENTARY: 20,
 };
 
 export class GoalApiClient {
@@ -487,6 +506,14 @@ export class GoalApiClient {
 
   getFixtureById(id: string): Promise<GoalApiFixture> {
     return this.cachedGet<GoalApiFixture>(`/fixtures/${encodeURIComponent(id)}`, undefined, GOAL_API_TTL.LIVE);
+  }
+
+  getFixtureCommentary(id: string): Promise<GoalApiCommentaryEntry[]> {
+    return this.cachedGet<GoalApiCommentaryEntry[]>(
+      `/fixtures/${encodeURIComponent(id)}/commentary`,
+      undefined,
+      GOAL_API_TTL.COMMENTARY,
+    );
   }
 
   getFixtureEvents(id: string): Promise<GoalApiMatchEvent[]> {
@@ -667,6 +694,7 @@ export const goalApi = {
   getFixturesByDate: (date: string) => getGoalApiClient().getFixturesByDate(date),
   getFixtureById: (id: string) => getGoalApiClient().getFixtureById(id),
   getFixtureEvents: (id: string) => getGoalApiClient().getFixtureEvents(id),
+  getFixtureCommentary: (id: string) => getGoalApiClient().getFixtureCommentary(id),
   getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
