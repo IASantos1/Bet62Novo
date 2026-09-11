@@ -518,6 +518,12 @@ export type LiveMatchState = {
   // apart from one side just never having had a real market price to
   // begin with — see PulseScore's odds shadow-compare (shadowMatchSync.ts).
   _baseOddsAreReal?: boolean;
+  // Debounced score-decrease guard (football/GOAL API only) — a candidate
+  // lower score seen once, held back from display until the same value
+  // repeats on the very next poll (see buildFootballLiveFromGoalApi).
+  // Cleared once the pending value is confirmed or superseded.
+  _pendingScoreHome?: number;
+  _pendingScoreAway?: number;
   // Set once a live football fixture's odds/markets are being driven by a
   // real PulseScore price instead of GOAL API's synthetic Poisson fallback
   // (see shadowMatchSync.ts's runOddsComparisonPhase, the only writer of
@@ -7950,9 +7956,9 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const home = stripGenderTeamSuffix(fx.homeTeam?.name);
     const away = stripGenderTeamSuffix(fx.awayTeam?.name);
     if (!home || !away) continue;
-    const homeScore = Number(fx.homeTeamScore);
-    const awayScore = Number(fx.awayTeamScore);
-    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
+    const rawHomeScore = Number(fx.homeTeamScore);
+    const rawAwayScore = Number(fx.awayTeamScore);
+    if (!Number.isFinite(rawHomeScore) || !Number.isFinite(rawAwayScore)) continue;
     canonicalInputs.push({
       sport: "football",
       provider: "goalapi",
@@ -7969,6 +7975,34 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const existing = liveMatchState.get(id);
     const baseOdds = makeOddsFromTeams(home, away);
     const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+    // Debounced score-decrease guard (user-reported 2026-09-11, same
+    // provider-poll-glitch pattern as the minute/priceSource bugs fixed
+    // earlier this session): GOAL API occasionally returns a fixture's
+    // score one goal lower than what it already confirmed, then corrects
+    // itself on the very next poll — screenshots showed 2-1 dropping to
+    // 1-1 for exactly one cycle while the minute clock kept advancing,
+    // then recovering back to 2-1. A hard "never decreases" floor would
+    // also hide a genuine VAR-overturned goal forever, so instead this
+    // requires the SAME lower total to be seen on two consecutive polls
+    // before accepting it — a real overturn still lands within one extra
+    // ~10s cycle, but a one-off glitch never gets shown at all.
+    const existingTotal = (existing?.homeScore ?? 0) + (existing?.awayScore ?? 0);
+    const rawTotal = rawHomeScore + rawAwayScore;
+    let homeScore = rawHomeScore;
+    let awayScore = rawAwayScore;
+    let pendingScoreHome: number | undefined;
+    let pendingScoreAway: number | undefined;
+    if (rawTotal < existingTotal) {
+      const confirmed =
+        existing?._pendingScoreHome === rawHomeScore && existing?._pendingScoreAway === rawAwayScore;
+      if (!confirmed) {
+        homeScore = existing!.homeScore;
+        awayScore = existing!.awayScore;
+        pendingScoreHome = rawHomeScore;
+        pendingScoreAway = rawAwayScore;
+      }
+    }
 
     let redCardsHome = existing?.redCardsHome ?? 0;
     let redCardsAway = existing?.redCardsAway ?? 0;
@@ -8088,6 +8122,8 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore: homeScore as number,
       awayScore: awayScore as number,
+      _pendingScoreHome: pendingScoreHome,
+      _pendingScoreAway: pendingScoreAway,
       // Monotonic floor: estimateGoalApiLiveMinute derives the minute from
       // fx.kickoffUtc/matchStatus fresh on every poll, with no memory of
       // what was shown last cycle. Real matches confirmed this session
