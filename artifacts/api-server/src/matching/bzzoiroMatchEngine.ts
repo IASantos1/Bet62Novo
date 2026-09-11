@@ -4,9 +4,11 @@
 // module rather than generalizing that one: bzzoiro's candidate pool is
 // always LIVE-ONLY and small (this app only ever calls it with fixtures
 // that are already live on the GOAL API side too), so the name-similarity
-// floor alone already carries almost all the discriminating power — no
-// league-name signal is used here (bzzoiro's league field isn't fetched by
-// this integration at all, see client.ts).
+// floor alone already carries almost all the discriminating power — the
+// real live pool is a handful of matches at a time (confirmed 2026-09-11:
+// GET /events/live/ returned 4 rows globally), so a league-name signal
+// isn't needed for discrimination even though league_id/league_name are
+// available on BzzoiroEvent.
 import { nameSimilarity } from "./teamNameMatch.js";
 import type { GoalApiFixtureRef } from "./footballMatchEngine.js";
 import type { BzzoiroEvent } from "../providers/bzzoiro/types.js";
@@ -68,7 +70,11 @@ export function matchGoalApiFixtureToBzzoiro(
 ): BzzoiroMatchCandidate | null {
   let best: BzzoiroMatchCandidate | null = null;
   for (const ev of bzzoiroEvents) {
-    if (ev.status !== "live") continue;
+    // "inprogress" is bzzoiro's real in-progress status string (confirmed
+    // 2026-09-11 via a real /events/live/ response) — NOT "live", which
+    // never actually appears in that field.
+    if (ev.status !== "inprogress") continue;
+    if (!ev.live_websocket) continue; // no point matching a fixture we can never subscribe to
     const candidate = scoreCandidate(fixture, ev);
     if (!candidate) continue;
     if (!best || candidate.confidence > best.confidence) best = candidate;
