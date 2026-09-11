@@ -414,15 +414,22 @@ const GOAL_API_TTL = {
   ODDS: 120,
   PREDICTIONS: 300,
   STATISTICS: 30,
-  // The provider's own commentary feed batches new rows on a fixed ~120s
-  // cadence internally — confirmed from a real captured response
-  // (2026-09-11): every row's createdAt lands in a cluster exactly 120s
-  // apart from the next cluster (11:04:06, 11:06:06, 11:08:06, ...), never
-  // in between. A shorter TTL than that just re-fetches the same batch
-  // from the provider — 110s (just under the batch cadence) still catches
-  // every new batch within one poll while cutting call volume ~5.5x vs the
-  // previous 20s.
-  COMMENTARY: 110,
+  // Lowered back down 2026-09-11 per explicit user request: the mini pitch
+  // tracker's ball position is driven straight off this field, and a
+  // 110s TTL made it visibly lag ~40s+ behind the rest of the live match
+  // data (score/minute), which polls every 2-3s. 3s keeps commentary on
+  // the same freshness budget as everything else.
+  //
+  // Important caveat this doesn't change: the provider's own commentary
+  // feed only WRITES new rows on a fixed ~120s cadence internally —
+  // confirmed from a real captured response (2026-09-11), every row's
+  // createdAt lands in a cluster exactly 120s apart from the next cluster
+  // (11:04:06, 11:06:06, 11:08:06, ...), never in between. A short TTL
+  // here only removes OUR added latency (so a genuinely new line shows up
+  // within ~3s of existing instead of up to 110s later) — it can't make
+  // brand-new commentary content arrive faster than the provider itself
+  // produces it, which stays ~2min between real updates regardless.
+  COMMENTARY: 3,
 };
 
 export class GoalApiClient {
