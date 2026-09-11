@@ -80,6 +80,8 @@ import {
   apiTennis,
   type ApiTennisMatch,
   type ApiTennisStanding,
+  type ApiTennisOddsResult,
+  type ApiTennisLiveOddsResult,
   type ApiTennisLiveOddsEntry,
   type ApiTennisPointByPointGame,
 } from "../services/apitennis/index.js";
@@ -8374,6 +8376,18 @@ async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
     .catch(() => [] as ApiTennisMatch[]);
   logger.info({ count: fixtures.length }, "[api-tennis] tennis upcoming raw fixture count");
 
+  // One bulk get_odds call for the whole date range instead of one call per
+  // fixture — match_key is optional (ApiTennisOddsResult is already a
+  // Record<eventKey, ...>, same dict-of-all-matches shape get_livescore()
+  // returns), so the per-fixture version below was making as many REST
+  // calls as there were upcoming fixtures (up to hundreds over a 7-day
+  // window) every time this cache entry expired — the single largest
+  // contributor to burning through the api-tennis.com request quota far
+  // faster than expected (user-reported 2026-09-11).
+  const bulkOdds = await apiTennis
+    .getOdds({ date_start: dateStart, date_stop: dateStop })
+    .catch(() => ({}) as ApiTennisOddsResult);
+
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
   for (const fx of fixtures) {
@@ -8386,13 +8400,8 @@ async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
     seen.add(key);
 
     let resultOdds: { home: number; draw: number; away: number } | null = null;
-    try {
-      const oddsResult = await apiTennis.getOdds({ match_key: fx.event_key });
-      const candidate = extractApiTennisMoneyline(oddsResult[fx.event_key]?.["Home/Away"]);
-      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
-    } catch {
-      /* no odds yet for this fixture — synthetic fallback below */
-    }
+    const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
+    if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
 
     // De-vig the real price into a probability so computeTennisExtras'
     // whole market grid (set betting, exact sets, total games, ...) stays
@@ -8446,6 +8455,24 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
 
+  // One bulk get_odds/get_live_odds call for every live match instead of
+  // two REST calls per match per tick — same fix and same reason as
+  // buildTennisUpcomingFromApiTennis above (match_key is optional on both
+  // endpoints; each already returns a dict keyed by event_key, the same
+  // shape get_livescore() already returns for every live match in one
+  // call). With N concurrently live tennis matches this was 2N REST calls
+  // per tick; now it's 2 regardless of N. get_odds is scoped to today's
+  // date (unlike get_live_odds, its params lead with date_start/date_stop,
+  // and a live match's odds entry is under today's date) rather than
+  // called with zero params, to avoid relying on undocumented default
+  // range behavior for an endpoint this codebase has only ever called
+  // with an explicit scope so far.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const bulkOdds = await apiTennis
+    .getOdds({ date_start: todayStr, date_stop: todayStr })
+    .catch(() => ({}) as ApiTennisOddsResult);
+  const bulkLiveOdds = await apiTennis.getLiveOdds().catch(() => ({}) as ApiTennisLiveOddsResult);
+
   for (const fx of matches) {
     const home = fx.event_first_player;
     const away = fx.event_second_player;
@@ -8497,22 +8524,12 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     const serving = parseApiTennisServer(liveFx.event_serve);
 
     let resultOdds: { home: number; draw: number; away: number } | null = null;
-    try {
-      const oddsResult = await apiTennis.getOdds({ match_key: fx.event_key });
-      const candidate = extractApiTennisMoneyline(oddsResult[fx.event_key]?.["Home/Away"]);
-      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
-    } catch {
-      /* no real odds this tick — keep whatever anchor already exists */
-    }
+    const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
+    if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
 
     let liveOddsRef: ApiTennisLiveOddsEntry[] | undefined = existing?._apiTennisLiveOddsRef;
-    try {
-      const liveOddsResult = await apiTennis.getLiveOdds({ match_key: fx.event_key });
-      const entry = liveOddsResult[fx.event_key];
-      if (entry?.live_odds) liveOddsRef = entry.live_odds;
-    } catch {
-      /* no live odds this tick — keep whatever reference already exists */
-    }
+    const liveOddsEntry = bulkLiveOdds[fx.event_key];
+    if (liveOddsEntry?.live_odds) liveOddsRef = liveOddsEntry.live_odds;
 
     const syntheticP = apiTennisSyntheticP(home, away);
     const baseOdds = makeTennisMoneylineFromP(syntheticP);
