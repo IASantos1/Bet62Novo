@@ -9809,7 +9809,8 @@ export default function Home({
             isWCVariant
               ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white")
               : "bg-zinc-800/40 border-zinc-700/30 opacity-70"
-          } cursor-not-allowed select-none`}
+          } select-none`}
+          title="Aguardando preço real da PulseScore para este jogo"
         >
           <span
             className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-zinc-500" : "text-[10px] leading-none opacity-50"}`}
