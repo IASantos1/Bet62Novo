@@ -443,28 +443,33 @@ export type GoalApiH2HMatch = {
   match_hometeam_halftime_score?: string;
 };
 
-/** /h2h/:id1/:id2's real response shape — confirmed real 2026-09-11.
- * team1Id/team2Id ARE this provider's own canonical team ids (the same
+/** /h2h/:id1/:id2/direct's real response shape — confirmed real
+ * 2026-09-11 via a second user-captured live response, which corrected an
+ * earlier (wrong) capture this client was first built against: the real
+ * endpoint needs the trailing /direct segment, team1/team2 are nested
+ * {id,name} objects (not flat team1Id/team1Name), and the match list is
+ * `matches` (not `directMatches`) — team1Recent/team2Recent never existed.
+ * team1.id/team2.id ARE this provider's own canonical team ids (the same
  * scheme as fx.homeTeam.id elsewhere), but the URL's own two path
  * segments don't reliably land in that same order in the response (a
  * user-captured real call had them swapped) — so team1/team2 orientation
  * must always be read back from this object, never assumed from call
- * order. directMatches is the real head-to-head history; team1Recent/
- * team2Recent are each team's own recent form (not head-to-head), same
- * data buildGoalApiForm already gets from /teams/:id/results — unused
- * here since that's already covered. */
+ * order. */
 export type GoalApiH2HResult = {
-  id?: string;
-  team1Id: string;
-  team1Name: string;
-  team2Id: string;
-  team2Name: string;
+  team1: { id: string; name: string };
+  team2: { id: string; name: string };
+  matches: GoalApiH2HMatch[];
+  count?: number;
+  statistics?: {
+    totalMatches: number;
+    team1Wins: number;
+    team2Wins: number;
+    draws: number;
+    team1Goals: number;
+    team2Goals: number;
+    averageGoals: number;
+  };
   lastUpdated?: string;
-  directMatches: GoalApiH2HMatch[];
-  team1Recent?: GoalApiH2HMatch[];
-  team2Recent?: GoalApiH2HMatch[];
-  createdAt?: string;
-  updatedAt?: string;
 };
 
 const GOAL_API_TTL = {
@@ -666,14 +671,15 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiTeamResults>(`/teams/${encodeURIComponent(teamId)}/results`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
-  /** /h2h/:id1/:id2 — real, dedicated head-to-head endpoint (confirmed
-   * real 2026-09-11, user-captured live response). Superseded a previous
-   * pass of buildGoalApiConfrontos that had to fake this by filtering one
-   * team's own /results for the opponent's name — this is the real thing,
-   * with actual past meetings between exactly these two teams. */
+  /** /h2h/:id1/:id2/direct — real, dedicated head-to-head endpoint
+   * (confirmed real 2026-09-11, user-captured live response). Superseded a
+   * previous pass of buildGoalApiConfrontos that had to fake this by
+   * filtering one team's own /results for the opponent's name — this is
+   * the real thing, with actual past meetings between exactly these two
+   * teams. */
   getH2H(teamId1: string, teamId2: string): Promise<GoalApiH2HResult> {
     return this.cachedGet<GoalApiH2HResult>(
-      `/h2h/${encodeURIComponent(teamId1)}/${encodeURIComponent(teamId2)}`,
+      `/h2h/${encodeURIComponent(teamId1)}/${encodeURIComponent(teamId2)}/direct`,
       undefined,
       GOAL_API_TTL.H2H,
     );

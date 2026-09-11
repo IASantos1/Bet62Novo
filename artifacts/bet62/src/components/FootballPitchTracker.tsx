@@ -340,20 +340,23 @@ export default function FootballPitchTracker({
 
         {view === "h2h" && (
           <div className="bet62-mini-panel">
-            {lastThreeMeetings.length === 0 ? (
-              <div className="bet62-mini-empty">Sem confrontos recentes registados.</div>
-            ) : (
-              <div className="bet62-mini-h2h">
-                {lastThreeMeetings.map((m, i) => (
-                  <div key={`${m.date}-${i}`} className="bet62-mini-h2h-row">
-                    <span className="bet62-mini-h2h-date">{m.date || "—"}</span>
-                    <span className="bet62-mini-h2h-score">
-                      {m.team1} <strong>{m.score1} - {m.score2}</strong> {m.team2}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="bet62-mini-h2h-wrap">
+              <div className="bet62-mini-h2h-label">H2H Direto</div>
+              {lastThreeMeetings.length === 0 ? (
+                <div className="bet62-mini-empty">Sem confrontos recentes registados.</div>
+              ) : (
+                <div className="bet62-mini-h2h">
+                  {lastThreeMeetings.map((m, i) => (
+                    <div key={`${m.date}-${i}`} className="bet62-mini-h2h-row">
+                      <span className="bet62-mini-h2h-date">{m.date || "—"}</span>
+                      <span className="bet62-mini-h2h-score">
+                        {m.team1} <strong>{m.score1} - {m.score2}</strong> {m.team2}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -536,6 +539,8 @@ const PITCH_TRACKER_CSS = `
 .bet62-mini-stat-bar { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: #232326; }
 .bet62-mini-stat-bar-home { background: #ff5050; }
 .bet62-mini-stat-bar-away { background: #5096ff; }
+.bet62-mini-h2h-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.bet62-mini-h2h-label { color: #888; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; }
 .bet62-mini-h2h { width: 100%; display: flex; flex-direction: column; gap: 10px; }
 .bet62-mini-h2h-row { display: flex; flex-direction: column; gap: 2px; font-size: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 8px; }
 .bet62-mini-h2h-date { color: #666; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -558,6 +563,52 @@ const PITCH_TRACKER_CSS = `
 .bet62-tab-btn:last-child { border-right: none; }
 .bet62-tab-btn:hover { color: #ccc; }
 .bet62-tab-btn.active { color: #fff; background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 -2px 0 #dc2626; }
+
+/* LIGHT MODE — same html.light-mode convention as the rest of the app
+ * (see src/lib/theme.ts + src/index.css). The pitch turf itself stays
+ * green in both themes (it's a real field, not chrome); only the card
+ * chrome around it (header, wrapper background, side panels, badges,
+ * tab bar) flips to a light palette. */
+html.light-mode .bet62-tracker {
+  background: #ffffff;
+  color: #18181b;
+  border-color: #e4e4e7;
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.08);
+}
+html.light-mode .bet62-tracker-header {
+  background: #f5f5f7;
+  border-color: #e4e4e7;
+}
+html.light-mode .bet62-score span { color: #a1a1aa; }
+html.light-mode .bet62-pitch-wrapper {
+  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.03), transparent 65%), #f5f5f7;
+}
+html.light-mode .bet62-event-badge {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  color: #18181b;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+html.light-mode .bet62-event-badge small { color: #71717a; }
+html.light-mode .event-goal { border-color: #be0014; background: rgba(190, 0, 20, 0.94); color: #fff; }
+html.light-mode .bet62-mini-panel {
+  border-color: #e4e4e7;
+  background: #f5f5f7;
+}
+html.light-mode .bet62-mini-empty { color: #71717a; }
+html.light-mode .bet62-mini-stat-labels span:first-child,
+html.light-mode .bet62-mini-stat-labels span:last-child { color: #18181b; }
+html.light-mode .bet62-mini-stat-name { color: #71717a; }
+html.light-mode .bet62-mini-stat-bar { background: #dadadd; }
+html.light-mode .bet62-mini-h2h-label { color: #71717a; }
+html.light-mode .bet62-mini-h2h-row { border-color: #e4e4e7; }
+html.light-mode .bet62-mini-h2h-date { color: #a1a1aa; }
+html.light-mode .bet62-mini-h2h-score { color: #3f3f46; }
+html.light-mode .bet62-mini-h2h-score strong { color: #18181b; }
+html.light-mode .bet62-tab-row { border-color: #e4e4e7; }
+html.light-mode .bet62-tab-btn { color: #a1a1aa; border-color: #e4e4e7; }
+html.light-mode .bet62-tab-btn:hover { color: #3f3f46; }
+html.light-mode .bet62-tab-btn.active { color: #18181b; background: rgba(0, 0, 0, 0.04); }
 @keyframes bet62TrailPulse {
   0% { opacity: 0.25; transform: translate(-50%, -50%) scaleX(0.7) rotate(-18deg); }
   50% { opacity: 0.85; transform: translate(-50%, -50%) scaleX(1) rotate(-18deg); }

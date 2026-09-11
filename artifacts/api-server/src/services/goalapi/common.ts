@@ -482,20 +482,20 @@ export type BuiltGoalApiConfrontosMeeting = {
 };
 
 /** Derives head-to-head history for the /confrontos route from GOAL API's
- * real /h2h/:id1/:id2 endpoint (confirmed real 2026-09-11 — a user-
- * captured live response finally proved this app's earlier assumption
- * wrong: GOAL API DOES have a dedicated H2H endpoint, this app just
- * hadn't found it yet. Superseded an earlier pass of this function that
- * faked H2H by filtering one team's own /teams/:id/results for the
+ * real /h2h/:id1/:id2/direct endpoint (confirmed real 2026-09-11 — a
+ * user-captured live response finally proved this app's earlier
+ * assumption wrong: GOAL API DOES have a dedicated H2H endpoint, this app
+ * just hadn't found it yet. Superseded an earlier pass of this function
+ * that faked H2H by filtering one team's own /teams/:id/results for the
  * opponent's name — kept as a comment here only for context, not as a
- * fallback, since directMatches is strictly better data).
+ * fallback, since real matches is strictly better data).
  *
- * directMatches' own match_hometeam_id/match_awayteam_id use a DIFFERENT
- * id scheme than this provider's canonical team ids (see GoalApiH2HMatch's
+ * matches' own match_hometeam_id/match_awayteam_id use a DIFFERENT id
+ * scheme than this provider's canonical team ids (see GoalApiH2HMatch's
  * doc comment) — orientation is instead resolved by matching each row's
  * match_hometeam_name/match_awayteam_name (normalized) against whichever
- * of the outer response's team1Name/team2Name corresponds to homeTeamId
- * (a reliable comparison — team1Id/team2Id in the outer object ARE the
+ * of the outer response's team1.name/team2.name corresponds to homeTeamId
+ * (a reliable comparison — team1.id/team2.id in the outer object ARE the
  * canonical scheme). A row that matches neither name is skipped rather
  * than guessed at. */
 export function buildGoalApiConfrontos(
@@ -510,10 +510,11 @@ export function buildGoalApiConfrontos(
   const recentMeetings: BuiltGoalApiConfrontosMeeting[] = [];
   if (!h2h) return { homeWins, awayWins, draws, recentMeetings };
 
-  const homeLabel = h2h.team1Id === homeTeamId ? h2h.team1Name : h2h.team2Id === homeTeamId ? h2h.team2Name : homeName;
+  const homeLabel =
+    h2h.team1?.id === homeTeamId ? h2h.team1.name : h2h.team2?.id === homeTeamId ? h2h.team2.name : homeName;
   const homeKey = normalizeGoalApiTeamName(homeLabel);
 
-  for (const m of h2h.directMatches ?? []) {
+  for (const m of h2h.matches ?? []) {
     const hs = Number(m.match_hometeam_score);
     const as = Number(m.match_awayteam_score);
     if (!Number.isFinite(hs) || !Number.isFinite(as)) continue; // unplayed/invalid row
