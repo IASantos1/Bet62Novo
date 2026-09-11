@@ -412,4 +412,52 @@ router.get("/shadow-status-snapshot", (_req: Request, res: Response) => {
   );
 });
 
+// Pure read — does GOAL API's own daily-fixture feed actually carry Japan /
+// South Korea / China leagues today? Answers that empirically instead of
+// guessing from the local priority-tier table (which only says what BET62
+// does with a league IF GOAL API sends it, not whether GOAL API sends it at
+// all). Not wired into any live path — diagnostic only.
+router.get("/goalapi-country-coverage", async (req: Request, res: Response) => {
+  if (!CONFIG.GOAL_API_KEY) {
+    res.status(503).json(fail(503, "GOAL_API_KEY not configured"));
+    return;
+  }
+  const days = Math.min(Math.max(Number(req.query.days) || 1, 1), 8);
+  const countriesParam =
+    typeof req.query.countries === "string" && req.query.countries.trim()
+      ? req.query.countries.split(",").map((c) => c.trim().toLowerCase())
+      : ["japan", "korea", "south korea", "china"];
+  try {
+    const dates = Array.from({ length: days }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      return d.toISOString().slice(0, 10);
+    });
+    const perDay = await Promise.all(dates.map((date) => goalApi.getFixturesByDate(date)));
+    const allFixtures = perDay.flat();
+    const leagueCounts = new Map<string, number>();
+    for (const fx of allFixtures) {
+      const ln = fx.leagueName ?? "(sem nome)";
+      leagueCounts.set(ln, (leagueCounts.get(ln) ?? 0) + 1);
+    }
+    const byCountry: Record<string, { league: string; fixtureCount: number }[]> = {};
+    for (const country of countriesParam) {
+      byCountry[country] = [...leagueCounts.entries()]
+        .filter(([league]) => league.toLowerCase().startsWith(country))
+        .map(([league, fixtureCount]) => ({ league, fixtureCount }));
+    }
+    res.json(
+      ok({
+        datesChecked: dates,
+        totalFixtures: allFixtures.length,
+        totalDistinctLeagues: leagueCounts.size,
+        byCountry,
+        note: "Ligas listadas aqui são exatamente o que a GOAL API está retornando agora — não passam pelos filtros/bloqueios do BET62.",
+      }),
+    );
+  } catch (err: any) {
+    res.status(500).json(fail(500, "GOAL API fetch failed", err?.message ?? String(err)));
+  }
+});
+
 export default router;
