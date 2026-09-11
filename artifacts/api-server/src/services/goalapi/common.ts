@@ -82,6 +82,17 @@ export function buildGoalApiMatchStats(
   return [{ title: "Estatísticas do Jogo", rows }];
 }
 
+/** GOAL API's commentary "time" is "MM:SS" elapsed match clock (e.g.
+ * "44:06") — the provider's own demo widget (user-checked 2026-09-11)
+ * displays just the bare minute with an apostrophe ("44'"), the same
+ * convention every other minute label in this app already uses, so this
+ * drops the seconds instead of showing a raw timestamp. */
+function formatCommentaryMinute(time: string): string {
+  const minutePart = time.split(":")[0];
+  const n = Number.parseInt(minutePart ?? "", 10);
+  return Number.isFinite(n) ? `${n}'` : time;
+}
+
 /** Maps GOAL API's raw /fixtures/:id/commentary rows (confirmed real
  * 2026-09-11 — see GoalApiCommentaryEntry) into a compact live feed for
  * routes/matches.ts's LiveMatchState._commentary field. The provider
@@ -97,7 +108,7 @@ export function buildGoalApiCommentary(
   return rows
     .slice(-COMMENTARY_FEED_LIMIT)
     .reverse()
-    .map((r) => ({ time: r.time, text: r.text }));
+    .map((r) => ({ time: formatCommentaryMinute(r.time), text: r.text }));
 }
 
 /** Parses GOAL API's "time" event field ("3", "45+2", "90+5") into a plain
