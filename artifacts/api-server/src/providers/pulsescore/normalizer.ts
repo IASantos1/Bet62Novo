@@ -106,8 +106,23 @@ function findOutcomeOdds(
   return selections.find((s) => s.canonicalOutcome === outcome)?.odds;
 }
 
+// bet365's canonicalMarket classifier tags the FULL_TIME 1X2 market as
+// "OTHER" (confirmed 2026-09-11 against a real captured payload) instead
+// of "MATCH_RESULT" — only its rawName ("Fulltime Result"/"To Win 2nd
+// Half", etc.) actually distinguishes it. This is the single
+// most-critical market (it gates `_priceSource: "pulsescore"` — see
+// shadowMatchSync.ts), so it gets a dedicated rawName fallback rather
+// than relying on canonicalMarket alone the way onexbet's feed allowed.
+const MATCH_RESULT_RAW_NAMES: Record<string, string[]> = {
+  FULL_TIME: ["fulltime result", "full time result", "match result", "1x2"],
+  FIRST_HALF: ["half time result", "1st half result", "to win 1st half"],
+  SECOND_HALF: ["to win 2nd half", "2nd half result"],
+};
+
 function extractMatchResult(ev: PulseScoreEvent, period: string) {
-  const m = findMarket(ev, "MATCH_RESULT", period);
+  const m =
+    findMarket(ev, "MATCH_RESULT", period) ??
+    findMarketLoose(ev, MATCH_RESULT_RAW_NAMES[period] ?? [], period);
   if (!m) return undefined;
   const home = findOutcomeOdds(m.selections, "HOME");
   const draw = findOutcomeOdds(m.selections, "DRAW");
@@ -121,12 +136,16 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
     market: m.canonicalMarket,
     period: m.period,
     providerMarketId: m.marketId,
-    selections: m.selections.map((s) => ({
+    selections: m.selections.map((s, i) => ({
       outcome: s.canonicalOutcome,
       odds: s.odds,
       line: s.line,
       isActive: s.isActive,
-      selectionId: s.selectionId,
+      // onexbet had a flat selectionId; bet365 carries its own id under
+      // moreInfo.ID instead (see types.ts header) — fall back to a
+      // synthesized-but-stable id so this is never empty. Never parsed as
+      // anything meaningful either way (traceability only).
+      selectionId: s.selectionId ?? s.moreInfo?.["ID"] ?? `${m.marketId}:${i}`,
     })),
   }));
 
@@ -151,7 +170,12 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
       })()
     : undefined;
 
-  const oddEvenMarket = findMarket(ev, "TOTAL_GOALS_ODD_EVEN", "FULL_TIME");
+  // Same bet365 canonicalMarket-inconsistency as MATCH_RESULT above:
+  // "Goals Odd/Even" also comes back tagged "OTHER" (confirmed 2026-09-11
+  // against the same real payload) rather than TOTAL_GOALS_ODD_EVEN.
+  const oddEvenMarket =
+    findMarket(ev, "TOTAL_GOALS_ODD_EVEN", "FULL_TIME") ??
+    findMarketLoose(ev, ["goals odd/even", "odd/even", "total goals odd"], "FULL_TIME");
   const totalGoalsOddEven = oddEvenMarket
     ? (() => {
         const even = findOutcomeOdds(oddEvenMarket.selections, "EVEN");
