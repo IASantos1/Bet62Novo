@@ -8087,7 +8087,16 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       sport: "football",
       homeScore: homeScore as number,
       awayScore: awayScore as number,
-      minute: estimateGoalApiLiveMinute(fx),
+      // Monotonic floor: estimateGoalApiLiveMinute derives the minute from
+      // fx.kickoffUtc/matchStatus fresh on every poll, with no memory of
+      // what was shown last cycle. Real matches confirmed this session
+      // (user-reported, second-half clock flickering 40' -> 3' -> 40'):
+      // some GOAL API polls carry a kickoffUtc that reads as the CURRENT
+      // period's restart time rather than the overall match start,
+      // producing a tiny elapsed-minute estimate that one poll later
+      // reverts to the correct, much larger value. The match clock only
+      // ever counts up, so never display a smaller minute than last shown.
+      minute: Math.max(estimateGoalApiLiveMinute(fx), existing?.minute ?? 0),
       status: fx.matchStatus,
       // NOT a pure display flag — home.tsx's OddsButton uses this as the
       // sole gate on whether the button is clickable (calls toggleBet) as
