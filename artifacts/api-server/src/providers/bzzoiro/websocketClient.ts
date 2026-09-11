@@ -37,6 +37,20 @@ let lastFrameAt = 0;
 let lastError: string | null = null;
 const subscribedEventIds = new Set<number>();
 
+// Diagnostic counters added 2026-09-11 alongside the heartbeat fix — a
+// healthy ping/pong cycle only proves the TCP connection is alive, it says
+// nothing about whether bzzoiro is actually acknowledging our subscribe
+// requests or sending real data for them. `lastFrameAt` used to be the only
+// signal for "is anything happening", but a `pong` control frame does NOT
+// touch it (only real `message` data frames do — see the "message" handler
+// below), so a perfectly healthy heartbeat can coexist with a `lastFrameAt`
+// that never advances if bzzoiro never sends a single data frame back.
+// These let /api/admin/bzzoiro-status tell "connection is dead" apart from
+// "connection is fine, bzzoiro just isn't sending anything for this event".
+let pingsSent = 0;
+let pongsReceived = 0;
+const subscribedAckAt = new Map<number, number>();
+
 let onLiveData: ((frame: BzzoiroLiveDataFrame) => void) | null = null;
 
 // Real bug fixed 2026-09-11 (user-reported: _ballPosition never populates
@@ -71,6 +85,7 @@ function startHeartbeat(socket: WsClient): void {
       return;
     }
     awaitingPong = true;
+    pingsSent++;
     socket.ping();
   }, HEARTBEAT_INTERVAL_MS);
 }
@@ -119,6 +134,7 @@ function connect(): void {
 
   socket.on("pong", () => {
     awaitingPong = false;
+    pongsReceived++;
   });
 
   socket.on("message", (data) => {
@@ -133,9 +149,18 @@ function connect(): void {
     if (msg.type === "livedata" && onLiveData) {
       onLiveData(msg as BzzoiroLiveDataFrame);
     }
-    // subscribed/unsubscribed/event/action/odds/ingest_debug/error frames
-    // are all real (confirmed via the user's capture) but unused here —
-    // this integration only ever needs real ball position.
+    if (msg.type === "subscribed" && "event_id" in msg) {
+      subscribedAckAt.set((msg as { event_id: number }).event_id, Date.now());
+    }
+    if (msg.type === "error") {
+      // Never silently swallow this — a rejected subscribe (bad token,
+      // plan/tier limit, unknown event_id, ...) would otherwise look
+      // identical to "connection fine, bzzoiro just isn't sending data".
+      logger.warn({ msg }, "[bzzoiro-ws] server sent an error frame");
+    }
+    // unsubscribed/event/action/odds/ingest_debug frames are all real
+    // (confirmed via the user's capture) but unused here — this
+    // integration only ever needs real ball position.
   });
 
   socket.on("close", (code) => {
@@ -189,11 +214,25 @@ export function getBzzoiroWsStatus(): {
   lastFrameAgeMs: number | null;
   lastError: string | null;
   subscribedCount: number;
+  pingsSent: number;
+  pongsReceived: number;
 } {
   return {
     connected,
     lastFrameAgeMs: lastFrameAt ? Date.now() - lastFrameAt : null,
     lastError,
     subscribedCount: subscribedEventIds.size,
+    pingsSent,
+    pongsReceived,
   };
+}
+
+/** Age of the last "subscribed" ack this specific event_id received, or
+ * null if it never got one. Distinguishes "bzzoiro rejected/ignored our
+ * subscribe" from "subscribed fine, just no livedata frames yet" — see the
+ * comment on subscribedAckAt above for why pongsReceived alone can't tell
+ * these apart. */
+export function getBzzoiroSubscribedAckAgeMs(eventId: number): number | null {
+  const at = subscribedAckAt.get(eventId);
+  return at ? Date.now() - at : null;
 }
