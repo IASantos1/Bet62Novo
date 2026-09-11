@@ -39,6 +39,42 @@ const subscribedEventIds = new Set<number>();
 
 let onLiveData: ((frame: BzzoiroLiveDataFrame) => void) | null = null;
 
+// Real bug fixed 2026-09-11 (user-reported: _ballPosition never populates
+// for any subscribed live match). Confirmed via /api/admin/bzzoiro-status:
+// `connected: true` with `lastFrameAgeMs` past 5 minutes across 5
+// concurrently-subscribed live matches, despite the docs saying `livedata`
+// lands roughly every 5s per match — a classic zombie WebSocket: the TCP
+// connection died silently (network blip, idle proxy timeout, ...) but
+// neither "close" nor "error" ever fired, so `connected` stayed true and
+// scheduleReconnect() never ran. A standard ping/pong heartbeat is the
+// only way to detect this class of failure — the `ws` library auto-replies
+// to a server-sent ping, but does nothing to notice the *absence* of any
+// traffic on its own.
+const HEARTBEAT_INTERVAL_MS = 30_000;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let awaitingPong = false;
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function startHeartbeat(socket: WsClient): void {
+  stopHeartbeat();
+  awaitingPong = false;
+  heartbeatTimer = setInterval(() => {
+    if (awaitingPong) {
+      logger.warn("[bzzoiro-ws] no response to heartbeat ping — terminating stale connection");
+      socket.terminate(); // forces "close", which schedules a real reconnect
+      return;
+    }
+    awaitingPong = true;
+    socket.ping();
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
 function sendSubscribeFrames(): void {
   if (!ws || !connected) return;
   for (const eventId of subscribedEventIds) {
@@ -78,10 +114,16 @@ function connect(): void {
     // any reconnect, since the server has no memory of a dropped socket's
     // prior subscriptions.
     sendSubscribeFrames();
+    startHeartbeat(socket);
+  });
+
+  socket.on("pong", () => {
+    awaitingPong = false;
   });
 
   socket.on("message", (data) => {
     lastFrameAt = Date.now();
+    awaitingPong = false; // any real traffic is proof of life, not just a pong
     let msg: BzzoiroWsFrame;
     try {
       msg = JSON.parse(data.toString());
@@ -99,6 +141,7 @@ function connect(): void {
   socket.on("close", (code) => {
     connected = false;
     ws = null;
+    stopHeartbeat();
     logger.warn({ code, retryMs: retryDelayMs }, "[bzzoiro-ws] closed — reconnecting");
     scheduleReconnect();
   });
@@ -106,6 +149,7 @@ function connect(): void {
   socket.on("error", (err) => {
     connected = false;
     ws = null;
+    stopHeartbeat();
     lastError = err instanceof Error ? err.message : String(err);
     // "close" always follows "error" for WebSocket — reconnect scheduled there.
   });
