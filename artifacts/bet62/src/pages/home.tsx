@@ -6278,7 +6278,18 @@ export default function Home({
 
     if (maxKnownMin > 0) {
       if (apiMin === 0) apiMin = maxKnownMin;
-      if (apiMin > maxKnownMin + 8) apiMin = maxKnownMin;
+      // Football only: this downgrade was the actual cause of the
+      // reported "40' -> 3'" clock flicker, still reproducing after the
+      // backend's own minute was made monotonic (routes/matches.ts,
+      // estimateGoalApiLiveMinute's Math.max floor) — a real match easily
+      // goes 20-30+ minutes with zero recorded events (goal/card/sub), so
+      // "current minute more than 8 above the last event's minute" is a
+      // completely normal, frequent state, not evidence the API minute is
+      // wrong. Downgrading to the stale event minute every time undid the
+      // backend fix from the frontend side. Football's apiMin is now
+      // trustworthy on its own; keep this sanity cap for other sports
+      // where it hasn't been shown to misfire.
+      if (!isFootball && apiMin > maxKnownMin + 8) apiMin = maxKnownMin;
     }
 
     const extra = (match as any)?._liveExtra;
