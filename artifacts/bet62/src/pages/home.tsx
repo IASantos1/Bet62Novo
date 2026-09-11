@@ -9775,6 +9775,23 @@ export default function Home({
     if ((match.sport ?? "football") === "tennis" && selection === "draw")
       return null;
     const now = Date.now();
+    const suspendedUntil = match.marketSuspension?.[market ?? "result"];
+    const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
+    // Shared movement calc — prevLiveOdds tracks every live match's last-seen
+    // odds unconditionally (see the setLiveMatches poll handler), synthetic
+    // anchor included, so a non-bettable price still shows ▲/▼ when it
+    // ticks, same as a real one. Server controls cadence; this only decides
+    // whether the change was big enough to flash.
+    const prevOdd = match.isLive
+      ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds]
+      : undefined;
+    const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+    const oddsUp = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
+    const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
+    const isWCVariant = variant === "worldcup";
+    const baseBoxClass = isWCVariant
+      ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
+      : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
     // Diretriz arquitetural: odds bettáveis vêm EXCLUSIVAMENTE da PulseScore real.
     // hasRealOdds=false (sem _priceSource=pulsescore) nunca deve executar
     // toggleBet, mas ainda pode ter um número sintético válido pra exibir —
@@ -9783,13 +9800,7 @@ export default function Home({
     const hasNoPriceSource = !match.hasRealOdds;
     const oddInvalid = odd <= 0 || !Number.isFinite(odd);
     if (hasNoPriceSource || oddInvalid) {
-      const isSuspended = match.marketSuspension?.[market ?? "result"];
-      const isSusNow = isSuspended !== undefined && isSuspended > now;
-      if (isSusNow) return null;
-      const isWCVariant = variant === "worldcup";
-      const baseBoxClass = isWCVariant
-        ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
-        : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
+      if (isSuspended) return null;
       return (
         <div
           className={`relative ${baseBoxClass} ${
@@ -9804,32 +9815,29 @@ export default function Home({
             {label}
           </span>
           <span
-            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-500"} tabular-nums`}
+            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-500"} tabular-nums flex items-center gap-0.5`}
           >
             {oddInvalid ? "--" : odd.toFixed(2)}
+            {!oddInvalid && oddsUp && (
+              <span className="text-green-400 text-[9px] font-black leading-none shrink-0">
+                ▲
+              </span>
+            )}
+            {!oddInvalid && oddsDown && (
+              <span className="text-red-400 text-[9px] font-black leading-none shrink-0">
+                ▼
+              </span>
+            )}
           </span>
         </div>
       );
     }
-    const suspendedUntil = match.marketSuspension?.[market];
-    const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
     const isSelected = !!bets.find(
       (b) =>
         b.matchId === match.id &&
         b.market === market &&
         b.selection === selection,
     );
-    const prevOdd = match.isLive
-      ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds]
-      : undefined;
-    // Arrow only when actual API value changed enough — server now controls cadence
-    const delta = prevOdd !== undefined ? odd - prevOdd : 0;
-    const oddsUp = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
-    const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
-    const isWCVariant = variant === "worldcup";
-    const baseBoxClass = isWCVariant
-      ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
-      : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
       return null;
