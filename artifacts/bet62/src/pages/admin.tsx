@@ -434,6 +434,7 @@ type EventRuntimeItem = {
   override_note: string | null;
   updated_by: string | null;
   override_updated_at: string | null;
+  pulse_score_price_status: "real" | "estimated" | null;
 };
 
 type EventOverrideDraft = {
@@ -4955,6 +4956,22 @@ export default function AdminPage() {
                                   {event.provider_event_id && (
                                     <div className="text-xs text-zinc-600 mt-1">
                                       provider: {event.provider_event_id}
+                                    </div>
+                                  )}
+                                  {event.pulse_score_price_status && (
+                                    <div className="mt-1">
+                                      <Badge
+                                        cls={
+                                          event.pulse_score_price_status === "real"
+                                            ? "bg-green-900/50 text-green-400"
+                                            : "bg-amber-900/40 text-amber-400"
+                                        }
+                                        label={
+                                          event.pulse_score_price_status === "real"
+                                            ? "PulseScore: Real"
+                                            : "PulseScore: Estimado"
+                                        }
+                                      />
                                     </div>
                                   )}
                                   {event.suspension_reason && (
