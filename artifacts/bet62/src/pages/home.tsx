@@ -19369,19 +19369,24 @@ export default function Home({
 
                 {/* Mini pitch tracker — PWA only (see .bet62-hide-in-pwa /
                     .bet62-show-in-pwa, index.css): replaces the header
-                    above directly above the Mercados odds markets. */}
+                    above directly above the Mercados odds markets. The
+                    component itself renders nothing when the match has no
+                    commentary feed — gated here too so no empty wrapper
+                    is left behind in that case. */}
                 {expandedMatch.isLive &&
                   (expandedMatch.sport ?? "football") === "football" &&
-                  matchViewTab === "markets" && (
+                  matchViewTab === "markets" &&
+                  expandedMatch._commentary &&
+                  expandedMatch._commentary.length > 0 && (
                     <div className="bet62-show-in-pwa mb-3">
                       <FootballPitchTracker
                         home={expandedMatch.home}
                         away={expandedMatch.away}
                         homeScore={expandedMatch.homeScore}
                         awayScore={expandedMatch.awayScore}
-                        minute={getDisplayMinute(expandedMatch)}
-                        isHalfTime={getFootballPhaseTag(expandedMatch, getDisplayMinute(expandedMatch)) === "HT"}
                         commentary={expandedMatch._commentary}
+                        v2StatsGroups={v2StatsGroups}
+                        confrontosRecentMeetings={confrontosData?.recentMeetings}
                       />
                     </div>
                   )}
@@ -26561,36 +26566,43 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        <aside
-          className={`hidden lg:flex lg:flex-col w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] ${
+        {(() => {
+          const showDesktopPitchTracker = !!(
             expandedMatch &&
             expandedMatch.isLive &&
             (expandedMatch.sport ?? "football") === "football" &&
-            matchViewTab === "markets"
-              ? "overflow-y-auto"
-              : ""
+            matchViewTab === "markets" &&
+            expandedMatch._commentary &&
+            expandedMatch._commentary.length > 0
+          );
+          return (
+        <aside
+          className={`hidden lg:flex lg:flex-col w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] ${
+            showDesktopPitchTracker ? "overflow-y-auto" : ""
           }`}
         >
           {/* Mini pitch tracker — user-requested 2026-09-11: shown above
-              the bet slip, on the Mercados tab of a live football match. */}
-          {expandedMatch &&
-            expandedMatch.isLive &&
-            (expandedMatch.sport ?? "football") === "football" &&
-            matchViewTab === "markets" && (
+              the bet slip, on the Mercados tab of a live football match.
+              The component itself renders nothing when the match has no
+              commentary feed — gated here too so no empty wrapper is left
+              behind in that case. */}
+          {showDesktopPitchTracker && expandedMatch && (
               <div className="p-3 border-b border-zinc-800/60 shrink-0">
                 <FootballPitchTracker
                   home={expandedMatch.home}
                   away={expandedMatch.away}
                   homeScore={expandedMatch.homeScore}
                   awayScore={expandedMatch.awayScore}
-                  minute={getDisplayMinute(expandedMatch)}
-                  isHalfTime={getFootballPhaseTag(expandedMatch, getDisplayMinute(expandedMatch)) === "HT"}
                   commentary={expandedMatch._commentary}
+                  v2StatsGroups={v2StatsGroups}
+                  confrontosRecentMeetings={confrontosData?.recentMeetings}
                 />
               </div>
             )}
           {BetSlipContent()}
         </aside>
+          );
+        })()}
       </div>
 
       {/* ── MOBILE BET SLIP ── collapsed bar + full-screen overlay */}

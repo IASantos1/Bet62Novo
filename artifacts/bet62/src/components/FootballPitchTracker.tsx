@@ -14,23 +14,47 @@
 // attack", ...) — mapped to the pitch zone that action type actually
 // happens in. It is not a claim of exact real-time ball tracking, the same
 // honest "derived, not fabricated" convention this app already applies
-// everywhere else (e.g. the Momentum chart's bars are purely decorative;
-// this is a step up from that — real event-driven, just not pixel-exact).
+// everywhere else.
+//
+// Revised 2026-09-11 per user feedback on the first version:
+// - Dropped the whole side event-panel (live-status ticker, current-event
+//   card, full timeline) — that's what made the pitch render tiny on
+//   desktop (a hardcoded 245px side column ate almost all the width of
+//   the 384px-wide slot this renders inside on desktop). The component is
+//   single-column now, so the pitch gets the full width.
+// - The removed space is now a 3-way tab row (Mini Campo / Estatísticas /
+//   H2H) that swaps what's shown inside the SAME bounded box — reusing
+//   data the app already fetches elsewhere (v2StatsGroups, confrontosData)
+//   rather than triggering any new request.
+// - The whole component renders nothing at all when there's no commentary
+//   for this match — that's the signal this specific fixture has no
+//   commentary feed, so the page falls back to the traditional layout
+//   with no mini pitch, exactly as before this feature existed.
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export type PitchTrackerCommentaryEntry = { time: string; text: string };
+export type PitchTrackerStatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
+export type PitchTrackerH2HMeeting = {
+  date: string;
+  team1: string;
+  team2: string;
+  score1: number;
+  score2: number;
+  league: string;
+};
 
 type Props = {
   home: string;
   away: string;
   homeScore?: number;
   awayScore?: number;
-  minute?: number;
-  isHalfTime?: boolean;
   commentary?: PitchTrackerCommentaryEntry[] | null; // newest-first
+  v2StatsGroups?: PitchTrackerStatsGroup[] | null;
+  confrontosRecentMeetings?: PitchTrackerH2HMeeting[] | null;
 };
 
 type BallSpot = { x: number; y: number };
+type View = "pitch" | "stats" | "h2h";
 
 const CENTER: BallSpot = { x: 50, y: 50 };
 
@@ -79,14 +103,39 @@ function parseCommentaryLine(
   return { side: "home", action: text };
 }
 
+/** Same key stat rows the Força panel (home.tsx's MomentumChart) already
+ * picks out of v2StatsGroups — duplicated here at a smaller scope (just
+ * the 4 the user asked for) since that extraction isn't exported. */
+function extractCompactStats(groups: PitchTrackerStatsGroup[] | null | undefined) {
+  if (!groups || groups.length === 0) return [];
+  const flat = groups.flatMap((g) => g.rows.map((r) => ({ n: r.name, h: r.home, a: r.away })));
+  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const wanted = [
+    { label: "Posse de Bola", pats: ["posse de bola", "possession"] },
+    { label: "Remates à Baliza", pats: ["remates a baliza", "shots on target", "no alvo"] },
+    { label: "Cantos", pats: ["cantos", "corners", "escanteios"] },
+    { label: "Faltas", pats: ["faltas", "fouls"] },
+  ];
+  const rows: Array<{ label: string; home: string; away: string; homePct: number }> = [];
+  for (const w of wanted) {
+    const hit = flat.find((r) => w.pats.some((p) => norm(r.n).includes(p)));
+    if (!hit || (!hit.h && !hit.a)) continue;
+    const hN = parseFloat((hit.h || "0").replace(/[^0-9.]/g, "")) || 0;
+    const aN = parseFloat((hit.a || "0").replace(/[^0-9.]/g, "")) || 0;
+    const tot = hN + aN;
+    rows.push({ label: w.label, home: hit.h || "-", away: hit.a || "-", homePct: tot > 0 ? Math.round((hN / tot) * 100) : 50 });
+  }
+  return rows;
+}
+
 export default function FootballPitchTracker({
   home,
   away,
   homeScore,
   awayScore,
-  minute,
-  isHalfTime,
   commentary,
+  v2StatsGroups,
+  confrontosRecentMeetings,
 }: Props) {
   const latest = commentary && commentary.length > 0 ? commentary[0]! : null;
   const parsed = latest ? parseCommentaryLine(latest.text, home, away) : null;
@@ -94,6 +143,7 @@ export default function FootballPitchTracker({
   const ballRef = useRef<BallSpot>(CENTER);
   const [ball, setBall] = useState<BallSpot>(CENTER);
   const [goalFlash, setGoalFlash] = useState(false);
+  const [view, setView] = useState<View>("pitch");
   const lastKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -121,7 +171,12 @@ export default function FootballPitchTracker({
     actionLower.includes("corner") ||
     actionLower.includes("penalty");
 
-  const timelineItems = useMemo(() => (commentary ?? []).slice(0, 30), [commentary]);
+  const compactStats = useMemo(() => extractCompactStats(v2StatsGroups), [v2StatsGroups]);
+  const lastThreeMeetings = useMemo(() => (confrontosRecentMeetings ?? []).slice(0, 3), [confrontosRecentMeetings]);
+
+  // No commentary feed at all for this fixture → don't show the mini
+  // pitch in any form, same traditional layout as before this feature.
+  if (!commentary || commentary.length === 0) return null;
 
   return (
     <div className="bet62-tracker">
@@ -143,8 +198,8 @@ export default function FootballPitchTracker({
         </div>
       </div>
 
-      <div className="bet62-tracker-body">
-        <div className="bet62-pitch-wrapper">
+      <div className="bet62-pitch-wrapper">
+        {view === "pitch" && (
           <div className="bet62-pitch">
             <div className="pitch-halfline" />
             <div className="pitch-center-circle" />
@@ -178,38 +233,74 @@ export default function FootballPitchTracker({
 
             {goalFlash && <div className="bet62-goal-animation">GOLO!</div>}
           </div>
-        </div>
+        )}
 
-        <div className="bet62-event-panel">
-          <div className="bet62-live-status">
-            <span className="live-indicator" />
-            AO VIVO {isHalfTime ? "· HT" : minute != null ? `· ${minute}'` : ""}
+        {view === "stats" && (
+          <div className="bet62-mini-panel">
+            {compactStats.length === 0 ? (
+              <div className="bet62-mini-empty">Estatísticas indisponíveis para este jogo.</div>
+            ) : (
+              <div className="bet62-mini-stats">
+                {compactStats.map((s) => (
+                  <div key={s.label} className="bet62-mini-stat-row">
+                    <div className="bet62-mini-stat-labels">
+                      <span>{s.home}</span>
+                      <span className="bet62-mini-stat-name">{s.label}</span>
+                      <span>{s.away}</span>
+                    </div>
+                    <div className="bet62-mini-stat-bar">
+                      <div className="bet62-mini-stat-bar-home" style={{ width: `${s.homePct}%` }} />
+                      <div className="bet62-mini-stat-bar-away" style={{ width: `${100 - s.homePct}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+        )}
 
-          {latest && (
-            <div className="bet62-current-event">
-              <small>ÚLTIMO LANCE</small>
-              <strong>{parsed?.action || latest.text}</strong>
-              <span>
-                {parsed?.side === "away" ? away : home} · {latest.time}
-              </span>
-            </div>
-          )}
-
-          <div className="bet62-timeline">
-            {timelineItems.map((c, i) => {
-              const p = parseCommentaryLine(c.text, home, away);
-              return (
-                <div key={`${c.time}-${i}`} className={`bet62-timeline-item ${i === 0 ? "active" : ""}`}>
-                  <span className="timeline-minute">{c.time}</span>
-                  <span>
-                    <span className="timeline-type">{p.side === "home" ? home : away}</span> {p.action}
-                  </span>
-                </div>
-              );
-            })}
+        {view === "h2h" && (
+          <div className="bet62-mini-panel">
+            {lastThreeMeetings.length === 0 ? (
+              <div className="bet62-mini-empty">Sem confrontos recentes registados.</div>
+            ) : (
+              <div className="bet62-mini-h2h">
+                {lastThreeMeetings.map((m, i) => (
+                  <div key={`${m.date}-${i}`} className="bet62-mini-h2h-row">
+                    <span className="bet62-mini-h2h-date">{m.date || "—"}</span>
+                    <span className="bet62-mini-h2h-score">
+                      {m.team1} <strong>{m.score1} - {m.score2}</strong> {m.team2}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
+        )}
+      </div>
+
+      <div className="bet62-tab-row">
+        <button
+          type="button"
+          className={`bet62-tab-btn ${view === "pitch" ? "active" : ""}`}
+          onClick={() => setView("pitch")}
+        >
+          ▶ Mini Campo
+        </button>
+        <button
+          type="button"
+          className={`bet62-tab-btn ${view === "stats" ? "active" : ""}`}
+          onClick={() => setView("stats")}
+        >
+          Estatísticas
+        </button>
+        <button
+          type="button"
+          className={`bet62-tab-btn ${view === "h2h" ? "active" : ""}`}
+          onClick={() => setView("h2h")}
+        >
+          H2H
+        </button>
       </div>
     </div>
   );
@@ -218,7 +309,6 @@ export default function FootballPitchTracker({
 const PITCH_TRACKER_CSS = `
 .bet62-tracker {
   width: 100%;
-  max-width: 1050px;
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid #252525;
@@ -242,9 +332,8 @@ const PITCH_TRACKER_CSS = `
 .bet62-team-dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 8px currentColor; background: currentColor; }
 .bet62-score { display: flex; align-items: center; gap: 8px; font-size: 20px; }
 .bet62-score span { color: #666; }
-.bet62-tracker-body { display: grid; grid-template-columns: minmax(0, 1fr) 245px; min-height: 470px; }
 .bet62-pitch-wrapper {
-  padding: 18px;
+  padding: 14px;
   background: radial-gradient(circle at center, rgba(255, 255, 255, 0.035), transparent 65%), #08090a;
 }
 .bet62-pitch {
@@ -271,14 +360,6 @@ const PITCH_TRACKER_CSS = `
 .pitch-goal { position: absolute; top: 42%; width: 2.5%; height: 16%; border: 2px solid rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.05); }
 .pitch-goal-left { left: -2.5%; border-left: 0; }
 .pitch-goal-right { right: -2.5%; border-right: 0; }
-.pitch-player {
-  position: absolute; z-index: 4; width: 25px; height: 25px;
-  display: flex; align-items: center; justify-content: center;
-  border: 2px solid rgba(255, 255, 255, 0.95); border-radius: 50%;
-  color: #fff; font-size: 9px; font-weight: 800;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45), 0 0 7px rgba(255, 255, 255, 0.15);
-}
 .bet62-ball {
   position: absolute; z-index: 10; width: 25px; height: 25px;
   display: flex; align-items: center; justify-content: center; font-size: 18px;
@@ -319,18 +400,48 @@ const PITCH_TRACKER_CSS = `
   animation: bet62GoalText 900ms ease-out forwards;
   pointer-events: none;
 }
-.bet62-event-panel { display: flex; flex-direction: column; border-left: 1px solid #242424; background: #0d0d10; }
-.bet62-live-status { display: flex; align-items: center; gap: 7px; padding: 14px 16px; border-bottom: 1px solid #242424; font-size: 11px; font-weight: 900; letter-spacing: 0.8px; }
-.live-indicator { width: 7px; height: 7px; border-radius: 50%; background: #31d158; box-shadow: 0 0 8px #31d158; animation: bet62LivePulse 1.2s infinite; }
-.bet62-current-event { padding: 18px 16px; border-bottom: 1px solid #242424; }
-.bet62-current-event small { display: block; margin-bottom: 8px; color: #777; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
-.bet62-current-event strong { display: block; font-size: 16px; font-weight: 900; }
-.bet62-current-event span { display: block; margin-top: 5px; color: #999; font-size: 12px; }
-.bet62-timeline { overflow-y: auto; flex: 1; }
-.bet62-timeline-item { display: grid; grid-template-columns: 42px 1fr; gap: 6px; padding: 8px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.035); opacity: 0.55; font-size: 10px; }
-.bet62-timeline-item.active { opacity: 1; background: rgba(255, 255, 255, 0.045); }
-.timeline-minute { color: #777; }
-.timeline-type { font-weight: 700; }
+.bet62-mini-panel {
+  position: relative;
+  width: 100%;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  background: #101012;
+  padding: 14px;
+}
+.bet62-mini-empty { color: #777; font-size: 12px; text-align: center; }
+.bet62-mini-stats { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.bet62-mini-stat-labels { display: flex; align-items: center; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+.bet62-mini-stat-labels span:first-child, .bet62-mini-stat-labels span:last-child { font-weight: 900; color: #fff; width: 40px; text-align: center; }
+.bet62-mini-stat-name { color: #888; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.bet62-mini-stat-bar { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: #232326; }
+.bet62-mini-stat-bar-home { background: #ff5050; }
+.bet62-mini-stat-bar-away { background: #5096ff; }
+.bet62-mini-h2h { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.bet62-mini-h2h-row { display: flex; flex-direction: column; gap: 2px; font-size: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 8px; }
+.bet62-mini-h2h-date { color: #666; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; }
+.bet62-mini-h2h-score { color: #ddd; }
+.bet62-mini-h2h-score strong { color: #fff; font-weight: 900; }
+.bet62-tab-row { display: flex; border-top: 1px solid #242424; }
+.bet62-tab-btn {
+  flex: 1;
+  padding: 11px 6px;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #242424;
+  color: #777;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+}
+.bet62-tab-btn:last-child { border-right: none; }
+.bet62-tab-btn:hover { color: #ccc; }
+.bet62-tab-btn.active { color: #fff; background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 -2px 0 #dc2626; }
 @keyframes bet62TrailPulse {
   0% { opacity: 0.25; transform: translate(-50%, -50%) scaleX(0.7) rotate(-18deg); }
   50% { opacity: 0.85; transform: translate(-50%, -50%) scaleX(1) rotate(-18deg); }
@@ -349,17 +460,5 @@ const PITCH_TRACKER_CSS = `
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
   35% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1.4); }
-}
-@keyframes bet62LivePulse {
-  0% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.75); }
-  100% { opacity: 1; transform: scale(1); }
-}
-@media (max-width: 760px) {
-  .bet62-tracker-body { grid-template-columns: 1fr; }
-  .bet62-event-panel { border-top: 1px solid #242424; border-left: 0; }
-  .bet62-timeline { max-height: 180px; }
-  .bet62-pitch-wrapper { padding: 10px; }
-  .pitch-player { width: 21px; height: 21px; font-size: 8px; }
 }
 `;
