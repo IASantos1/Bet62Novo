@@ -99,16 +99,22 @@ function formatCommentaryMinute(time: string): string {
  * returns the full match history on every call (102 rows by minute 63 in
  * the captured sample) already sorted oldest-first, so this keeps only the
  * most recent COMMENTARY_FEED_LIMIT rows and reverses them — newest line
- * first, matching how a live text feed is read. */
+ * first, matching how a live text feed is read.
+ *
+ * `id` is carried through (falling back to a time+text composite key on
+ * the rare row missing one) so the frontend's pitch tracker can tell truly
+ * NEW rows apart from ones it's already animated, across polls — needed
+ * to queue and replay every missed line in order instead of only ever
+ * reacting to whichever row is newest at fetch time. */
 const COMMENTARY_FEED_LIMIT = 40;
 export function buildGoalApiCommentary(
   rows: GoalApiCommentaryEntry[] | null | undefined,
-): Array<{ time: string; text: string }> {
+): Array<{ id: string; time: string; text: string }> {
   if (!rows || rows.length === 0) return [];
   return rows
     .slice(-COMMENTARY_FEED_LIMIT)
     .reverse()
-    .map((r) => ({ time: formatCommentaryMinute(r.time), text: r.text }));
+    .map((r) => ({ id: r.id ?? `${r.time}-${r.text}`, time: formatCommentaryMinute(r.time), text: r.text }));
 }
 
 /** Parses GOAL API's "time" event field ("3", "45+2", "90+5") into a plain

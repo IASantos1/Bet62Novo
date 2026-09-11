@@ -495,8 +495,10 @@ export type LiveMatchState = {
   // attack"), distinct from the structured `events` array above. Sourced
   // from GOAL API's /fixtures/:id/commentary (confirmed real 2026-09-11 via
   // a user-captured live response). Newest-first, capped at 40 entries —
-  // see buildGoalApiCommentary.
-  _commentary?: Array<{ time: string; text: string }>;
+  // see buildGoalApiCommentary. `id` lets the frontend's pitch tracker
+  // queue and replay every truly-new line across polls, not just the one
+  // that happens to be newest at fetch time.
+  _commentary?: Array<{ id: string; time: string; text: string }>;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries

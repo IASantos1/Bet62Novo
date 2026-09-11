@@ -3801,8 +3801,8 @@ type Match = {
   // SportsAPI Pro V2 /v2-statistics feed this same shape used to come from.
   matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
   // Live text commentary feed (GOAL API football only) — free-text
-  // play-by-play narration, newest entry first. See LiveCommentaryFeed.
-  _commentary?: Array<{ time: string; text: string }>;
+  // play-by-play narration, newest entry first. See FootballPitchTracker.
+  _commentary?: Array<{ id: string; time: string; text: string }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
   // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
@@ -7575,7 +7575,7 @@ export default function Home({
     marketSuspension?: Record<string, number>;
     _suspensionReason?: string;
     _feedWarning?: string;
-    _commentary?: Array<{ time: string; text: string }>;
+    _commentary?: Array<{ id: string; time: string; text: string }>;
     _liveExtra?: {
       clockStr?: string;
       sets?: Array<[number, number]>;
