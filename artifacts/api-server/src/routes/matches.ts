@@ -94,6 +94,7 @@ import {
   parseApiTennisGameResult,
   parseApiTennisServer,
   extractApiTennisMoneyline,
+  extractApiTennisLiveMarkets,
   buildApiTennisConfrontos,
   buildApiTennisPlayerProfile,
 } from "../services/apitennis/common.js";
@@ -8584,17 +8585,46 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     const currentPoints = parseApiTennisGameResult(liveFx.event_game_result);
     const serving = parseApiTennisServer(liveFx.event_serve);
 
-    let resultOdds: { home: number; draw: number; away: number } | null = null;
-    const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
-    if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
-
     let liveOddsRef: ApiTennisLiveOddsEntry[] | undefined = existing?._apiTennisLiveOddsRef;
     const liveOddsEntry = bulkLiveOdds[fx.event_key];
     if (liveOddsEntry?.live_odds) liveOddsRef = liveOddsEntry.live_odds;
 
+    // Real live markets from get_live_odds — confirmed real 2026-09-11
+    // (user-reported: live tennis odds weren't updating at all; root cause
+    // was this exact data being fetched into _apiTennisLiveOddsRef every
+    // tick but never actually read anywhere downstream). Preferred over
+    // get_odds' "Home/Away" (candidate below), which is a prematch/daily
+    // snapshot, not the true in-play price.
+    const realLiveMarkets = extractApiTennisLiveMarkets(liveOddsRef);
+
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    if (realLiveMarkets.moneyline) {
+      resultOdds = { home: realLiveMarkets.moneyline.home, draw: 0, away: realLiveMarkets.moneyline.away };
+    } else {
+      const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
+      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
+    }
+
     const syntheticP = apiTennisSyntheticP(home, away);
     const baseOdds = makeTennisMoneylineFromP(syntheticP);
     const baseMarkets = makeTennisMarketsFromPlayers(home, away, syntheticP);
+    // Patch the synthetic tennisExtra with real per-market data wherever
+    // get_live_odds has it this tick — same "real data patches synthetic"
+    // convention every other provider in this file follows. Fields with no
+    // real value this tick keep the synthetic estimate untouched.
+    if (realLiveMarkets.set1) Object.assign(baseMarkets.tennisExtra.firstSet, realLiveMarkets.set1);
+    if (realLiveMarkets.set2) Object.assign(baseMarkets.tennisExtra.set2, realLiveMarkets.set2);
+    if (realLiveMarkets.set3) Object.assign(baseMarkets.tennisExtra.set3, realLiveMarkets.set3);
+    if (realLiveMarkets.gameHandicap) Object.assign(baseMarkets.tennisExtra.gameHandicap, realLiveMarkets.gameHandicap);
+    if (realLiveMarkets.totalGamesLines && realLiveMarkets.totalGamesLines.length > 0) {
+      baseMarkets.tennisExtra.totalGamesLines = realLiveMarkets.totalGamesLines;
+      const mid = realLiveMarkets.totalGamesLines[Math.floor(realLiveMarkets.totalGamesLines.length / 2)]!;
+      baseMarkets.tennisExtra.totalGames = mid;
+    }
+    if (realLiveMarkets.set1GamesLines && realLiveMarkets.set1GamesLines.length > 0) {
+      const mid = realLiveMarkets.set1GamesLines[Math.floor(realLiveMarkets.set1GamesLines.length / 2)]!;
+      baseMarkets.tennisExtra.set1Games = mid;
+    }
 
     const state: LiveMatchState = {
       id,
@@ -8608,10 +8638,19 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       minute: 0,
       status: liveFx.event_status || "",
       hasRealOdds: !!resultOdds,
-      odds: existing?.odds ?? resultOdds ?? baseOdds,
-      markets: existing?.markets ?? baseMarkets,
-      _baseOdds: existing?._baseOdds ?? resultOdds ?? baseOdds,
-      _baseMarkets: existing?._baseMarkets ?? baseMarkets,
+      // Fresh every tick, not frozen at first-seen (real bug fixed
+      // 2026-09-11 — user-reported: live tennis odds never updated at
+      // all). Unlike football, no separate drift engine processes tennis
+      // (applyTieredMarketDrift's poll loop is football-only), so this
+      // builder is the only place tennis odds/markets are ever written —
+      // freezing them here after the first tick meant they froze forever.
+      // Falls back to the last known value only when this tick's fetch
+      // genuinely produced nothing (never regress to the synthetic
+      // baseline just because of a transient API hiccup).
+      odds: resultOdds ?? existing?.odds ?? baseOdds,
+      markets: baseMarkets,
+      _baseOdds: resultOdds ?? baseOdds,
+      _baseMarkets: baseMarkets,
       _apiTennisLiveOddsRef: liveOddsRef,
       events: existing?.events ?? [],
       _liveExtra: {
