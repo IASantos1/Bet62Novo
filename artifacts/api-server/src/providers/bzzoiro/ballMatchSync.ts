@@ -19,7 +19,7 @@ import {
   getUnmatchedGoalApiFootballMatches,
   getMatchedLiveFootballFixtures,
 } from "../../lib/canonicalMatchCatalog.js";
-import { matchGoalApiFixtureToBzzoiro } from "../../matching/bzzoiroMatchEngine.js";
+import { matchGoalApiFixtureToBzzoiro, debugBestCandidateBzzoiro } from "../../matching/bzzoiroMatchEngine.js";
 import type { GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
 import { getBzzoiroLiveEvents } from "./client.js";
 import {
@@ -39,6 +39,8 @@ const SYNC_INTERVAL_MS = 20_000;
 // which LiveMatchState entry a given event_id's livedata frame belongs to.
 let currentSubscriptions = new Map<number, string>();
 
+const NEAR_MISS_SAMPLE_CAP = 8;
+
 async function runMatchingPhase(): Promise<{ attempted: number; matched: number }> {
   const unmatched = (await getUnmatchedGoalApiFootballMatches(PROVIDER)).filter(
     (m) => m.status === "live", // bzzoiro's candidate pool below is live-only
@@ -49,6 +51,25 @@ async function runMatchingPhase(): Promise<{ attempted: number; matched: number 
   if (candidates.length === 0) return { attempted: unmatched.length, matched: 0 };
 
   let matched = 0;
+  // Diagnostic-only, added 2026-09-11 (same shape as PulseScore's
+  // shadowMatchSync.ts nearMissSamples) to debug a real live near-miss: a
+  // confirmed-live GOAL API fixture with a confirmed-live same-match
+  // bzzoiro event that still wasn't matching, with no visibility into why
+  // beyond the round's bare attempted/matched counts.
+  const nearMissSamples: Array<{
+    matchId: number;
+    goalApiFixture: string;
+    bzzoiroEventId: number | null;
+    bzzoiroFixture: string | null;
+    bzzoiroStatus: string | null;
+    bzzoiroLiveWebsocket: boolean | null;
+    confidence: number | null;
+    nameSim: number | null;
+    homeNameSimilarity: number | null;
+    awayNameSimilarity: number | null;
+    passedNameFloor: boolean;
+    kickoffDeltaMinutes: number | null;
+  }> = [];
   for (const goalApiMatch of unmatched) {
     const fixture: GoalApiFixtureRef = {
       id: goalApiMatch.providerMatchId,
@@ -58,7 +79,25 @@ async function runMatchingPhase(): Promise<{ attempted: number; matched: number 
       kickoffUtc: goalApiMatch.kickoffUtc ? goalApiMatch.kickoffUtc.toISOString() : null,
     };
     const candidate = matchGoalApiFixtureToBzzoiro(fixture, candidates);
-    if (!candidate) continue;
+    if (!candidate) {
+      const diag = debugBestCandidateBzzoiro(fixture, candidates);
+      nearMissSamples.push({
+        matchId: goalApiMatch.matchId,
+        goalApiFixture: `${goalApiMatch.home} vs ${goalApiMatch.away}`,
+        bzzoiroEventId: diag.bzzoiroEventId,
+        bzzoiroFixture:
+          diag.bzzoiroHome != null && diag.bzzoiroAway != null ? `${diag.bzzoiroHome} vs ${diag.bzzoiroAway}` : null,
+        bzzoiroStatus: diag.bzzoiroStatus,
+        bzzoiroLiveWebsocket: diag.bzzoiroLiveWebsocket,
+        confidence: diag.confidence,
+        nameSim: diag.nameSim,
+        homeNameSimilarity: diag.homeNameSimilarity,
+        awayNameSimilarity: diag.awayNameSimilarity,
+        passedNameFloor: diag.passedNameFloor,
+        kickoffDeltaMinutes: diag.kickoffDeltaMinutes,
+      });
+      continue;
+    }
     const ev = candidates.find((e) => e.id === candidate.bzzoiroEventId);
     if (!ev) continue;
     try {
@@ -78,6 +117,13 @@ async function runMatchingPhase(): Promise<{ attempted: number; matched: number 
         "[bzzoiro-match] attachProviderMapping failed",
       );
     }
+  }
+  if (nearMissSamples.length > 0) {
+    nearMissSamples.sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+    logger.info(
+      { samples: nearMissSamples.slice(0, NEAR_MISS_SAMPLE_CAP), totalMisses: nearMissSamples.length },
+      "[bzzoiro-match] closest near-misses among live, still-unmatched fixtures (diagnostic only)",
+    );
   }
   return { attempted: unmatched.length, matched };
 }

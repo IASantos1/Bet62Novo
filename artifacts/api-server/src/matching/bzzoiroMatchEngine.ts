@@ -82,3 +82,80 @@ export function matchGoalApiFixtureToBzzoiro(
   if (!best || best.confidence < MIN_REPORTABLE_CONFIDENCE) return null;
   return best;
 }
+
+export type BzzoiroMatchDiagnostic = {
+  bzzoiroEventId: number | null;
+  bzzoiroHome: string | null;
+  bzzoiroAway: string | null;
+  bzzoiroStatus: string | null;
+  bzzoiroLiveWebsocket: boolean | null;
+  confidence: number | null;
+  nameSim: number | null;
+  homeNameSimilarity: number | null;
+  awayNameSimilarity: number | null;
+  passedNameFloor: boolean;
+  kickoffDeltaMinutes: number | null;
+};
+
+/** Debug-only: the single best-scoring candidate regardless of status/
+ * live_websocket/NAME_FLOOR/MIN_REPORTABLE_CONFIDENCE gates — added
+ * 2026-09-11 to diagnose a real live near-miss (a confirmed-live GOAL API
+ * fixture with a confirmed-live same-match bzzoiro event that still wasn't
+ * matching), mirroring footballMatchEngine.ts's identically-purposed
+ * debugBestCandidate for PulseScore. Never used to decide an actual match. */
+export function debugBestCandidateBzzoiro(
+  fixture: GoalApiFixtureRef,
+  bzzoiroEvents: BzzoiroEvent[],
+): BzzoiroMatchDiagnostic {
+  let best: (BzzoiroMatchCandidate & { nameSim: number }) | null = null;
+  let bestEvent: BzzoiroEvent | null = null;
+  for (const ev of bzzoiroEvents) {
+    const homeNameSimilarity = nameSimilarity(fixture.homeTeamName, ev.home_team);
+    const awayNameSimilarity = nameSimilarity(fixture.awayTeamName, ev.away_team);
+    const nameSim = Math.min(homeNameSimilarity, awayNameSimilarity);
+    const { score: kickoffScore, deltaMinutes: kickoffDeltaMinutes } = kickoffProximityScore(
+      fixture.kickoffUtc,
+      ev.event_date,
+    );
+    const kickoffComponent = kickoffScore ?? 0.5;
+    const confidence = Math.round(100 * (nameSim * 0.85 + kickoffComponent * 0.15));
+    const candidate = {
+      bzzoiroEventId: ev.id,
+      confidence,
+      nameSim,
+      signals: { homeNameSimilarity, awayNameSimilarity, kickoffDeltaMinutes },
+    };
+    if (!best || candidate.confidence > best.confidence) {
+      best = candidate;
+      bestEvent = ev;
+    }
+  }
+  if (!best || !bestEvent) {
+    return {
+      bzzoiroEventId: null,
+      bzzoiroHome: null,
+      bzzoiroAway: null,
+      bzzoiroStatus: null,
+      bzzoiroLiveWebsocket: null,
+      confidence: null,
+      nameSim: null,
+      homeNameSimilarity: null,
+      awayNameSimilarity: null,
+      passedNameFloor: false,
+      kickoffDeltaMinutes: null,
+    };
+  }
+  return {
+    bzzoiroEventId: best.bzzoiroEventId,
+    bzzoiroHome: bestEvent.home_team,
+    bzzoiroAway: bestEvent.away_team,
+    bzzoiroStatus: bestEvent.status,
+    bzzoiroLiveWebsocket: bestEvent.live_websocket,
+    confidence: best.confidence,
+    nameSim: Math.round(best.nameSim * 100) / 100,
+    homeNameSimilarity: Math.round(best.signals.homeNameSimilarity * 100) / 100,
+    awayNameSimilarity: Math.round(best.signals.awayNameSimilarity * 100) / 100,
+    passedNameFloor: best.nameSim >= NAME_FLOOR,
+    kickoffDeltaMinutes: best.signals.kickoffDeltaMinutes,
+  };
+}
