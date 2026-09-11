@@ -9794,14 +9794,8 @@ export default function Home({
     const baseBoxClass = isWCVariant
       ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
       : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
-    // Diretriz arquitetural: odds bettáveis vêm EXCLUSIVAMENTE da PulseScore real.
-    // hasRealOdds=false (sem _priceSource=pulsescore) nunca deve executar
-    // toggleBet, mas ainda pode ter um número sintético válido pra exibir —
-    // mostra ele desabilitado (não clicável) em vez de esconder atrás de um
-    // "--" genérico; só um odd genuinamente ausente/inválido cai no "--".
-    const hasNoPriceSource = !match.hasRealOdds;
     const oddInvalid = odd <= 0 || !Number.isFinite(odd);
-    if (hasNoPriceSource || oddInvalid) {
+    if (oddInvalid) {
       if (isSuspended) return null;
       return (
         <div
@@ -13069,7 +13063,7 @@ export default function Home({
                       const baseTabs: Array<{ key: string; label: string; icon?: string }> = [
                         { key: "todos", label: "Todos" },
                       ];
-                      const hasResult = !!match.hasRealOdds && ((match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01);
+                      const hasResult = (match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01;
                       if (hasResult) baseTabs.push({ key: "resultado", label: "Resultado" });
                       const hasDupla =
                         (Number(mk?.doubleChance?.homeOrDraw ?? 0) > 1.01) ||
