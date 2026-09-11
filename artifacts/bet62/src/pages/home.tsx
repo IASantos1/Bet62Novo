@@ -1535,24 +1535,40 @@ const LEAGUE_LOGOS: Record<string, string> = {
 // Brazilian league name variant, so it's used here as a veto: a candidate
 // logo key whose own known country conflicts with the match's real country
 // is skipped, same as getCountryFlagIso already does for flags.
-function leagueLogoKeyConflictsWithCountry(key: string, countryIso: string | undefined): boolean {
-  if (!countryIso) return false;
+function leagueLogoKeyConflictsWithCountry(
+  key: string,
+  countryIso: string | undefined,
+  homeTeam?: string | null,
+): boolean {
+  // Team-name fallback — mirrors getCountryFlagIso's own "5. Team name
+  // fallback": when match.country carries no real signal (GOAL API sends a
+  // hardcoded "Internacional" placeholder for every football fixture, real
+  // or not — see buildFootballLiveFromGoalApi), a known club's own country
+  // is a strictly better signal than trusting an ambiguous bare league name
+  // like "Premier League" (Singapore's included, alongside England's).
+  const resolvedIso =
+    countryIso ?? (homeTeam ? COUNTRY_ISO[TEAM_COUNTRY[homeTeam] ?? ""] : undefined);
+  if (!resolvedIso) return false;
   const kl = key.toLowerCase();
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (kl === pat) return iso !== "" && iso !== countryIso;
+    if (kl === pat) return iso !== "" && iso !== resolvedIso;
   }
   return false;
 }
 
 /** Exact match first, then prefix match, then contains match for dynamically-named competitions (e.g. "FIFA World Cup - Round of 32"). */
-function getLeagueLogo(league: string | null | undefined, country?: string | null): string | undefined {
+function getLeagueLogo(
+  league: string | null | undefined,
+  country?: string | null,
+  homeTeam?: string | null,
+): string | undefined {
   const l = league ?? "";
   if (!l) return undefined;
   const countryIso = (() => {
     const ck = (country ?? "").trim().toLowerCase();
     return ck ? COUNTRY_ISO[ck] : undefined;
   })();
-  if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso)) return LEAGUE_LOGOS[l];
+  if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso, homeTeam)) return LEAGUE_LOGOS[l];
   const lLower = l.toLowerCase();
   // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo -
   // Grupo A", etc. LONGEST matching key wins, not the first one declared in
@@ -1565,7 +1581,7 @@ function getLeagueLogo(league: string | null | undefined, country?: string | nul
   // specific, correct one.
   let bestPrefix: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso)) {
+    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso, homeTeam)) {
       bestPrefix = { key, url };
     }
   }
@@ -1573,7 +1589,7 @@ function getLeagueLogo(league: string | null | undefined, country?: string | nul
   // Case-insensitive contains match — same longest-match reasoning.
   let bestContains: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso)) {
+    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso, homeTeam)) {
       bestContains = { key, url };
     }
   }
@@ -1999,6 +2015,21 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Balata": "palestine",
   "Khadamat Rafah": "palestine",
   "Samia Nablus": "palestine",
+  // Singapore Premier League — bug report 2026-09-11: GOAL API sends this
+  // league's bare "Premier League" name with no country qualifier (unlike
+  // e.g. "Kenyan Premier League") and no country field at all, so it fell
+  // through to LEAGUE_ISO_MAP's generic "premier league" → England
+  // fallback, showing the English Premier League crest on a Singaporean
+  // match. Same team-name fallback getCountryFlagIso already uses for
+  // flags, now also wired into getLeagueLogo (see
+  // leagueLogoKeyConflictsWithCountry).
+  "Tampines Rovers": "singapore",
+  "Balestier Khalsa": "singapore",
+  "Lion City Sailors": "singapore",
+  "Albirex Niigata (S)": "singapore",
+  "Geylang International": "singapore",
+  "Hougang United": "singapore",
+  "Young Lions": "singapore",
 };
 
 function normalizeBannerTeamName(name: string): string {
@@ -10056,7 +10087,7 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const leagueLogo = getLeagueLogo(match.league, match.country);
+            const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
             const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -10827,7 +10858,7 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const leagueLogo = getLeagueLogo(match.league, match.country);
+                const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
                 const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
@@ -11321,7 +11352,7 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const leagueLogo = getLeagueLogo(match.league, match.country);
+              const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
               const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
