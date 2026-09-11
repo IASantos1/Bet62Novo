@@ -274,9 +274,24 @@ export default function FootballPitchTracker({
   const attackDepth = parsed ? (parsed.side === "home" ? ball.x : 100 - ball.x) : 0;
   const momentumTier: "neutral" | "attacking" | "danger" = isDangerZone
     ? "danger"
-    : attackDepth > 55
+    : attackDepth > 60
       ? "attacking"
       : "neutral";
+
+  // The momentum shape always starts at the halfway line and reaches
+  // toward wherever the ball currently is — it grows as the acting side
+  // pushes further forward and shrinks back for a deeper build-up action,
+  // instead of always spanning a fixed third of the pitch. Shaped as a
+  // block with a mild taper at the ball end (not a thin sharp dagger).
+  const ARROW_TAPER = 7;
+  const arrowClipPath = (() => {
+    if (!current || !parsed) return undefined;
+    const nearX = 50;
+    const farX = ball.x;
+    const dir = farX >= nearX ? 1 : -1;
+    const bodyEdge = dir === 1 ? Math.max(nearX, farX - ARROW_TAPER) : Math.min(nearX, farX + ARROW_TAPER);
+    return `polygon(${nearX}% 0%, ${bodyEdge}% 0%, ${farX}% 50%, ${bodyEdge}% 100%, ${nearX}% 100%)`;
+  })();
 
   const compactStats = useMemo(() => extractCompactStats(v2StatsGroups), [v2StatsGroups]);
   const lastThreeMeetings = useMemo(() => (confrontosRecentMeetings ?? []).slice(0, 3), [confrontosRecentMeetings]);
@@ -309,9 +324,7 @@ export default function FootballPitchTracker({
         {view === "pitch" && (
           <div className="bet62-pitch">
             {current && parsed && (
-              <div
-                className={`bet62-momentum-arrow tier-${momentumTier} ${parsed.side === "away" ? "arrow-away" : "arrow-home"}`}
-              />
+              <div className={`bet62-momentum-arrow tier-${momentumTier}`} style={{ clipPath: arrowClipPath }} />
             )}
             <div className="pitch-halfline" />
             <div className="pitch-center-circle" />
@@ -486,14 +499,15 @@ const PITCH_TRACKER_CSS = `
 .bet62-momentum-arrow {
   position: absolute;
   inset: 0;
-  transition: background-color 450ms ease, clip-path 450ms ease;
+  transition: background-color 450ms ease, clip-path 900ms cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
-.bet62-momentum-arrow.arrow-home { clip-path: polygon(52% 50%, 100% 10%, 100% 90%); }
-.bet62-momentum-arrow.arrow-away { clip-path: polygon(48% 50%, 0% 10%, 0% 90%); }
 .bet62-momentum-arrow.tier-neutral { background: rgba(4, 30, 14, 0.4); }
-.bet62-momentum-arrow.tier-attacking { background: rgba(196, 148, 15, 0.4); }
-.bet62-momentum-arrow.tier-danger { background: rgba(190, 20, 20, 0.45); }
+.bet62-momentum-arrow.tier-attacking { background: rgba(206, 122, 12, 0.42); }
+.bet62-momentum-arrow.tier-danger {
+  background: rgba(190, 20, 20, 0.48);
+  animation: bet62ArrowPulse 900ms ease-in-out infinite;
+}
 .pitch-halfline { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: rgba(255, 255, 255, 0.72); transform: translateX(-50%); }
 .pitch-center-circle { position: absolute; width: 19%; aspect-ratio: 1; top: 50%; left: 50%; border: 2px solid rgba(255, 255, 255, 0.72); border-radius: 50%; transform: translate(-50%, -50%); }
 .pitch-center-dot { position: absolute; width: 7px; height: 7px; top: 50%; left: 50%; background: #fff; border-radius: 50%; transform: translate(-50%, -50%); }
@@ -683,6 +697,10 @@ html.light-mode .bet62-tab-row { border-color: #e4e4e7; }
 html.light-mode .bet62-tab-btn { color: #a1a1aa; border-color: #e4e4e7; }
 html.light-mode .bet62-tab-btn:hover { color: #3f3f46; }
 html.light-mode .bet62-tab-btn.active { color: #18181b; background: rgba(0, 0, 0, 0.04); }
+@keyframes bet62ArrowPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 @keyframes bet62TrailPulse {
   0% { opacity: 0.25; transform: translate(-50%, -50%) scaleX(0.7) rotate(-18deg); }
   50% { opacity: 0.85; transform: translate(-50%, -50%) scaleX(1) rotate(-18deg); }
