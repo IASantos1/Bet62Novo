@@ -10548,7 +10548,16 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
+  // no-store added 2026-09-11 (user-reported: an open match's live odds/
+  // score stayed frozen on a stale snapshot even across a full page
+  // reload) — bet62.plus sits behind Cloudflare (confirmed via the
+  // reporting user's own Network tab, remote address in Cloudflare's
+  // published ASN range), whose edge cache/buffering doesn't necessarily
+  // honor nginx's X-Accel-Buffering convention or a bare `no-cache`
+  // (which only requires revalidation, not "never store") the way this
+  // endpoint needs. `no-store` is the strongest standard signal to never
+  // cache a response at any layer.
+  res.setHeader("Cache-Control", "no-cache, no-store, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
 
