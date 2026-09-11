@@ -12,6 +12,7 @@ import type {
   GoalApiLineupEntry,
   GoalApiTopScorer,
   GoalApiTeamResults,
+  GoalApiH2HResult,
   GoalApiStanding,
   GoalApiStandingZones,
   GoalApiPlayer,
@@ -480,21 +481,26 @@ export type BuiltGoalApiConfrontosMeeting = {
   league: string;
 };
 
-/** Derives head-to-head history for the /confrontos route from the home
- * team's own /teams/:id/results — GOAL API has no dedicated H2H endpoint
- * (see buildApiTennisConfrontos's own note on this — api-tennis.com was
- * this app's first real H2H source, for tennis only; football always fell
- * back to an empty 0-0-0 result). recentFixtures already carries the
- * queried team's own W/D/L (see buildGoalApiForm's comment) and a literal
- * "home-away" score string for whichever side was actually home in that
- * past fixture — re-oriented here to THIS match's home/away (the queried
- * team is always home in the caller's context, so a fixture where it
- * wasn't the historical home side has its score numbers swapped). Limited
- * to whatever GOAL API's own "recent" window returns — a genuine older
- * meeting outside that window is indistinguishable from "these teams never
- * played", same honest limitation as api-tennis.com's H2H already has. */
+/** Derives head-to-head history for the /confrontos route from GOAL API's
+ * real /h2h/:id1/:id2 endpoint (confirmed real 2026-09-11 — a user-
+ * captured live response finally proved this app's earlier assumption
+ * wrong: GOAL API DOES have a dedicated H2H endpoint, this app just
+ * hadn't found it yet. Superseded an earlier pass of this function that
+ * faked H2H by filtering one team's own /teams/:id/results for the
+ * opponent's name — kept as a comment here only for context, not as a
+ * fallback, since directMatches is strictly better data).
+ *
+ * directMatches' own match_hometeam_id/match_awayteam_id use a DIFFERENT
+ * id scheme than this provider's canonical team ids (see GoalApiH2HMatch's
+ * doc comment) — orientation is instead resolved by matching each row's
+ * match_hometeam_name/match_awayteam_name (normalized) against whichever
+ * of the outer response's team1Name/team2Name corresponds to homeTeamId
+ * (a reliable comparison — team1Id/team2Id in the outer object ARE the
+ * canonical scheme). A row that matches neither name is skipped rather
+ * than guessed at. */
 export function buildGoalApiConfrontos(
-  homeTeamResults: GoalApiTeamResults | null | undefined,
+  h2h: GoalApiH2HResult | null | undefined,
+  homeTeamId: string,
   homeName: string,
   awayName: string,
 ): { homeWins: number; awayWins: number; draws: number; recentMeetings: BuiltGoalApiConfrontosMeeting[] } {
@@ -502,19 +508,26 @@ export function buildGoalApiConfrontos(
   let awayWins = 0;
   let draws = 0;
   const recentMeetings: BuiltGoalApiConfrontosMeeting[] = [];
-  const awayKey = normalizeGoalApiTeamName(awayName);
-  for (const fx of homeTeamResults?.recentFixtures ?? []) {
-    if (!fx.opponent || normalizeGoalApiTeamName(fx.opponent) !== awayKey) continue;
-    const parts = fx.score?.split(/[-–]/).map((n) => Number(n.trim()));
-    if (!parts || parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) continue;
-    const [historicalHomeScore, historicalAwayScore] = parts as [number, number];
-    const score1 = fx.isHome ? historicalHomeScore : historicalAwayScore;
-    const score2 = fx.isHome ? historicalAwayScore : historicalHomeScore;
-    if (fx.result === "W") homeWins++;
-    else if (fx.result === "L") awayWins++;
+  if (!h2h) return { homeWins, awayWins, draws, recentMeetings };
+
+  const homeLabel = h2h.team1Id === homeTeamId ? h2h.team1Name : h2h.team2Id === homeTeamId ? h2h.team2Name : homeName;
+  const homeKey = normalizeGoalApiTeamName(homeLabel);
+
+  for (const m of h2h.directMatches ?? []) {
+    const hs = Number(m.match_hometeam_score);
+    const as = Number(m.match_awayteam_score);
+    if (!Number.isFinite(hs) || !Number.isFinite(as)) continue; // unplayed/invalid row
+    const rowHomeIsOurHome = normalizeGoalApiTeamName(m.match_hometeam_name ?? "") === homeKey;
+    const rowAwayIsOurHome = normalizeGoalApiTeamName(m.match_awayteam_name ?? "") === homeKey;
+    if (!rowHomeIsOurHome && !rowAwayIsOurHome) continue; // can't safely orient this row — skip, never guess
+    const score1 = rowHomeIsOurHome ? hs : as;
+    const score2 = rowHomeIsOurHome ? as : hs;
+    if (score1 > score2) homeWins++;
+    else if (score1 < score2) awayWins++;
     else draws++;
-    recentMeetings.push({ date: fx.date ?? "", team1: homeName, team2: awayName, score1, score2, league: fx.league ?? "" });
+    recentMeetings.push({ date: m.match_date ?? "", team1: homeName, team2: awayName, score1, score2, league: m.league_name ?? "" });
   }
+  recentMeetings.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   return { homeWins, awayWins, draws, recentMeetings };
 }
 

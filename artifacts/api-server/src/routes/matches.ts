@@ -14085,12 +14085,14 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   // tennis (api-tennis.com's own /get_H2H) — every football match, and
   // every other sport, always fell back to the hardcoded 0-0-0/empty
   // result below (dead code note from 2026-09-08's provider removals).
-  // GOAL API has no dedicated H2H endpoint either, so this derives it from
-  // the home team's own /teams/:id/results — see buildGoalApiConfrontos.
-  if (sport === "football" && homeTeamId && home && away) {
+  // First football pass derived H2H by filtering one team's own
+  // /teams/:id/results for the opponent's name, believing GOAL API had no
+  // dedicated H2H endpoint — a user-captured live response same day proved
+  // that wrong: /h2h/:id1/:id2 is real, see buildGoalApiConfrontos.
+  if (sport === "football" && homeTeamId && awayTeamId && home && away) {
     try {
-      const results = await goalApi.getTeamResults(homeTeamId);
-      const built = buildGoalApiConfrontos(results, home, away);
+      const h2h = await goalApi.getH2H(homeTeamId, awayTeamId);
+      const built = buildGoalApiConfrontos(h2h, homeTeamId, home, away);
       homeWins = built.homeWins;
       awayWins = built.awayWins;
       draws = built.draws;
