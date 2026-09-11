@@ -173,6 +173,13 @@ type AdvancedMarkets = {
     o105: number;
     u105: number;
   };
+  // Per-team corners over/under — real PulseScore market
+  // (HOME/AWAY_CORNERS_OVER_UNDER), unlike `corners` above (combined match
+  // total) each team has its own natural range, so a single dynamic
+  // `{line, over, under}` (whichever line the book actually offers) fits
+  // better than fixed shared slots.
+  homeCorners?: { line: number; over: number; under: number };
+  awayCorners?: { line: number; over: number; under: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
   // Sport-specific extras
   _spread?: number;
