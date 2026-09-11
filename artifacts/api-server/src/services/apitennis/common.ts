@@ -3,7 +3,7 @@
 // component and the expanded match header already read from
 // LiveMatchState._liveExtra (sets/currentPoints/serving/tennisStats), so no
 // new frontend shape is introduced.
-import type { ApiTennisMatch, ApiTennisOddsMarket, ApiTennisH2HResult, ApiTennisPlayer } from "./index.js";
+import type { ApiTennisMatch, ApiTennisOddsMarket, ApiTennisH2HResult, ApiTennisPlayer, ApiTennisLiveOddsEntry } from "./index.js";
 
 /** /get_fixtures and /get_livescore's `scores` array — one entry per set,
  * confirmed real in the provider's docs. Sorted by score_set so an
@@ -203,4 +203,123 @@ export function extractApiTennisMoneyline(
     if (Number.isFinite(h) && Number.isFinite(a)) return { home: h, away: a };
   }
   return null;
+}
+
+/** Real markets extracted from GET /get_live_odds's flat live_odds[] rows —
+ * confirmed real 2026-09-11 against a live match (Zverev vs Khachanov).
+ * Only maps odd_name/type combinations this app already has a rendered
+ * slot for (computeTennisExtras' synthetic fields in routes/matches.ts):
+ * moneyline ("To Win"), set 1-3 winner, total games (match + set 1), and
+ * the match games handicap. Several other real markets this same response
+ * carries (Total Sets, tie-breaks, correct-score groups, Match Result +
+ * Total Games combos, ...) have no existing frontend market to patch and
+ * are deliberately left out — wiring those needs new UI/settlement work,
+ * not just a parser, and is out of scope here.
+ *
+ * A suspended row (the bookmaker has paused that specific line, e.g. right
+ * after a break point) is treated as "no real value this tick" rather than
+ * shown frozen — same principle as GOAL API's suspension engine — so the
+ * caller's existing synthetic fallback covers it until the line reopens. */
+export type ApiTennisRealLiveMarkets = {
+  moneyline?: { home: number; away: number };
+  set1?: { home: number; away: number };
+  set2?: { home: number; away: number };
+  set3?: { home: number; away: number };
+  /** Every non-suspended (line, over, under) triple found for "Total Games
+   * in Match" — the caller picks/merges into its own fixed line ladder. */
+  totalGamesLines?: Array<{ line: number; over: number; under: number }>;
+  set1GamesLines?: Array<{ line: number; over: number; under: number }>;
+  /** "Match Handicap" — a GAMES handicap for the whole match (confirmed
+   * real: e.g. line -5.5/+5.5, far too large to be a sets handicap), not
+   * to be confused with computeTennisExtras' sets-based `setHandicap`
+   * (line 1.5, "wins in straight sets"), which this feed has no direct
+   * equivalent for. */
+  gameHandicap?: { line: number; home: number; away: number };
+};
+
+function findLiveOddValue(
+  rows: ApiTennisLiveOddsEntry[],
+  oddName: string,
+  type: string,
+): number | null {
+  const row = rows.find((r) => r.odd_name === oddName && r.type === type && r.suspended !== "Yes");
+  if (!row) return null;
+  const v = Number(row.value);
+  return Number.isFinite(v) && v > 1 ? v : null;
+}
+
+function findLiveOddPair(
+  rows: ApiTennisLiveOddsEntry[],
+  oddName: string,
+): { home: number; away: number } | null {
+  const home = findLiveOddValue(rows, oddName, "Home");
+  const away = findLiveOddValue(rows, oddName, "Away");
+  if (home == null || away == null) return null;
+  return { home, away };
+}
+
+/** Every non-suspended Over/Under pair sharing the same `handicap` (the
+ * line) under one odd_name — e.g. "Total Games in Match" quotes several
+ * lines (35.5, 56.5, ...) at once, same multi-line pattern this codebase's
+ * football over/under aggregators already follow. */
+function findLiveOverUnderLines(
+  rows: ApiTennisLiveOddsEntry[],
+  oddName: string,
+): Array<{ line: number; over: number; under: number }> {
+  const overByLine = new Map<number, number>();
+  const underByLine = new Map<number, number>();
+  for (const r of rows) {
+    if (r.odd_name !== oddName || r.suspended === "Yes") continue;
+    const line = Number(r.handicap);
+    const value = Number(r.value);
+    if (!Number.isFinite(line) || !Number.isFinite(value) || value <= 1) continue;
+    if (r.type === "Over") overByLine.set(line, value);
+    else if (r.type === "Under") underByLine.set(line, value);
+  }
+  const out: Array<{ line: number; over: number; under: number }> = [];
+  for (const [line, over] of overByLine) {
+    const under = underByLine.get(line);
+    if (under != null) out.push({ line, over, under });
+  }
+  return out.sort((a, b) => a.line - b.line);
+}
+
+export function extractApiTennisLiveMarkets(
+  rows: ApiTennisLiveOddsEntry[] | null | undefined,
+): ApiTennisRealLiveMarkets {
+  if (!rows || rows.length === 0) return {};
+
+  const out: ApiTennisRealLiveMarkets = {};
+
+  const moneyline = findLiveOddPair(rows, "To Win");
+  if (moneyline) out.moneyline = moneyline;
+
+  const set1 = findLiveOddPair(rows, "Set 1 Winner");
+  if (set1) out.set1 = set1;
+  const set2 = findLiveOddPair(rows, "Set 2 Winner");
+  if (set2) out.set2 = set2;
+  const set3 = findLiveOddPair(rows, "Set 3 Winner");
+  if (set3) out.set3 = set3;
+
+  const totalGamesLines = findLiveOverUnderLines(rows, "Total Games in Match");
+  if (totalGamesLines.length > 0) out.totalGamesLines = totalGamesLines;
+  const set1GamesLines = findLiveOverUnderLines(rows, "Total Games in Set 1");
+  if (set1GamesLines.length > 0) out.set1GamesLines = set1GamesLines;
+
+  const handicapHome = rows.find(
+    (r) => r.odd_name === "Match Handicap" && r.type === "Home" && r.suspended !== "Yes",
+  );
+  const handicapAway = rows.find(
+    (r) => r.odd_name === "Match Handicap" && r.type === "Away" && r.suspended !== "Yes",
+  );
+  if (handicapHome && handicapAway) {
+    const line = Number(handicapHome.handicap);
+    const home = Number(handicapHome.value);
+    const away = Number(handicapAway.value);
+    if (Number.isFinite(line) && Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1) {
+      out.gameHandicap = { line, home, away };
+    }
+  }
+
+  return out;
 }
