@@ -25,6 +25,7 @@ import { timingSafeEqualString } from "./lib/security.js";
 import { userIdFromMemberAccount } from "./routes/casino.js";
 import { verifyGoalApiSignature, parseGoalApiWebhookBody } from "./services/goalapi/webhook.js";
 import { applyGoalApiWebhookEvent } from "./routes/matches.js";
+import { recordGoalApiWebhookReceived, recordGoalApiWebhookSignatureFailure } from "./health/providerHealth.js";
 
 const app: Express = express();
 
@@ -327,6 +328,7 @@ app.post(
     );
     if (verification.valid === false) {
       logger.warn({ reason: verification.reason }, "[goal-api-webhook] signature verification failed");
+      recordGoalApiWebhookSignatureFailure();
       res.sendStatus(401);
       return;
     }
@@ -335,6 +337,7 @@ app.post(
       res.sendStatus(400);
       return;
     }
+    recordGoalApiWebhookReceived(event.event);
     // Respond fast (the provider's own docs specify an 8s timeout and
     // retries on anything but 2xx) — do the actual work after responding.
     res.sendStatus(200);

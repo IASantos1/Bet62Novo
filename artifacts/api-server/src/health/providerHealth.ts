@@ -28,6 +28,20 @@ export type ProviderHealth = {
     lastError: string | null;
     consecutiveFailures: number;
   };
+  /** Visibility into GOAL API's push channel (POST /api/webhooks/goal-api)
+   * — previously untracked, so a live scenario where webhooks never reach
+   * us (misconfigured URL on GOAL API's side, wrong secret, network block)
+   * looked identical to "webhooks are fine" from the admin panel: both
+   * cases silently fall back to the ~10s REST poll cache with no signal
+   * either way. User-reported 2026-09-11: goal/VAR events showing up with
+   * a large delay — this field is what actually answers "are webhooks
+   * even arriving" instead of guessing. */
+  webhook: {
+    lastReceivedAt: number | null;
+    lastEvent: string | null;
+    totalReceived: number;
+    lastSignatureFailureAt: number | null;
+  };
 };
 
 /** How stale the last successful REST call can be before a run of failures
@@ -74,6 +88,23 @@ export function recordGoalApiRestFailure(err: unknown): void {
   restState.consecutiveFailures += 1;
 }
 
+const webhookState = {
+  lastReceivedAt: null as number | null,
+  lastEvent: null as string | null,
+  totalReceived: 0,
+  lastSignatureFailureAt: null as number | null,
+};
+
+export function recordGoalApiWebhookReceived(eventType: string): void {
+  webhookState.lastReceivedAt = Date.now();
+  webhookState.lastEvent = eventType;
+  webhookState.totalReceived += 1;
+}
+
+export function recordGoalApiWebhookSignatureFailure(): void {
+  webhookState.lastSignatureFailureAt = Date.now();
+}
+
 export function getGoalApiProviderHealth(): ProviderHealth {
   const now = Date.now();
   const ws = getGoalApiWsStatus();
@@ -99,6 +130,12 @@ export function getGoalApiProviderHealth(): ProviderHealth {
       lastFailureAt: restState.lastFailureAt,
       lastError: restState.lastError,
       consecutiveFailures: restState.consecutiveFailures,
+    },
+    webhook: {
+      lastReceivedAt: webhookState.lastReceivedAt,
+      lastEvent: webhookState.lastEvent,
+      totalReceived: webhookState.totalReceived,
+      lastSignatureFailureAt: webhookState.lastSignatureFailureAt,
     },
   };
 }
