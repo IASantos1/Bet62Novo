@@ -160,6 +160,7 @@ const parisFCBanner = mk("Photorealistic 16:9 football stadium banner for Paris 
 const lorientBanner = mk("Photorealistic 16:9 football stadium banner for FC Lorient Merlus, Stade du Moustoir, orange and black colors Brittany herring, French Ligue 1, high detail, cinematic stadium photography, no text, no watermark");
 const brestBanner = mk("Photorealistic 16:9 football stadium banner for Stade Brestois 29 Brest Armorique, Stade Francis Le Ble, red and white colors Brittany sailboat, French Ligue 1, high detail, cinematic stadium photography, no text, no watermark");
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import FootballPitchTracker from "@/components/FootballPitchTracker";
 import PlayerProfileModal from "@/components/PlayerProfileModal";
 import TournamentBracket from "@/components/TournamentBracket";
 import SuggestedCombos from "@/components/SuggestedCombos";
@@ -19198,7 +19199,15 @@ export default function Home({
                 </button>
 
                 {/* Match header */}
-                <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
+                <div
+                  className={`relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3 ${
+                    expandedMatch.isLive &&
+                    (expandedMatch.sport ?? "football") === "football" &&
+                    matchViewTab === "markets"
+                      ? "bet62-hide-in-pwa"
+                      : ""
+                  }`}
+                >
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
                     <div className="flex items-center justify-between gap-3 mb-4">
@@ -19357,6 +19366,25 @@ export default function Home({
                       )}
                   </div>
                 </div>
+
+                {/* Mini pitch tracker — PWA only (see .bet62-hide-in-pwa /
+                    .bet62-show-in-pwa, index.css): replaces the header
+                    above directly above the Mercados odds markets. */}
+                {expandedMatch.isLive &&
+                  (expandedMatch.sport ?? "football") === "football" &&
+                  matchViewTab === "markets" && (
+                    <div className="bet62-show-in-pwa mb-3">
+                      <FootballPitchTracker
+                        home={expandedMatch.home}
+                        away={expandedMatch.away}
+                        homeScore={expandedMatch.homeScore}
+                        awayScore={expandedMatch.awayScore}
+                        minute={getDisplayMinute(expandedMatch)}
+                        isHalfTime={getFootballPhaseTag(expandedMatch, getDisplayMinute(expandedMatch)) === "HT"}
+                        commentary={expandedMatch._commentary}
+                      />
+                    </div>
+                  )}
 
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
@@ -26533,7 +26561,34 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        <aside className="hidden lg:block w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)]">
+        <aside
+          className={`hidden lg:flex lg:flex-col w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] ${
+            expandedMatch &&
+            expandedMatch.isLive &&
+            (expandedMatch.sport ?? "football") === "football" &&
+            matchViewTab === "markets"
+              ? "overflow-y-auto"
+              : ""
+          }`}
+        >
+          {/* Mini pitch tracker — user-requested 2026-09-11: shown above
+              the bet slip, on the Mercados tab of a live football match. */}
+          {expandedMatch &&
+            expandedMatch.isLive &&
+            (expandedMatch.sport ?? "football") === "football" &&
+            matchViewTab === "markets" && (
+              <div className="p-3 border-b border-zinc-800/60 shrink-0">
+                <FootballPitchTracker
+                  home={expandedMatch.home}
+                  away={expandedMatch.away}
+                  homeScore={expandedMatch.homeScore}
+                  awayScore={expandedMatch.awayScore}
+                  minute={getDisplayMinute(expandedMatch)}
+                  isHalfTime={getFootballPhaseTag(expandedMatch, getDisplayMinute(expandedMatch)) === "HT"}
+                  commentary={expandedMatch._commentary}
+                />
+              </div>
+            )}
           {BetSlipContent()}
         </aside>
       </div>
