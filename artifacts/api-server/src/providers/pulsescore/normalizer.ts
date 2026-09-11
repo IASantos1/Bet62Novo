@@ -77,6 +77,10 @@ export type NormalizedFootballEvent = {
   cornersLines?: Map<number, { over: number; under: number }>;
   cardsLines?: Map<number, { over: number; under: number }>;
   asianTotalLines?: Map<number, { over: number; under: number }>;
+  teamGoalsHomeLines?: Map<number, { over: number; under: number }>;
+  teamGoalsAwayLines?: Map<number, { over: number; under: number }>;
+  homeCornersLines?: Map<number, { over: number; under: number }>;
+  awayCornersLines?: Map<number, { over: number; under: number }>;
 };
 
 function findMarket(ev: PulseScoreEvent, canonicalMarket: string, period: string) {
@@ -173,7 +177,11 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
       })()
     : undefined;
 
-  const fgTeamMarket = findMarketLoose(ev, ["NEXT_GOAL_TEAM", "FIRST_GOAL_TEAM", "NEXT_GOAL", "WHICH_TEAM_SCORES_NEXT"], "FULL_TIME");
+  // "FIRST_TEAM_TO_SCORE" is PulseScore's real canonicalMarket name for this
+  // (confirmed 2026-09-11 against real captured payloads) — the other
+  // needles below never matched anything real; kept as harmless fallbacks
+  // in case a different bookmaker feed uses a different name.
+  const fgTeamMarket = findMarketLoose(ev, ["FIRST_TEAM_TO_SCORE", "NEXT_GOAL_TEAM", "FIRST_GOAL_TEAM", "NEXT_GOAL", "WHICH_TEAM_SCORES_NEXT"], "FULL_TIME");
   const firstGoalTeam = fgTeamMarket
     ? (() => {
         const home =
@@ -184,7 +192,10 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
           findOutcomeOdds(fgTeamMarket.selections, "AWAY") ??
           findOutcomeOdds(fgTeamMarket.selections, "AWAY_FIRST") ??
           findOutcomeOdds(fgTeamMarket.selections, "AWAY_NEXT");
+        // "NEITHER" is PulseScore's real canonicalOutcome for "no goal at
+        // all" on FIRST_TEAM_TO_SCORE (confirmed 2026-09-11).
         const noGoal =
+          findOutcomeOdds(fgTeamMarket.selections, "NEITHER") ??
           findOutcomeOdds(fgTeamMarket.selections, "NO_GOAL") ??
           findOutcomeOdds(fgTeamMarket.selections, "NONE") ??
           findOutcomeOdds(fgTeamMarket.selections, "NO_MORE_GOALS");
@@ -262,64 +273,89 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   const firstGoalscorer = pluckPlayers(firstGsMarket);
   const lastGoalscorer = pluckPlayers(lastGsMarket);
 
+  // Real PulseScore Asian handicap data (confirmed 2026-09-11) prices HOME
+  // and AWAY at OPPOSITE-signed lines for the same pairing — "HOME -1" (the
+  // favorite giving a goal) sits alongside "AWAY +1" (the underdog getting
+  // it), never "AWAY -1". Grouping selections by their raw `line` value
+  // (as both this and handicapLines below used to) therefore never finds a
+  // home+away match at the same key and silently returns nothing — pairing
+  // each HOME line with the AWAY entry at its negation is the fix.
+  function pairAsianHandicapLines(
+    selections: PulseScoreEvent["markets"][number]["selections"],
+  ): Map<number, { home: number; away: number }> | undefined {
+    const homeByLine = new Map<number, number>();
+    const awayByLine = new Map<number, number>();
+    for (const s of selections) {
+      if (s.line == null || !Number.isFinite(s.line)) continue;
+      if (s.canonicalOutcome === "HOME" || s.canonicalOutcome === "1") homeByLine.set(s.line, s.odds);
+      else if (s.canonicalOutcome === "AWAY" || s.canonicalOutcome === "2") awayByLine.set(s.line, s.odds);
+    }
+    const combined = new Map<number, { home: number; away: number }>();
+    for (const [line, home] of homeByLine) {
+      const away = awayByLine.get(-line) ?? awayByLine.get(line);
+      if (away != null) combined.set(line, { home, away });
+    }
+    return combined.size ? combined : undefined;
+  }
+
   // Asian handicap full-time line market — pick line 0 first (DNB duplicate),
   // else the absolute-smallest absolute line the provider emits.
   const ahMarket = findMarketLoose(ev, ["ASIAN_HANDICAP", "HANDICAP_ASIAN"], "FULL_TIME");
+  const asianHandicapAllLines = ahMarket ? pairAsianHandicapLines(ahMarket.selections) : undefined;
   const asianHandicapFull: NormalizedFootballEvent["asianHandicapFull"] = (() => {
-    if (!ahMarket) return undefined;
-    const byLine = new Map<number, { home?: number; away?: number }>();
-    for (const s of ahMarket.selections) {
-      if (s.line == null || !Number.isFinite(s.line)) continue;
-      const rec = byLine.get(s.line) ?? {};
-      if (s.canonicalOutcome === "HOME" || s.canonicalOutcome === "1") rec.home = s.odds;
-      else if (s.canonicalOutcome === "AWAY" || s.canonicalOutcome === "2") rec.away = s.odds;
-      byLine.set(s.line, rec);
-    }
-    const available: Array<{ line: number; home: number; away: number }> = [];
-    for (const [line, v] of byLine.entries()) {
-      if (v.home != null && v.away != null) available.push({ line, home: v.home, away: v.away });
-    }
-    if (!available.length) return undefined;
+    if (!asianHandicapAllLines) return undefined;
+    const available = [...asianHandicapAllLines.entries()].map(([line, v]) => ({ line, ...v }));
     available.sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
     return available[0];
   })();
 
-  // Generic line-market aggregator (over/under or home/away handicap per line):
-  const aggregateLineMarkets = (needles: string[], period: string, kind: "overunder" | "handicap") => {
+  // Generic over/under line-market aggregator. (A "handicap" mode used to
+  // live here too, grouping HOME/AWAY selections by their raw `line` — removed
+  // 2026-09-11 since real Asian handicap data pairs HOME/AWAY at *opposite*
+  // signs per line, not the same one, so that mode always returned nothing
+  // useful; see pairAsianHandicapLines above for the correct approach.)
+  const aggregateLineMarkets = (needles: string[], period: string) => {
     const mkt = findMarketLoose(ev, needles, period);
     if (!mkt) return undefined;
-    if (kind === "overunder") {
-      const m = new Map<number, { over: number; under: number }>();
-      for (const s of mkt.selections) {
-        if (s.line == null || !Number.isFinite(s.line)) continue;
-        const rec = m.get(s.line) ?? { over: undefined as number | undefined, under: undefined as number | undefined };
-        const out = s.canonicalOutcome.toUpperCase();
-        if (out === "OVER" || out.startsWith("O") || out.startsWith("MORE")) rec.over = s.odds;
-        else if (out === "UNDER" || out.startsWith("U") || out.startsWith("LESS")) rec.under = s.odds;
-        m.set(s.line, rec as { over: number; under: number });
-      }
-      const clean = new Map<number, { over: number; under: number }>();
-      for (const [l, v] of m.entries()) if (v.over != null && v.under != null) clean.set(l, v);
-      return clean.size ? clean : undefined;
-    } else {
-      const m = new Map<number, { home: number; away: number }>();
-      for (const s of mkt.selections) {
-        if (s.line == null || !Number.isFinite(s.line)) continue;
-        const rec = m.get(s.line) ?? { home: undefined as number | undefined, away: undefined as number | undefined };
-        const out = s.canonicalOutcome.toUpperCase();
-        if (out === "HOME" || out === "1") rec.home = s.odds;
-        else if (out === "AWAY" || out === "2") rec.away = s.odds;
-        m.set(s.line, rec as { home: number; away: number });
-      }
-      const clean = new Map<number, { home: number; away: number }>();
-      for (const [l, v] of m.entries()) if (v.home != null && v.away != null) clean.set(l, v);
-      return clean.size ? clean : undefined;
+    const m = new Map<number, { over: number; under: number }>();
+    for (const s of mkt.selections) {
+      if (s.line == null || !Number.isFinite(s.line)) continue;
+      const rec = m.get(s.line) ?? { over: undefined as number | undefined, under: undefined as number | undefined };
+      const out = s.canonicalOutcome.toUpperCase();
+      if (out === "OVER" || out.startsWith("O") || out.startsWith("MORE")) rec.over = s.odds;
+      else if (out === "UNDER" || out.startsWith("U") || out.startsWith("LESS")) rec.under = s.odds;
+      m.set(s.line, rec as { over: number; under: number });
     }
+    const clean = new Map<number, { over: number; under: number }>();
+    for (const [l, v] of m.entries()) if (v.over != null && v.under != null) clean.set(l, v);
+    return clean.size ? clean : undefined;
   };
-  const handicapLines = aggregateLineMarkets(["MATCH_HANDICAP", "RESULT_HANDICAP", "HOME_AWAY_HANDICAP", "HANDICAP_RESULT"], "FULL_TIME", "handicap");
-  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER"], "FULL_TIME", "overunder");
-  const cardsLines = aggregateLineMarkets(["BOOKINGS_TOTAL", "TOTAL_CARDS", "CARDS_OVER_UNDER"], "FULL_TIME", "overunder");
-  const asianTotalLines = aggregateLineMarkets(["TOTAL_GOALS", "GOALS_TOTAL", "TOTAL"], "FULL_TIME", "overunder");
+  // None of "MATCH_HANDICAP"/"RESULT_HANDICAP"/"HOME_AWAY_HANDICAP"/
+  // "HANDICAP_RESULT" ever matched anything real (confirmed 2026-09-11
+  // against real captured payloads) — this silently returned undefined
+  // every time, so BET62's 2-way `handicap` field (homeMinusOne/
+  // awayPlusOne/...) was always zeroed. The real 2-way market is
+  // "ASIAN_HANDICAP" — reuse the same correctly opposite-sign-paired map
+  // asianHandicapFull is built from above (fixing this at the source, not
+  // via aggregateLineMarkets's generic "handicap" mode, which shares the
+  // exact same same-sign assumption bug the header comment above just
+  // described — see pairAsianHandicapLines). PulseScore's other handicap
+  // market, "EUROPEAN_HANDICAP", is a genuine 3-way (home/draw/away) price
+  // per line — a different shape from this 2-way field, deliberately not
+  // mapped here (would need its own market type, out of scope for this
+  // pass; see the session notes on this decision).
+  const handicapLines = asianHandicapAllLines;
+  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER"], "FULL_TIME");
+  const cardsLines = aggregateLineMarkets(["BOOKINGS_TOTAL", "TOTAL_CARDS", "CARDS_OVER_UNDER"], "FULL_TIME");
+  const asianTotalLines = aggregateLineMarkets(["TOTAL_GOALS", "GOALS_TOTAL", "TOTAL"], "FULL_TIME");
+  // Per-team goals/corners over-under — real canonicalMarkets
+  // "HOME_OVER_UNDER"/"AWAY_OVER_UNDER" and "HOME_CORNERS_OVER_UNDER"/
+  // "AWAY_CORNERS_OVER_UNDER" (all confirmed 2026-09-11), previously not
+  // extracted at all.
+  const teamGoalsHomeLines = aggregateLineMarkets(["HOME_OVER_UNDER"], "FULL_TIME");
+  const teamGoalsAwayLines = aggregateLineMarkets(["AWAY_OVER_UNDER"], "FULL_TIME");
+  const homeCornersLines = aggregateLineMarkets(["HOME_CORNERS_OVER_UNDER"], "FULL_TIME");
+  const awayCornersLines = aggregateLineMarkets(["AWAY_CORNERS_OVER_UNDER"], "FULL_TIME");
 
   return {
     eventId: ev.eventId,
@@ -347,5 +383,9 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
     cornersLines,
     cardsLines,
     asianTotalLines,
+    teamGoalsHomeLines,
+    teamGoalsAwayLines,
+    homeCornersLines,
+    awayCornersLines,
   };
 }

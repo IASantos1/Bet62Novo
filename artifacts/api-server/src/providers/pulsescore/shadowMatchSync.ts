@@ -415,6 +415,36 @@ export function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Mar
       }
     : undefined;
 
+  const goalOddEven = normalized.totalGoalsOddEven;
+
+  const tgh = normalized.teamGoalsHomeLines;
+  const tga = normalized.teamGoalsAwayLines;
+  const teamGoals: NonNullable<Markets["teamGoals"]> | undefined =
+    tgh || tga
+      ? {
+          homeOver05: tgh?.get(0.5)?.over, homeUnder05: tgh?.get(0.5)?.under,
+          homeOver15: tgh?.get(1.5)?.over, homeUnder15: tgh?.get(1.5)?.under,
+          homeOver25: tgh?.get(2.5)?.over, homeUnder25: tgh?.get(2.5)?.under,
+          awayOver05: tga?.get(0.5)?.over, awayUnder05: tga?.get(0.5)?.under,
+          awayOver15: tga?.get(1.5)?.over, awayUnder15: tga?.get(1.5)?.under,
+          awayOver25: tga?.get(2.5)?.over, awayUnder25: tga?.get(2.5)?.under,
+        }
+      : undefined;
+
+  // Per-team corners: unlike the fixed shared slots the combined `corners`
+  // market uses, each team's real range differs enough (home commonly
+  // 8-12, away commonly 1-5) that a single dynamic line makes more sense —
+  // take whichever line the book listed first (real data confirms
+  // PulseScore lists these ascending, so this is its lowest/most-central
+  // line, not an arbitrary one).
+  const firstLine = (m: Map<number, { over: number; under: number }> | undefined) => {
+    if (!m || m.size === 0) return undefined;
+    const [line, v] = [...m.entries()][0]!;
+    return { line, over: v.over, under: v.under };
+  };
+  const homeCorners = firstLine(normalized.homeCornersLines);
+  const awayCorners = firstLine(normalized.awayCornersLines);
+
   return {
     doubleChance,
     bothTeamsScore,
@@ -434,6 +464,10 @@ export function buildPulseScoreMarkets(normalized: NormalizedFootballEvent): Mar
     lastGoalscorer,
     corners,
     cards,
+    goalOddEven,
+    teamGoals,
+    homeCorners,
+    awayCorners,
   };
 }
 
