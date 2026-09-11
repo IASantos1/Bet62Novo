@@ -9776,8 +9776,10 @@ export default function Home({
       return null;
     const now = Date.now();
     // Diretriz arquitetural: odds bettáveis vêm EXCLUSIVAMENTE da PulseScore real.
-    // Placeholder odds={0,0,0} ou undefined (sem _priceSource=pulsescore /
-    // hasRealOdds=false) devem exibir "--" desabilitado, nunca executar toggleBet.
+    // hasRealOdds=false (sem _priceSource=pulsescore) nunca deve executar
+    // toggleBet, mas ainda pode ter um número sintético válido pra exibir —
+    // mostra ele desabilitado (não clicável) em vez de esconder atrás de um
+    // "--" genérico; só um odd genuinamente ausente/inválido cai no "--".
     const hasNoPriceSource = !match.hasRealOdds;
     const oddInvalid = odd <= 0 || !Number.isFinite(odd);
     if (hasNoPriceSource || oddInvalid) {
@@ -9804,7 +9806,7 @@ export default function Home({
           <span
             className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-500"} tabular-nums`}
           >
-            --
+            {oddInvalid ? "--" : odd.toFixed(2)}
           </span>
         </div>
       );

@@ -8082,17 +8082,19 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       awayScore: awayScore as number,
       minute: estimateGoalApiLiveMinute(fx),
       status: fx.matchStatus,
-      // Display-only flag (bets.ts never reads it — it gates purely on
-      // `_priceSource === "pulsescore"`, unaffected by this): true whenever
-      // there's a valid price to render at all, synthetic-anchor included,
-      // so the frontend's OddsButton (home.tsx) shows a moving number
-      // instead of "--" for a fixture PulseScore hasn't priced yet. Using
-      // `wasPulseBefore` here (as before this fix) made the card/list
-      // hide the price entirely for any non-PulseScore-priced fixture even
-      // though the odds themselves were already valid and displayed fine
-      // elsewhere (e.g. the match detail's Mercados tab, which reads
-      // `odds` directly without this gate).
-      hasRealOdds: displayOdds.home > 0 && displayOdds.draw > 0 && displayOdds.away > 0,
+      // NOT a pure display flag — home.tsx's OddsButton uses this as the
+      // sole gate on whether the button is clickable (calls toggleBet) as
+      // well as what it renders, so it must stay tied to real bettability
+      // (`_priceSource === "pulsescore"`), never to "is there any number
+      // to show at all". A synthetic anchor is a valid number but not a
+      // real price — flagging it hasRealOdds:true here made the button
+      // fully clickable, letting a bettor add a fabricated price to their
+      // slip that the server then silently rejects at submission (caught
+      // in review before shipping). The synthetic value is still shown to
+      // the user — see OddsButton's disabled branch, which now renders
+      // `odd` instead of a bare "--" whenever a real number exists, without
+      // making the button selectable.
+      hasRealOdds: wasPulseBefore,
       odds: displayOdds,
       markets: displayMarkets,
       _baseOdds: wasPulseBefore ? existing?._baseOdds : (existing?._baseOdds ?? baseOdds),
