@@ -715,11 +715,12 @@ export type UpcomingMatch = {
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
   /** PulseScore-only: when this upcoming fixture's odds/markets have been
-   *  replaced with real PulseScore upstream data (every oddity only from
-   *  PulseScore per user's 2026-09-10 rule). `undefined` / absent means
-   *  fixture is still showing anchor odds (Poisson synthetic +
-   *  goalApi.getFixtureOdds 1X2/O.2.5/BTTS legacy values) — visible in
-   *  the list but bets are blocked (gate in bets.ts POST /bets). */
+   *  replaced with real PulseScore upstream data. `undefined` / absent
+   *  means fixture is still showing the synthetic anchor odds (Poisson +
+   *  goalApi.getFixtureOdds 1X2/O.2.5/BTTS legacy values). Purely a
+   *  display/diagnostic flag now — per the user's 2026-09-11 decision
+   *  (routes/bets.ts), a bet is accepted on whichever price is shown,
+   *  real or synthetic; this no longer gates acceptance. */
   _priceSource?: "pulsescore";
   /** Traceability: the raw PulseScore event id used for this fixture's
    *  real markets (matches getPrematchPulsePrice + canonical DB mapping). */
@@ -9378,6 +9379,15 @@ export { buildUpcomingMatches, getUpcomingAll };
 // This means a V1 score patch triggers a broadcast in ~5ms instead of ~200ms.
 let _allUpcomingCache: UpcomingMatch[] = [];
 let _allUpcomingCacheBuiltAt = 0;
+
+/** Read-only snapshot for callers outside this module (e.g. the admin
+ * Eventos table) that need team names / PulseScore price status for
+ * pré-jogo fixtures without triggering their own fetch — this cache is
+ * already kept warm by every /live poll (buildLivePayload's cache-warm
+ * check above). */
+export function getUpcomingMatchesSnapshot(): UpcomingMatch[] {
+  return _allUpcomingCache;
+}
 const UPCOMING_CACHE_TTL_MS = 30_000;
 let _upcomingRebuildInProgress = false;
 
