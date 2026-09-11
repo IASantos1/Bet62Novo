@@ -91,7 +91,7 @@ function zoneForAction(action: string, side: "home" | "away", seed: string): Bal
   const a = action.toLowerCase();
   const y = seededY(seed);
   const mirror = (x: number) => (side === "home" ? x : 100 - x);
-  if (/\bgoal\b/.test(a) && !a.includes("goal kick")) return CENTER; // kickoff spot after a goal
+  if (/\bgoal\b/.test(a) && !a.includes("goal kick")) return { x: mirror(97), y: 50 }; // into the net
   if (a.includes("goal kick")) return { x: mirror(8), y };
   if (a.includes("penalty")) return { x: mirror(83), y: 50 };
   if (a.includes("corner")) return { x: mirror(96), y: y < 50 ? 8 : 92 };
@@ -181,6 +181,10 @@ export default function FootballPitchTracker({
   const ballRef = useRef<BallSpot>(CENTER);
   const [ball, setBall] = useState<BallSpot>(CENTER);
   const [goalFlash, setGoalFlash] = useState(false);
+  // Where the ball was right before a goal — captured so the shot-trail
+  // line can be drawn from there to the net, instead of the goal effect
+  // just appearing out of nowhere at the goal mouth.
+  const [shotOrigin, setShotOrigin] = useState<BallSpot | null>(null);
   const [view, setView] = useState<View>("pitch");
   const [current, setCurrent] = useState<PitchTrackerCommentaryEntry | null>(null);
   const [queue, setQueue] = useState<PitchTrackerCommentaryEntry[]>([]);
@@ -201,6 +205,7 @@ export default function FootballPitchTracker({
     setQueue([]);
     setCurrent(null);
     setGoalFlash(false);
+    setShotOrigin(null);
     ballRef.current = CENTER;
     setBall(CENTER);
   }, [matchKey]);
@@ -242,12 +247,14 @@ export default function FootballPitchTracker({
     setCurrent(next);
     const p = parseCommentaryLine(next.text, home, away);
     const spot = zoneForAction(p.action, p.side, next.id);
+    const isGoal = /\bgoal\b/i.test(p.action) && !/goal kick/i.test(p.action);
     if (spot) {
+      if (isGoal) setShotOrigin(ballRef.current); // where it flew in from, for the shot-trail line
       ballRef.current = spot;
       setBall(spot);
     }
     let goalTimer: ReturnType<typeof setTimeout> | undefined;
-    if (/\bgoal\b/i.test(p.action) && !/goal kick/i.test(p.action)) {
+    if (isGoal) {
       setGoalFlash(true);
       goalTimer = setTimeout(() => setGoalFlash(false), 900);
     }
@@ -278,19 +285,49 @@ export default function FootballPitchTracker({
       ? "attacking"
       : "neutral";
 
-  // The momentum shape always starts at the halfway line and reaches
-  // toward wherever the ball currently is — it grows as the acting side
-  // pushes further forward and shrinks back for a deeper build-up action,
-  // instead of always spanning a fixed third of the pitch. Shaped as a
-  // block with a mild taper at the ball end (not a thin sharp dagger).
-  const ARROW_TAPER = 7;
+  // The momentum shape always starts at the attacking side's OWN goal
+  // line (how much of the pitch they've advanced through from their own
+  // box, not just "since midfield") and reaches toward wherever the ball
+  // currently is — it grows as the acting side pushes further forward and
+  // shrinks back for a deeper build-up action. Shaped as a block with a
+  // mild taper at the ball end (not a thin sharp dagger).
+  const ARROW_TAPER = 6;
   const arrowClipPath = (() => {
     if (!current || !parsed) return undefined;
-    const nearX = 50;
+    const nearX = parsed.side === "home" ? 0 : 100;
     const farX = ball.x;
     const dir = farX >= nearX ? 1 : -1;
     const bodyEdge = dir === 1 ? Math.max(nearX, farX - ARROW_TAPER) : Math.min(nearX, farX + ARROW_TAPER);
     return `polygon(${nearX}% 0%, ${bodyEdge}% 0%, ${farX}% 50%, ${bodyEdge}% 100%, ${nearX}% 100%)`;
+  })();
+
+  // Light near the own goal line, strongest right at the tip (the ball) —
+  // same tone family as momentumTier, just as a gradient instead of a
+  // flat fill, per user request.
+  const ARROW_GRADIENT: Record<typeof momentumTier, [string, string]> = {
+    neutral: ["rgba(150, 150, 150, 0.18)", "rgba(90, 90, 90, 0.42)"],
+    attacking: ["rgba(220, 130, 40, 0.22)", "rgba(214, 60, 20, 0.5)"],
+    danger: ["rgba(255, 120, 120, 0.2)", "rgba(210, 10, 10, 0.58)"],
+  };
+  const arrowBackground = (() => {
+    if (!current || !parsed) return undefined;
+    const [from, to] = ARROW_GRADIENT[momentumTier];
+    const towardHome = parsed.side === "home"; // home's own goal is at x≈0, so the gradient runs left→right
+    return `linear-gradient(to ${towardHome ? "right" : "left"}, ${from}, ${to})`;
+  })();
+
+  // A comet-style "shot map" line from where the ball was to the net,
+  // instead of the goal effect just appearing out of nowhere — angle/
+  // length are computed in the same 0-100 % coordinate space everything
+  // else here uses (a stylized approximation, not literal pixel physics,
+  // same convention as the existing ball trail's fixed rotation).
+  const shotLine = (() => {
+    if (!goalFlash || !shotOrigin) return null;
+    const dx = ball.x - shotOrigin.x;
+    const dy = ball.y - shotOrigin.y;
+    const lengthPct = Math.sqrt(dx * dx + dy * dy);
+    const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    return { x: shotOrigin.x, y: shotOrigin.y, lengthPct, angleDeg };
   })();
 
   const compactStats = useMemo(() => extractCompactStats(v2StatsGroups), [v2StatsGroups]);
@@ -324,7 +361,10 @@ export default function FootballPitchTracker({
         {view === "pitch" && (
           <div className="bet62-pitch">
             {current && parsed && (
-              <div className={`bet62-momentum-arrow tier-${momentumTier}`} style={{ clipPath: arrowClipPath }} />
+              <div
+                className={`bet62-momentum-arrow ${momentumTier === "danger" ? "tier-danger" : ""}`}
+                style={{ clipPath: arrowClipPath, background: arrowBackground }}
+              />
             )}
             <div className="pitch-halfline" />
             <div className="pitch-center-circle" />
@@ -348,10 +388,27 @@ export default function FootballPitchTracker({
               <div className="pitch-goal-net" />
             </div>
 
+            {shotLine && (
+              <div
+                className="bet62-shot-line"
+                style={{
+                  left: `${shotLine.x}%`,
+                  top: `${shotLine.y}%`,
+                  width: `${shotLine.lengthPct}%`,
+                  transform: `rotate(${shotLine.angleDeg}deg)`,
+                }}
+              />
+            )}
             <div
               className={`bet62-ball-trail ${parsed?.side === "away" ? "trail-away" : "trail-home"} ${isDangerZone ? "trail-danger" : ""}`}
               style={{ left: `${ball.x}%`, top: `${ball.y}%` }}
             />
+            {goalFlash && (
+              <>
+                <div className="bet62-impact-ring ring-2" style={{ left: `${ball.x}%`, top: `${ball.y}%` }} />
+                <div className="bet62-impact-ring" style={{ left: `${ball.x}%`, top: `${ball.y}%` }} />
+              </>
+            )}
             <div
               className={`bet62-ball ${goalFlash ? "ball-goal" : ""}`}
               style={{ left: `${ball.x}%`, top: `${ball.y}%` }}
@@ -481,17 +538,26 @@ const PITCH_TRACKER_CSS = `
 .bet62-team-dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 8px currentColor; background: currentColor; }
 .bet62-score { display: flex; align-items: center; gap: 8px; font-size: 20px; }
 .bet62-score span { color: #666; }
+/* "área técnica" — a green turf margin OUTSIDE the white touchline
+ * (same idea as the grass strip visible around the pitch in a broadcast
+ * graphic), between the playing field and the card's rounded corner.
+ * overflow:hidden lives HERE (not on .bet62-pitch below) specifically so
+ * the goal boxes — positioned at left/right: -2.5%, i.e. fully outside
+ * the 0-100% line-marked field — bleed into this margin instead of
+ * being invisibly clipped to nothing (that was a real bug: with
+ * overflow:hidden on .bet62-pitch itself, the goal net never rendered
+ * at all since the whole goal box sat outside the clipped area). */
 .bet62-pitch-wrapper {
-  padding: 8px;
-  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.035), transparent 65%), #08090a;
+  padding: 10px 9px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: repeating-linear-gradient(90deg, #146030 0, #146030 8%, #17693a 8%, #17693a 16%);
 }
 .bet62-pitch {
   position: relative;
   width: 100%;
   aspect-ratio: 1.55 / 1;
-  overflow: hidden;
   border: 2px solid rgba(255, 255, 255, 0.75);
-  border-radius: 5px;
   background:
     radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.08), transparent 55%),
     repeating-linear-gradient(90deg, #1c8a44 0, #1c8a44 8%, #22964c 8%, #22964c 16%);
@@ -499,13 +565,10 @@ const PITCH_TRACKER_CSS = `
 .bet62-momentum-arrow {
   position: absolute;
   inset: 0;
-  transition: background-color 450ms ease, clip-path 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: clip-path 900ms cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
-.bet62-momentum-arrow.tier-neutral { background: rgba(4, 30, 14, 0.4); }
-.bet62-momentum-arrow.tier-attacking { background: rgba(206, 122, 12, 0.42); }
 .bet62-momentum-arrow.tier-danger {
-  background: rgba(190, 20, 20, 0.48);
   animation: bet62ArrowPulse 900ms ease-in-out infinite;
 }
 .pitch-halfline { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: rgba(255, 255, 255, 0.72); transform: translateX(-50%); }
@@ -573,6 +636,24 @@ const PITCH_TRACKER_CSS = `
 .trail-home { background: rgba(255, 80, 80, 0.8); }
 .trail-away { background: rgba(80, 150, 255, 0.8); }
 .trail-danger { width: 70px; opacity: 0.9; }
+/* Shot-map style speed line for the goal effect — drawn once, from where
+ * the ball was to the net, at whatever angle/length that shot happened
+ * to be (see the shotLine calc in the component body). */
+.bet62-shot-line {
+  position: absolute; z-index: 8; height: 4px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 214, 90, 0.9) 55%, #fff 100%);
+  transform-origin: left center;
+  filter: drop-shadow(0 0 6px rgba(255, 200, 60, 0.65));
+  animation: bet62ShotLineFade 900ms ease-out forwards;
+}
+.bet62-impact-ring {
+  position: absolute; z-index: 9; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  transform: translate(-50%, -50%);
+  animation: bet62ImpactRing 700ms ease-out forwards;
+}
+.bet62-impact-ring.ring-2 { border-color: rgba(255, 214, 90, 0.75); animation-delay: 80ms; }
 .bet62-event-badge {
   position: absolute; z-index: 20; left: 50%; bottom: 12px;
   display: flex; align-items: stretch; gap: 10px; padding: 8px 14px 8px 10px;
@@ -663,9 +744,6 @@ html.light-mode .bet62-tracker-header {
   border-color: #e4e4e7;
 }
 html.light-mode .bet62-score span { color: #a1a1aa; }
-html.light-mode .bet62-pitch-wrapper {
-  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.03), transparent 65%), #f5f5f7;
-}
 html.light-mode .bet62-event-badge {
   border-color: rgba(0, 0, 0, 0.1);
   background: rgba(255, 255, 255, 0.9);
@@ -700,6 +778,15 @@ html.light-mode .bet62-tab-btn.active { color: #18181b; background: rgba(0, 0, 0
 @keyframes bet62ArrowPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+@keyframes bet62ShotLineFade {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes bet62ImpactRing {
+  0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
 }
 @keyframes bet62TrailPulse {
   0% { opacity: 0.25; transform: translate(-50%, -50%) scaleX(0.7) rotate(-18deg); }
