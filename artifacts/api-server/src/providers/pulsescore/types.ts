@@ -1,10 +1,17 @@
-// PulseScore (api.pulsescore.net) response shapes — confirmed real via 5
-// endpoints the user pasted 2026-09-10 (raw curl + response JSON):
-//   GET /api/onexbet/soccer/leagues?page&limit
-//   GET /api/onexbet/soccer/events?page&limit
-//   GET /api/onexbet/soccer/events/:id
-//   GET /api/onexbet/live-events?page&limit&sport=soccer
-//   GET /api/onexbet/live-events/events/:id
+// PulseScore (api.pulsescore.net) response shapes. Originally confirmed
+// real via 5 /api/onexbet/* endpoints 2026-09-10; switched to /api/v3/
+// bet365/* 2026-09-11 (confirmed real via the user's own live requests) —
+// same account/domain/auth, far larger pool (2182 total events vs
+// onexbet's low hundreds) and richer per-event markets. The two feeds'
+// shapes are close but NOT identical:
+//   - bet365 selections carry their provider id under `moreInfo.ID`
+//     instead of a flat `rawOdds`/`selectionId` pair onexbet had — both
+//     kept optional here so either shape parses.
+//   - bet365's own canonicalMarket classifier is less consistent: several
+//     markets that matter (the FULL_TIME 1X2, "Goals Odd/Even") come back
+//     tagged canonicalMarket:"OTHER" with only rawName ("Fulltime
+//     Result") distinguishing them — see normalizer.ts's loose-match
+//     fallbacks, added specifically for this.
 //
 // PulseScore has ALREADY normalized markets/outcomes on its own side
 // (canonicalMarket/canonicalOutcome), unlike GOAL API/api-tennis which
@@ -17,9 +24,15 @@ export type PulseScoreSelection = {
   canonicalOutcome: string;
   rawName: string;
   odds: number;
-  rawOdds: string;
+  /** onexbet-only field — absent on bet365 (see header). */
+  rawOdds?: string;
   isActive: boolean;
-  selectionId: string;
+  /** onexbet-only field — absent on bet365, which uses `moreInfo.ID`
+   * instead (see header). Never parse either as anything meaningful. */
+  selectionId?: string;
+  /** bet365's per-selection provider ids (ID/N2/OR keys observed) —
+   * opaque, traceability only. */
+  moreInfo?: Record<string, string>;
   /** Present on line-based markets (over/under, handicaps) — absent on
    * markets with no line (1X2, double chance, odd/even). */
   line?: number;

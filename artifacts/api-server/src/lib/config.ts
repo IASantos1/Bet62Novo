@@ -184,8 +184,14 @@ const PULSESCORE_MIN_REQUEST_INTERVAL_MS =
 // client's `x-secret` header) — this is the 1xBet ("onexbet") bookmaker's
 // endpoint specifically, matching every REST path this integration already
 // uses.
+// UNCONFIRMED 2026-09-11: mirrors the REST path's onexbet->v3/bet365
+// switch, but unlike the REST paths (each verified via a real request),
+// this exact WS path was never tested against bet365. Low risk either
+// way — startPulseScoreWebSocket() is called with no callback (see
+// api/index.ts), so nothing consumes its frames yet; a wrong URL just
+// means silent reconnect attempts, no functional impact.
 const PULSESCORE_WS_URL =
-  process.env["PULSESCORE_WS_URL"]?.trim() || "wss://api.pulsescore.net/api/onexbet/ws/live";
+  process.env["PULSESCORE_WS_URL"]?.trim() || "wss://api.pulsescore.net/api/v3/bet365/ws/live";
 
 // sports.bzzoiro.com — dedicated real ball-position provider (2026-09-11),
 // added specifically to drive the mini pitch tracker's ball movement with

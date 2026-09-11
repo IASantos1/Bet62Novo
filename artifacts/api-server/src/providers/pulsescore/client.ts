@@ -100,18 +100,25 @@ export class PulseScoreClient {
   }
 
   // ── Soccer (pré-jogo) ────────────────────────────────────────────────────
+  // Switched from /api/onexbet/soccer/* to /api/v3/bet365/* 2026-09-11 —
+  // confirmed real via the user's own live requests: bet365's pool is far
+  // larger (2182 total events vs onexbet's low hundreds) with much richer
+  // per-event markets (handicaps, corners, goalscorers) than onexbet ever
+  // carried. Unlike onexbet's path, bet365's /events and /leagues are NOT
+  // sport-scoped by path — `sport` is passed explicitly to avoid pulling
+  // back every sport bet365 covers.
 
   getSoccerLeagues(params?: { page?: number; limit?: number }): Promise<PulseScoreLeaguesResponse> {
-    return this.rawGet<PulseScoreLeaguesResponse>("/api/onexbet/soccer/leagues", params);
+    return this.rawGet<PulseScoreLeaguesResponse>("/api/v3/bet365/leagues", { ...params, sport: "soccer" });
   }
 
   getSoccerEvents(params?: { page?: number; limit?: number }): Promise<PulseScoreEventsResponse> {
-    return this.rawGet<PulseScoreEventsResponse>("/api/onexbet/soccer/events", params);
+    return this.rawGet<PulseScoreEventsResponse>("/api/v3/bet365/events", { ...params, sport: "soccer" });
   }
 
   async getSoccerEventById(id: string): Promise<PulseScoreEvent> {
     const resp = await this.rawGet<PulseScoreEventDetailResponse>(
-      `/api/onexbet/soccer/events/${encodeURIComponent(id)}`,
+      `/api/v3/bet365/events/${encodeURIComponent(id)}`,
     );
     return resp.data;
   }
@@ -123,12 +130,12 @@ export class PulseScoreClient {
     limit?: number;
     sport?: string;
   }): Promise<PulseScoreLiveEventsResponse> {
-    return this.rawGet<PulseScoreLiveEventsResponse>("/api/onexbet/live-events", params);
+    return this.rawGet<PulseScoreLiveEventsResponse>("/api/v3/bet365/live-events", params);
   }
 
   async getLiveEventById(id: string): Promise<PulseScoreEvent> {
     const resp = await this.rawGet<PulseScoreEventDetailResponse>(
-      `/api/onexbet/live-events/events/${encodeURIComponent(id)}`,
+      `/api/v3/bet365/live-events/events/${encodeURIComponent(id)}`,
     );
     return resp.data;
   }
