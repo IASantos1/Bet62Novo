@@ -8063,6 +8063,22 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     } catch {
       /* keep previous commentary if unavailable this tick */
     }
+    // Real minute straight from GOAL API's own commentary clock ("MM:SS",
+    // formatted to "93'" by buildGoalApiCommentary — see its header),
+    // confirmed real 2026-09-11. Far more accurate than
+    // estimateGoalApiLiveMinute's wall-clock-since-kickoffUtc guess, which
+    // has no idea about stoppage time and drifts behind reality whenever
+    // the real kickoff was delayed from the scheduled one (confirmed real
+    // via the mini pitch's commentary-derived badge showing the correct
+    // minute while the main scoreboard's estimated one lagged behind).
+    // `commentary` is newest-first (see buildGoalApiCommentary), so index 0
+    // is the latest line.
+    const realMinuteFromCommentary = (() => {
+      const latest = commentary?.[0]?.time;
+      if (!latest) return undefined;
+      const n = Number.parseInt(latest, 10);
+      return Number.isFinite(n) ? n : undefined;
+    })();
 
     const newRedCard =
       !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
@@ -8171,7 +8187,14 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       // producing a tiny elapsed-minute estimate that one poll later
       // reverts to the correct, much larger value. The match clock only
       // ever counts up, so never display a smaller minute than last shown.
-      minute: Math.max(estimateGoalApiLiveMinute(fx), existing?.minute ?? 0),
+      // realMinuteFromCommentary (GOAL API's own match clock) wins whenever
+      // present — it's authoritative, not a guess — the estimate is only
+      // ever a fallback for a fixture with no commentary yet.
+      minute: Math.max(
+        realMinuteFromCommentary ?? 0,
+        estimateGoalApiLiveMinute(fx),
+        existing?.minute ?? 0,
+      ),
       status: fx.matchStatus,
       // NOT a pure display flag — home.tsx's OddsButton uses this as the
       // sole gate on whether the button is clickable (calls toggleBet) as
