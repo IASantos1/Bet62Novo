@@ -30,7 +30,6 @@ import {
   type SelectionRecord,
 } from "../settlement.js";
 import { detectOddsDrift } from "../lib/config.js";
-import { getPrematchPulsePrice } from "../providers/pulsescore/shadowMatchSync.js";
 
 const router: IRouter = Router();
 
@@ -1873,42 +1872,10 @@ router.post(
 
     const now = Date.now();
 
-    function goalApiFootballId(mId: string): string | null {
-      if (!mId.startsWith("goalapi-football-")) return null;
-      const raw = mId.slice("goalapi-football-".length);
-      return raw === "" ? null : raw;
-    }
-    function rejectMissingPulseScorePrematch(goalApiId: string): boolean {
-      return getPrematchPulsePrice(goalApiId) === undefined;
-    }
-    function rejectMissingPulseScoreLive(st: LiveMatchState): boolean {
-      return st.id.startsWith("goalapi-football-") && st._priceSource !== "pulsescore";
-    }
-
-    const topLevelGoalApiId = goalApiFootballId(canonicalMatchId);
     if (selList.length === 0) {
       const liveSt =
         liveMatchState.get(String(matchId)) ??
         liveMatchState.get(canonicalMatchId);
-      if (topLevelGoalApiId) {
-        if (!liveSt) {
-          if (rejectMissingPulseScorePrematch(topLevelGoalApiId)) {
-            res.status(409).json({
-              error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
-              reason: "AGUARDANDO PULSESCORE (PRÉ-JOGO)",
-            });
-            return;
-          }
-        } else if (liveSt.sport === "football") {
-          if (rejectMissingPulseScoreLive(liveSt)) {
-            res.status(409).json({
-              error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
-              reason: "AGUARDANDO PULSESCORE (AO VIVO)",
-            });
-            return;
-          }
-        }
-      }
       if (
         liveSt?.sport === "tennis" ||
         liveSt?.sport === "football" ||
@@ -1955,28 +1922,7 @@ router.post(
         sel.matchId ?? canonicalMatchId,
         (sel as { sport?: unknown }).sport ?? topLevelSport,
       );
-      const selGoalApiId = goalApiFootballId(mId);
       const liveSt = liveMatchState.get(mId);
-
-      if (selGoalApiId) {
-        if (!liveSt) {
-          if (rejectMissingPulseScorePrematch(selGoalApiId)) {
-            res.status(409).json({
-              error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
-              reason: "AGUARDANDO PULSESCORE (PRÉ-JOGO)",
-            });
-            return;
-          }
-          continue;
-        }
-        if (liveSt.sport === "football" && rejectMissingPulseScoreLive(liveSt)) {
-          res.status(409).json({
-            error: "Odds ainda não sincronizadas. Aguarde e tente novamente.",
-            reason: "AGUARDANDO PULSESCORE (AO VIVO)",
-          });
-          return;
-        }
-      }
 
       if (!liveSt) continue;
       if (
