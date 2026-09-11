@@ -6150,11 +6150,21 @@ export default function Home({
     league: string;
     country?: string;
   };
+  type RecentMatchEntry = {
+    date: string;
+    opponent: string;
+    score: string;
+    result: "W" | "D" | "L";
+    home: boolean;
+    league?: string;
+  };
   type ConfrontosData = {
     homeWins: number;
     awayWins: number;
     draws: number;
     recentMeetings: H2HMeeting[];
+    homeRecentMatches?: RecentMatchEntry[];
+    awayRecentMatches?: RecentMatchEntry[];
     team1Name: string;
     team2Name: string;
     sport: string;
@@ -21355,6 +21365,61 @@ export default function Home({
                               O historial directo entre as equipas não está
                               disponível
                             </div>
+                          </div>
+                        )}
+
+                        {/* Últimos Jogos — each team's own recent form
+                            (against whichever opponents they actually
+                            played), separate from the head-to-head above */}
+                        {((confrontosData.homeRecentMatches?.length ?? 0) > 0 ||
+                          (confrontosData.awayRecentMatches?.length ?? 0) > 0) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { team: expandedMatch.home, list: confrontosData.homeRecentMatches ?? [] },
+                              { team: expandedMatch.away, list: confrontosData.awayRecentMatches ?? [] },
+                            ].map(({ team, list }) =>
+                              list.length > 0 ? (
+                                <div
+                                  key={team}
+                                  className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4"
+                                >
+                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3 truncate">
+                                    Últimos Jogos — {team}
+                                  </div>
+                                  <div className="space-y-0">
+                                    {list.map((m, i) => (
+                                      <div
+                                        key={i}
+                                        className="flex items-center gap-2 py-1.5 border-b border-zinc-800/40 last:border-0"
+                                      >
+                                        <span
+                                          className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-[9px] font-black ${
+                                            m.result === "W"
+                                              ? "bg-green-500/20 text-green-400"
+                                              : m.result === "L"
+                                                ? "bg-red-500/20 text-red-400"
+                                                : "bg-zinc-700/40 text-zinc-400"
+                                          }`}
+                                        >
+                                          {m.result}
+                                        </span>
+                                        <span className="flex-1 text-[11px] font-semibold text-zinc-300 truncate">
+                                          {m.home ? "vs" : "@"} {m.opponent}
+                                        </span>
+                                        <span className="shrink-0 font-black text-[11px] tabular-nums text-white bg-zinc-800 px-1.5 py-0.5 rounded">
+                                          {m.score}
+                                        </span>
+                                        {m.date && (
+                                          <span className="text-[9px] text-zinc-600 shrink-0 tabular-nums hidden sm:block">
+                                            {m.date}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null,
+                            )}
                           </div>
                         )}
 

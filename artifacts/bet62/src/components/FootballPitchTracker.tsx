@@ -181,10 +181,12 @@ export default function FootballPitchTracker({
   const ballRef = useRef<BallSpot>(CENTER);
   const [ball, setBall] = useState<BallSpot>(CENTER);
   const [goalFlash, setGoalFlash] = useState(false);
-  // Where the ball was right before a goal — captured so the shot-trail
-  // line can be drawn from there to the net, instead of the goal effect
-  // just appearing out of nowhere at the goal mouth.
-  const [shotOrigin, setShotOrigin] = useState<BallSpot | null>(null);
+  // Where the ball was right before its latest move — captured so a
+  // fading directional trail can be drawn from there to wherever it just
+  // went (dissolving after the move, rather than a static blob), and so
+  // a goal specifically can draw its shot-trail line from the real spot
+  // it was struck from instead of appearing out of nowhere at the net.
+  const [moveOrigin, setMoveOrigin] = useState<BallSpot | null>(null);
   const [view, setView] = useState<View>("pitch");
   const [current, setCurrent] = useState<PitchTrackerCommentaryEntry | null>(null);
   const [queue, setQueue] = useState<PitchTrackerCommentaryEntry[]>([]);
@@ -205,7 +207,7 @@ export default function FootballPitchTracker({
     setQueue([]);
     setCurrent(null);
     setGoalFlash(false);
-    setShotOrigin(null);
+    setMoveOrigin(null);
     ballRef.current = CENTER;
     setBall(CENTER);
   }, [matchKey]);
@@ -249,7 +251,7 @@ export default function FootballPitchTracker({
     const spot = zoneForAction(p.action, p.side, next.id);
     const isGoal = /\bgoal\b/i.test(p.action) && !/goal kick/i.test(p.action);
     if (spot) {
-      if (isGoal) setShotOrigin(ballRef.current); // where it flew in from, for the shot-trail line
+      setMoveOrigin(ballRef.current); // where it came from, for the fading movement trail
       ballRef.current = spot;
       setBall(spot);
     }
@@ -305,7 +307,7 @@ export default function FootballPitchTracker({
   // same tone family as momentumTier, just as a gradient instead of a
   // flat fill, per user request.
   const ARROW_GRADIENT: Record<typeof momentumTier, [string, string]> = {
-    neutral: ["rgba(150, 150, 150, 0.18)", "rgba(90, 90, 90, 0.42)"],
+    neutral: ["rgba(90, 90, 90, 0.24)", "rgba(45, 45, 45, 0.5)"],
     attacking: ["rgba(220, 130, 40, 0.22)", "rgba(214, 60, 20, 0.5)"],
     danger: ["rgba(255, 120, 120, 0.2)", "rgba(210, 10, 10, 0.58)"],
   };
@@ -316,18 +318,21 @@ export default function FootballPitchTracker({
     return `linear-gradient(to ${towardHome ? "right" : "left"}, ${from}, ${to})`;
   })();
 
-  // A comet-style "shot map" line from where the ball was to the net,
-  // instead of the goal effect just appearing out of nowhere — angle/
-  // length are computed in the same 0-100 % coordinate space everything
-  // else here uses (a stylized approximation, not literal pixel physics,
-  // same convention as the existing ball trail's fixed rotation).
-  const shotLine = (() => {
-    if (!goalFlash || !shotOrigin) return null;
-    const dx = ball.x - shotOrigin.x;
-    const dy = ball.y - shotOrigin.y;
+  // A comet-style line from where the ball just was to where it is now —
+  // shown on every move (fading out as it "dissolves" behind the ball),
+  // not only goals; a goal reuses the exact same geometry but in the
+  // bolder gold "shot map" style since that's a real strike on net.
+  // Angle/length are computed in the same 0-100 % coordinate space
+  // everything else here uses (a stylized approximation, not literal
+  // pixel physics).
+  const moveTrail = (() => {
+    if (!current || !moveOrigin) return null;
+    const dx = ball.x - moveOrigin.x;
+    const dy = ball.y - moveOrigin.y;
     const lengthPct = Math.sqrt(dx * dx + dy * dy);
+    if (lengthPct < 2) return null; // negligible/no movement — nothing to draw
     const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
-    return { x: shotOrigin.x, y: shotOrigin.y, lengthPct, angleDeg };
+    return { x: moveOrigin.x, y: moveOrigin.y, lengthPct, angleDeg };
   })();
 
   const compactStats = useMemo(() => extractCompactStats(v2StatsGroups), [v2StatsGroups]);
@@ -381,6 +386,14 @@ export default function FootballPitchTracker({
             <div className="pitch-corner corner-tr" />
             <div className="pitch-corner corner-bl" />
             <div className="pitch-corner corner-br" />
+            <div className="corner-flag-pole flag-tl-pole" />
+            <div className="corner-flag-pennant flag-tl-pennant" />
+            <div className="corner-flag-pole flag-tr-pole" />
+            <div className="corner-flag-pennant flag-tr-pennant" />
+            <div className="corner-flag-pole flag-bl-pole" />
+            <div className="corner-flag-pennant flag-bl-pennant" />
+            <div className="corner-flag-pole flag-br-pole" />
+            <div className="corner-flag-pennant flag-br-pennant" />
             <div className="pitch-goal pitch-goal-left">
               <div className="pitch-goal-net" />
             </div>
@@ -388,14 +401,15 @@ export default function FootballPitchTracker({
               <div className="pitch-goal-net" />
             </div>
 
-            {shotLine && (
+            {moveTrail && (
               <div
-                className="bet62-shot-line"
+                key={current?.id}
+                className={`bet62-shot-line ${goalFlash ? "trail-goal" : "trail-move"}`}
                 style={{
-                  left: `${shotLine.x}%`,
-                  top: `${shotLine.y}%`,
-                  width: `${shotLine.lengthPct}%`,
-                  transform: `rotate(${shotLine.angleDeg}deg)`,
+                  left: `${moveTrail.x}%`,
+                  top: `${moveTrail.y}%`,
+                  width: `${moveTrail.lengthPct}%`,
+                  transform: `rotate(${moveTrail.angleDeg}deg)`,
                 }}
               />
             )}
@@ -603,10 +617,44 @@ const PITCH_TRACKER_CSS = `
   border-radius: 50%;
   background: transparent;
 }
-.corner-tl { top: -9px; left: -9px; }
-.corner-tr { top: -9px; right: -9px; }
-.corner-bl { bottom: -9px; left: -9px; }
-.corner-br { bottom: -9px; right: -9px; }
+/* Each corner circle is centered exactly on the pitch's true corner
+ * point, so only ONE quarter of it is actually "inside" the field — the
+ * other three quarters used to be invisible only because a parent had
+ * overflow:hidden right at the pitch edge. That clipping now lives
+ * further out (on .bet62-pitch-wrapper, to fit the goal net bleeding
+ * into the green margin), so each corner needs its own clip-path to
+ * keep just the correct quarter-arc instead of rendering as a full
+ * circle. */
+.corner-tl { top: -9px; left: -9px; clip-path: inset(50% 0 0 50%); }
+.corner-tr { top: -9px; right: -9px; clip-path: inset(50% 50% 0 0); }
+.corner-bl { bottom: -9px; left: -9px; clip-path: inset(0 0 50% 50%); }
+.corner-br { bottom: -9px; right: -9px; clip-path: inset(0 50% 50% 0); }
+/* Small corner flags — a thin pole planted right at the corner point,
+ * poking into the green "área técnica" margin, with a red pennant near
+ * the top, so the corners read as a real pitch instead of just the arc
+ * line. */
+.corner-flag-pole {
+  position: absolute;
+  width: 1.5px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.corner-flag-pennant {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-top: 2.5px solid transparent;
+  border-bottom: 2.5px solid transparent;
+  border-left: 5px solid #dc2626;
+}
+.flag-tl-pole { top: -8px; left: -1px; }
+.flag-tl-pennant { top: -8px; left: 0.5px; }
+.flag-tr-pole { top: -8px; right: -1px; }
+.flag-tr-pennant { top: -8px; right: 0.5px; }
+.flag-bl-pole { bottom: -8px; left: -1px; }
+.flag-bl-pennant { bottom: -8px; left: 0.5px; }
+.flag-br-pole { bottom: -8px; right: -1px; }
+.flag-br-pennant { bottom: -8px; right: 0.5px; }
 .pitch-goal { position: absolute; top: 42%; width: 2.5%; height: 16%; border: 2px solid rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.05); overflow: hidden; }
 .pitch-goal-left { left: -2.5%; border-left: 0; }
 .pitch-goal-right { right: -2.5%; border-right: 0; }
@@ -636,16 +684,24 @@ const PITCH_TRACKER_CSS = `
 .trail-home { background: rgba(255, 80, 80, 0.8); }
 .trail-away { background: rgba(80, 150, 255, 0.8); }
 .trail-danger { width: 70px; opacity: 0.9; }
-/* Shot-map style speed line for the goal effect — drawn once, from where
- * the ball was to the net, at whatever angle/length that shot happened
- * to be (see the shotLine calc in the component body). */
+/* A comet line drawn once per move, from where the ball was to where it
+ * is now, then dissolving — see the moveTrail calc in the component
+ * body. .trail-move is the subtle default for every regular pass/dribble;
+ * .trail-goal reuses the exact same geometry but in the bolder gold
+ * "shot map" style for an actual strike on net. */
 .bet62-shot-line {
-  position: absolute; z-index: 8; height: 4px;
+  position: absolute; z-index: 8; height: 3px;
   border-radius: 3px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 214, 90, 0.9) 55%, #fff 100%);
   transform-origin: left center;
-  filter: drop-shadow(0 0 6px rgba(255, 200, 60, 0.65));
   animation: bet62ShotLineFade 900ms ease-out forwards;
+}
+.bet62-shot-line.trail-move {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.55) 100%);
+}
+.bet62-shot-line.trail-goal {
+  height: 4px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 214, 90, 0.9) 55%, #fff 100%);
+  filter: drop-shadow(0 0 6px rgba(255, 200, 60, 0.65));
 }
 .bet62-impact-ring {
   position: absolute; z-index: 9; width: 16px; height: 16px; border-radius: 50%;

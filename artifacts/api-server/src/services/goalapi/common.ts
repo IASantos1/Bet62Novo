@@ -454,6 +454,49 @@ export function buildGoalApiForm(results: GoalApiTeamResults | null | undefined)
   return entries;
 }
 
+export type BuiltRecentMatchEntry = {
+  date: string;
+  opponent: string;
+  score: string;
+  result: "W" | "D" | "L";
+  home: boolean;
+  league?: string;
+};
+
+/** Same source as buildGoalApiForm (/teams/:id/results) but keeps the
+ * match date and competition name — for the Confrontos tab's "Últimos
+ * Jogos" section, which shows each team's OWN recent results (against
+ * whichever opponents they actually played, not just the two teams
+ * facing each other today) alongside the real head-to-head history.
+ * Kept as a separate builder rather than extending BuiltFormEntry so the
+ * existing "Forma" tab's shape (and every caller of buildGoalApiForm)
+ * stays untouched. */
+export function buildGoalApiRecentMatches(
+  results: GoalApiTeamResults | null | undefined,
+  limit = 5,
+): BuiltRecentMatchEntry[] {
+  const fixtures = results?.recentFixtures;
+  if (!fixtures) return [];
+  const entries: BuiltRecentMatchEntry[] = [];
+  for (const fx of fixtures) {
+    if (entries.length >= limit) break;
+    const parts = fx.score?.split(/[-–]/).map((n) => Number(n.trim()));
+    if (!parts || parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) continue;
+    const [homeScore, awayScore] = parts as [number, number];
+    const ownScore = fx.isHome ? homeScore : awayScore;
+    const oppScore = fx.isHome ? awayScore : homeScore;
+    entries.push({
+      date: fx.date ?? "",
+      opponent: fx.opponent ?? "?",
+      score: `${ownScore}-${oppScore}`,
+      result: fx.result,
+      home: fx.isHome,
+      league: fx.league,
+    });
+  }
+  return entries;
+}
+
 /** Loose team-name match key — lowercase, strip diacritics, drop common
  * club-suffix abbreviations, collapse whitespace. GOAL API's team-results
  * endpoint and its live-fixture team names come from the same provider but

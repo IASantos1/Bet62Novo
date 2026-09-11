@@ -65,6 +65,7 @@ import {
   buildGoalApiTopScorers,
   buildGoalApiTeamUpcoming,
   buildGoalApiForm,
+  buildGoalApiRecentMatches,
   buildGoalApiStandings,
   buildGoalApiStandingZoneMap,
   buildGoalApiPlayerProfile,
@@ -14043,11 +14044,26 @@ type ConfrontosH2HMeeting = {
   league: string;
   country?: string;
 };
+type ConfrontosRecentMatch = {
+  date: string;
+  opponent: string;
+  score: string;
+  result: "W" | "D" | "L";
+  home: boolean;
+  league?: string;
+};
 type ConfrontosResult = {
   homeWins: number;
   awayWins: number;
   draws: number;
   recentMeetings: ConfrontosH2HMeeting[];
+  // Each team's OWN last matches (against whichever opponents they
+  // actually played, not necessarily each other) — separate from the
+  // recentMeetings head-to-head above. Football only for now (same
+  // GOAL API /teams/:id/results source buildGoalApiForm's "Forma" tab
+  // already uses); empty for tennis/other sports.
+  homeRecentMatches: ConfrontosRecentMatch[];
+  awayRecentMatches: ConfrontosRecentMatch[];
   team1Name: string;
   team2Name: string;
   sport: string;
@@ -14078,6 +14094,8 @@ router.get("/confrontos", async (req: Request, res: Response) => {
     awayWins = 0,
     draws = 0;
   let recentMeetings: ConfrontosH2HMeeting[] = [];
+  let homeRecentMatches: ConfrontosRecentMatch[] = [];
+  let awayRecentMatches: ConfrontosRecentMatch[] = [];
   let team1Name = home,
     team2Name = away;
 
@@ -14099,6 +14117,25 @@ router.get("/confrontos", async (req: Request, res: Response) => {
       recentMeetings = built.recentMeetings;
     } catch (err) {
       logger.error({ err, homeTeamId, awayTeamId }, "[goal-api] H2H fetch failed");
+    }
+    // Each team's own last 5 results — separate from the head-to-head
+    // above, requested so a team's real recent form (against whichever
+    // opponents they actually faced) shows alongside the direct history,
+    // both pré-jogo and ao vivo. Fetched independently so one team's
+    // failure doesn't blank out the other's.
+    const [homeResultsSettled, awayResultsSettled] = await Promise.allSettled([
+      goalApi.getTeamResults(homeTeamId),
+      goalApi.getTeamResults(awayTeamId),
+    ]);
+    if (homeResultsSettled.status === "fulfilled") {
+      homeRecentMatches = buildGoalApiRecentMatches(homeResultsSettled.value);
+    } else {
+      logger.error({ err: homeResultsSettled.reason, homeTeamId }, "[goal-api] home team results fetch failed");
+    }
+    if (awayResultsSettled.status === "fulfilled") {
+      awayRecentMatches = buildGoalApiRecentMatches(awayResultsSettled.value);
+    } else {
+      logger.error({ err: awayResultsSettled.reason, awayTeamId }, "[goal-api] away team results fetch failed");
     }
   } else if (sport === "tennis" && matchId && CONFIG.TENNIS_API_KEY) {
     try {
@@ -14130,6 +14167,8 @@ router.get("/confrontos", async (req: Request, res: Response) => {
     awayWins,
     draws,
     recentMeetings,
+    homeRecentMatches,
+    awayRecentMatches,
     team1Name,
     team2Name,
     sport,
