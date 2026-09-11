@@ -60,6 +60,7 @@ import {
   buildGoalApiMatchStats,
   buildGoalApiEvents,
   buildGoalApiCommentary,
+  buildGoalApiConfrontos,
   buildGoalApiLineups,
   buildGoalApiTopScorers,
   buildGoalApiTeamUpcoming,
@@ -14061,8 +14062,10 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   const matchId = String(req.query["matchId"] ?? "");
   const home = String(req.query["home"] ?? "").trim();
   const away = String(req.query["away"] ?? "").trim();
+  const homeTeamId = String(req.query["homeTeamId"] ?? "").trim();
+  const awayTeamId = String(req.query["awayTeamId"] ?? "").trim();
 
-  const cacheKey = `confrontos:${sport}:${matchId}:${home}:${away}`;
+  const cacheKey = `confrontos:${sport}:${matchId}:${home}:${away}:${homeTeamId}:${awayTeamId}`;
   const cached = confrontosCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < CONFRONTOS_TTL) {
     res.json(cached.data);
@@ -14076,9 +14079,24 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   let team1Name = home,
     team2Name = away;
 
-  // No data provider for any other sport (all removed, 2026-09-08) — every
-  // other matchId scheme still gets an empty recentMeetings/0-0-0 result.
-  if (sport === "tennis" && matchId && CONFIG.TENNIS_API_KEY) {
+  // Reported 2026-09-11: this route only ever had real H2H data for
+  // tennis (api-tennis.com's own /get_H2H) — every football match, and
+  // every other sport, always fell back to the hardcoded 0-0-0/empty
+  // result below (dead code note from 2026-09-08's provider removals).
+  // GOAL API has no dedicated H2H endpoint either, so this derives it from
+  // the home team's own /teams/:id/results — see buildGoalApiConfrontos.
+  if (sport === "football" && homeTeamId && home && away) {
+    try {
+      const results = await goalApi.getTeamResults(homeTeamId);
+      const built = buildGoalApiConfrontos(results, home, away);
+      homeWins = built.homeWins;
+      awayWins = built.awayWins;
+      draws = built.draws;
+      recentMeetings = built.recentMeetings;
+    } catch (err) {
+      logger.error({ err, homeTeamId, awayTeamId }, "[goal-api] H2H fetch failed");
+    }
+  } else if (sport === "tennis" && matchId && CONFIG.TENNIS_API_KEY) {
     try {
       const rangeStart = new Date();
       rangeStart.setDate(rangeStart.getDate() - 3);

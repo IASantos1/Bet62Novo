@@ -483,3 +483,19 @@ input[type="submit"] {
     scroll-snap-align: start;
   }
 }
+
+/* Mini pitch tracker (live football, Mercados tab): inside an installed
+   PWA it replaces the match header directly above the odds markets — on
+   regular web/mobile browser tabs the normal header stays and the tracker
+   is hidden, matching the destaques-promo-row pattern above. */
+.bet62-show-in-pwa {
+  display: none;
+}
+@media (display-mode: standalone) {
+  .bet62-hide-in-pwa {
+    display: none;
+  }
+  .bet62-show-in-pwa {
+    display: block;
+  }
+}

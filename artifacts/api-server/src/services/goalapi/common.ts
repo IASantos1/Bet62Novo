@@ -447,6 +447,71 @@ export function buildGoalApiForm(results: GoalApiTeamResults | null | undefined)
   return entries;
 }
 
+/** Loose team-name match key — lowercase, strip diacritics, drop common
+ * club-suffix abbreviations, collapse whitespace. GOAL API's team-results
+ * endpoint and its live-fixture team names come from the same provider but
+ * aren't guaranteed to be the literal same string (transliteration/suffix
+ * differences observed on lower-tier leagues), so an exact-string match
+ * would silently under-match; this mirrors bet62's own frontend team-name
+ * normalizer (normalizeBannerTeamName, home.tsx) for the same reason. */
+function normalizeGoalApiTeamName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(fc|afc|sc|cf|sv|ac|rsc|fk|sk|cd|ud|sd|ca|ad|as|ss|us|ssc|club|clube)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export type BuiltGoalApiConfrontosMeeting = {
+  date: string;
+  team1: string;
+  team2: string;
+  score1: number;
+  score2: number;
+  league: string;
+};
+
+/** Derives head-to-head history for the /confrontos route from the home
+ * team's own /teams/:id/results — GOAL API has no dedicated H2H endpoint
+ * (see buildApiTennisConfrontos's own note on this — api-tennis.com was
+ * this app's first real H2H source, for tennis only; football always fell
+ * back to an empty 0-0-0 result). recentFixtures already carries the
+ * queried team's own W/D/L (see buildGoalApiForm's comment) and a literal
+ * "home-away" score string for whichever side was actually home in that
+ * past fixture — re-oriented here to THIS match's home/away (the queried
+ * team is always home in the caller's context, so a fixture where it
+ * wasn't the historical home side has its score numbers swapped). Limited
+ * to whatever GOAL API's own "recent" window returns — a genuine older
+ * meeting outside that window is indistinguishable from "these teams never
+ * played", same honest limitation as api-tennis.com's H2H already has. */
+export function buildGoalApiConfrontos(
+  homeTeamResults: GoalApiTeamResults | null | undefined,
+  homeName: string,
+  awayName: string,
+): { homeWins: number; awayWins: number; draws: number; recentMeetings: BuiltGoalApiConfrontosMeeting[] } {
+  let homeWins = 0;
+  let awayWins = 0;
+  let draws = 0;
+  const recentMeetings: BuiltGoalApiConfrontosMeeting[] = [];
+  const awayKey = normalizeGoalApiTeamName(awayName);
+  for (const fx of homeTeamResults?.recentFixtures ?? []) {
+    if (!fx.opponent || normalizeGoalApiTeamName(fx.opponent) !== awayKey) continue;
+    const parts = fx.score?.split(/[-–]/).map((n) => Number(n.trim()));
+    if (!parts || parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) continue;
+    const [historicalHomeScore, historicalAwayScore] = parts as [number, number];
+    const score1 = fx.isHome ? historicalHomeScore : historicalAwayScore;
+    const score2 = fx.isHome ? historicalAwayScore : historicalHomeScore;
+    if (fx.result === "W") homeWins++;
+    else if (fx.result === "L") awayWins++;
+    else draws++;
+    recentMeetings.push({ date: fx.date ?? "", team1: homeName, team2: awayName, score1, score2, league: fx.league ?? "" });
+  }
+  return { homeWins, awayWins, draws, recentMeetings };
+}
+
 /** ISO-8601 kickoffUtc → { date: "DD.MM.YYYY", time: "HH:MM" } in
  * Europe/Lisbon — same shape/timezone every other provider in this app
  * already uses (see routes/matches.ts's proplineEventDateTime). Falls back
