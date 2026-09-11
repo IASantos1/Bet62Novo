@@ -27,6 +27,7 @@ import {
   subscribeBzzoiroEvent,
   unsubscribeBzzoiroEvent,
   getBzzoiroWsStatus,
+  getBzzoiroSubscribedAckAgeMs,
 } from "./websocketClient.js";
 import { liveMatchState, broadcastMatchDelta, type LiveMatchState } from "../../routes/matches.js";
 import type { BzzoiroLiveDataFrame } from "./types.js";
@@ -220,6 +221,7 @@ export function getBzzoiroSubscriptionDetails(): Array<{
   fixture: string | null;
   hasBallPosition: boolean;
   ballPositionAgeMs: number | null;
+  subscribedAckAgeMs: number | null;
 }> {
   const out: Array<{
     bzzoiroEventId: number;
@@ -227,6 +229,7 @@ export function getBzzoiroSubscriptionDetails(): Array<{
     fixture: string | null;
     hasBallPosition: boolean;
     ballPositionAgeMs: number | null;
+    subscribedAckAgeMs: number | null;
   }> = [];
   for (const [eventId, liveMatchId] of currentSubscriptions.entries()) {
     const state = liveMatchState.get(liveMatchId);
@@ -237,6 +240,9 @@ export function getBzzoiroSubscriptionDetails(): Array<{
       fixture: state ? `${state.home} vs ${state.away}` : null,
       hasBallPosition: !!bp,
       ballPositionAgeMs: bp ? Date.now() - bp.updatedAt : null,
+      // null here means bzzoiro never acknowledged this specific subscribe
+      // request — distinct from "acked but no livedata yet".
+      subscribedAckAgeMs: getBzzoiroSubscribedAckAgeMs(eventId),
     });
   }
   return out;
