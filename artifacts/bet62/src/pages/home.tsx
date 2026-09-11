@@ -4497,31 +4497,6 @@ function MomentumChart({
   );
 }
 
-// Live text play-by-play (GOAL API's /fixtures/:id/commentary, football
-// only) — distinct from the structured incident timeline ("Estatística
-// Avançada" below it): raw narration lines like "PVF-CAND dangerous
-// attack" or "Long An in possession", the same granularity a future match
-// tracker would need. Server already sends newest-first (see
-// buildGoalApiCommentary), so this just renders the list as-is.
-function LiveCommentaryFeed({ commentary }: { commentary?: Array<{ time: string; text: string }> }) {
-  if (!commentary || commentary.length === 0) return null;
-  return (
-    <div className="mt-4 pt-4 border-t border-zinc-700/60">
-      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2.5">
-        Comentários ao Vivo
-      </div>
-      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-        {commentary.map((c, i) => (
-          <div key={`${c.time}-${i}`} className="flex items-start gap-2.5 text-[11px] leading-snug">
-            <span className="text-zinc-500 font-black tabular-nums shrink-0 w-9 text-right">{c.time}</span>
-            <span className="text-zinc-300">{c.text}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function phoneMask(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 9);
   if (digits.length <= 3) return digits;
@@ -19415,6 +19390,7 @@ export default function Home({
                     homeScore={expandedMatch.homeScore}
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
+                    commentary={expandedMatch._commentary}
                   />
                 )}
 
@@ -20130,10 +20106,6 @@ export default function Home({
                 {matchViewTab === "live" && expandedMatch.isLive && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     <MomentumChart match={expandedMatch} v2StatsGroups={v2StatsGroups} />
-
-                    {expandedMatch.sport === "football" && (
-                      <LiveCommentaryFeed commentary={expandedMatch._commentary} />
-                    )}
 
                     {expandedMatch.sport === "football" && (
                       <div className="mt-4 pt-4 border-t border-zinc-700/60">

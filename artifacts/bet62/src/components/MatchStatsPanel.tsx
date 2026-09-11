@@ -206,6 +206,11 @@ type Props = {
   topScorersLoading?: boolean;
   homeScore?: number;
   awayScore?: number;
+  /** GOAL API's live text play-by-play (football only), newest entry
+   * first — see buildGoalApiCommentary (api-server). Rendered directly
+   * below the "Ao Vivo" stat-bars block in the Estatísticas tab, per the
+   * user's placement request 2026-09-11. */
+  commentary?: Array<{ time: string; text: string }> | null;
 };
 
 // ── Momentum Chart ──────────────────────────────────────────────────────────
@@ -592,6 +597,7 @@ export default function MatchStatsPanel({
   standings, standingsGroups, standingsLoading, standingsLeague,
   topScorers, topScorersLoading,
   homeScore, awayScore,
+  commentary,
 }: Props) {
   const isFootball = !sport || sport === "football";
 
@@ -1342,6 +1348,25 @@ export default function MatchStatsPanel({
                     </div>
                   </div>
                 ) : null
+              )}
+
+              {/* Live text commentary — GOAL API's play-by-play, football
+                  only, placed directly below the "Ao Vivo" stats block per
+                  the user's request 2026-09-11. */}
+              {isFootball && commentary && commentary.length > 0 && (
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                  <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">
+                    Comentários ao Vivo
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {commentary.map((c, i) => (
+                      <div key={`${c.time}-${i}`} className="text-[12px] leading-snug">
+                        <span className="font-black text-zinc-400 tabular-nums">{c.time}</span>
+                        <span className="text-zinc-300">{c.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}
