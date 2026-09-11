@@ -8082,7 +8082,17 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       awayScore: awayScore as number,
       minute: estimateGoalApiLiveMinute(fx),
       status: fx.matchStatus,
-      hasRealOdds: wasPulseBefore,
+      // Display-only flag (bets.ts never reads it — it gates purely on
+      // `_priceSource === "pulsescore"`, unaffected by this): true whenever
+      // there's a valid price to render at all, synthetic-anchor included,
+      // so the frontend's OddsButton (home.tsx) shows a moving number
+      // instead of "--" for a fixture PulseScore hasn't priced yet. Using
+      // `wasPulseBefore` here (as before this fix) made the card/list
+      // hide the price entirely for any non-PulseScore-priced fixture even
+      // though the odds themselves were already valid and displayed fine
+      // elsewhere (e.g. the match detail's Mercados tab, which reads
+      // `odds` directly without this gate).
+      hasRealOdds: displayOdds.home > 0 && displayOdds.draw > 0 && displayOdds.away > 0,
       odds: displayOdds,
       markets: displayMarkets,
       _baseOdds: wasPulseBefore ? existing?._baseOdds : (existing?._baseOdds ?? baseOdds),
