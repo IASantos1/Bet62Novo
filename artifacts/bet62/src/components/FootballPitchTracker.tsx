@@ -31,6 +31,7 @@
 //   commentary feed, so the page falls back to the traditional layout
 //   with no mini pitch, exactly as before this feature existed.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Play, Activity, Users } from "lucide-react";
 
 export type PitchTrackerCommentaryEntry = { time: string; text: string };
 export type PitchTrackerStatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
@@ -282,24 +283,30 @@ export default function FootballPitchTracker({
       <div className="bet62-tab-row">
         <button
           type="button"
+          title="Mini Campo"
+          aria-label="Mini Campo"
           className={`bet62-tab-btn ${view === "pitch" ? "active" : ""}`}
           onClick={() => setView("pitch")}
         >
-          ▶ Mini Campo
+          <Play size={16} />
         </button>
         <button
           type="button"
+          title="Estatísticas"
+          aria-label="Estatísticas"
           className={`bet62-tab-btn ${view === "stats" ? "active" : ""}`}
           onClick={() => setView("stats")}
         >
-          Estatísticas
+          <Activity size={16} />
         </button>
         <button
           type="button"
+          title="H2H"
+          aria-label="H2H"
           className={`bet62-tab-btn ${view === "h2h" ? "active" : ""}`}
           onClick={() => setView("h2h")}
         >
-          H2H
+          <Users size={16} />
         </button>
       </div>
     </div>
@@ -428,14 +435,14 @@ const PITCH_TRACKER_CSS = `
 .bet62-tab-row { display: flex; border-top: 1px solid #242424; }
 .bet62-tab-btn {
   flex: 1;
-  padding: 11px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 6px;
   background: transparent;
   border: none;
   border-right: 1px solid #242424;
   color: #777;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.3px;
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease;
 }
