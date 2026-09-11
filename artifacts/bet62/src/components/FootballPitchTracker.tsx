@@ -30,10 +30,24 @@
 //   for this match — that's the signal this specific fixture has no
 //   commentary feed, so the page falls back to the traditional layout
 //   with no mini pitch, exactly as before this feature existed.
+//
+// Revised again 2026-09-11 — replay queue: the backend now polls
+// /fixtures/:id/commentary every 3s (kvCache TTL), and each entry carries
+// a stable `id`. Previously this component only ever reacted to
+// commentary[0] (whatever was newest at fetch time), so if more than one
+// new line landed between two polls the ball would silently skip straight
+// to the latest one. Now every commentary update is diffed against the
+// ids already shown, and any truly-new ones are queued in chronological
+// order and animated one at a time (each held for ~950ms, matching the
+// ball's own 900ms CSS transition) instead of only ever showing the most
+// recent. In practice this rarely fires more than one at a time — GOAL
+// API's own commentary feed only writes new rows in batches roughly every
+// 2 minutes (see the COMMENTARY TTL comment in services/goalapi/index.ts)
+// — but it's cheap correctness for the rare case a poll catches two.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Activity, Users } from "lucide-react";
 
-export type PitchTrackerCommentaryEntry = { time: string; text: string };
+export type PitchTrackerCommentaryEntry = { id: string; time: string; text: string };
 export type PitchTrackerStatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
 export type PitchTrackerH2HMeeting = {
   date: string;
@@ -138,33 +152,87 @@ export default function FootballPitchTracker({
   v2StatsGroups,
   confrontosRecentMeetings,
 }: Props) {
-  const latest = commentary && commentary.length > 0 ? commentary[0]! : null;
-  const parsed = latest ? parseCommentaryLine(latest.text, home, away) : null;
-
   const ballRef = useRef<BallSpot>(CENTER);
   const [ball, setBall] = useState<BallSpot>(CENTER);
   const [goalFlash, setGoalFlash] = useState(false);
   const [view, setView] = useState<View>("pitch");
-  const lastKeyRef = useRef<string | null>(null);
+  const [current, setCurrent] = useState<PitchTrackerCommentaryEntry | null>(null);
+  const [queue, setQueue] = useState<PitchTrackerCommentaryEntry[]>([]);
 
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
+  const matchKey = `${home}__${away}`;
+  const prevMatchKeyRef = useRef(matchKey);
+
+  // Different match than last render (list scrolled to a new one, or the
+  // same component instance got reused) → wipe all replay state instead
+  // of treating the new match's whole history as "new" to animate through.
   useEffect(() => {
-    if (!latest || !parsed) return;
-    const key = `${latest.time}-${latest.text}`;
-    if (key === lastKeyRef.current) return; // same line, no new event
-    lastKeyRef.current = key;
+    if (prevMatchKeyRef.current === matchKey) return;
+    prevMatchKeyRef.current = matchKey;
+    initializedRef.current = false;
+    seenIdsRef.current = new Set();
+    setQueue([]);
+    setCurrent(null);
+    setGoalFlash(false);
+    ballRef.current = CENTER;
+    setBall(CENTER);
+  }, [matchKey]);
 
-    const spot = zoneForAction(parsed.action, parsed.side, key);
+  // Diff each commentary update against what's already been shown; queue
+  // only the truly-new rows, oldest first, so a rare multi-line catch-up
+  // still replays in the order it actually happened (see header comment).
+  useEffect(() => {
+    if (!commentary || commentary.length === 0) return;
+    if (!initializedRef.current) {
+      // First load for this match — establish the baseline silently,
+      // snap straight to the latest line without animating through
+      // history that already happened before the tracker was open.
+      initializedRef.current = true;
+      for (const c of commentary) seenIdsRef.current.add(c.id);
+      const first = commentary[0]!;
+      setCurrent(first);
+      const p = parseCommentaryLine(first.text, home, away);
+      const spot = zoneForAction(p.action, p.side, first.id) ?? CENTER;
+      ballRef.current = spot;
+      setBall(spot);
+      return;
+    }
+    const newOnes = commentary.filter((c) => !seenIdsRef.current.has(c.id));
+    if (newOnes.length === 0) return;
+    for (const c of newOnes) seenIdsRef.current.add(c.id);
+    // commentary arrives newest-first — reverse just the new slice so the
+    // queue plays oldest-missed-line first.
+    setQueue((prev) => [...prev, ...[...newOnes].reverse()]);
+  }, [commentary]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Drain the queue one entry at a time — only re-triggers when the HEAD
+  // of the queue actually changes (not on every append to the tail), so a
+  // new arrival mid-animation doesn't reset the item currently showing.
+  const queueHeadId = queue[0]?.id;
+  useEffect(() => {
+    if (queue.length === 0) return;
+    const next = queue[0]!;
+    setCurrent(next);
+    const p = parseCommentaryLine(next.text, home, away);
+    const spot = zoneForAction(p.action, p.side, next.id);
     if (spot) {
       ballRef.current = spot;
       setBall(spot);
     }
-    if (/\bgoal\b/i.test(parsed.action) && !/goal kick/i.test(parsed.action)) {
+    let goalTimer: ReturnType<typeof setTimeout> | undefined;
+    if (/\bgoal\b/i.test(p.action) && !/goal kick/i.test(p.action)) {
       setGoalFlash(true);
-      const t = setTimeout(() => setGoalFlash(false), 900);
-      return () => clearTimeout(t);
+      goalTimer = setTimeout(() => setGoalFlash(false), 900);
     }
-  }, [latest?.time, latest?.text]); // eslint-disable-line react-hooks/exhaustive-deps
+    const advanceTimer = setTimeout(() => setQueue((prev) => prev.slice(1)), 950);
+    return () => {
+      clearTimeout(advanceTimer);
+      if (goalTimer) clearTimeout(goalTimer);
+    };
+  }, [queueHeadId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const parsed = current ? parseCommentaryLine(current.text, home, away) : null;
   const actionLower = (parsed?.action ?? "").toLowerCase();
   const isDangerZone =
     actionLower.includes("dangerous") ||
@@ -225,10 +293,10 @@ export default function FootballPitchTracker({
               ⚽
             </div>
 
-            {latest && (
+            {current && (
               <div className={`bet62-event-badge ${goalFlash ? "event-goal" : isDangerZone ? "event-danger" : ""}`}>
-                <small>{latest.time}</small>
-                {parsed?.action || latest.text}
+                <small>{current.time}</small>
+                {parsed?.action || current.text}
               </div>
             )}
 
