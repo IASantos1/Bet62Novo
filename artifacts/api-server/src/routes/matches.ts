@@ -8082,6 +8082,18 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       awayScore: awayScore as number,
       minute: estimateGoalApiLiveMinute(fx),
       status: fx.matchStatus,
+      // NOT a pure display flag — home.tsx's OddsButton uses this as the
+      // sole gate on whether the button is clickable (calls toggleBet) as
+      // well as what it renders, so it must stay tied to real bettability
+      // (`_priceSource === "pulsescore"`), never to "is there any number
+      // to show at all". A synthetic anchor is a valid number but not a
+      // real price — flagging it hasRealOdds:true here made the button
+      // fully clickable, letting a bettor add a fabricated price to their
+      // slip that the server then silently rejects at submission (caught
+      // in review before shipping). The synthetic value is still shown to
+      // the user — see OddsButton's disabled branch, which now renders
+      // `odd` instead of a bare "--" whenever a real number exists, without
+      // making the button selectable.
       hasRealOdds: wasPulseBefore,
       odds: displayOdds,
       markets: displayMarkets,
