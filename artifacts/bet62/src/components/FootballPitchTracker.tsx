@@ -118,6 +118,32 @@ function parseCommentaryLine(
   return { side: "home", action: text };
 }
 
+/** Localized label for the compact event badge — mirrors the same action
+ * fragments zoneForAction already recognizes, translated for display only
+ * (the underlying signal is still the same 100%-real action keyword from
+ * the commentary line, this is just presentation, same "derived, not
+ * fabricated" convention as the rest of this component). Falls back to a
+ * capitalized version of the raw fragment for anything unrecognized. */
+function translateAction(action: string): string {
+  const a = action.toLowerCase();
+  if (/\bgoal\b/.test(a) && !a.includes("goal kick")) return "Golo!";
+  if (a.includes("goal kick")) return "Tiro de meta";
+  if (a.includes("penalty")) return "Pênalti";
+  if (a.includes("corner")) return "Escanteio";
+  if (a.includes("shot")) return "Finalização";
+  if (a.includes("dangerous attack")) return "Ataque perigoso";
+  if (a.includes("free kick")) return "Falta";
+  if (a.includes("attack")) return "Em ataque";
+  if (a.includes("in possession")) return "Bola segura";
+  if (a.includes("throw in")) return "Lançamento lateral";
+  if (a.includes("yellow card")) return "Cartão amarelo";
+  if (a.includes("red card")) return "Cartão vermelho";
+  if (a.includes("substitution")) return "Substituição";
+  if (a.includes("half time")) return "Intervalo";
+  if (!action) return "";
+  return action.charAt(0).toUpperCase() + action.slice(1);
+}
+
 /** Same key stat rows the Força panel (home.tsx's MomentumChart) already
  * picks out of v2StatsGroups — duplicated here at a smaller scope (just
  * the 4 the user asked for) since that extraction isn't exported. */
@@ -240,6 +266,18 @@ export default function FootballPitchTracker({
     actionLower.includes("corner") ||
     actionLower.includes("penalty");
 
+  // How deep into the attacking third the acting side currently is —
+  // reuses the same left-to-right/right-to-left mirroring convention as
+  // zoneForAction (home attacks toward x≈100, away toward x≈0) so the
+  // momentum arrow always points at whichever goal is under pressure,
+  // and its color escalates with how threatening the current action is.
+  const attackDepth = parsed ? (parsed.side === "home" ? ball.x : 100 - ball.x) : 0;
+  const momentumTier: "neutral" | "attacking" | "danger" = isDangerZone
+    ? "danger"
+    : attackDepth > 55
+      ? "attacking"
+      : "neutral";
+
   const compactStats = useMemo(() => extractCompactStats(v2StatsGroups), [v2StatsGroups]);
   const lastThreeMeetings = useMemo(() => (confrontosRecentMeetings ?? []).slice(0, 3), [confrontosRecentMeetings]);
 
@@ -270,6 +308,11 @@ export default function FootballPitchTracker({
       <div className="bet62-pitch-wrapper">
         {view === "pitch" && (
           <div className="bet62-pitch">
+            {current && parsed && (
+              <div
+                className={`bet62-momentum-arrow tier-${momentumTier} ${parsed.side === "away" ? "arrow-away" : "arrow-home"}`}
+              />
+            )}
             <div className="pitch-halfline" />
             <div className="pitch-center-circle" />
             <div className="pitch-center-dot" />
@@ -305,8 +348,13 @@ export default function FootballPitchTracker({
 
             {current && (
               <div className={`bet62-event-badge ${goalFlash ? "event-goal" : isDangerZone ? "event-danger" : ""}`}>
-                <small>{current.time}</small>
-                {parsed?.action || current.text}
+                <span className={`bet62-event-bar ${parsed?.side === "away" ? "bar-away" : "bar-home"}`} />
+                <div className="bet62-event-text">
+                  <div className="bet62-event-team truncate">{parsed?.side === "away" ? away : home}</div>
+                  <div className="bet62-event-action truncate">
+                    <small>{current.time}</small> {parsed ? translateAction(parsed.action) || current.text : current.text}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -431,8 +479,21 @@ const PITCH_TRACKER_CSS = `
   overflow: hidden;
   border: 2px solid rgba(255, 255, 255, 0.75);
   border-radius: 5px;
-  background: repeating-linear-gradient(90deg, #176b35 0, #176b35 8%, #196f38 8%, #196f38 16%);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.08), transparent 55%),
+    repeating-linear-gradient(90deg, #1c8a44 0, #1c8a44 8%, #22964c 8%, #22964c 16%);
 }
+.bet62-momentum-arrow {
+  position: absolute;
+  inset: 0;
+  transition: background-color 450ms ease, clip-path 450ms ease;
+  pointer-events: none;
+}
+.bet62-momentum-arrow.arrow-home { clip-path: polygon(52% 50%, 100% 10%, 100% 90%); }
+.bet62-momentum-arrow.arrow-away { clip-path: polygon(48% 50%, 0% 10%, 0% 90%); }
+.bet62-momentum-arrow.tier-neutral { background: rgba(4, 30, 14, 0.4); }
+.bet62-momentum-arrow.tier-attacking { background: rgba(196, 148, 15, 0.4); }
+.bet62-momentum-arrow.tier-danger { background: rgba(190, 20, 20, 0.45); }
 .pitch-halfline { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: rgba(255, 255, 255, 0.72); transform: translateX(-50%); }
 .pitch-center-circle { position: absolute; width: 19%; aspect-ratio: 1; top: 50%; left: 50%; border: 2px solid rgba(255, 255, 255, 0.72); border-radius: 50%; transform: translate(-50%, -50%); }
 .pitch-center-dot { position: absolute; width: 7px; height: 7px; top: 50%; left: 50%; background: #fff; border-radius: 50%; transform: translate(-50%, -50%); }
@@ -500,17 +561,25 @@ const PITCH_TRACKER_CSS = `
 .trail-danger { width: 70px; opacity: 0.9; }
 .bet62-event-badge {
   position: absolute; z-index: 20; left: 50%; bottom: 12px;
-  display: flex; align-items: center; gap: 8px; padding: 7px 11px;
+  display: flex; align-items: stretch; gap: 10px; padding: 8px 14px 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px;
   background: rgba(0, 0, 0, 0.76); backdrop-filter: blur(8px);
-  transform: translateX(-50%); font-size: 11px; font-weight: 800;
+  transform: translateX(-50%);
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.25);
   animation: bet62EventIn 250ms ease-out;
   max-width: 92%;
 }
-.bet62-event-badge small { color: #aaa; font-size: 10px; }
+.bet62-event-bar { width: 4px; border-radius: 3px; background: currentColor; flex-shrink: 0; }
+.bet62-event-bar.bar-home { color: #ff5050; }
+.bet62-event-bar.bar-away { color: #5096ff; }
+.bet62-event-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bet62-event-team { font-size: 13px; font-weight: 900; color: #fff; }
+.bet62-event-action { font-size: 11px; font-weight: 600; color: #bbb; }
+.bet62-event-action small { color: #888; font-size: 10px; font-weight: 700; margin-right: 2px; }
 .event-danger { border-color: rgba(255, 130, 30, 0.7); box-shadow: 0 0 18px rgba(255, 100, 0, 0.22); }
 .event-goal { border-color: #fff; background: rgba(190, 0, 20, 0.9); }
+.event-goal .bet62-event-action { color: #ffd9d9; }
+.event-goal .bet62-event-action small { color: #ffb3b3; }
 .bet62-goal-animation {
   position: absolute; z-index: 30; top: 50%; left: 50%;
   font-size: 34px; font-weight: 950; letter-spacing: 2px; color: #fff;
@@ -589,8 +658,13 @@ html.light-mode .bet62-event-badge {
   color: #18181b;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
 }
-html.light-mode .bet62-event-badge small { color: #71717a; }
-html.light-mode .event-goal { border-color: #be0014; background: rgba(190, 0, 20, 0.94); color: #fff; }
+html.light-mode .bet62-event-team { color: #18181b; }
+html.light-mode .bet62-event-action { color: #52525b; }
+html.light-mode .bet62-event-action small { color: #71717a; }
+html.light-mode .event-goal { border-color: #be0014; background: rgba(190, 0, 20, 0.94); }
+html.light-mode .event-goal .bet62-event-team,
+html.light-mode .event-goal .bet62-event-action,
+html.light-mode .event-goal .bet62-event-action small { color: #fff; }
 html.light-mode .bet62-mini-panel {
   border-color: #e4e4e7;
   background: #f5f5f7;
