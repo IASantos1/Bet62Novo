@@ -4,6 +4,7 @@ import type {
   GoalApiFixture,
   GoalApiOdds,
   GoalApiFixtureStatistics,
+  GoalApiCommentaryEntry,
   GoalApiMatchEvent,
   GoalApiSubstitution,
   GoalApiLineups,
@@ -79,6 +80,24 @@ export function buildGoalApiMatchStats(
   }
   if (rows.length === 0) return [];
   return [{ title: "Estatísticas do Jogo", rows }];
+}
+
+/** Maps GOAL API's raw /fixtures/:id/commentary rows (confirmed real
+ * 2026-09-11 — see GoalApiCommentaryEntry) into a compact live feed for
+ * routes/matches.ts's LiveMatchState._commentary field. The provider
+ * returns the full match history on every call (102 rows by minute 63 in
+ * the captured sample) already sorted oldest-first, so this keeps only the
+ * most recent COMMENTARY_FEED_LIMIT rows and reverses them — newest line
+ * first, matching how a live text feed is read. */
+const COMMENTARY_FEED_LIMIT = 40;
+export function buildGoalApiCommentary(
+  rows: GoalApiCommentaryEntry[] | null | undefined,
+): Array<{ time: string; text: string }> {
+  if (!rows || rows.length === 0) return [];
+  return rows
+    .slice(-COMMENTARY_FEED_LIMIT)
+    .reverse()
+    .map((r) => ({ time: r.time, text: r.text }));
 }
 
 /** Parses GOAL API's "time" event field ("3", "45+2", "90+5") into a plain
