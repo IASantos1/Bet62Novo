@@ -12,6 +12,7 @@ import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.j
 import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
 import { runPulseScoreShadowMatchSync, triggerPrematchPulseScoreSync } from "../providers/pulsescore/shadowMatchSync.js";
 import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClient.js";
+import { startBzzoiroBallSync } from "../providers/bzzoiro/ballMatchSync.js";
 import { goalApi } from "../services/goalapi/index.js";
 
 function isBlockedLeague(name: string): boolean {
@@ -169,6 +170,16 @@ server.listen(port, () => {
   // for now. Inert until PULSESCORE_API_KEY is set.
   if (CONFIG.PULSESCORE_API_KEY) {
     startPulseScoreWebSocket();
+  }
+
+  // sports.bzzoiro.com — confirmed real via the user's own live-tested
+  // connection 2026-09-11: real ball x/y + situation over WebSocket, used
+  // solely to drive the mini pitch tracker's ball movement. Strictly
+  // additive to GOAL API (score/commentary/stats) and PulseScore (odds) —
+  // see providers/bzzoiro/ballMatchSync.ts's header. Inert until
+  // BZZOIRO_API_KEY is set.
+  if (CONFIG.BZZOIRO_API_KEY) {
+    startBzzoiroBallSync();
   }
 
   // PulseScore Fase 2 — PRÉ-JOGO (upcoming 8 dias): mesma arquitetura híbrida
