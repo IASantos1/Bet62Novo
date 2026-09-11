@@ -279,8 +279,18 @@ export default function FootballPitchTracker({
             <div className="pitch-small-box pitch-small-right" />
             <div className="pitch-penalty-dot pitch-penalty-left" />
             <div className="pitch-penalty-dot pitch-penalty-right" />
-            <div className="pitch-goal pitch-goal-left" />
-            <div className="pitch-goal pitch-goal-right" />
+            <div className="pitch-arc-d pitch-arc-d-left" />
+            <div className="pitch-arc-d pitch-arc-d-right" />
+            <div className="pitch-corner corner-tl" />
+            <div className="pitch-corner corner-tr" />
+            <div className="pitch-corner corner-bl" />
+            <div className="pitch-corner corner-br" />
+            <div className="pitch-goal pitch-goal-left">
+              <div className="pitch-goal-net" />
+            </div>
+            <div className="pitch-goal pitch-goal-right">
+              <div className="pitch-goal-net" />
+            </div>
 
             <div
               className={`bet62-ball-trail ${parsed?.side === "away" ? "trail-away" : "trail-home"} ${isDangerZone ? "trail-danger" : ""}`}
@@ -408,13 +418,13 @@ const PITCH_TRACKER_CSS = `
 .bet62-score { display: flex; align-items: center; gap: 8px; font-size: 20px; }
 .bet62-score span { color: #666; }
 .bet62-pitch-wrapper {
-  padding: 14px;
+  padding: 8px;
   background: radial-gradient(circle at center, rgba(255, 255, 255, 0.035), transparent 65%), #08090a;
 }
 .bet62-pitch {
   position: relative;
   width: 100%;
-  aspect-ratio: 1.72 / 1;
+  aspect-ratio: 1.55 / 1;
   overflow: hidden;
   border: 2px solid rgba(255, 255, 255, 0.75);
   border-radius: 5px;
@@ -432,9 +442,40 @@ const PITCH_TRACKER_CSS = `
 .pitch-penalty-dot { position: absolute; top: 50%; width: 6px; height: 6px; background: #fff; border-radius: 50%; transform: translateY(-50%); }
 .pitch-penalty-left { left: 11%; }
 .pitch-penalty-right { right: 11%; }
-.pitch-goal { position: absolute; top: 42%; width: 2.5%; height: 16%; border: 2px solid rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.05); }
+.pitch-arc-d {
+  position: absolute;
+  width: 19%;
+  aspect-ratio: 1;
+  top: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+}
+.pitch-arc-d-left { left: 1.5%; clip-path: inset(0 0 0 76.3%); }
+.pitch-arc-d-right { left: 79.5%; clip-path: inset(0 76.3% 0 0); }
+.pitch-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 50%;
+  background: transparent;
+}
+.corner-tl { top: -9px; left: -9px; }
+.corner-tr { top: -9px; right: -9px; }
+.corner-bl { bottom: -9px; left: -9px; }
+.corner-br { bottom: -9px; right: -9px; }
+.pitch-goal { position: absolute; top: 42%; width: 2.5%; height: 16%; border: 2px solid rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.05); overflow: hidden; }
 .pitch-goal-left { left: -2.5%; border-left: 0; }
 .pitch-goal-right { right: -2.5%; border-right: 0; }
+.pitch-goal-net {
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.4) 0, rgba(255, 255, 255, 0.4) 1px, transparent 1px, transparent 4px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.4) 0, rgba(255, 255, 255, 0.4) 1px, transparent 1px, transparent 4px);
+}
 .bet62-ball {
   position: absolute; z-index: 10; width: 25px; height: 25px;
   display: flex; align-items: center; justify-content: center; font-size: 18px;
