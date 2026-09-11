@@ -7248,6 +7248,8 @@ export default function Home({
       matchId: rawId,
       home: expandedMatch.home,
       away: expandedMatch.away,
+      ...(expandedMatch.homeTeamId ? { homeTeamId: expandedMatch.homeTeamId } : {}),
+      ...(expandedMatch.awayTeamId ? { awayTeamId: expandedMatch.awayTeamId } : {}),
     });
     fetch(`/api/matches/confrontos?${p}`)
       .then((r) => (r.ok ? r.json() : null))
