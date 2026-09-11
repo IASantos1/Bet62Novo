@@ -17,6 +17,7 @@ import { eq, desc, count, sum, sql, ne } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
 import { logger } from "../lib/logger.js";
 import { invalidateCompetitionCatalogSnapshot } from "../lib/liveCompetitionCatalog.js";
+import { liveMatchState } from "./matches.js";
 
 const router: IRouter = Router();
 
@@ -406,7 +407,23 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
       LIMIT 500
     `);
 
-    res.json({ events: rows.rows });
+    // Cross-reference against the in-memory live football state for a
+    // real-time "PulseScore real price or synthetic estimate" indicator —
+    // event_runtime_states is DB-persisted canonical tracking (Fase 0,
+    // multi-provider/multi-sport) and has no notion of PulseScore pricing;
+    // liveMatchState (routes/matches.ts) is where _priceSource actually
+    // lives, keyed by the same "goalapi-football-<id>" string used as
+    // this table's event_id for GOAL API football rows.
+    const events = rows.rows.map((row: any) => {
+      let pulseScorePriceStatus: "real" | "estimated" | null = null;
+      if (row.sport === "football" && typeof row.event_id === "string" && row.event_id.startsWith("goalapi-football-")) {
+        const live = liveMatchState.get(row.event_id);
+        if (live) pulseScorePriceStatus = live._priceSource === "pulsescore" ? "real" : "estimated";
+      }
+      return { ...row, pulse_score_price_status: pulseScorePriceStatus };
+    });
+
+    res.json({ events });
   } catch (err) {
     logger.error({ err }, "Admin event runtime list error");
     res.status(500).json({ error: "Erro ao carregar runtime dos eventos" });
