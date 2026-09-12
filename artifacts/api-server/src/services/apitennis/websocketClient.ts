@@ -135,11 +135,30 @@ export function getApiTennisWsStatus(): {
   cachedMatches: number;
   lastFrameAgeMs: number | null;
   lastError: string | null;
+  cachedMatchSamples: Array<{
+    eventKey: string;
+    players: string;
+    eventGameResult: string | null;
+    ageMs: number;
+  }>;
 } {
+  const now = Date.now();
   return {
     connected,
     cachedMatches: liveCache.size,
-    lastFrameAgeMs: lastFrameAt ? Date.now() - lastFrameAt : null,
+    lastFrameAgeMs: lastFrameAt ? now - lastFrameAt : null,
     lastError,
+    // Added 2026-09-12 alongside the /apitennis-ws-status endpoint — lets a
+    // caller directly compare a WS-covered match's event_game_result age
+    // against a same-instant REST get_livescore poll for the SAME match,
+    // to confirm the WS is actually faster rather than just assuming it
+    // from cachedMatches growing (a slow-but-real event-driven push would
+    // look identical to a broken one from that count alone).
+    cachedMatchSamples: [...liveCache.entries()].map(([eventKey, entry]) => ({
+      eventKey,
+      players: `${entry.data.event_first_player ?? "?"} vs ${entry.data.event_second_player ?? "?"}`,
+      eventGameResult: entry.data.event_game_result ?? null,
+      ageMs: now - entry.updatedAt,
+    })),
   };
 }
