@@ -2884,7 +2884,7 @@ router.get("/pulsescore-market-dump", adminMiddleware, async (req: AdminRequest,
         rawName: m.rawName,
         period: m.period,
         selectionCount: m.selections.length,
-        sampleSelections: m.selections.slice(0, 8).map((s) => ({
+        sampleSelections: m.selections.slice(0, 30).map((s) => ({
           canonicalOutcome: s.canonicalOutcome,
           rawName: s.rawName,
           line: s.line,
