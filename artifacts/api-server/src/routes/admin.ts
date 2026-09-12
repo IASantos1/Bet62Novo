@@ -47,6 +47,7 @@ import {
   getPrematchPulsePrice,
 } from "../providers/pulsescore/shadowMatchSync.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
+import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 
 function escapeCsv(val: unknown): string {
@@ -2705,6 +2706,19 @@ router.get("/bzzoiro-status", adminMiddleware, async (_req: AdminRequest, res) =
     sync: getBzzoiroBallSyncStatus(),
     subscriptions: getBzzoiroSubscriptionDetails(),
   });
+});
+
+// api-tennis.com WebSocket push status — read-only, mirrors /bzzoiro-status.
+// Added 2026-09-12 (user-reported: live tennis point score, e.g. "15-30",
+// lags ~30s behind reality). Real diagnostic (a direct, uncached poll of
+// get_livescore) showed api-tennis.com's own REST backend only refreshes
+// in ~20s batches at the source — our 10s cache isn't the bottleneck, the
+// REST feed itself is just that slow. The WS client
+// (services/apitennis/websocketClient.ts) exists specifically to beat
+// that lag but has never had any visibility into whether it's actually
+// connected and receiving pushes — this closes that gap.
+router.get("/apitennis-ws-status", adminMiddleware, async (_req: AdminRequest, res) => {
+  res.json(getApiTennisWsStatus());
 });
 
 router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest, res) => {
