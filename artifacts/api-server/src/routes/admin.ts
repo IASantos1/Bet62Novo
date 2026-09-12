@@ -45,7 +45,10 @@ import {
   getPulseScorePrematchStatus,
   getPrematchPulseScorePricedFixtureIds,
   getPrematchPulsePrice,
+  buildPulseScoreMarkets,
 } from "../providers/pulsescore/shadowMatchSync.js";
+import { pulseScore } from "../providers/pulsescore/client.js";
+import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
@@ -2741,6 +2744,7 @@ router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest,
       fixture: `${m.home} vs ${m.away}`,
       league: m.league,
       _priceSource: m._priceSource ?? null,
+      _pulseScoreEventId: m._pulseScoreEventId ?? null,
       _suspensionReason: m._suspensionReason ?? null,
       hasRealOdds: m.hasRealOdds,
       odds1x2: m.odds,
@@ -2821,6 +2825,102 @@ router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest,
           ? "✅ 100% COBERTURA PULSESCORE (LIVE + PREMATCH)"
           : `⚠️ Cobertura incompleta LIVE ${pct(liveWithPulse.length, liveGoalApiFootball.length)}% · PREMATCH ${pct(upWithPulse.length, upFootball.length)}%.`,
   });
+});
+
+// Diagnoses the 2026-09-12 "mercados de futebol mediocre" report: bet62OddsAreReal
+// being true only proves the headline 1X2 came from PulseScore — it says nothing
+// about how many of the OTHER ~20 AdvancedMarkets slots (doubleChance/totalGoals/
+// handicap/asianTotals/corners/cards/htft/correctScore/goalscorers/...) actually
+// got populated for this specific fixture, since buildPulseScoreMarkets zeroes
+// (never fabricates) any slot PulseScore's normalizer didn't find a real market
+// for (see that function's header + normalizer.ts). This pulls the SAME raw
+// PulseScore event fresh, runs it through normalizePulseScoreEvent +
+// buildPulseScoreMarkets exactly like the live/prematch builders do, and returns
+// all three layers side by side — raw bet365 market list (so we can see what
+// bet365 genuinely offers this match right now), the normalizer's extracted
+// summary (so we can see which real markets it failed to map, if any), and the
+// final AdvancedMarkets-shaped object the frontend actually receives — so a
+// "mediocre" list can be told apart from "bet365 itself just isn't offering much
+// for this match/moment" vs "a real gap in normalizer.ts is silently dropping
+// markets bet365 does offer".
+router.get("/pulsescore-market-dump", adminMiddleware, async (req: AdminRequest, res) => {
+  const pulseScoreEventId = typeof req.query.pulseScoreEventId === "string" ? req.query.pulseScoreEventId : undefined;
+  const matchId = typeof req.query.matchId === "string" ? req.query.matchId : undefined;
+
+  let eventId = pulseScoreEventId;
+  let fixtureLabel: string | undefined;
+  if (!eventId && matchId) {
+    const state = liveMatchState.get(matchId) as any;
+    if (state?._pulseScoreEventId) {
+      eventId = state._pulseScoreEventId;
+      fixtureLabel = `${state.home} vs ${state.away}`;
+    }
+  }
+  if (!eventId) {
+    res.status(400).json({
+      error:
+        "Informe ?pulseScoreEventId=<id> (pegue em sampleWithPulse de /pulsescore-odds-audit) ou ?matchId=goalapi-football-... de um jogo AO VIVO já casado (_priceSource=pulsescore).",
+    });
+    return;
+  }
+
+  try {
+    let raw;
+    try {
+      raw = await pulseScore.getLiveEventById(eventId);
+    } catch {
+      raw = await pulseScore.getSoccerEventById(eventId);
+    }
+    const normalized = normalizePulseScoreEvent(raw);
+    const built = buildPulseScoreMarkets(normalized);
+    const mapEntries = (m: Map<number, unknown> | undefined) => (m ? Object.fromEntries(m) : null);
+
+    res.json({
+      fixture: fixtureLabel ?? `${raw.home} vs ${raw.away}`,
+      pulseScoreEventId: eventId,
+      rawMarketCount: raw.markets.length,
+      rawMarkets: raw.markets.map((m) => ({
+        canonicalMarket: m.canonicalMarket,
+        rawName: m.rawName,
+        period: m.period,
+        selectionCount: m.selections.length,
+        sampleSelections: m.selections.slice(0, 8).map((s) => ({
+          canonicalOutcome: s.canonicalOutcome,
+          line: s.line,
+          odds: s.odds,
+          isActive: s.isActive,
+        })),
+      })),
+      normalizedSummary: {
+        matchResult: normalized.matchResult ?? null,
+        matchResult1H: normalized.matchResult1H ?? null,
+        matchResult2H: normalized.matchResult2H ?? null,
+        doubleChance: normalized.doubleChance ?? null,
+        bothTeamsToScore: normalized.bothTeamsToScore ?? null,
+        totalGoalsOddEven: normalized.totalGoalsOddEven ?? null,
+        drawNoBet: normalized.drawNoBet ?? null,
+        firstGoalTeam: normalized.firstGoalTeam ?? null,
+        htft: normalized.htft ?? null,
+        correctScoreCount: normalized.correctScore ? Object.keys(normalized.correctScore).length : 0,
+        htCorrectScoreCount: normalized.htCorrectScore ? Object.keys(normalized.htCorrectScore).length : 0,
+        anytimeGoalscorerCount: normalized.anytimeGoalscorer?.length ?? 0,
+        firstGoalscorerCount: normalized.firstGoalscorer?.length ?? 0,
+        lastGoalscorerCount: normalized.lastGoalscorer?.length ?? 0,
+        asianHandicapFull: normalized.asianHandicapFull ?? null,
+        handicapLines: mapEntries(normalized.handicapLines),
+        cornersLines: mapEntries(normalized.cornersLines),
+        cardsLines: mapEntries(normalized.cardsLines),
+        asianTotalLines: mapEntries(normalized.asianTotalLines),
+        teamGoalsHomeLines: mapEntries(normalized.teamGoalsHomeLines),
+        teamGoalsAwayLines: mapEntries(normalized.teamGoalsAwayLines),
+        homeCornersLines: mapEntries(normalized.homeCornersLines),
+        awayCornersLines: mapEntries(normalized.awayCornersLines),
+      },
+      finalMarketsWrittenToLiveState: built,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao consultar PulseScore", detail: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 router.get("/propline-sports", adminMiddleware, async (_req: AdminRequest, res) => {
