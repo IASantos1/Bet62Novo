@@ -15,10 +15,10 @@
     "skipLibCheck": true,
     "strict": false,
     "noImplicitAny": false,
+    "types": ["react", "react-dom", "vite/client"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@assets/*": ["../../attached_assets/*"],
       "@workspace/api-client-react": ["../../lib/api-client-react/src/index.ts"]
     }
   },

@@ -171,15 +171,6 @@ declare module "cookie-parser" {
   export default function(...args: any[]): any;
   export type CookieParseOptions = any;
 }
-declare module "ws" {
-  export default function(...args: any[]): any;
-  export class WebSocket { constructor(address: any, opts?: any); on: any; send: any; close: any; readyState: any; CONNECTING: any; OPEN: any; CLOSING: any; CLOSED: any; }
-  export class Server { constructor(opts: any); on: any; clients: any; close: any; handleUpgrade: any; }
-  export const WebSocketServer: any;
-  export type Event = any; export type ErrorEvent = any; export type MessageEvent = any;
-  export type CloseEvent = any; export type ServerOptions = any;
-  export type ClientOptions = any; export const RawData: any;
-}
 declare module "http" {
   const CallableWithProps: {
     (...args: any[]): any;

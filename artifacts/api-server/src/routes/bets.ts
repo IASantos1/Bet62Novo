@@ -1884,9 +1884,6 @@ router.post(
         liveSt?.sport === "baseball" ||
         liveSt?.sport === "volleyball"
       ) {
-        // Same "already missing from the feed, don't accept a doomed bet"
-        // guard as the per-selection loop below (see its comment) —
-        // ticket BT62-000074, 2026-08-11.
         if (liveSt._missingSinceAt) {
           res.status(409).json({
             error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
@@ -1926,6 +1923,7 @@ router.post(
         (sel as { sport?: unknown }).sport ?? topLevelSport,
       );
       const liveSt = liveMatchState.get(mId);
+
       if (!liveSt) continue;
       if (
         liveSt.sport !== "tennis" &&
@@ -1937,17 +1935,6 @@ router.post(
       )
         continue;
 
-      // Real incident, 2026-08-11 (ticket BT62-000074): a match already
-      // missing from the provider feed (liveSt._missingSinceAt set) is on
-      // its way to being voided by finalizeStaleLiveMatch (matches.ts) —
-      // for tennis/basketball/volleyball that's typically within 15s (see
-      // TENNIS_DISAPPEAR_GRACE_MS and friends). Accepting a bet on it isn't
-      // wrong exactly (it gets a correct void+refund once finalized, not a
-      // false loss), but it's pointless and confusing: the user ties up
-      // stake on a bet already headed for an instant void. Reject up front
-      // instead — same shape as the suspension response below, since from
-      // the bettor's perspective "can't bet on this right now" is the same
-      // message either way.
       if (liveSt._missingSinceAt) {
         res.status(409).json({
           error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
@@ -1988,15 +1975,6 @@ router.post(
         return;
       }
 
-      // Odds-drift guard (audit finding, 2026-08-10): the suspension check
-      // above is the ONLY thing that stood between an accepted bet and
-      // whatever odds the client submitted — nothing compared sel.odd
-      // against the server's own current price. A market with no
-      // suspension covering it (or one whose suspension window already
-      // lapsed a tick before this request landed) would silently accept a
-      // stale or arbitrarily-inflated client-submitted odd. Belt-and-braces
-      // on top of suspension, not a replacement for it — suspension is
-      // still the primary, immediate-reaction guard.
       const submittedOdd = Number((sel as { odd?: unknown }).odd);
       const curOdd = currentOddForSelection(sel as unknown as SelectionRecord, liveSt);
       if (
@@ -2005,6 +1983,21 @@ router.post(
         Number.isFinite(curOdd) &&
         (curOdd as number) > 1.0 &&
         detectOddsDrift(submittedOdd, curOdd as number)
+      ) {
+        res.status(409).json({
+          error: "As odds mudaram. Reveja o boletim e tente novamente.",
+          reason: "ODDS DESATUALIZADAS",
+        });
+        return;
+      }
+
+      const submittedMarketVersion = Number(
+        (sel as { marketVersion?: unknown }).marketVersion,
+      );
+      if (
+        Number.isFinite(submittedMarketVersion) &&
+        typeof liveSt.marketVersion === "number" &&
+        submittedMarketVersion < liveSt.marketVersion
       ) {
         res.status(409).json({
           error: "As odds mudaram. Reveja o boletim e tente novamente.",

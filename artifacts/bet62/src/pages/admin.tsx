@@ -434,6 +434,9 @@ type EventRuntimeItem = {
   override_note: string | null;
   updated_by: string | null;
   override_updated_at: string | null;
+  pulse_score_price_status: "real" | "estimated" | null;
+  home_team: string | null;
+  away_team: string | null;
 };
 
 type EventOverrideDraft = {
@@ -4812,6 +4815,7 @@ export default function AdminPage() {
                           <option value="all">Todos os estados</option>
                           {[
                             "ACTIVE",
+                            "SCHEDULED",
                             "SUSPENDED",
                             "TRADING_RESTRICTED",
                             "UNSTABLE_FEED",
@@ -4932,7 +4936,12 @@ export default function AdminPage() {
                                 className="border-b border-zinc-800/50 hover:bg-zinc-800/25 transition-colors align-top"
                               >
                                 <td className="px-4 py-3 min-w-[220px]">
-                                  <div className="text-white text-sm font-medium">
+                                  {(event.home_team || event.away_team) && (
+                                    <div className="text-white text-sm font-semibold">
+                                      {event.home_team || "?"} vs {event.away_team || "?"}
+                                    </div>
+                                  )}
+                                  <div className="text-zinc-400 text-xs mt-0.5">
                                     {event.competition_name ||
                                       "Sem competição mapeada"}
                                   </div>
@@ -4957,6 +4966,22 @@ export default function AdminPage() {
                                       provider: {event.provider_event_id}
                                     </div>
                                   )}
+                                  {event.pulse_score_price_status && (
+                                    <div className="mt-1">
+                                      <Badge
+                                        cls={
+                                          event.pulse_score_price_status === "real"
+                                            ? "bg-green-900/50 text-green-400"
+                                            : "bg-amber-900/40 text-amber-400"
+                                        }
+                                        label={
+                                          event.pulse_score_price_status === "real"
+                                            ? "PulseScore: Real"
+                                            : "PulseScore: Estimado"
+                                        }
+                                      />
+                                    </div>
+                                  )}
                                   {event.suspension_reason && (
                                     <div className="text-xs text-yellow-400 mt-2 italic">
                                       {event.suspension_reason}
@@ -4971,7 +4996,9 @@ export default function AdminPage() {
                                           ? "bg-green-900/50 text-green-400"
                                           : effectiveState === "ENDED"
                                             ? "bg-zinc-800 text-zinc-400"
-                                            : "bg-red-900/40 text-red-400"
+                                            : effectiveState === "SCHEDULED"
+                                              ? "bg-blue-900/40 text-blue-400"
+                                              : "bg-red-900/40 text-red-400"
                                       }
                                       label={effectiveState}
                                     />

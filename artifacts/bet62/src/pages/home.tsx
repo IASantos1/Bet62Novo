@@ -157,8 +157,11 @@ import parisFCBanner from "@/assets/banners/file_1779019459045_1779019658504.jpe
 import lorientBanner from "@/assets/banners/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@/assets/banners/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import FootballPitchTracker from "@/components/FootballPitchTracker";
 import PlayerProfileModal from "@/components/PlayerProfileModal";
+import TournamentBracket from "@/components/TournamentBracket";
 import SuggestedCombos from "@/components/SuggestedCombos";
+import PredictionCard from "@/components/PredictionCard";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
 const TEAM_BANNERS: Record<string, string> = {
@@ -610,6 +613,43 @@ function teamNamePt(name: string): string {
   const n = (name ?? "").trim();
   if (!n) return n;
   return TEAM_NAME_PT[n] ?? n;
+}
+
+// Odds-button team labels used the last word of the full name (e.g.
+// "Manchester United" -> "United"), which works for most club names but
+// breaks for PropLine's international team names: "Macedónia do Norte" ->
+// "Norte" (meaningless alone), "Chile (W)" -> "(W)" (the whole label is
+// just the gender marker), and two teams sharing a mascot word both
+// collapsing to the same label ("Ust Golden Spikers" / "DLSU Green
+// Spikers" -> "Spikers" for both). Falls back to the first word that
+// actually differs between the two names only when the last-word approach
+// would produce a generic/collided/gender-only label — keeps existing
+// well-known club labels (e.g. "Real Madrid" -> "Madrid") unchanged.
+const TEAM_LABEL_GENERIC_WORDS = new Set([
+  "norte", "sul", "leste", "oeste", "north", "south", "east", "west",
+  "do", "da", "de", "dos", "das", "del", "united", "city", "fc", "sc",
+]);
+function shortTeamLabelPair(nameA: string, nameB: string): [string, string] {
+  const stripGenderSuffix = (n: string) => n.replace(/\s*\((?:w|women|f|fem)\)\s*$/i, "").trim();
+  const a = stripGenderSuffix(nameA) || nameA;
+  const b = stripGenderSuffix(nameB) || nameB;
+  const wordsA = a.split(" ").filter(Boolean);
+  const wordsB = b.split(" ").filter(Boolean);
+  const lastA = wordsA[wordsA.length - 1] ?? a;
+  const lastB = wordsB[wordsB.length - 1] ?? b;
+  const isBadLabel = (w: string) => TEAM_LABEL_GENERIC_WORDS.has(w.toLowerCase()) || /^\(.*\)$/.test(w) || w.length <= 2;
+  if (lastA.toLowerCase() !== lastB.toLowerCase() && !isBadLabel(lastA) && !isBadLabel(lastB)) {
+    return [lastA, lastB];
+  }
+  const maxLen = Math.max(wordsA.length, wordsB.length);
+  for (let i = 0; i < maxLen; i++) {
+    const wa = wordsA[i];
+    const wb = wordsB[i];
+    if (wa && wb && wa.toLowerCase() !== wb.toLowerCase()) return [wa, wb];
+    if (wa && !wb) return [wa, lastB];
+    if (!wa && wb) return [lastA, wb];
+  }
+  return [wordsA[0] ?? a, wordsB[0] ?? b];
 }
 
 const LEAGUE_NAME_PT: Record<string, string> = {
@@ -1493,24 +1533,40 @@ const LEAGUE_LOGOS: Record<string, string> = {
 // Brazilian league name variant, so it's used here as a veto: a candidate
 // logo key whose own known country conflicts with the match's real country
 // is skipped, same as getCountryFlagIso already does for flags.
-function leagueLogoKeyConflictsWithCountry(key: string, countryIso: string | undefined): boolean {
-  if (!countryIso) return false;
+function leagueLogoKeyConflictsWithCountry(
+  key: string,
+  countryIso: string | undefined,
+  homeTeam?: string | null,
+): boolean {
+  // Team-name fallback — mirrors getCountryFlagIso's own "5. Team name
+  // fallback": when match.country carries no real signal (GOAL API sends a
+  // hardcoded "Internacional" placeholder for every football fixture, real
+  // or not — see buildFootballLiveFromGoalApi), a known club's own country
+  // is a strictly better signal than trusting an ambiguous bare league name
+  // like "Premier League" (Singapore's included, alongside England's).
+  const resolvedIso =
+    countryIso ?? (homeTeam ? COUNTRY_ISO[TEAM_COUNTRY[homeTeam] ?? ""] : undefined);
+  if (!resolvedIso) return false;
   const kl = key.toLowerCase();
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (kl === pat) return iso !== "" && iso !== countryIso;
+    if (kl === pat) return iso !== "" && iso !== resolvedIso;
   }
   return false;
 }
 
 /** Exact match first, then prefix match, then contains match for dynamically-named competitions (e.g. "FIFA World Cup - Round of 32"). */
-function getLeagueLogo(league: string | null | undefined, country?: string | null): string | undefined {
+function getLeagueLogo(
+  league: string | null | undefined,
+  country?: string | null,
+  homeTeam?: string | null,
+): string | undefined {
   const l = league ?? "";
   if (!l) return undefined;
   const countryIso = (() => {
     const ck = (country ?? "").trim().toLowerCase();
     return ck ? COUNTRY_ISO[ck] : undefined;
   })();
-  if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso)) return LEAGUE_LOGOS[l];
+  if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso, homeTeam)) return LEAGUE_LOGOS[l];
   const lLower = l.toLowerCase();
   // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo -
   // Grupo A", etc. LONGEST matching key wins, not the first one declared in
@@ -1523,7 +1579,7 @@ function getLeagueLogo(league: string | null | undefined, country?: string | nul
   // specific, correct one.
   let bestPrefix: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso)) {
+    if (key.length >= 6 && l.startsWith(key) && (!bestPrefix || key.length > bestPrefix.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso, homeTeam)) {
       bestPrefix = { key, url };
     }
   }
@@ -1531,7 +1587,7 @@ function getLeagueLogo(league: string | null | undefined, country?: string | nul
   // Case-insensitive contains match — same longest-match reasoning.
   let bestContains: { key: string; url: string } | null = null;
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
-    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso)) {
+    if (key.length >= 6 && lLower.includes(key.toLowerCase()) && (!bestContains || key.length > bestContains.key.length) && !leagueLogoKeyConflictsWithCountry(key, countryIso, homeTeam)) {
       bestContains = { key, url };
     }
   }
@@ -1957,6 +2013,21 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Balata": "palestine",
   "Khadamat Rafah": "palestine",
   "Samia Nablus": "palestine",
+  // Singapore Premier League — bug report 2026-09-11: GOAL API sends this
+  // league's bare "Premier League" name with no country qualifier (unlike
+  // e.g. "Kenyan Premier League") and no country field at all, so it fell
+  // through to LEAGUE_ISO_MAP's generic "premier league" → England
+  // fallback, showing the English Premier League crest on a Singaporean
+  // match. Same team-name fallback getCountryFlagIso already uses for
+  // flags, now also wired into getLeagueLogo (see
+  // leagueLogoKeyConflictsWithCountry).
+  "Tampines Rovers": "singapore",
+  "Balestier Khalsa": "singapore",
+  "Lion City Sailors": "singapore",
+  "Albirex Niigata (S)": "singapore",
+  "Geylang International": "singapore",
+  "Hougang United": "singapore",
+  "Young Lions": "singapore",
 };
 
 function normalizeBannerTeamName(name: string): string {
@@ -3605,6 +3676,8 @@ type AdvancedMarkets = {
     o105: number;
     u105: number;
   };
+  homeCorners?: { line: number; over: number; under: number };
+  awayCorners?: { line: number; over: number; under: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
   // Second half result market (who wins just the 2nd half)
   secondHalf?: { home: number; draw: number; away: number };
@@ -3649,6 +3722,21 @@ type AdvancedMarkets = {
   penExtra?: {
     winner: { home: number; away: number };
   };
+  // Football extended markets (matches backend AdvancedMarkets shape)
+  winToNil?: { home: number; away: number };
+  cleanSheet?: { home: number; away: number };
+  goalOddEven?: { odd: number; even: number };
+  exactGoals?: { g0: number; g1: number; g2: number; g3: number; g4: number; g5plus: number };
+  btts1H?: { yes: number; no: number };
+  btts2H?: { yes: number; no: number };
+  toWinBothHalves?: { home: number; away: number };
+  highestScoringHalf?: { first: number; second: number; equal: number };
+  htCorrectScore?: Record<string, number>;
+  h2CorrectScore?: Record<string, number>;
+  teamGoals?: Partial<{
+    homeOver05: number; homeUnder05: number; homeOver15: number; homeUnder15: number; homeOver25: number; homeUnder25: number;
+    awayOver05: number; awayUnder05: number; awayOver15: number; awayUnder15: number; awayOver25: number; awayUnder25: number;
+  }>;
   // Tennis-specific live markets (injected server-side)
   tennisExtra?: {
     firstSet?: { home: number; away: number };
@@ -3679,6 +3767,9 @@ type Match = {
   // the only source getTeamBadgeAsset uses; see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  // Football only — GOAL API's matchStadium/matchReferee.
+  stadium?: string;
+  referee?: string;
   league: string;
   country?: string;
   time?: string;
@@ -3700,9 +3791,20 @@ type Match = {
     team: string;
     minute: number;
     player: string;
-    playerId?: number;
+    playerId?: string;
     detail?: string;
   }>;
+  // Real match statistics (GOAL API football only) — replaces the deleted
+  // SportsAPI Pro V2 /v2-statistics feed this same shape used to come from.
+  matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
+  // Live text commentary feed (GOAL API football only) — free-text
+  // play-by-play narration, newest entry first. See FootballPitchTracker.
+  _commentary?: Array<{ id: string; time: string; text: string }>;
+  // Real ball position (GOAL API + sports.bzzoiro.com hybrid, football
+  // only) — see FootballPitchTracker's realBallPosition prop. Absent
+  // whenever bzzoiro hasn't matched/priced this fixture yet; the tracker
+  // falls back to its own commentary-derived zone guess in that case.
+  _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
   // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
@@ -3930,6 +4032,14 @@ type StandingRow = {
   gf: number;
   ga: number;
   pts: number;
+  zone?: "promotion" | "european" | "safe" | "relegationPlayoff" | "relegation";
+};
+
+const STANDING_ZONE_BORDER: Record<string, string> = {
+  promotion: "border-l-green-500",
+  european: "border-l-blue-500",
+  relegationPlayoff: "border-l-orange-500",
+  relegation: "border-l-red-500",
 };
 
 const MarketTabCtx = createContext<string>("");
@@ -4919,7 +5029,11 @@ export default function Home({
       return bySport && bySearch;
     };
     const actualLive = liveMatches.filter(
-      (m) => m.startsIn === undefined && filterBySport(m),
+      (m) => {
+        const s = String(m.status ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+        const isFinished = /final|fin|finished|ended|complete|full.?time|after.?extra|after.?penalt|retir|abandon|cancel|award|default|ft|aet|ap/.test(s);
+        return m.startsIn === undefined && !isFinished && filterBySport(m);
+      },
     );
     // Dedup key: match id when every source actually has a stable one,
     // team-name pair otherwise — a bare team-name key alone would silently
@@ -4930,7 +5044,11 @@ export default function Home({
       m.id !== undefined && m.id !== null && m.id !== "" ? `id:${m.id}` : `${m.home}|${m.away}`;
     // Em Breve: live-feed entries + ALL upcoming matches within 7 days
     const _emBreveFromLive = liveMatches.filter(
-      (m) => m.startsIn !== undefined && filterBySport(m),
+      (m) => {
+        const s = String(m.status ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+        const isFinished = /final|fin|finished|ended|complete|full.?time|after.?extra|after.?penalt|retir|abandon|cancel|award|default|ft|aet|ap/.test(s);
+        return m.startsIn !== undefined && !isFinished && filterBySport(m);
+      },
     );
     const _liveBreveKeys = new Set(_emBreveFromLive.map(matchKey));
     const _minsUntil = (date?: string, time?: string): number => {
@@ -5077,6 +5195,38 @@ export default function Home({
     time: string;
   };
   const [mlbResults, setMlbResults] = useState<MLBResult[]>([]);
+
+  // Football results (yesterday) — real GOAL API /results/yesterday feed.
+  type FootballResult = {
+    id: string;
+    home: string;
+    homeBadge: string | null;
+    away: string;
+    awayBadge: string | null;
+    homeScore: number;
+    awayScore: number;
+    status: string;
+    league: string;
+    country: string | null;
+    round: string | null;
+    date: string;
+    time: string;
+  };
+  const [footballResults, setFootballResults] = useState<FootballResult[]>([]);
+  type FootballResultsStats = {
+    totalMatches: number;
+    totalGoals: number;
+    averageGoals: number;
+    homeWinPercentage: number;
+    drawPercentage: number;
+    awayWinPercentage: number;
+    bttsPercentage: number;
+    over25Percentage: number;
+    over35Percentage: number;
+    mostCommonScore: { score: string; percentage: number } | null;
+  };
+  const [footballResultsStats, setFootballResultsStats] =
+    useState<FootballResultsStats | null>(null);
 
   type NHLTeamStats = {
     shotsOnGoal: number;
@@ -5761,6 +5911,16 @@ export default function Home({
   }> | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [standingsLeague, setStandingsLeague] = useState("");
+  type TopScorerRow = {
+    rank: number;
+    playerName: string;
+    teamName: string;
+    goals: number;
+    assists: number;
+    penaltyGoals: number;
+  };
+  const [topScorers, setTopScorers] = useState<TopScorerRow[] | null>(null);
+  const [topScorersLoading, setTopScorersLoading] = useState(false);
   type AllOddsMarket = {
     name: string;
     group: string;
@@ -5777,11 +5937,13 @@ export default function Home({
     confirmed: boolean;
     home: {
       formation?: string;
+      coach?: string;
       starters: LineupsV2Player[];
       bench: LineupsV2Player[];
     };
     away: {
       formation?: string;
+      coach?: string;
       starters: LineupsV2Player[];
       bench: LineupsV2Player[];
     };
@@ -5993,11 +6155,21 @@ export default function Home({
     league: string;
     country?: string;
   };
+  type RecentMatchEntry = {
+    date: string;
+    opponent: string;
+    score: string;
+    result: "W" | "D" | "L";
+    home: boolean;
+    league?: string;
+  };
   type ConfrontosData = {
     homeWins: number;
     awayWins: number;
     draws: number;
     recentMeetings: H2HMeeting[];
+    homeRecentMatches?: RecentMatchEntry[];
+    awayRecentMatches?: RecentMatchEntry[];
     team1Name: string;
     team2Name: string;
     sport: string;
@@ -6014,7 +6186,8 @@ export default function Home({
   };
   const [homeUpcoming, setHomeUpcoming] = useState<TeamUpcomingEntry[]>([]);
   const [awayUpcoming, setAwayUpcoming] = useState<TeamUpcomingEntry[]>([]);
-  const [playerProfileId, setPlayerProfileId] = useState<number | null>(null);
+  const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
+  const [playerProfileSport, setPlayerProfileSport] = useState<string>("football");
 
   const extractLiveKeyStats = (
     groups: V2StatsGroup[],
@@ -6152,7 +6325,18 @@ export default function Home({
 
     if (maxKnownMin > 0) {
       if (apiMin === 0) apiMin = maxKnownMin;
-      if (apiMin > maxKnownMin + 8) apiMin = maxKnownMin;
+      // Football only: this downgrade was the actual cause of the
+      // reported "40' -> 3'" clock flicker, still reproducing after the
+      // backend's own minute was made monotonic (routes/matches.ts,
+      // estimateGoalApiLiveMinute's Math.max floor) — a real match easily
+      // goes 20-30+ minutes with zero recorded events (goal/card/sub), so
+      // "current minute more than 8 above the last event's minute" is a
+      // completely normal, frequent state, not evidence the API minute is
+      // wrong. Downgrading to the stale event minute every time undid the
+      // backend fix from the frontend side. Football's apiMin is now
+      // trustworthy on its own; keep this sanity cap for other sports
+      // where it hasn't been shown to misfire.
+      if (!isFootball && apiMin > maxKnownMin + 8) apiMin = maxKnownMin;
     }
 
     const extra = (match as any)?._liveExtra;
@@ -6754,6 +6938,8 @@ export default function Home({
     setStandingsGroups(null);
     setStandingsLoading(false);
     setStandingsLeague("");
+    setTopScorers(null);
+    setTopScorersLoading(false);
     setConfrontosData(null);
     setConfrontosLoading(false);
     setAllOddsData(null);
@@ -6876,6 +7062,8 @@ export default function Home({
       sport: expandedMatch.sport ?? "football",
       league: expandedMatch.league ?? "",
       country: expandedMatch.country ?? "",
+      ...(expandedMatch.homeTeamId ? { homeTeamId: expandedMatch.homeTeamId } : {}),
+      ...(expandedMatch.awayTeamId ? { awayTeamId: expandedMatch.awayTeamId } : {}),
     });
     fetch(`/api/matches/stats?${p}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -6887,23 +7075,53 @@ export default function Home({
   }, [expandedMatch?.id]);
 
   useEffect(() => {
-    // The /v2-statistics backend endpoint (SportsAPI Pro V2) was removed —
-    // there is no replacement source for this per-match stats breakdown, so
-    // this now always settles straight to "not available" instead of polling
-    // a route that no longer exists.
+    // Real replacement source (GOAL API, 2026-09-09) for what the deleted
+    // SportsAPI Pro V2 /v2-statistics feed used to provide — matchStats
+    // already arrives in the same V2StatsGroup shape via the live match
+    // object, so no separate fetch is needed here. Only football/GOAL API
+    // matches populate it; everything else correctly settles to "not
+    // available" exactly as before.
     if (!expandedMatch) return;
+    const real = expandedMatch.matchStats;
+    if (real && real.length > 0) {
+      setV2StatsGroups(real);
+      return;
+    }
     if (v2StatsGroups === null) setV2StatsGroups([]);
-  }, [expandedMatch?.id, v2StatsGroups]);
+  }, [expandedMatch?.id, expandedMatch?.matchStats, v2StatsGroups]);
 
   useEffect(() => {
-    // The /v2-incidents backend endpoint (SportsAPI Pro V2) was removed —
-    // there is no replacement source for the goals/cards/corners timeline,
-    // so this now always settles straight to "not available" instead of
-    // polling a route that no longer exists.
+    // Real replacement source (GOAL API, 2026-09-09) for what the deleted
+    // SportsAPI Pro V2 /v2-incidents feed used to provide — derived from
+    // the live match's own real events array (goals/cards), which already
+    // arrives with the match object with no separate fetch needed.
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
+    const rawEvents = expandedMatch.events ?? [];
+    if (rawEvents.length > 0) {
+      const incidents: V2Incident[] = rawEvents.map((e, i) => {
+        const isGoal = e.type === "goal";
+        const isCard = e.type === "card";
+        const isSub = e.type === "substitution";
+        const isRed = isCard && (e.detail ?? "").toLowerCase().includes("red");
+        const team: "home" | "away" | "neutral" =
+          e.team === "home" || e.team === "away" ? e.team : "neutral";
+        return {
+          key: `${e.type}-${e.team}-${e.minute}-${i}`,
+          time: `${e.minute}'`,
+          minute: e.minute,
+          team,
+          kind: isGoal ? "goal" : isCard ? "card" : isSub ? "sub" : "other",
+          card: isCard ? (isRed ? "red" : "yellow") : null,
+          title: isGoal ? "Golo" : isCard ? (isRed ? "Cartão Vermelho" : "Cartão Amarelo") : isSub ? "Substituição" : e.type,
+          detail: isSub ? `${e.player} (${e.detail ?? ""})` : (e.player ?? ""),
+        };
+      });
+      setV2Incidents(incidents);
+      return;
+    }
     if (v2Incidents === null) setV2Incidents([]);
-  }, [matchViewTab, expandedMatch?.id, expandedMatch?.isLive, v2Incidents]);
+  }, [matchViewTab, expandedMatch?.id, expandedMatch?.isLive, expandedMatch?.events, v2Incidents]);
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
@@ -6939,15 +7157,17 @@ export default function Home({
       setStandingsGroups(safeGroups);
       return true;
     };
+    const leagueId = expandedMatch.leagueId;
     const loadV1 = () =>
       fetch(
-        `/api/matches/league-standings?league=${encodeURIComponent(league)}`,
+        `/api/matches/league-standings?league=${encodeURIComponent(league)}${leagueId ? `&leagueId=${encodeURIComponent(leagueId)}` : ""}`,
       )
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (!d || !Array.isArray(d.teams)) return;
+          const groups = Array.isArray(d.groups) ? (d.groups as Array<{ name: string; rows: StandingRow[] }>) : null;
           if (
-            !acceptStandings(d.teams as StandingRow[], null, d.league ?? league)
+            !acceptStandings(d.teams as StandingRow[], groups, d.league ?? league)
           ) {
             setStandings([]);
             setStandingsGroups(null);
@@ -6955,9 +7175,11 @@ export default function Home({
           }
         });
     // The /v2-standings backend endpoint (SportsAPI Pro V2) was removed.
-    // Football still resolves standings via the V1 league-standings route;
-    // other sports had no other source for per-match standings, so they now
-    // settle straight to "not available".
+    // Football still resolves standings via the league-standings route —
+    // real GOAL API data when leagueId is known (see buildGoalApiStandings
+    // on the backend), synthetic otherwise; other sports had no other
+    // source for per-match standings, so they now settle straight to "not
+    // available".
     const sport = expandedMatch.sport ?? "football";
     if (sport === "football") {
       loadV1()
@@ -6970,6 +7192,26 @@ export default function Home({
     }
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch top scorers (Artilheiros) when the stats tab is active — same
+  // trigger condition as standings above, and same reasoning: the panel
+  // embeds this as a sub-tab, so the data needs to be ready before the user
+  // navigates there. Football only — GOAL API's leagueId is only populated
+  // on football matches.
+  useEffect(() => {
+    if (matchViewTab !== "stats" || !expandedMatch || topScorers) return;
+    const sport = expandedMatch.sport ?? "football";
+    const leagueId = expandedMatch.leagueId;
+    if (sport !== "football" || !leagueId) {
+      setTopScorers([]);
+      return;
+    }
+    setTopScorersLoading(true);
+    fetch(`/api/matches/top-scorers/${encodeURIComponent(leagueId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setTopScorers(Array.isArray(d?.scorers) ? d.scorers : []))
+      .catch(() => setTopScorers([]))
+      .finally(() => setTopScorersLoading(false));
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The /v2-match-odds backend endpoint (SportsAPI Pro V2) was removed —
   // there is no replacement source for the full markets list, so the
@@ -6982,13 +7224,15 @@ export default function Home({
     setAllOddsSectionOpen({});
   }, [matchViewTab, expandedMatch?.id]);
 
-  // The /v2-lineups backend endpoint (SportsAPI Pro V2) was removed — there
-  // is no replacement source for lineups, so the "lineups" tab now always
-  // settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
     setLineupsData(null);
-    setLineupsLoading(false);
+    setLineupsLoading(true);
+    fetch(`/api/matches/lineups/${expandedMatch.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setLineupsData(d as LineupsV2 | null))
+      .catch(() => setLineupsData(null))
+      .finally(() => setLineupsLoading(false));
   }, [matchViewTab, expandedMatch?.id]);
 
   // Fetch live storyline when a live football match is expanded
@@ -7017,12 +7261,31 @@ export default function Home({
       matchId: rawId,
       home: expandedMatch.home,
       away: expandedMatch.away,
+      ...(expandedMatch.homeTeamId ? { homeTeamId: expandedMatch.homeTeamId } : {}),
+      ...(expandedMatch.awayTeamId ? { awayTeamId: expandedMatch.awayTeamId } : {}),
     });
     fetch(`/api/matches/confrontos?${p}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setConfrontosData(d as ConfrontosData))
       .catch(() => setConfrontosData(null))
       .finally(() => setConfrontosLoading(false));
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch football results scoped to the currently viewed match's own league
+  // (via /results/league/:id) when GOAL API knows its leagueId, falling back
+  // to the global yesterday feed otherwise — replaces the page-load-once,
+  // unscoped fetch this used to be (every competition worldwide mixed
+  // together, regardless of which match's panel was open).
+  useEffect(() => {
+    if (!expandedMatch || (expandedMatch.sport ?? "football") !== "football") return;
+    setFootballResults([]);
+    const leagueId = expandedMatch.leagueId;
+    const p = new URLSearchParams({ range: "yesterday" });
+    if (leagueId) p.set("leagueId", leagueId);
+    fetch(`/api/matches/football-results?${p}`)
+      .then((r) => (r.ok ? r.json() : { results: [] }))
+      .then((d) => setFootballResults(d.results ?? []))
+      .catch(() => setFootballResults([]));
   }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Próximos Jogos — each team's next fixtures. Used to be sourced from
@@ -7145,6 +7408,12 @@ export default function Home({
       fetch("/api/matches/mlb-results")
         .then((r) => (r.ok ? r.json() : { results: [] }))
         .then((d) => setMlbResults(d.results ?? []))
+        .catch(() => {
+          /* non-critical */
+        });
+      fetch("/api/matches/football-results-stats")
+        .then((r) => (r.ok ? r.json() : { stats: null }))
+        .then((d) => setFootballResultsStats(d.stats ?? null))
         .catch(() => {
           /* non-critical */
         });
@@ -7318,6 +7587,8 @@ export default function Home({
     marketSuspension?: Record<string, number>;
     _suspensionReason?: string;
     _feedWarning?: string;
+    _commentary?: Array<{ id: string; time: string; text: string }>;
+    _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
     _liveExtra?: {
       clockStr?: string;
       sets?: Array<[number, number]>;
@@ -9568,18 +9839,16 @@ export default function Home({
     if ((match.sport ?? "football") === "tennis" && selection === "draw")
       return null;
     const now = Date.now();
-    const suspendedUntil = match.marketSuspension?.[market];
+    const suspendedUntil = match.marketSuspension?.[market ?? "result"];
     const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
-    const isSelected = !!bets.find(
-      (b) =>
-        b.matchId === match.id &&
-        b.market === market &&
-        b.selection === selection,
-    );
+    // Shared movement calc — prevLiveOdds tracks every live match's last-seen
+    // odds unconditionally (see the setLiveMatches poll handler), synthetic
+    // anchor included, so a non-bettable price still shows ▲/▼ when it
+    // ticks, same as a real one. Server controls cadence; this only decides
+    // whether the change was big enough to flash.
     const prevOdd = match.isLive
       ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds]
       : undefined;
-    // Arrow only when actual API value changed enough — server now controls cadence
     const delta = prevOdd !== undefined ? odd - prevOdd : 0;
     const oddsUp = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
@@ -9587,6 +9856,47 @@ export default function Home({
     const baseBoxClass = isWCVariant
       ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
       : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
+    const oddInvalid = odd <= 0 || !Number.isFinite(odd);
+    if (oddInvalid) {
+      if (isSuspended) return null;
+      return (
+        <div
+          className={`relative ${baseBoxClass} ${
+            isWCVariant
+              ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white")
+              : "bg-zinc-800/40 border-zinc-700/30 opacity-70"
+          } select-none`}
+          title="Aguardando preço real da PulseScore para este jogo"
+        >
+          <span
+            className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-zinc-500" : "text-[10px] leading-none opacity-50"}`}
+          >
+            {label}
+          </span>
+          <span
+            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-500"} tabular-nums flex items-center gap-0.5`}
+          >
+            {oddInvalid ? "--" : odd.toFixed(2)}
+            {!oddInvalid && oddsUp && (
+              <span className="text-green-400 text-[9px] font-black leading-none shrink-0">
+                ▲
+              </span>
+            )}
+            {!oddInvalid && oddsDown && (
+              <span className="text-red-400 text-[9px] font-black leading-none shrink-0">
+                ▼
+              </span>
+            )}
+          </span>
+        </div>
+      );
+    }
+    const isSelected = !!bets.find(
+      (b) =>
+        b.matchId === match.id &&
+        b.market === market &&
+        b.selection === selection,
+    );
 
     if (isSuspended) {
       return null;
@@ -9768,7 +10078,7 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const leagueLogo = getLeagueLogo(match.league, match.country);
+            const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
             const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -9813,6 +10123,7 @@ export default function Home({
     const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
+    const [shortHomeLabel, shortAwayLabel] = shortTeamLabelPair(homeName, awayName);
     const isNationalMatch = isSelectionMatch(match);
     const homeFlag = isNationalMatch ? getCountryFlagUrl(match.home.toLowerCase()) : null;
     const awayFlag = isNationalMatch ? getCountryFlagUrl(match.away.toLowerCase()) : null;
@@ -10391,6 +10702,7 @@ export default function Home({
 
     const isObviousLiveResult =
       match.isLive &&
+      match.hasRealOdds === true &&
       (match.sport === "football" || !match.sport) &&
       (() => {
         const minOdd = Math.min(match.odds.home, match.odds.away);
@@ -10451,7 +10763,7 @@ export default function Home({
                   selection="pen-home"
                   odd={match.markets!.penExtra!.winner.home}
                   market="penaltis"
-                  label={homeName.split(" ").slice(-1)[0]!}
+                  label={shortHomeLabel}
                   grow
                   variant="worldcup"
                 />
@@ -10460,7 +10772,7 @@ export default function Home({
                   selection="pen-away"
                   odd={match.markets!.penExtra!.winner.away}
                   market="penaltis"
-                  label={awayName.split(" ").slice(-1)[0]!}
+                  label={shortAwayLabel}
                   grow
                   variant="worldcup"
                 />
@@ -10482,7 +10794,7 @@ export default function Home({
                     selection="home"
                     odd={match.odds.home}
                     market="result"
-                    label={homeName.split(" ").slice(-1)[0]!}
+                    label={shortHomeLabel}
                     grow
                     variant="worldcup"
                   />
@@ -10502,7 +10814,7 @@ export default function Home({
                     selection="away"
                     odd={match.odds.away}
                     market="result"
-                    label={awayName.split(" ").slice(-1)[0]!}
+                    label={shortAwayLabel}
                     grow
                     variant="worldcup"
                   />
@@ -10537,7 +10849,7 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const leagueLogo = getLeagueLogo(match.league, match.country);
+                const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
                 const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
@@ -11031,7 +11343,7 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const leagueLogo = getLeagueLogo(match.league, match.country);
+              const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
               const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -12808,34 +13120,85 @@ export default function Home({
                       { key: "prolongamento", label: "⏱ Prorrogação" },
                     ]
                   : // Regular time — all markets, but only popular markets after 85'
-                    isLateGame
-                    ? [
+                    (() => {
+                      const mk = match.markets;
+                      const baseTabs: Array<{ key: string; label: string; icon?: string }> = [
                         { key: "todos", label: "Todos" },
-                        { key: "resultado", label: "Resultado" },
-                        { key: "gols", label: "Gols" },
-                        { key: "handicap", label: "Handicap" },
-                      ]
-                    : [
-                        { key: "todos", label: "Todos" },
-                        { key: "betbuilder", label: "Bet Builder", icon: "🧩" },
-                        { key: "resultado", label: "Resultado" },
-                        { key: "dupla", label: "Dupla Chance" },
-                        { key: "gols", label: "Gols" },
-                        { key: "especiais", label: "Especiais" },
-                        { key: "handicap", label: "Handicap" },
-                        ...(show1tempo
-                          ? [{ key: "1tempo", label: "1º Tempo" }]
-                          : []),
-                        ...(show2tempo
-                          ? [{ key: "2tempo", label: "2º Tempo" }]
-                          : []),
-                        { key: "htft", label: "HT/FT" },
-                        { key: "placar", label: "Placar Exato" },
-                        { key: "marcadores", label: "Marcadores" },
-                        { key: "escanteios", label: "Escanteios" },
-                        { key: "cartoes", label: "Cartões" },
-                        { key: "asiatico", label: "Asiático" },
                       ];
+                      const hasResult = (match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01;
+                      if (hasResult) baseTabs.push({ key: "resultado", label: "Resultado" });
+                      const hasDupla =
+                        (Number(mk?.doubleChance?.homeOrDraw ?? 0) > 1.01) ||
+                        (Number(mk?.doubleChance?.awayOrDraw ?? 0) > 1.01) ||
+                        (Number(mk?.doubleChance?.homeOrAway ?? 0) > 1.01) ||
+                        (Number(mk?.bothTeamsScore?.yes ?? 0) > 1.01);
+                      if (hasDupla) baseTabs.push({ key: "dupla", label: "Dupla Chance" });
+                      const hasGols =
+                        (Number(mk?.totalGoals?.over05 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over15 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over25 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over35 ?? 0) > 1.01) ||
+                        (Number(mk?.totalGoals?.over45 ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.toWinBothHalves?.home ?? 0) > 1.01) ||
+                        (Number(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
+                        (Number(mk?.exactGoals?.g0 ?? 0) > 1.01);
+                      if (hasGols) baseTabs.push({ key: "gols", label: "Gols" });
+                      const hasEspeciais =
+                        (Number(mk?.btts1H?.yes ?? 0) > 1.01) ||
+                        (Number(mk?.highestScoringHalf?.first ?? 0) > 1.01) ||
+                        (Number(mk?.teamGoals?.homeOver05 ?? 0) > 1.01) ||
+                        (Number(mk?.teamGoals?.awayOver05 ?? 0) > 1.01);
+                      if (hasEspeciais) baseTabs.push({ key: "especiais", label: "Especiais" });
+                      const hasHandicap =
+                        (Number(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
+                        (Number(mk?.handicap?.homeMinusOneHalf ?? 0) > 1.01) ||
+                        (Number(mk?.handicap?.awayPlusOne ?? 0) > 1.01) ||
+                        (Number(mk?.handicap?.awayPlusOneHalf ?? 0) > 1.01);
+                      if (hasHandicap) baseTabs.push({ key: "handicap", label: "Handicap" });
+                      const has1Tempo =
+                        show1tempo &&
+                        ((Number(mk?.halfTime?.home ?? 0) > 1.01) ||
+                          (Number(mk?.halfTime?.draw ?? 0) > 1.01) ||
+                          (Number(mk?.halfTime?.away ?? 0) > 1.01) ||
+                          (Number(mk?.firstGoal?.home ?? 0) > 1.01) ||
+                          (Number(mk?.drawNoBet?.home ?? 0) > 1.01));
+                      if (has1Tempo) baseTabs.push({ key: "1tempo", label: "1º Tempo" });
+                      const has2Tempo =
+                        show2tempo &&
+                        ((Number(mk?.secondHalf?.home ?? 0) > 1.01) ||
+                          (Number(mk?.secondHalf?.draw ?? 0) > 1.01) ||
+                          (Number(mk?.secondHalf?.away ?? 0) > 1.01));
+                      if (has2Tempo) baseTabs.push({ key: "2tempo", label: "2º Tempo" });
+                      const hasHtft = Object.values((mk?.htft ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
+                      if (hasHtft) baseTabs.push({ key: "htft", label: "HT/FT" });
+                      const hasPlacar = !!mk?.correctScore && Object.values(mk.correctScore).some((v) => (Number(v) ?? 0) > 1.01);
+                      if (hasPlacar) baseTabs.push({ key: "placar", label: "Placar Exato" });
+                      const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length;
+                      if (hasMarcadores) baseTabs.push({ key: "marcadores", label: "Marcadores" });
+                      const hasEscanteios =
+                        Object.values(mk?.corners ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
+                        (mk?.homeCorners?.over ?? 0) > 1.01 ||
+                        (mk?.awayCorners?.over ?? 0) > 1.01;
+                      if (hasEscanteios) baseTabs.push({ key: "escanteios", label: "Escanteios" });
+                      const hasCartoes = Object.values(mk?.cards ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01);
+                      if (hasCartoes) baseTabs.push({ key: "cartoes", label: "Cartões" });
+                      const hasAsiatico =
+                        (Number(mk?.drawNoBet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.asianHandicap?.home ?? 0) > 1.01) ||
+                        Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
+                      if (hasAsiatico) baseTabs.push({ key: "asiatico", label: "Asiático" });
+                      const hasBetBuilder = hasResult || hasDupla || hasGols || hasHandicap || has1Tempo || hasEspeciais;
+                      if (hasBetBuilder) {
+                        const idx = baseTabs.findIndex((t) => t.key === "resultado");
+                        baseTabs.splice(idx >= 0 ? idx : 1, 0, { key: "betbuilder", label: "Bet Builder", icon: "🧩" });
+                      }
+                      if (isLateGame) {
+                        return baseTabs.filter((t) => ["todos", "resultado", "gols", "handicap"].includes(t.key));
+                      }
+                      return baseTabs;
+                    })();
 
     const m = match.markets;
     const tennisExtra = isTennis
@@ -12853,7 +13216,14 @@ export default function Home({
     const hasTennisMarkets =
       match.sport === "tennis" && !!m?.tennisExtra?.firstSet?.home;
     const hasComputedMarkets = hasPlayableMarketOdds(m);
-    if (!matchHasPlayableOdds(match) && !hasTennisMarkets && !hasComputedMarkets) {
+    const isFootballLike =
+      (match.sport ?? "football") === "football" ||
+      (match.sport ?? "football") === "baseball" ||
+      (match.sport ?? "football") === "basketball" ||
+      (match.sport ?? "football") === "volleyball" ||
+      (match.sport ?? "football") === "hockey" ||
+      (match.sport ?? "football") === "mma";
+    if (!isFootballLike && !matchHasPlayableOdds(match) && !hasTennisMarkets && !hasComputedMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
@@ -15743,9 +16113,59 @@ export default function Home({
                 !isLateGame &&
                 modalTab === "escanteios" &&
                 m &&
-                !m.corners && (
+                !m.corners &&
+                !m.homeCorners &&
+                !m.awayCorners && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
+                  </div>
+                )}
+
+              {/* ── FUTEBOL: ESCANTEIOS POR EQUIPA ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "escanteios" || modalTab === "todos") &&
+                m &&
+                (m.homeCorners || m.awayCorners) && (
+                  <div>
+                    {m.homeCorners && (
+                      <MarketGroup title={`Escanteios — ${match.home} — ${m.homeCorners.line}`}>
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`ohc${m.homeCorners.line}`}
+                          odd={m.homeCorners.over}
+                          market="escanteios"
+                          label={`Acima de ${m.homeCorners.line}`}
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`uhc${m.homeCorners.line}`}
+                          odd={m.homeCorners.under}
+                          market="escanteios"
+                          label={`Abaixo de ${m.homeCorners.line}`}
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.awayCorners && (
+                      <MarketGroup title={`Escanteios — ${match.away} — ${m.awayCorners.line}`}>
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`oac${m.awayCorners.line}`}
+                          odd={m.awayCorners.over}
+                          market="escanteios"
+                          label={`Acima de ${m.awayCorners.line}`}
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`uac${m.awayCorners.line}`}
+                          odd={m.awayCorners.under}
+                          market="escanteios"
+                          label={`Abaixo de ${m.awayCorners.line}`}
+                        />
+                      </MarketGroup>
+                    )}
                   </div>
                 )}
 
@@ -18792,7 +19212,15 @@ export default function Home({
                 </button>
 
                 {/* Match header */}
-                <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
+                <div
+                  className={`relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3 ${
+                    expandedMatch.isLive &&
+                    (expandedMatch.sport ?? "football") === "football" &&
+                    matchViewTab === "markets"
+                      ? "bet62-hide-in-pwa"
+                      : ""
+                  }`}
+                >
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
                     <div className="flex items-center justify-between gap-3 mb-4">
@@ -18842,6 +19270,14 @@ export default function Home({
                           <Activity size={11} />
                           Stats
                         </button>
+                        {(expandedMatch.sport ?? "football") === "football" && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "yesterday" ? "markets" : "yesterday")}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "yesterday" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          >
+                            Resultados
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -18930,8 +19366,44 @@ export default function Home({
                         );
                       })()}
                     </div>
+                    {(expandedMatch.sport ?? "football") === "football" &&
+                      (expandedMatch.stadium || expandedMatch.referee) && (
+                        <div className="flex items-center justify-center gap-3 text-[10px] text-zinc-500 pb-1">
+                          {expandedMatch.stadium && (
+                            <span className="truncate">🏟️ {expandedMatch.stadium}</span>
+                          )}
+                          {expandedMatch.referee && (
+                            <span className="truncate">👤 {expandedMatch.referee}</span>
+                          )}
+                        </div>
+                      )}
                   </div>
                 </div>
+
+                {/* Mini pitch tracker — PWA only (see .bet62-hide-in-pwa /
+                    .bet62-show-in-pwa, index.css): replaces the header
+                    above directly above the Mercados odds markets. The
+                    component itself renders nothing when the match has no
+                    commentary feed — gated here too so no empty wrapper
+                    is left behind in that case. */}
+                {expandedMatch.isLive &&
+                  (expandedMatch.sport ?? "football") === "football" &&
+                  matchViewTab === "markets" &&
+                  expandedMatch._commentary &&
+                  expandedMatch._commentary.length > 0 && (
+                    <div className="bet62-show-in-pwa mb-3">
+                      <FootballPitchTracker
+                        home={expandedMatch.home}
+                        away={expandedMatch.away}
+                        homeScore={expandedMatch.homeScore}
+                        awayScore={expandedMatch.awayScore}
+                        commentary={expandedMatch._commentary}
+                        v2StatsGroups={v2StatsGroups}
+                        confrontosRecentMeetings={confrontosData?.recentMeetings}
+                        realBallPosition={expandedMatch._ballPosition}
+                      />
+                    </div>
+                  )}
 
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
@@ -18956,6 +19428,8 @@ export default function Home({
                     standingsGroups={standingsGroups}
                     standingsLoading={standingsLoading}
                     standingsLeague={standingsLeague}
+                    topScorers={topScorers}
+                    topScorersLoading={topScorersLoading}
                     onAddInsight={(market, odds) => {
                       if (!expandedMatch) return;
                       toggleBet(expandedMatch, market, odds, "insight", market);
@@ -18965,6 +19439,7 @@ export default function Home({
                     homeScore={expandedMatch.homeScore}
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
+                    commentary={expandedMatch._commentary}
                   />
                 )}
 
@@ -19036,10 +19511,13 @@ export default function Home({
                                   row.name,
                                   expandedMatch.away,
                                 );
+                                const zoneBorder = row.zone
+                                  ? (STANDING_ZONE_BORDER[row.zone] ?? "border-l-transparent")
+                                  : "border-l-transparent";
                                 return (
                                   <tr
                                     key={ri}
-                                    className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}
+                                    className={`border-b border-zinc-800/50 border-l-2 ${zoneBorder} ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}
                                   >
                                     <td className="py-2 pr-2 text-zinc-500">
                                       {row.pos}
@@ -19076,11 +19554,33 @@ export default function Home({
                             </tbody>
                           </table>
                         );
+                        const zoneLegendLabels: Record<string, string> = {
+                          promotion: "Promoção",
+                          european: "Vaga Europeia",
+                          relegationPlayoff: "Play-off Descida",
+                          relegation: "Descida",
+                        };
+                        const presentZones: Array<"promotion" | "european" | "relegationPlayoff" | "relegation"> = [];
+                        for (const row of standings ?? []) {
+                          if (row.zone && row.zone !== "safe" && !presentZones.includes(row.zone)) {
+                            presentZones.push(row.zone);
+                          }
+                        }
                         return (
                           <div>
                             <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
                               {standingsLeague}
                             </div>
+                            {presentZones.length > 0 && (
+                              <div className="flex flex-wrap gap-3 mb-3">
+                                {presentZones.map((zone) => (
+                                  <div key={zone} className="flex items-center gap-1.5 text-[9px] text-zinc-500">
+                                    <span className={`w-2 h-2 rounded-sm ${STANDING_ZONE_BORDER[zone]?.replace("border-l-", "bg-") ?? ""}`} />
+                                    {zoneLegendLabels[zone]}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {standingsGroups && standingsGroups.length > 0 ? (
                               <div className="space-y-4">
                                 {standingsGroups.map((group) => (
@@ -19105,6 +19605,97 @@ export default function Home({
                     )}
                   </div>
                 )}
+
+                {/* Results panel (football) — real GOAL API /results/yesterday
+                    feed + /results/stats trends. */}
+                {matchViewTab === "yesterday" &&
+                  (expandedMatch.sport ?? "football") === "football" && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                        ⚽ Resultados — Ontem
+                      </div>
+                      {footballResultsStats && (
+                        <div className="grid grid-cols-3 gap-1.5 mb-3">
+                          {[
+                            { label: "Ambas marcam", value: footballResultsStats.bttsPercentage },
+                            { label: "Mais de 2.5", value: footballResultsStats.over25Percentage },
+                            { label: "Mais de 3.5", value: footballResultsStats.over35Percentage },
+                            { label: "Vitória casa", value: footballResultsStats.homeWinPercentage },
+                            { label: "Empate", value: footballResultsStats.drawPercentage },
+                            { label: "Vitória fora", value: footballResultsStats.awayWinPercentage },
+                          ].map((s) => (
+                            <div
+                              key={s.label}
+                              className="bg-zinc-950/60 border border-zinc-800 rounded-lg py-2 px-1.5 text-center"
+                            >
+                              <div className="text-[13px] font-black text-white tabular-nums">
+                                {s.value}%
+                              </div>
+                              <div className="text-[8px] font-bold text-zinc-500 uppercase tracking-wide mt-0.5">
+                                {s.label}
+                              </div>
+                            </div>
+                          ))}
+                          {footballResultsStats.mostCommonScore && (
+                            <div className="col-span-3 flex items-center justify-between bg-zinc-950/60 border border-zinc-800 rounded-lg py-2 px-3">
+                              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wide">
+                                Placar mais comum
+                              </span>
+                              <span className="text-[12px] font-black text-white tabular-nums">
+                                {footballResultsStats.mostCommonScore.score} ·{" "}
+                                {footballResultsStats.mostCommonScore.percentage}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {footballResults.length === 0 ? (
+                        <div className="text-center text-zinc-500 py-6 text-sm">
+                          Sem resultados disponíveis.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-96 overflow-y-auto">
+                          {footballResults.slice(0, 40).map((r) => (
+                            <div
+                              key={r.id}
+                              className="flex items-center justify-between bg-zinc-950/60 border border-zinc-800 rounded-lg px-3 py-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[9px] font-bold text-zinc-600 truncate">
+                                  {r.league}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span
+                                    className={`text-[11px] font-bold truncate ${r.homeScore > r.awayScore ? "text-white" : "text-zinc-500"}`}
+                                  >
+                                    {r.home}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`text-[11px] font-bold truncate ${r.awayScore > r.homeScore ? "text-white" : "text-zinc-500"}`}
+                                  >
+                                    {r.away}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-center px-2 shrink-0">
+                                <span className="text-[13px] font-black text-white tabular-nums">
+                                  {r.homeScore}
+                                </span>
+                                <span className="text-[13px] font-black text-white tabular-nums">
+                                  {r.awayScore}
+                                </span>
+                              </div>
+                              <div className="text-[9px] font-semibold text-zinc-600 shrink-0 text-right">
+                                {r.time}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 {/* Legacy basketball standings block removed; generic sport standings are used above. */}
 
@@ -20552,6 +21143,11 @@ export default function Home({
                                   </div>
                                 )}
                               </div>
+                              {teamData.coach && (
+                                <div className="text-[9px] text-zinc-500 mb-1.5 truncate">
+                                  <span className="text-zinc-600">Treinador:</span> {teamData.coach}
+                                </div>
+                              )}
                               <div className="space-y-1">
                                 {starters.map((p, i) => (
                                   <div
@@ -20779,6 +21375,61 @@ export default function Home({
                           </div>
                         )}
 
+                        {/* Últimos Jogos — each team's own recent form
+                            (against whichever opponents they actually
+                            played), separate from the head-to-head above */}
+                        {((confrontosData.homeRecentMatches?.length ?? 0) > 0 ||
+                          (confrontosData.awayRecentMatches?.length ?? 0) > 0) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { team: expandedMatch.home, list: confrontosData.homeRecentMatches ?? [] },
+                              { team: expandedMatch.away, list: confrontosData.awayRecentMatches ?? [] },
+                            ].map(({ team, list }) =>
+                              list.length > 0 ? (
+                                <div
+                                  key={team}
+                                  className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4"
+                                >
+                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3 truncate">
+                                    Últimos Jogos — {team}
+                                  </div>
+                                  <div className="space-y-0">
+                                    {list.map((m, i) => (
+                                      <div
+                                        key={i}
+                                        className="flex items-center gap-2 py-1.5 border-b border-zinc-800/40 last:border-0"
+                                      >
+                                        <span
+                                          className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-[9px] font-black ${
+                                            m.result === "W"
+                                              ? "bg-green-500/20 text-green-400"
+                                              : m.result === "L"
+                                                ? "bg-red-500/20 text-red-400"
+                                                : "bg-zinc-700/40 text-zinc-400"
+                                          }`}
+                                        >
+                                          {m.result}
+                                        </span>
+                                        <span className="flex-1 text-[11px] font-semibold text-zinc-300 truncate">
+                                          {m.home ? "vs" : "@"} {m.opponent}
+                                        </span>
+                                        <span className="shrink-0 font-black text-[11px] tabular-nums text-white bg-zinc-800 px-1.5 py-0.5 rounded">
+                                          {m.score}
+                                        </span>
+                                        {m.date && (
+                                          <span className="text-[9px] text-zinc-600 shrink-0 tabular-nums hidden sm:block">
+                                            {m.date}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null,
+                            )}
+                          </div>
+                        )}
+
                         {/* Próximos Jogos — real SportMonks team schedule */}
                         {(homeUpcoming.length > 0 || awayUpcoming.length > 0) && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -20833,7 +21484,10 @@ export default function Home({
                                   </span>
                                   {ev.playerId ? (
                                     <button
-                                      onClick={() => setPlayerProfileId(ev.playerId!)}
+                                      onClick={() => {
+                                        setPlayerProfileId(ev.playerId!);
+                                        setPlayerProfileSport(expandedMatch.sport ?? "football");
+                                      }}
                                       className="flex-1 text-left text-zinc-200 font-semibold truncate hover:text-red-400 hover:underline"
                                     >
                                       {ev.player}
@@ -20851,6 +21505,16 @@ export default function Home({
                       </div>
                     )}
                   </div>
+                )}
+
+                {/* ── Previsão — probabilidades reais do modelo GOAL API ── */}
+                {matchViewTab === "markets" && (!expandedMatch.sport || expandedMatch.sport === "football") && (
+                  <PredictionCard
+                    matchId={expandedMatch.id}
+                    sport={expandedMatch.sport}
+                    home={expandedMatch.home}
+                    away={expandedMatch.away}
+                  />
                 )}
 
                 {/* ── Múltiplas Sugeridas — entre o card do jogo e as abas de mercados ── */}
@@ -22861,6 +23525,7 @@ export default function Home({
                                 });
 
                                 return (
+                                  <>
                                   <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/80 overflow-hidden">
                                     <div className={`h-0.5 w-full ${sc.bar}`} />
                                     <div className="p-3">
@@ -22928,6 +23593,12 @@ export default function Home({
                                         )}
                                     </div>
                                   </div>
+                                  <TournamentBracket
+                                    tournamentId={expandedTournamentId}
+                                    accentBar={sc.bar}
+                                    accentText={sc.text}
+                                  />
+                                  </>
                                 );
                               })()}
                           </div>
@@ -25964,9 +26635,44 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        <aside className="hidden lg:block w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)]">
+        {(() => {
+          const showDesktopPitchTracker = !!(
+            expandedMatch &&
+            expandedMatch.isLive &&
+            (expandedMatch.sport ?? "football") === "football" &&
+            matchViewTab === "markets" &&
+            expandedMatch._commentary &&
+            expandedMatch._commentary.length > 0
+          );
+          return (
+        <aside
+          className={`hidden lg:flex lg:flex-col w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] ${
+            showDesktopPitchTracker ? "overflow-y-auto" : ""
+          }`}
+        >
+          {/* Mini pitch tracker — user-requested 2026-09-11: shown above
+              the bet slip, on the Mercados tab of a live football match.
+              The component itself renders nothing when the match has no
+              commentary feed — gated here too so no empty wrapper is left
+              behind in that case. */}
+          {showDesktopPitchTracker && expandedMatch && (
+              <div className="p-3 border-b border-zinc-800/60 shrink-0">
+                <FootballPitchTracker
+                  home={expandedMatch.home}
+                  away={expandedMatch.away}
+                  homeScore={expandedMatch.homeScore}
+                  awayScore={expandedMatch.awayScore}
+                  commentary={expandedMatch._commentary}
+                  v2StatsGroups={v2StatsGroups}
+                  confrontosRecentMeetings={confrontosData?.recentMeetings}
+                  realBallPosition={expandedMatch._ballPosition}
+                />
+              </div>
+            )}
           {BetSlipContent()}
         </aside>
+          );
+        })()}
       </div>
 
       {/* ── MOBILE BET SLIP ── collapsed bar + full-screen overlay */}
@@ -26568,6 +27274,7 @@ export default function Home({
 
       <PlayerProfileModal
         playerId={playerProfileId}
+        sport={playerProfileSport}
         onClose={() => setPlayerProfileId(null)}
       />
 

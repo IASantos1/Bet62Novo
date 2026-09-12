@@ -10,6 +10,8 @@ import {
   getCompetitionCatalogDecisions,
   syncLiveCompetitionCatalog,
 } from "../lib/liveCompetitionCatalog.js";
+import { syncCanonicalMatches, type SeenMatchInput } from "../lib/canonicalMatchCatalog.js";
+import { computeFootballMarketSuspension } from "../markets/suspensionEngine.js";
 import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
@@ -18,6 +20,84 @@ import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
+import { extractProplineScore, proplineEventDateTime, dedupeProplineFixtures } from "../services/propline/common.js";
+import {
+  PROPLINE_BASKETBALL_LEAGUE_TITLES,
+  extractProplineBasketballOdds,
+  proplineFetchBasketballOddsAllLeagues,
+  proplineFetchBasketballLiveAllLeagues,
+  proplineFetchBasketballPeriodOddsAllLeagues,
+} from "../services/propline/basketball.js";
+import {
+  PROPLINE_BASEBALL_LEAGUE_TITLES,
+  extractProplineBaseballOdds,
+  proplineFetchBaseballOddsAllLeagues,
+  proplineFetchBaseballLiveAllLeagues,
+} from "../services/propline/baseball.js";
+import {
+  extractProplineHockeyOdds,
+  extractProplineHockeyPeriod1Odds,
+  proplineFetchHockeyOddsAllLeagues,
+  proplineFetchHockeyLiveAllLeagues,
+  proplineFetchHockeyPeriod1OddsAllLeagues,
+} from "../services/propline/hockey.js";
+import {
+  extractProplineVolleyballOdds,
+  proplineFetchVolleyballOdds,
+  proplineFetchVolleyballLive,
+} from "../services/propline/volleyball.js";
+import {
+  extractProplineMmaOdds,
+  proplineFetchMmaOddsAllLeagues,
+  proplineFetchMmaLiveAllLeagues,
+} from "../services/propline/mma.js";
+import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
+import {
+  extractGoalApi1x2Odds,
+  extractGoalApiOverUnder25,
+  extractGoalApiBothTeamsToScore,
+  goalApiKickoffDateTime,
+  buildGoalApiMatchStats,
+  buildGoalApiEvents,
+  buildGoalApiCommentary,
+  buildGoalApiConfrontos,
+  buildGoalApiLineups,
+  buildGoalApiTopScorers,
+  buildGoalApiTeamUpcoming,
+  buildGoalApiForm,
+  buildGoalApiRecentMatches,
+  buildGoalApiStandings,
+  buildGoalApiStandingZoneMap,
+  buildGoalApiPlayerProfile,
+  buildGoalApiResults,
+  buildGoalApiResultsStats,
+  buildGoalApiPrediction,
+} from "../services/goalapi/common.js";
+import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
+import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
+import {
+  getPrematchPulsePrice,
+  triggerPrematchPulseScoreSync,
+} from "../providers/pulsescore/shadowMatchSync.js";
+import {
+  apiTennis,
+  type ApiTennisMatch,
+  type ApiTennisStanding,
+  type ApiTennisOddsResult,
+  type ApiTennisLiveOddsResult,
+  type ApiTennisLiveOddsEntry,
+  type ApiTennisPointByPointGame,
+} from "../services/apitennis/index.js";
+import { getApiTennisWsMatch } from "../services/apitennis/websocketClient.js";
+import {
+  buildApiTennisSets,
+  parseApiTennisGameResult,
+  parseApiTennisServer,
+  extractApiTennisMoneyline,
+  extractApiTennisLiveMarkets,
+  buildApiTennisConfrontos,
+  buildApiTennisPlayerProfile,
+} from "../services/apitennis/common.js";
 
 
 const router: IRouter = Router();
@@ -99,6 +179,13 @@ type AdvancedMarkets = {
     o105: number;
     u105: number;
   };
+  // Per-team corners over/under — real PulseScore market
+  // (HOME/AWAY_CORNERS_OVER_UNDER), unlike `corners` above (combined match
+  // total) each team has its own natural range, so a single dynamic
+  // `{line, over, under}` (whichever line the book actually offers) fits
+  // better than fixed shared slots.
+  homeCorners?: { line: number; over: number; under: number };
+  awayCorners?: { line: number; over: number; under: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
   // Sport-specific extras
   _spread?: number;
@@ -323,6 +410,34 @@ type AdvancedMarkets = {
   }>;
 };
 
+function zerofillAdvancedMarkets(): AdvancedMarkets {
+  const totalGoals = {
+    over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+    over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
+    over65: 0, under65: 0,
+  };
+  const handicap = { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 };
+  const halfTime = { home: 0, draw: 0, away: 0 };
+  const firstGoal = { home: 0, noGoal: 0, away: 0 };
+  const secondHalf = { home: 0, draw: 0, away: 0 };
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals,
+    handicap,
+    halfTime,
+    firstGoal,
+    secondHalf,
+    correctScore: {},
+    htCorrectScore: {},
+    h2CorrectScore: {},
+    teamGoals: {
+      homeOver05: 0, homeUnder05: 0, homeOver15: 0, homeUnder15: 0, homeOver25: 0, homeUnder25: 0,
+      awayOver05: 0, awayUnder05: 0, awayOver15: 0, awayUnder15: 0, awayOver25: 0, awayUnder25: 0,
+    },
+  };
+}
+
 export type LiveMatchState = {
   id: string;
   home: string;
@@ -339,6 +454,11 @@ export type LiveMatchState = {
   // those two fields are no longer read for logos anywhere.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
+  // populated on the same fixture object every other football field here
+  // comes from).
+  stadium?: string;
+  referee?: string;
   league: string;
   country: string;
   sport: string;
@@ -352,7 +472,7 @@ export type LiveMatchState = {
   hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
-  events: Array<{ type: string; team: string; minute: number; player: string; playerId?: number; detail?: string }>;
+  events: Array<{ type: string; team: string; minute: number; player: string; playerId?: string; detail?: string }>;
   date?: string;
   time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
@@ -367,16 +487,100 @@ export type LiveMatchState = {
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
+  // Match statistics panel (football/GOAL API only) — possession/shots/
+  // corners/fouls, shaped for the frontend's existing generic stats-row
+  // renderer (home.tsx's V2StatsGroup type, previously fed by the deleted
+  // SportsAPI Pro V2 integration and always empty since).
+  matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
+  // Live text commentary feed (football/GOAL API only) — free-text
+  // play-by-play narration ("Long An in possession", "PVF-CAND dangerous
+  // attack"), distinct from the structured `events` array above. Sourced
+  // from GOAL API's /fixtures/:id/commentary (confirmed real 2026-09-11 via
+  // a user-captured live response). Newest-first, capped at 40 entries —
+  // see buildGoalApiCommentary. `id` lets the frontend's pitch tracker
+  // queue and replay every truly-new line across polls, not just the one
+  // that happens to be newest at fetch time.
+  _commentary?: Array<{ id: string; time: string; text: string }>;
+  // Real ball position (football only) — sports.bzzoiro.com's WebSocket
+  // `livedata` frame, confirmed real via a user-captured live connection
+  // 2026-09-11. Only ever written by providers/bzzoiro/ballMatchSync.ts's
+  // WS handler (directly into liveMatchState, independent of this file's
+  // own GOAL API poll cycle) once that fixture has been matched to a
+  // bzzoiro live event — same "written elsewhere, must be explicitly
+  // preserved through the next GOAL API rebuild" pattern as _priceSource,
+  // see buildFootballLiveFromGoalApi's object literal. x/y are 0-100,
+  // same "home defends 0, home attacks 100" orientation as
+  // FootballPitchTracker's own zoneForAction (see bzzoiro's types.ts for
+  // the caveat on this being an inferred, not confirmed, orientation).
+  // Absent entirely until a match is found; the frontend falls back to
+  // its existing commentary-derived zone guess whenever this is missing
+  // or stale.
+  _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
   scheduledTime?: string;
   // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
   scheduledDate?: string;
+  // GOAL API's own live Over/Under 2.5 + BTTS odds (football only) — kept
+  // strictly as an internal benchmark/reference, never surfaced as a
+  // published market. calculateLiveFootballMarkets (the Poisson grid also
+  // driving 1X2) is what actually prices these two markets for the bettor;
+  // this field exists only so a future reconciliation/drift-alert layer can
+  // compare BET62's price against the provider's without ever showing the
+  // provider's price directly.
+  _providerReferenceOdds?: { over25?: number; under25?: number; bttsYes?: number; bttsNo?: number };
+  // api-tennis.com's get_live_odds raw entries (tennis only) — captured as an
+  // internal benchmark only. Only one odd_name has ever been confirmed real
+  // in the provider's docs ("Set 1 to Break Serve"); none for the headline
+  // match-winner market, so nothing here is ever surfaced as a bettable
+  // price — same "capture but never publish" convention as
+  // _providerReferenceOdds above.
+  _apiTennisLiveOddsRef?: ApiTennisLiveOddsEntry[];
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
+  // Whether _baseOdds was anchored to a real provider price on first
+  // sighting, vs a fully synthetic makeOddsFromTeams fallback — frozen
+  // alongside _baseOdds itself (football/GOAL API only; unlike the
+  // per-tick `hasRealOdds` above, this never flips back and forth after
+  // the anchor is set, since the displayed odds/_baseOdds never are
+  // either). Lets a reader tell a genuine two-source odds disagreement
+  // apart from one side just never having had a real market price to
+  // begin with — see PulseScore's odds shadow-compare (shadowMatchSync.ts).
+  _baseOddsAreReal?: boolean;
+  // Debounced score-decrease guard (football/GOAL API only) — a candidate
+  // lower score seen once, held back from display until the same value
+  // repeats on the very next poll (see buildFootballLiveFromGoalApi).
+  // Cleared once the pending value is confirmed or superseded.
+  _pendingScoreHome?: number;
+  _pendingScoreAway?: number;
+  // Set once a live football fixture's odds/markets are being driven by a
+  // real PulseScore price instead of GOAL API's synthetic Poisson fallback
+  // (see shadowMatchSync.ts's runOddsComparisonPhase, the only writer of
+  // this field). Two things key off it: the drift-engine setInterval loop
+  // skips any state with this set (never overwrites a real PulseScore price
+  // with a synthetic one), and buildLivePayload's visibility filter
+  // requires it before a football/GOAL-API fixture is shown as bettable —
+  // per the user's explicit decision (2026-09-10): PulseScore is the sole
+  // live football odds source, so a fixture with no real PulseScore price
+  // yet simply doesn't appear for betting rather than showing a fabricated
+  // one. GOAL API remains the source of score/events/stats regardless.
+  _priceSource?: "pulsescore";
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
+  // BET62 Fase 0 (2026-09-10) — monotonic counter, bumped only when
+  // odds/markets actually changed value (never on every tick — see the
+  // oddsChanged/marketsChanged reference-equality check in the football
+  // drift broadcast interval below, the only place this is currently
+  // bumped). Exposed to the frontend alongside odds so a client can notice
+  // its displayed price went stale before even submitting a bet — this is
+  // a UX signal, NOT the correctness backstop: that's detectOddsDrift's
+  // job at bet acceptance (routes/bets.ts), which already compares the
+  // client-submitted price against the server's current one directly and
+  // was unaffected by this addition. Football only for now — other sports'
+  // live builders compute odds inline per tick without a separate
+  // central "did the value change" pass to hook a counter into.
+  marketVersion?: number;
   _driftPhase?: number;
   // Per-market independent update schedule: key → next allowed update time (ms)
   // Ensures each market group updates at its own cadence, never all at once
@@ -397,8 +601,13 @@ export type LiveMatchState = {
     sets?: Array<[number, number]>; // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
+    pointByPoint?: ApiTennisPointByPointGame[]; // tennis: per-game point log, from the WS push (get_fixtures/livescore also carry it, usually empty by the time REST is polled)
     currentPts?: [number, number]; // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>; // volleyball: completed set scores [[25,18],[22,25]]
+    // PropLine volleyball only: cumulative match-wide points at the moment
+    // the current set began — see buildVolleyballLiveFromPropLine's own
+    // comment for why the raw home_score/away_score can't be shown directly.
+    propLineSetBaseGames?: [number, number];
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
     periods?: Array<[number, number]>; // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
     quarters?: Array<[number, number]>; // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
@@ -533,10 +742,25 @@ export type UpcomingMatch = {
   // homeImageVersion in getTeamBadgeAsset.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
+  // same fixture object every other football field here comes from).
+  stadium?: string;
+  referee?: string;
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
+  /** PulseScore-only: when this upcoming fixture's odds/markets have been
+   *  replaced with real PulseScore upstream data. `undefined` / absent
+   *  means fixture is still showing the synthetic anchor odds (Poisson +
+   *  goalApi.getFixtureOdds 1X2/O.2.5/BTTS legacy values). Purely a
+   *  display/diagnostic flag now — per the user's 2026-09-11 decision
+   *  (routes/bets.ts), a bet is accepted on whichever price is shown,
+   *  real or synthetic; this no longer gates acceptance. */
+  _priceSource?: "pulsescore";
+  /** Traceability: the raw PulseScore event id used for this fixture's
+   *  real markets (matches getPrematchPulsePrice + canonical DB mapping). */
+  _pulseScoreEventId?: string;
 };
 
 type ProviderQualitySnapshot = {
@@ -3020,7 +3244,7 @@ function computeTennisExtras(
       a02: overrides?.xa02 ?? es02!,
       a12: overrides?.xa12 ?? es12!,
     },
-    setHandicap: { home: shhm15!, away: shaw15! },
+    setHandicap: { line: 1.5, home: shhm15!, away: shaw15! },
     totalGames: {
       line: overrides?.gamesLineRound ?? mainGamesLine.line,
       over: overrides?.oGames ?? mainGamesLine.over,
@@ -4893,6 +5117,35 @@ function makeHockeyMoneylineFromTeams(
   return { home: h!, draw: dx!, away: a! };
 }
 
+// Two-way (no draw) synthetic moneyline, used as a fallback baseline only
+// until a real bookmaker line arrives — no fight-specific stats exist to
+// weight it by. AdvancedMarkets' required generic fields (bothTeamsScore/
+// totalGoals/handicap/halfTime/firstGoal) don't apply to MMA at all —
+// zeroed, matching this codebase's "0 odds = not priced, frontend hides
+// it" convention already used for every other placeholder market.
+function makeMmaMoneylineFromTeams(home: string, away: string): { home: number; away: number } {
+  const sr = seededRng(`mma-ml:${home}:${away}`);
+  const pHome = mc(0.5 + (sr(1) - 0.5) * 0.3, 0.15, 0.85);
+  const [oddsHome, oddsAway] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+  return { home: oddsHome!, away: oddsAway! };
+}
+
+function makeMmaMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+  const ml = makeMmaMoneylineFromTeams(home, away);
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals: {
+      over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+      over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
+      over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: ml.home, noGoal: 0, away: ml.away },
+  };
+}
+
 // Two-way (no draw) synthetic moneyline for baseball's upcoming builder —
 // same seeded-margin approach makeMLBMarketsFromTeams already uses
 // internally for its run-line synthetic (marginMean/marginSd), just
@@ -5563,6 +5816,7 @@ type TennisDailyResult = {
 };
 let tennisResultsCache: TennisDailyResult[] | null = null;
 let tennisResultsFetchedAt = 0;
+const TENNIS_RESULTS_CACHE_TTL = 60 * 60 * 1000; // 1h — yesterday's results won't change
 
 // Tennis tournament list (ATP + WTA) — active tournaments today
 type TournamentRaw = {
@@ -5780,7 +6034,7 @@ async function persistFinishedMatchRecord(
   } catch {}
 }
 
-async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
+export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
   const finishedAt = Date.now();
   const htScore = state._liveExtra?.htScore;
   // Tennis/basketball/volleyball can never legitimately end 0-0 (sets or
@@ -6049,7 +6303,16 @@ export async function ensureFinishedMatchResult(
 // ────────────────────────────────────────────────────────────────────────────
 const LIVE_MARGIN = 0.06; // 6% house margin (vig)
 
-function calculateLive1x2(state: {
+/** Same Poisson grid backs 1X2, Over/Under 2.5 and BTTS — a live goal
+ * distribution is one model, not three. Previously only 1X2 was derived
+ * this way; Over/Under 2.5 and BTTS were GOAL API's raw live odds passed
+ * straight through (services/goalapi/common.ts's extractGoalApiOverUnder25/
+ * extractGoalApiBothTeamsToScore, called from buildFootballLiveFromGoalApi).
+ * That meant the bettor could see the provider's own live price on those
+ * two markets — this function is what replaces that: BET62's model derives
+ * every live football market, the provider's odds become log-only
+ * reference (see LiveMatchState._liveExtra.providerReferenceOdds). */
+function calculateLiveFootballMarkets(state: {
   minute: number;
   homeGoals: number;
   awayGoals: number;
@@ -6058,9 +6321,43 @@ function calculateLive1x2(state: {
   baseHome: number; // starting odds for this match (model/real)
   baseDraw: number;
   baseAway: number;
-}): { home: number; draw: number; away: number } {
+}): {
+  home: number;
+  draw: number;
+  away: number;
+  over05: number;
+  under05: number;
+  over15: number;
+  under15: number;
+  over25: number;
+  under25: number;
+  over35: number;
+  under35: number;
+  over45: number;
+  under45: number;
+  over55: number;
+  under55: number;
+  over65: number;
+  under65: number;
+  bttsYes: number;
+  bttsNo: number;
+  homeOver05: number;
+  homeUnder05: number;
+  homeOver15: number;
+  homeUnder15: number;
+  homeOver25: number;
+  homeUnder25: number;
+  awayOver05: number;
+  awayUnder05: number;
+  awayOver15: number;
+  awayUnder15: number;
+  awayOver25: number;
+  awayUnder25: number;
+} {
   const r = (n: number) => Math.round(n * 100) / 100;
   const vigFactor = 1 - LIVE_MARGIN;
+  const toOdd = (p: number, cap: number) =>
+    p > 0.005 ? Math.min(cap, Math.max(1.04, r((1 / p) * vigFactor))) : 0;
 
   // 1. Fair pre-match probabilities from odds (normalised)
   const invH = state.baseHome > 1.01 ? 1 / state.baseHome : 0.33;
@@ -6092,17 +6389,36 @@ function calculateLive1x2(state: {
     remainingFrac *
     Math.max(0.4, 1 - 0.12 * state.redCardsAway + 0.04 * state.redCardsHome);
 
-  // 5. Poisson convolution over remaining goals, conditioned on current score
+  // 5. Poisson convolution over remaining goals, conditioned on current score.
+  //    One grid, every market reads off the same (kH, kA) cells:
+  //    - 1X2 from the net-goal-difference sign (unchanged from before).
+  //    - Over/Under, EVERY standard line (0.5-6.5), from the final total
+  //      (current score + remaining goals) — a line already crossed by the
+  //      current score alone (e.g. Over 0.5 after any goal) naturally
+  //      converges to p≈1 here since every (kH,kA) cell satisfies it, which
+  //      is what correctly prices it down to the 1.04 floor instead of
+  //      leaving it at whatever a score-blind model guessed. Previously
+  //      only the 2.5 line was priced this way; every other line fell back
+  //      to a team-name-only model with no awareness of the actual score
+  //      (audit finding, 2026-09-10: a live Over 0.5 kept a normal-looking
+  //      price long after the outcome was already mathematically decided).
+  //    - BTTS from whether each side's final tally is ≥ 1.
   //    This guarantees P(Draw) ≥ P(losing team wins) by construction — because
   //    to draw from N goals down requires N net goals; to win requires N+1 net goals.
   const MAX_G = 8;
   const pH = poissonPmf(muH, MAX_G);
   const pA = poissonPmf(muA, MAX_G);
   const diff = state.homeGoals - state.awayGoals; // positive = home leading
+  const OU_LINES = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5] as const;
+  const TEAM_OU_LINES = [0.5, 1.5, 2.5] as const;
 
   let pHomeWin = 0,
     pDraw = 0,
-    pAwayWin = 0;
+    pAwayWin = 0,
+    pBttsYes = 0;
+  const pOverByLine = new Map<number, number>(OU_LINES.map((l) => [l, 0]));
+  const pHomeOverByLine = new Map<number, number>(TEAM_OU_LINES.map((l) => [l, 0]));
+  const pAwayOverByLine = new Map<number, number>(TEAM_OU_LINES.map((l) => [l, 0]));
   for (let kH = 0; kH <= MAX_G; kH++) {
     for (let kA = 0; kA <= MAX_G; kA++) {
       const p = pH[kH]! * pA[kA]!;
@@ -6110,6 +6426,18 @@ function calculateLive1x2(state: {
       if (net > 0) pHomeWin += p;
       else if (net === 0) pDraw += p;
       else pAwayWin += p;
+
+      const finalHome = state.homeGoals + kH;
+      const finalAway = state.awayGoals + kA;
+      const finalTotal = finalHome + finalAway;
+      for (const line of OU_LINES) {
+        if (finalTotal > line) pOverByLine.set(line, pOverByLine.get(line)! + p);
+      }
+      for (const line of TEAM_OU_LINES) {
+        if (finalHome > line) pHomeOverByLine.set(line, pHomeOverByLine.get(line)! + p);
+        if (finalAway > line) pAwayOverByLine.set(line, pAwayOverByLine.get(line)! + p);
+      }
+      if (finalHome >= 1 && finalAway >= 1) pBttsYes += p;
     }
   }
 
@@ -6118,11 +6446,30 @@ function calculateLive1x2(state: {
   pHomeWin /= total;
   pDraw /= total;
   pAwayWin /= total;
+  for (const line of OU_LINES) pOverByLine.set(line, pOverByLine.get(line)! / total);
+  for (const line of TEAM_OU_LINES) {
+    pHomeOverByLine.set(line, pHomeOverByLine.get(line)! / total);
+    pAwayOverByLine.set(line, pAwayOverByLine.get(line)! / total);
+  }
+  pBttsYes /= total;
 
   // Global hard cap: no 1X2 odd exceeds 30.00.
   // Late-game draw rule: at 80+ min with a level score, cap further at 10.00.
   const isLevelLate = state.minute >= 80 && state.homeGoals === state.awayGoals;
   const cap = isLevelLate ? 10.0 : 30.0;
+  const pOver05 = pOverByLine.get(0.5)!;
+  const pOver15 = pOverByLine.get(1.5)!;
+  const pOver25 = pOverByLine.get(2.5)!;
+  const pOver35 = pOverByLine.get(3.5)!;
+  const pOver45 = pOverByLine.get(4.5)!;
+  const pOver55 = pOverByLine.get(5.5)!;
+  const pOver65 = pOverByLine.get(6.5)!;
+  const pHomeOver05 = pHomeOverByLine.get(0.5)!;
+  const pHomeOver15 = pHomeOverByLine.get(1.5)!;
+  const pHomeOver25 = pHomeOverByLine.get(2.5)!;
+  const pAwayOver05 = pAwayOverByLine.get(0.5)!;
+  const pAwayOver15 = pAwayOverByLine.get(1.5)!;
+  const pAwayOver25 = pAwayOverByLine.get(2.5)!;
   return {
     home: Math.min(cap, Math.max(1.04, r((1 / pHomeWin) * vigFactor))),
     draw:
@@ -6130,6 +6477,34 @@ function calculateLive1x2(state: {
         ? Math.min(cap, Math.max(1.04, r((1 / pDraw) * vigFactor)))
         : 0,
     away: Math.min(cap, Math.max(1.04, r((1 / pAwayWin) * vigFactor))),
+    over05: toOdd(pOver05, 30.0),
+    under05: toOdd(1 - pOver05, 30.0),
+    over15: toOdd(pOver15, 30.0),
+    under15: toOdd(1 - pOver15, 30.0),
+    over25: toOdd(pOver25, 30.0),
+    under25: toOdd(1 - pOver25, 30.0),
+    over35: toOdd(pOver35, 30.0),
+    under35: toOdd(1 - pOver35, 30.0),
+    over45: toOdd(pOver45, 30.0),
+    under45: toOdd(1 - pOver45, 30.0),
+    over55: toOdd(pOver55, 30.0),
+    under55: toOdd(1 - pOver55, 30.0),
+    over65: toOdd(pOver65, 30.0),
+    under65: toOdd(1 - pOver65, 30.0),
+    bttsYes: toOdd(pBttsYes, 30.0),
+    bttsNo: toOdd(1 - pBttsYes, 30.0),
+    homeOver05: toOdd(pHomeOver05, 30.0),
+    homeUnder05: toOdd(1 - pHomeOver05, 30.0),
+    homeOver15: toOdd(pHomeOver15, 30.0),
+    homeUnder15: toOdd(1 - pHomeOver15, 30.0),
+    homeOver25: toOdd(pHomeOver25, 30.0),
+    homeUnder25: toOdd(1 - pHomeOver25, 30.0),
+    awayOver05: toOdd(pAwayOver05, 30.0),
+    awayUnder05: toOdd(1 - pAwayOver05, 30.0),
+    awayOver15: toOdd(pAwayOver15, 30.0),
+    awayUnder15: toOdd(1 - pAwayOver15, 30.0),
+    awayOver25: toOdd(pAwayOver25, 30.0),
+    awayUnder25: toOdd(1 - pAwayOver25, 30.0),
   };
 }
 
@@ -6194,10 +6569,13 @@ function applyTieredMarketDrift(
 
   // ── Main 1X2 odds (highest priority, 8–15s cadence for live feel) ──────────
   // For football, re-anchor to score-aware Poisson model every tick so that a
-  // team winning 5-0 always has very low odds — not the pre-match line.
-  const liveAnchor: { home: number; draw: number; away: number } =
+  // team winning 5-0 always has very low odds — not the pre-match line. The
+  // same call also derives Over/Under 2.5 and BTTS off the identical grid
+  // (see calculateLiveFootballMarkets/bothTeamsScore+totalGoals below) —
+  // reused here rather than recomputed, since it's the same simulation.
+  const liveFootballMarkets =
     state.sport === "football"
-      ? calculateLive1x2({
+      ? calculateLiveFootballMarkets({
           minute,
           homeGoals: homeScore,
           awayGoals: awayScore,
@@ -6207,7 +6585,9 @@ function applyTieredMarketDrift(
           baseDraw: baseOdds.draw,
           baseAway: baseOdds.away,
         })
-      : baseOdds;
+      : null;
+  const liveAnchor: { home: number; draw: number; away: number } =
+    liveFootballMarkets ?? baseOdds;
 
   const oddsOscH =
     Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
@@ -6297,6 +6677,15 @@ function applyTieredMarketDrift(
 
     bothTeamsScore: btsDue
       ? (() => {
+          // Football: same score/time-aware Poisson grid as the 1X2 anchor
+          // above — not the team-name-only recalcLiveBothTeamsScore other
+          // sports use below, and never the provider's own live BTTS price
+          // (buildFootballLiveFromGoalApi keeps that as reference-only, see
+          // LiveMatchState._liveExtra.providerReferenceOdds).
+          if (liveFootballMarkets) {
+            if (liveFootballMarkets.bttsYes <= 0) return state.markets.bothTeamsScore;
+            return { yes: s1(liveFootballMarkets.bttsYes), no: s1(liveFootballMarkets.bttsNo) };
+          }
           const live = recalcLiveBothTeamsScore(
             state.home,
             state.away,
@@ -6322,21 +6711,46 @@ function applyTieredMarketDrift(
             state.status,
             state.markets.totalGoals,
           );
+          // Football: every standard line (0.5-6.5) comes from the same
+          // Poisson grid as the 1X2 anchor and BTTS above, for internal
+          // consistency (a 3-0 scoreline reads the same Over 2.5 probability
+          // the 1X2 market itself is priced from) and so a line the current
+          // score has already decided (e.g. Over 0.5 after any goal) prices
+          // down to the 1.04 floor instead of a score-blind guess (audit
+          // finding, 2026-09-10 — see calculateLiveFootballMarkets's own
+          // comment). Any other sport keeps the team-name-only
+          // recalcLiveTotalGoals model, same as before.
+          const pick = (lfKey: keyof NonNullable<typeof liveFootballMarkets>, fallback: number) =>
+            liveFootballMarkets ? liveFootballMarkets[lfKey] : fallback;
+          const liveOver05 = pick("over05", live.over05);
+          const liveUnder05 = pick("under05", live.under05);
+          const liveOver15 = pick("over15", live.over15);
+          const liveUnder15 = pick("under15", live.under15);
+          const liveOver25 = pick("over25", live.over25);
+          const liveUnder25 = pick("under25", live.under25);
+          const liveOver35 = pick("over35", live.over35);
+          const liveUnder35 = pick("under35", live.under35);
+          const liveOver45 = pick("over45", live.over45);
+          const liveUnder45 = pick("under45", live.under45);
+          const liveOver55 = pick("over55", live.over55);
+          const liveUnder55 = pick("under55", live.under55);
+          const liveOver65 = pick("over65", live.over65);
+          const liveUnder65 = pick("under65", live.under65);
           return {
-            over05: live.over05 > 0 ? Math.min(5.0, s1(live.over05)) : 0,
-            under05: live.under05 > 0 ? s1(live.under05) : 0,
-            over15: live.over15 > 0 ? Math.min(49.99, s1(live.over15)) : 0,
-            under15: live.under15 > 0 ? s1(live.under15) : 0,
-            over25: live.over25 > 0 ? Math.min(49.99, s1(live.over25)) : 0,
-            under25: live.under25 > 0 ? s1(live.under25) : 0,
-            over35: live.over35 > 0 ? Math.min(49.99, s1(live.over35)) : 0,
-            under35: live.under35 > 0 ? s1(live.under35) : 0,
-            over45: live.over45 > 0 ? Math.min(49.99, s1(live.over45)) : 0,
-            under45: live.under45 > 0 ? s1(live.under45) : 0,
-            over55: live.over55 > 0 ? Math.min(49.99, s1(live.over55)) : 0,
-            under55: live.under55 > 0 ? s1(live.under55) : 0,
-            over65: live.over65 > 0 ? Math.min(49.99, s1(live.over65)) : 0,
-            under65: live.under65 > 0 ? s1(live.under65) : 0,
+            over05: liveOver05 > 0 ? Math.min(5.0, s1(liveOver05)) : 0,
+            under05: liveUnder05 > 0 ? s1(liveUnder05) : 0,
+            over15: liveOver15 > 0 ? Math.min(49.99, s1(liveOver15)) : 0,
+            under15: liveUnder15 > 0 ? s1(liveUnder15) : 0,
+            over25: liveOver25 > 0 ? Math.min(49.99, s1(liveOver25)) : 0,
+            under25: liveUnder25 > 0 ? s1(liveUnder25) : 0,
+            over35: liveOver35 > 0 ? Math.min(49.99, s1(liveOver35)) : 0,
+            under35: liveUnder35 > 0 ? s1(liveUnder35) : 0,
+            over45: liveOver45 > 0 ? Math.min(49.99, s1(liveOver45)) : 0,
+            under45: liveUnder45 > 0 ? s1(liveUnder45) : 0,
+            over55: liveOver55 > 0 ? Math.min(49.99, s1(liveOver55)) : 0,
+            under55: liveUnder55 > 0 ? s1(liveUnder55) : 0,
+            over65: liveOver65 > 0 ? Math.min(49.99, s1(liveOver65)) : 0,
+            under65: liveUnder65 > 0 ? s1(liveUnder65) : 0,
           };
         })()
       : state.markets.totalGoals,
@@ -6353,19 +6767,36 @@ function applyTieredMarketDrift(
               state.status,
               state.markets.teamGoals,
             );
+            // Football: same Poisson grid as totalGoals/1X2/BTTS above —
+            // see calculateLiveFootballMarkets's comment. Other sports keep
+            // the team-name-only recalcLiveTeamGoals model.
+            const pickTg = (lfKey: keyof NonNullable<typeof liveFootballMarkets>, fallback: number) =>
+              liveFootballMarkets ? liveFootballMarkets[lfKey] : fallback;
+            const hO05 = pickTg("homeOver05", live.homeOver05);
+            const hU05 = pickTg("homeUnder05", live.homeUnder05);
+            const hO15 = pickTg("homeOver15", live.homeOver15);
+            const hU15 = pickTg("homeUnder15", live.homeUnder15);
+            const hO25 = pickTg("homeOver25", live.homeOver25);
+            const hU25 = pickTg("homeUnder25", live.homeUnder25);
+            const aO05 = pickTg("awayOver05", live.awayOver05);
+            const aU05 = pickTg("awayUnder05", live.awayUnder05);
+            const aO15 = pickTg("awayOver15", live.awayOver15);
+            const aU15 = pickTg("awayUnder15", live.awayUnder15);
+            const aO25 = pickTg("awayOver25", live.awayOver25);
+            const aU25 = pickTg("awayUnder25", live.awayUnder25);
             return {
-              homeOver05: live.homeOver05 > 0 ? s1(live.homeOver05) : 0,
-              homeUnder05: live.homeUnder05 > 0 ? s1(live.homeUnder05) : 0,
-              homeOver15: live.homeOver15 > 0 ? s1(live.homeOver15) : 0,
-              homeUnder15: live.homeUnder15 > 0 ? s1(live.homeUnder15) : 0,
-              homeOver25: live.homeOver25 > 0 ? s1(live.homeOver25) : 0,
-              homeUnder25: live.homeUnder25 > 0 ? s1(live.homeUnder25) : 0,
-              awayOver05: live.awayOver05 > 0 ? s1(live.awayOver05) : 0,
-              awayUnder05: live.awayUnder05 > 0 ? s1(live.awayUnder05) : 0,
-              awayOver15: live.awayOver15 > 0 ? s1(live.awayOver15) : 0,
-              awayUnder15: live.awayUnder15 > 0 ? s1(live.awayUnder15) : 0,
-              awayOver25: live.awayOver25 > 0 ? s1(live.awayOver25) : 0,
-              awayUnder25: live.awayUnder25 > 0 ? s1(live.awayUnder25) : 0,
+              homeOver05: hO05 > 0 ? s1(hO05) : 0,
+              homeUnder05: hU05 > 0 ? s1(hU05) : 0,
+              homeOver15: hO15 > 0 ? s1(hO15) : 0,
+              homeUnder15: hU15 > 0 ? s1(hU15) : 0,
+              homeOver25: hO25 > 0 ? s1(hO25) : 0,
+              homeUnder25: hU25 > 0 ? s1(hU25) : 0,
+              awayOver05: aO05 > 0 ? s1(aO05) : 0,
+              awayUnder05: aU05 > 0 ? s1(aU05) : 0,
+              awayOver15: aO15 > 0 ? s1(aO15) : 0,
+              awayUnder15: aU15 > 0 ? s1(aU15) : 0,
+              awayOver25: aO25 > 0 ? s1(aO25) : 0,
+              awayUnder25: aU25 > 0 ? s1(aU25) : 0,
             };
           })()
         : state.markets.teamGoals,
@@ -7238,7 +7669,11 @@ function canonicalTennisSetScoreOrder(
 
 // ─── League Filters ────────────────────────────────────────────────────────────
 
-/** Returns true for youth leagues (U15–U21, U23) or blocked tournaments that should be hidden. */
+/** Returns true for youth leagues (U15–U21, U23) or blocked tournaments that
+ * should be hidden. Defined since an earlier provider era but never
+ * actually called from either GOAL API football builder below (audit
+ * finding, 2026-09-10, user report: youth/women's fixtures still showing
+ * up pré-jogo and ao vivo) — now wired into both. */
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
   if (/\bu(1[5-9]|2[013])\b/.test(n)) return true;
@@ -7254,9 +7689,12 @@ function isBlockedLeague(name: string): boolean {
   return false;
 }
 
-/** Returns true for women's football leagues (kept but flagged for frontend). */
+/** Returns true for women's football leagues — blocked outright per user
+ * request (2026-09-10), same as isBlockedLeague's youth leagues. Was
+ * previously "kept but flagged for frontend" (isWomens tag on
+ * UpcomingMatch); now filtered out at the source instead. */
 function isWomensLeague(name: string): boolean {
-  return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(
+  return /women|feminine|féminin|feminino|femminile|frauen|femenin|damall|nwsl|wsl/i.test(
     name,
   );
 }
@@ -7349,13 +7787,1649 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
 
 // ─── Match builders ────────────────────────────────────────────────────────────
 
-// buildUpcomingMatches() used to delegate to whichever real provider served
-// football's upcoming list. All sports-data providers were removed by
-// explicit user decision (2026-09-08) — kept as a thin named wrapper
-// returning [] so predictions.ts's dynamic import("./matches.js") (see its
-// by-matchId upcoming lookup) doesn't need to change.
+// buildUpcomingMatches() delegates to whichever real provider serves
+// football's upcoming list — GOAL API as of 2026-09-09 (tennis still on its
+// own separate, not-yet-chosen provider; PropLine stays scoped to
+// basketball/hockey/volleyball/mma). Kept as a thin named wrapper so
+// predictions.ts's dynamic import("./matches.js") (see its by-matchId
+// upcoming lookup) doesn't need to change.
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return [];
+  return buildFootballUpcomingFromGoalApi();
+}
+
+/** Football prematch from GOAL API. Real 1X2 odds via extractGoalApi1x2Odds
+ * wherever a bookmaker has priced the fixture — per the provider's own
+ * docs, pre-match odds only exist inside a ~72h pre-kickoff sync window
+ * (refreshed 8x/day), so most fixtures further out will have none yet and
+ * fall back to the synthetic Poisson-model baseline (hasRealOdds:false) —
+ * same "real data patches synthetic" convention every provider in this
+ * file follows. */
+async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.GOAL_API_KEY) return [];
+  const today = new Date();
+  const dates = Array.from({ length: 8 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+  const perDay = await Promise.all(
+    dates.map((date) => goalApi.getFixturesByDate(date).catch(() => [] as GoalApiFixture[])),
+  );
+  logger.info(
+    { counts: perDay.map((f, i) => ({ date: dates[i], fixtures: f.length })) },
+    "[goal-api] football upcoming raw fixture counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  const canonicalInputs: SeenMatchInput[] = [];
+  const prematchRefs: {
+    providerMatchId: string;
+    home: string;
+    away: string;
+    leagueName: string;
+    kickoffUtc: Date | null;
+  }[] = [];
+  for (const fixtures of perDay) {
+    for (const fx of fixtures) {
+      if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+      if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
+      const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+      const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const kickoffUtcDate = fx.kickoffUtc ? new Date(fx.kickoffUtc) : null;
+      canonicalInputs.push({
+        sport: "football",
+        provider: "goalapi",
+        providerMatchId: fx.id,
+        home,
+        away,
+        leagueName: fx.leagueName ?? null,
+        kickoffUtc: kickoffUtcDate,
+        status: "scheduled",
+      });
+      prematchRefs.push({
+        providerMatchId: fx.id,
+        home,
+        away,
+        leagueName: fx.leagueName ?? "",
+        kickoffUtc: kickoffUtcDate,
+      });
+    }
+  }
+  void triggerPrematchPulseScoreSync(prematchRefs);
+
+  for (const fixtures of perDay) {
+    for (const fx of fixtures) {
+      if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+      if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
+      const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+      const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (!seen.has(key)) continue;
+      seen.delete(key);
+
+      const prematchPrice = getPrematchPulsePrice(fx.id);
+      let resultOdds: { home: number; draw: number; away: number } = { home: 0, draw: 0, away: 0 };
+      let finalMarkets: AdvancedMarkets | null = null;
+      let hasRealOdds = false;
+      let priceSource: "pulsescore" | undefined;
+      let pulseScoreEventId: string | undefined;
+
+      if (prematchPrice && prematchPrice.odds) {
+        resultOdds = prematchPrice.odds;
+        finalMarkets = prematchPrice.markets;
+        hasRealOdds = true;
+        priceSource = "pulsescore";
+        pulseScoreEventId = prematchPrice.pulseScoreEventId;
+      }
+      const { date, time } = goalApiKickoffDateTime(fx);
+
+      results.push({
+        id: `goalapi-football-${fx.id}`,
+        home,
+        away,
+        league: fx.leagueName ?? "Futebol",
+        country: "Internacional",
+        time,
+        date,
+        sport: "football",
+        hasRealOdds,
+        odds: resultOdds,
+        markets: finalMarkets ?? zerofillAdvancedMarkets(),
+        isPriorityLeague: true,
+        homeLogoUrl: fx.homeTeam?.badge,
+        awayLogoUrl: fx.awayTeam?.badge,
+        leagueId: fx.leagueId,
+        homeTeamId: fx.homeTeam?.id,
+        awayTeamId: fx.awayTeam?.id,
+        stadium: fx.matchStadium ?? undefined,
+        referee: fx.matchReferee ?? undefined,
+        _priceSource: priceSource,
+        _pulseScoreEventId: pulseScoreEventId,
+      });
+    }
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  syncCanonicalMatches(canonicalInputs);
+  return results;
+}
+
+const GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+// No confirmed elapsed-minute field exists on /fixtures/live yet (never
+// guessed a field name — same policy as everywhere else in this file), but
+// the live Poisson model (calculateLiveFootballMarkets) needs SOME minute
+// to scale remaining time, and kickoffUtc is real and already trusted
+// elsewhere. Estimated, not authoritative — swap for a real field the
+// moment a pasted response reveals one.
+const GOAL_API_ESTIMATED_HALFTIME_BREAK_MINUTES = 15;
+
+function estimateGoalApiLiveMinute(fx: GoalApiFixture): number {
+  if (fx.matchStatus === "HALF_TIME") return 45;
+  const kickoffMs = fx.kickoffUtc ? Date.parse(fx.kickoffUtc) : NaN;
+  if (!Number.isFinite(kickoffMs)) return 0;
+  const elapsedMin = (Date.now() - kickoffMs) / 60_000;
+  if (elapsedMin <= 45) return Math.max(0, Math.floor(elapsedMin));
+  // Past the 45' mark in wall-clock time: assume halftime already happened
+  // and discount its (estimated) length before resuming the clock.
+  const secondHalfMinute = elapsedMin - GOAL_API_ESTIMATED_HALFTIME_BREAK_MINUTES;
+  return Math.min(90, Math.max(45, Math.floor(secondHalfMinute)));
+}
+
+/** Football live from GOAL API — market suspension and odds come from a separate
+ * call since the provider's own docs confirm they refresh only every ~2
+ * minutes regardless of channel — see GoalApiClient.getFixtureLiveOdds's
+ * own comment.
+ *
+ * Market suspension covers all of FOOTBALL_SUSP_KEYS (26 markets), tiered
+ * by risk exactly like the old SportMonks integration did
+ * (footballSuspensionDelayMs from lib/config.ts — never reinvented here):
+ * a goal uses the "goal" tier; a red card — detected via
+ * countGoalApiRedCards against /fixtures/:id/events, since a red card
+ * doesn't move the score the way a goal does — uses the higher "var" tier,
+ * same choice the deleted SportMonks/API-Football cross-reference made for
+ * the same reason (a red card swings the match materially more than a
+ * routine goal). */
+// Diagnostic for the PulseScore odds shadow-compare finding (2026-09-10):
+// every fixture sampled so far reported bet62OddsAreReal:false — i.e.
+// getFixtureLiveOdds never once returned a usable 1X2 price. The catch
+// block below silently swallowed every failure with zero logging, so
+// there was no way to tell "the call is failing" from "no bookmaker has
+// priced this match" without this. Throttled per fixture (the TTL=120s
+// cache only re-fires the real network call on failure, so unthrottled
+// logging here would fire every ~1-2s poll tick while a fixture stays
+// live) — this is diagnostic-only, never used to decide anything.
+const liveOddsDiagnosticLastLoggedAt = new Map<string, number>();
+const LIVE_ODDS_DIAGNOSTIC_THROTTLE_MS = 5 * 60_000;
+function logLiveOddsDiagnosticOnce(fixtureId: string, fields: Record<string, unknown>, msg: string): void {
+  const last = liveOddsDiagnosticLastLoggedAt.get(fixtureId) ?? 0;
+  const now = Date.now();
+  if (now - last < LIVE_ODDS_DIAGNOSTIC_THROTTLE_MS) return;
+  liveOddsDiagnosticLastLoggedAt.set(fixtureId, now);
+  logger.warn({ fixtureId, ...fields }, msg);
+}
+
+async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
+  if (!CONFIG.GOAL_API_KEY) return [];
+  const fixtures = await goalApi.getLiveFixtures().catch(() => [] as GoalApiFixture[]);
+  logger.info({ count: fixtures.length }, "[goal-api] football live raw fixture count");
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+  const canonicalInputs: SeenMatchInput[] = [];
+
+  for (const fx of fixtures) {
+    if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
+    const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+    const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+    if (!home || !away) continue;
+    const rawHomeScore = Number(fx.homeTeamScore);
+    const rawAwayScore = Number(fx.awayTeamScore);
+    if (!Number.isFinite(rawHomeScore) || !Number.isFinite(rawAwayScore)) continue;
+    canonicalInputs.push({
+      sport: "football",
+      provider: "goalapi",
+      providerMatchId: fx.id,
+      home,
+      away,
+      leagueName: fx.leagueName ?? null,
+      kickoffUtc: fx.kickoffUtc ? new Date(fx.kickoffUtc) : null,
+      status: "live",
+    });
+
+    const id = `goalapi-football-${fx.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+    // Debounced score-decrease guard (user-reported 2026-09-11, same
+    // provider-poll-glitch pattern as the minute/priceSource bugs fixed
+    // earlier this session): GOAL API occasionally returns a fixture's
+    // score one goal lower than what it already confirmed, then corrects
+    // itself on the very next poll — screenshots showed 2-1 dropping to
+    // 1-1 for exactly one cycle while the minute clock kept advancing,
+    // then recovering back to 2-1. A hard "never decreases" floor would
+    // also hide a genuine VAR-overturned goal forever, so instead this
+    // requires the SAME lower total to be seen on two consecutive polls
+    // before accepting it — a real overturn still lands within one extra
+    // ~10s cycle, but a one-off glitch never gets shown at all.
+    const existingTotal = (existing?.homeScore ?? 0) + (existing?.awayScore ?? 0);
+    const rawTotal = rawHomeScore + rawAwayScore;
+    let homeScore = rawHomeScore;
+    let awayScore = rawAwayScore;
+    let pendingScoreHome: number | undefined;
+    let pendingScoreAway: number | undefined;
+    if (rawTotal < existingTotal) {
+      const confirmed =
+        existing?._pendingScoreHome === rawHomeScore && existing?._pendingScoreAway === rawAwayScore;
+      if (!confirmed) {
+        homeScore = existing!.homeScore;
+        awayScore = existing!.awayScore;
+        pendingScoreHome = rawHomeScore;
+        pendingScoreAway = rawAwayScore;
+      }
+    }
+
+    let redCardsHome = existing?.redCardsHome ?? 0;
+    let redCardsAway = existing?.redCardsAway ?? 0;
+    let matchEvents: LiveMatchState["events"] = existing?.events ?? [];
+    try {
+      const events = await goalApi.getFixtureEvents(fx.id);
+      redCardsHome = countGoalApiRedCards(events, "home");
+      redCardsAway = countGoalApiRedCards(events, "away");
+      const substitutions = await goalApi.getFixtureSubstitutions(fx.id).catch(() => []);
+      matchEvents = buildGoalApiEvents(events, substitutions);
+    } catch {
+      /* keep previous counts/events if the events call fails this tick */
+    }
+
+    let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
+    try {
+      const stats = await goalApi.getFixtureStatistics(fx.id);
+      const built = buildGoalApiMatchStats(stats);
+      if (built.length > 0) matchStats = built;
+    } catch {
+      /* keep previous stats if unavailable this tick */
+    }
+
+    let commentary: LiveMatchState["_commentary"] = existing?._commentary;
+    try {
+      const commentaryRows = await goalApi.getFixtureCommentary(fx.id);
+      const builtCommentary = buildGoalApiCommentary(commentaryRows);
+      if (builtCommentary.length > 0) commentary = builtCommentary;
+    } catch {
+      /* keep previous commentary if unavailable this tick */
+    }
+    // Real minute straight from GOAL API's own commentary clock ("MM:SS",
+    // formatted to "93'" by buildGoalApiCommentary — see its header),
+    // confirmed real 2026-09-11. Far more accurate than
+    // estimateGoalApiLiveMinute's wall-clock-since-kickoffUtc guess, which
+    // has no idea about stoppage time and drifts behind reality whenever
+    // the real kickoff was delayed from the scheduled one (confirmed real
+    // via the mini pitch's commentary-derived badge showing the correct
+    // minute while the main scoreboard's estimated one lagged behind).
+    // `commentary` is newest-first (see buildGoalApiCommentary), so index 0
+    // is the latest line.
+    const realMinuteFromCommentary = (() => {
+      const latest = commentary?.[0]?.time;
+      if (!latest) return undefined;
+      const n = Number.parseInt(latest, 10);
+      return Number.isFinite(n) ? n : undefined;
+    })();
+
+    const newRedCard =
+      !!existing && (redCardsHome > (existing.redCardsHome ?? 0) || redCardsAway > (existing.redCardsAway ?? 0));
+    const goalScored = !!existing && (homeScore !== existing.homeScore || awayScore !== existing.awayScore);
+
+    // Odds Engine validation: a big swing right after a goal/red card is
+    // expected (skipVariationCheck below) and always accepted; the same
+    // swing with NO supporting event usually means bad/stale upstream
+    // data, so the previous real value is kept instead for this tick —
+    // never a fabricated synthetic fallback just because one poll looked
+    // suspicious.
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    let providerReferenceOdds: LiveMatchState["_providerReferenceOdds"] = existing?._providerReferenceOdds;
+    try {
+      const oddsList = await goalApi.getFixtureLiveOdds(fx.id);
+      const candidate = extractGoalApi1x2Odds(oddsList);
+      if (candidate) {
+        const previousReal = existing?.hasRealOdds ? existing.odds : null;
+        if (shouldAcceptOddsUpdate(previousReal, candidate, CONFIG.GOAL_API_MAX_ODDS_DELTA_PCT, goalScored || newRedCard)) {
+          resultOdds = candidate;
+        } else {
+          logger.warn(
+            { fixtureId: fx.id, previous: previousReal, candidate },
+            "[goal-api] odds update rejected — swing exceeds variation limit with no supporting event",
+          );
+          resultOdds = previousReal;
+        }
+      } else {
+        // Real values, not just field names — the previous round confirmed
+        // the response shape is completely different from what
+        // extractGoalApi1x2Odds expects (flat odd1/oddX/odd2 per bookmaker):
+        // it's hundreds of individual {oddName, type, value, handicap, ...}
+        // records instead. Need real enum values for oddName/type to write
+        // a correct extractor, not just the field names already captured.
+        const distinctTypes = oddsList
+          ? [...new Set(oddsList.map((e) => (e as Record<string, unknown>).type))].slice(0, 30)
+          : null;
+        logLiveOddsDiagnosticOnce(
+          fx.id,
+          {
+            oddsListLength: oddsList?.length ?? 0,
+            distinctTypes,
+            sampleEntries: oddsList?.slice(0, 6) ?? null,
+          },
+          "[goal-api] live-odds call succeeded but no bookmaker entry had a usable 1X2 price",
+        );
+      }
+      // Unlike the prematch builder, these two markets are NOT patched onto
+      // baseMarkets here — live, the bettor must only ever see BET62's own
+      // price (calculateLiveFootballMarkets, applied in applyTieredMarketDrift).
+      // The provider's live odds are captured below purely as an internal
+      // reference/benchmark for a future drift-alert comparison.
+      const overUnder = extractGoalApiOverUnder25(oddsList);
+      const bts = extractGoalApiBothTeamsToScore(oddsList);
+      if (overUnder || bts) {
+        providerReferenceOdds = {
+          ...(overUnder ? { over25: overUnder.over, under25: overUnder.under } : {}),
+          ...(bts ? { bttsYes: bts.yes, bttsNo: bts.no } : {}),
+        };
+      }
+    } catch (err) {
+      logLiveOddsDiagnosticOnce(
+        fx.id,
+        { err: err instanceof Error ? { message: err.message, name: err.name } : String(err) },
+        "[goal-api] live-odds call failed — falling back to synthetic",
+      );
+    }
+
+    const oddsUpdatedAt = resultOdds ? Date.now() : existing?._oddsUpdatedAt;
+    const { marketSuspension, suspensionReason } = computeFootballMarketSuspension({
+      now: Date.now(),
+      existingSuspension: existing?.marketSuspension,
+      existingReason: existing?._suspensionReason,
+      newRedCard,
+      goalScored,
+      oddsAgeMs: existing?._oddsUpdatedAt ? Date.now() - existing._oddsUpdatedAt : undefined,
+    });
+
+    // A real PulseScore price, once set, is never displaced by the
+    // synthetic anchor/drift below (see the drift-loop guard on
+    // `_priceSource === "pulsescore"`) — this only seeds/preserves the
+    // synthetic display value for fixtures PulseScore hasn't priced yet,
+    // so the match still shows a moving, browsable price instead of a
+    // blank "--" while bets.ts continues to refuse real wagers on it
+    // (gate: `_priceSource !== "pulsescore"`).
+    const wasPulseBefore = existing?._priceSource === "pulsescore";
+    const displayOdds = wasPulseBefore ? existing.odds : (existing?.odds ?? baseOdds);
+    const displayMarkets = wasPulseBefore ? existing.markets : (existing?.markets ?? baseMarkets);
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: fx.leagueName ?? "Futebol",
+      country: "Internacional",
+      sport: "football",
+      homeScore: homeScore as number,
+      awayScore: awayScore as number,
+      _pendingScoreHome: pendingScoreHome,
+      _pendingScoreAway: pendingScoreAway,
+      // Monotonic floor: estimateGoalApiLiveMinute derives the minute from
+      // fx.kickoffUtc/matchStatus fresh on every poll, with no memory of
+      // what was shown last cycle. Real matches confirmed this session
+      // (user-reported, second-half clock flickering 40' -> 3' -> 40'):
+      // some GOAL API polls carry a kickoffUtc that reads as the CURRENT
+      // period's restart time rather than the overall match start,
+      // producing a tiny elapsed-minute estimate that one poll later
+      // reverts to the correct, much larger value. The match clock only
+      // ever counts up, so never display a smaller minute than last shown.
+      // realMinuteFromCommentary (GOAL API's own match clock) wins whenever
+      // present — it's authoritative, not a guess — the estimate is only
+      // ever a fallback for a fixture with no commentary yet.
+      minute: Math.max(
+        realMinuteFromCommentary ?? 0,
+        estimateGoalApiLiveMinute(fx),
+        existing?.minute ?? 0,
+      ),
+      status: fx.matchStatus,
+      // NOT a pure display flag — home.tsx's OddsButton uses this as the
+      // sole gate on whether the button is clickable (calls toggleBet) as
+      // well as what it renders, so it must stay tied to real bettability
+      // (`_priceSource === "pulsescore"`), never to "is there any number
+      // to show at all". A synthetic anchor is a valid number but not a
+      // real price — flagging it hasRealOdds:true here made the button
+      // fully clickable, letting a bettor add a fabricated price to their
+      // slip that the server then silently rejects at submission (caught
+      // in review before shipping). The synthetic value is still shown to
+      // the user — see OddsButton's disabled branch, which now renders
+      // `odd` instead of a bare "--" whenever a real number exists, without
+      // making the button selectable.
+      hasRealOdds: wasPulseBefore,
+      odds: displayOdds,
+      markets: displayMarkets,
+      _baseOdds: wasPulseBefore ? existing?._baseOdds : (existing?._baseOdds ?? baseOdds),
+      _baseOddsAreReal: wasPulseBefore,
+      _baseMarkets: wasPulseBefore ? existing?._baseMarkets : (existing?._baseMarkets ?? baseMarkets),
+      // Bug fixed 2026-09-11: this object literal previously omitted
+      // _priceSource entirely, so every GOAL API poll (much more frequent
+      // than shadowMatchSync's ~15s PulseScore cycle) silently wiped it
+      // back to undefined right after runOddsComparisonPhase set it — the
+      // very next rebuild then read `existing._priceSource` as unset,
+      // flipping hasRealOdds back to false within seconds of becoming
+      // true. Must mirror hasRealOdds's own wasPulseBefore-gated
+      // preservation exactly.
+      _priceSource: wasPulseBefore ? existing?._priceSource : undefined,
+      events: matchEvents,
+      matchStats,
+      _commentary: commentary,
+      _ballPosition: existing?._ballPosition,
+      redCardsHome,
+      redCardsAway,
+      _providerReferenceOdds: providerReferenceOdds,
+      _oddsUpdatedAt: oddsUpdatedAt,
+      _lastSeenAt: Date.now(),
+      marketSuspension,
+      _suspensionReason: suspensionReason,
+      homeLogoUrl: fx.homeTeam?.badge ?? existing?.homeLogoUrl,
+      awayLogoUrl: fx.awayTeam?.badge ?? existing?.awayLogoUrl,
+      leagueId: fx.leagueId ?? existing?.leagueId,
+      homeTeamId: fx.homeTeam?.id ?? existing?.homeTeamId,
+      awayTeamId: fx.awayTeam?.id ?? existing?.awayTeamId,
+      stadium: fx.matchStadium ?? existing?.stadium,
+      referee: fx.matchReferee ?? existing?.referee,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("goalapi-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[goal-api] football finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  syncCanonicalMatches(canonicalInputs);
+  return results;
+}
+
+/** Dispatch target for the GOAL API webhook receiver (app.ts's
+ * /api/webhooks/goal-api route). The webhook payload shapes for each event
+ * aren't fully documented beyond the event names, so rather than trust and
+ * parse per-event fields that might not match reality, this treats every
+ * event as a "refresh this data now" signal and re-derives state from the
+ * same REST calls buildFootballLiveFromGoalApi already uses — one source
+ * of truth for suspension/red-card logic regardless of trigger.
+ * match.finished is the one case worth short-circuiting: waiting for the
+ * fixture to merely vanish from /fixtures/live and ride out
+ * GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS defeats the entire point of a
+ * push-based finished signal, so it finalizes immediately instead. */
+export async function applyGoalApiWebhookEvent(event: {
+  event: string;
+  data?: { fixtureId?: string };
+}): Promise<void> {
+  const fixtureId = event.data?.fixtureId;
+  if (!fixtureId) return;
+  const id = `goalapi-football-${fixtureId}`;
+
+  if (event.event === "match.finished") {
+    let state = liveMatchState.get(id);
+    if (!state) {
+      try {
+        const fx = await goalApi.getFixtureById(fixtureId);
+        const home = stripGenderTeamSuffix(fx.homeTeam?.name);
+        const away = stripGenderTeamSuffix(fx.awayTeam?.name);
+        if (!home || !away) return;
+        const homeScore = Number(fx.homeTeamScore);
+        const awayScore = Number(fx.awayTeamScore);
+        state = {
+          id,
+          home,
+          away,
+          league: fx.leagueName ?? "Futebol",
+          country: "Internacional",
+          sport: "football",
+          homeScore: Number.isFinite(homeScore) ? homeScore : 0,
+          awayScore: Number.isFinite(awayScore) ? awayScore : 0,
+          minute: 90,
+          status: fx.matchStatus,
+          hasRealOdds: false,
+          odds: { home: 0, draw: 0, away: 0 },
+          markets: zerofillAdvancedMarkets(),
+          events: [],
+          _lastSeenAt: Date.now(),
+        };
+      } catch (err) {
+        logger.error({ err, fixtureId }, "[goal-api] webhook match.finished: fixture fetch failed");
+        return;
+      }
+    }
+    try {
+      await finalizeStaleLiveMatch(state);
+    } catch (err) {
+      logger.error({ err, id }, "[goal-api] webhook-triggered finalizeStaleLiveMatch failed");
+    }
+    liveMatchState.delete(id);
+    return;
+  }
+
+  // match.status_changed placeholder for VAR: no real payload pasted this
+  // session has shown a dedicated VAR event or matchStatus (confirmed real
+  // values so far: SCHEDULED, FINISHED, AFTER_ET, AFTER_PEN, LIVE,
+  // HALF_TIME) — status_changed is the closest real signal available, and
+  // any status transition mid-match plausibly follows a review (penalty
+  // given/overturned, goal disallowed), so it's suspended at the same
+  // highest tier as a red card until confirmed otherwise. Conservative by
+  // design: this can suspend on status changes that aren't VAR at all
+  // (e.g. HT), which only costs a brief, safe pause — never a wrong price.
+  if (event.event === "match.status_changed") {
+    const existing = liveMatchState.get(id);
+    if (existing) {
+      const now = Date.now();
+      liveMatchState.set(id, {
+        ...existing,
+        marketSuspension: Object.fromEntries(FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)])),
+        // Must contain "VAR" — home.tsx's SuspensionBanner matches this
+        // string against `.includes("VAR")` to show "🎥 REVISÃO VAR"
+        // instead of the generic "SUSPENSO" fallback (bug found via user
+        // screenshots 2026-09-11: the old text never matched).
+        _suspensionReason: "REVISÃO VAR EM CURSO",
+      });
+    }
+  }
+
+  // match.started / goal.scored / score.changed / match.status_changed —
+  // refresh the whole live feed now instead of waiting for the next poll
+  // tick. Refreshes every live fixture, not just this one, but GOAL API's
+  // documented rate limits are generous relative to how many fixtures are
+  // ever live at once, and this guarantees the webhook and poll paths can
+  // never disagree about how a score/status change gets applied.
+  try {
+    await buildFootballLiveFromGoalApi();
+  } catch (err) {
+    logger.error({ err, fixtureId, event: event.event }, "[goal-api] webhook-triggered live refresh failed");
+  }
+}
+
+// ── Tennis (api-tennis.com) — first real tennis provider this platform has
+// ever had; every prior attempt (PulseScore, SportMonks) was removed. ──────
+
+const API_TENNIS_ID_PREFIX = "apitennis-tennis-";
+const API_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
+
+// event_status values that mean the match is actually over — confirmed real
+// terminal values ("Finished") plus the early-termination ones the frontend
+// already special-cases (retired/walkover). api-tennis.com's get_livescore()
+// can keep returning a match under this status for a while after it ends
+// (reported 2026-09-09: a finished doubles match still showing "ao vivo"
+// with pre-match-looking odds) — the disappearance-only GC below never even
+// starts its grace-period countdown for a match that's still present in the
+// feed, so a status-based check is required in addition to it, not instead.
+const API_TENNIS_TERMINAL_STATUSES = new Set(["finished", "retired", "walkover", "walk over", "w/o", "wo", "cancelled"]);
+
+/** Deterministic pseudo-random baseline win probability for a pair of
+ * players with no real odds yet — same seededRng/hashStr utilities every
+ * other synthetic generator in this file already uses (e.g.
+ * makeMmaMoneylineFromTeams), kept within a competitive 35-65% band rather
+ * than ever showing a coin-flip 50/50 for every unpriced match. */
+function apiTennisSyntheticP(home: string, away: string): number {
+  const rng = seededRng(`apitennis:${home}:${away}`);
+  return mc(0.5 + (rng(1) - 0.5) * 0.6, 0.35, 0.65);
+}
+
+/** Tennis has no draw and none of football's goal-based markets — same
+ * "zeroed generic fields + sport-specific extension" pattern as
+ * makeMmaMarketsFromTeams. tennisExtra itself (~30 fields) comes from
+ * computeTennisExtras, which already existed but had no caller until this
+ * provider. */
+function makeTennisMarketsFromPlayers(home: string, away: string, p?: number): AdvancedMarkets {
+  const tennisExtra = computeTennisExtras(p ?? apiTennisSyntheticP(home, away));
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals: {
+      over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
+      over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
+      over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    tennisExtra,
+  };
+}
+
+function makeTennisMoneylineFromP(p: number): { home: number; draw: number; away: number } {
+  const [home, away] = probsToDecimalOdds([p, 1 - p], 1.06);
+  return { home: home!, draw: 0, away: away! };
+}
+
+/** Tennis prematch from api-tennis.com — real moneyline via
+ * extractApiTennisMoneyline (get_odds's "Home/Away" group) wherever a
+ * bookmaker has priced the match; synthetic Poisson-ish baseline
+ * (computeTennisExtras) otherwise, same "real data patches synthetic"
+ * convention every other provider in this file follows. */
+async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.TENNIS_API_KEY) return [];
+  const today = new Date();
+  const dateStart = today.toISOString().slice(0, 10);
+  const stop = new Date(today);
+  stop.setDate(stop.getDate() + 7);
+  const dateStop = stop.toISOString().slice(0, 10);
+
+  const fixtures = await apiTennis
+    .getFixtures({ date_start: dateStart, date_stop: dateStop })
+    .catch(() => [] as ApiTennisMatch[]);
+  logger.info({ count: fixtures.length }, "[api-tennis] tennis upcoming raw fixture count");
+
+  // One bulk get_odds call for the whole date range instead of one call per
+  // fixture — match_key is optional (ApiTennisOddsResult is already a
+  // Record<eventKey, ...>, same dict-of-all-matches shape get_livescore()
+  // returns), so the per-fixture version below was making as many REST
+  // calls as there were upcoming fixtures (up to hundreds over a 7-day
+  // window) every time this cache entry expired — the single largest
+  // contributor to burning through the api-tennis.com request quota far
+  // faster than expected (user-reported 2026-09-11).
+  const bulkOdds = await apiTennis
+    .getOdds({ date_start: dateStart, date_stop: dateStop })
+    .catch(() => ({}) as ApiTennisOddsResult);
+
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const fx of fixtures) {
+    if (fx.event_live === "1") continue; // live matches come from buildTennisLiveFromApiTennis
+    const home = fx.event_first_player;
+    const away = fx.event_second_player;
+    if (!home || !away) continue;
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
+    if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
+
+    // De-vig the real price into a probability so computeTennisExtras'
+    // whole market grid (set betting, exact sets, total games, ...) stays
+    // internally consistent with the real moneyline instead of only the
+    // headline home/away price reflecting reality.
+    const p = resultOdds
+      ? mc(1 / resultOdds.home / (1 / resultOdds.home + 1 / resultOdds.away), 0.02, 0.98)
+      : apiTennisSyntheticP(home, away);
+    const markets = makeTennisMarketsFromPlayers(home, away, p);
+    const odds = resultOdds ?? makeTennisMoneylineFromP(p);
+
+    results.push({
+      id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
+      home,
+      away,
+      league: fx.tournament_name || fx.event_type_type || "Tênis",
+      country: "Internacional",
+      time: fx.event_time || "",
+      date: fx.event_date || dateStart,
+      sport: "tennis",
+      hasRealOdds: !!resultOdds,
+      odds,
+      markets,
+      homeLogoUrl: fx.event_first_player_logo ?? undefined,
+      awayLogoUrl: fx.event_second_player_logo ?? undefined,
+    });
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+/** Tennis live from api-tennis.com — get_livescore already embeds
+ * pointbypoint/scores/statistics inline, no separate per-match call
+ * needed. Sets won (not games) is what settlement/UI expect on
+ * homeScore/awayScore (getTennisSetsFromExtras reads _liveExtra.sets, not
+ * these two fields directly, but the frontend's live list and progress
+ * indicators use homeScore/awayScore as "sets won" the same way every
+ * other sport uses them as its own scoring unit).
+ *
+ * CRITICAL — same lesson as the football live-odds bug fixed this session
+ * (a team down several goals still showing competitive odds because the
+ * poll refresh overwrote the drift engine's corrected price every ~1-2s):
+ * this function must never overwrite state.odds/state.markets after the
+ * first tick. The drift engine (applyTieredMarketDrift) is the sole owner
+ * of what's displayed; this only feeds it fresh facts (sets, current
+ * point, server) and a fresh _baseOdds anchor when a real price arrives. */
+async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
+  if (!CONFIG.TENNIS_API_KEY) return [];
+  const matches = await apiTennis.getLivescore().catch(() => [] as ApiTennisMatch[]);
+  logger.info({ count: matches.length }, "[api-tennis] tennis live raw match count");
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  // One bulk get_odds/get_live_odds call for every live match instead of
+  // two REST calls per match per tick — same fix and same reason as
+  // buildTennisUpcomingFromApiTennis above (match_key is optional on both
+  // endpoints; each already returns a dict keyed by event_key, the same
+  // shape get_livescore() already returns for every live match in one
+  // call). With N concurrently live tennis matches this was 2N REST calls
+  // per tick; now it's 2 regardless of N. get_odds is scoped to today's
+  // date (unlike get_live_odds, its params lead with date_start/date_stop,
+  // and a live match's odds entry is under today's date) rather than
+  // called with zero params, to avoid relying on undocumented default
+  // range behavior for an endpoint this codebase has only ever called
+  // with an explicit scope so far.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const bulkOdds = await apiTennis
+    .getOdds({ date_start: todayStr, date_stop: todayStr })
+    .catch(() => ({}) as ApiTennisOddsResult);
+  const bulkLiveOdds = await apiTennis.getLiveOdds().catch(() => ({}) as ApiTennisLiveOddsResult);
+
+  for (const fx of matches) {
+    const home = fx.event_first_player;
+    const away = fx.event_second_player;
+    if (!home || !away) continue;
+
+    const id = `${API_TENNIS_ID_PREFIX}${fx.event_key}`;
+    const existing = liveMatchState.get(id);
+
+    // Prefer the WebSocket's pushed snapshot when one exists for this
+    // event_key — same DTO as the REST fixture, just fresher. Falls back
+    // to the REST fixture untouched when the socket is disconnected or
+    // hasn't seen this match yet.
+    const liveFx = getApiTennisWsMatch(fx.event_key) ?? fx;
+
+    const statusLower = String(liveFx.event_status ?? "").trim().toLowerCase();
+    if (API_TENNIS_TERMINAL_STATUSES.has(statusLower)) {
+      // Already over, but get_livescore() is still returning it — finalize
+      // now instead of leaving it "ao vivo" with stale odds until it
+      // eventually disappears from the feed. Idempotent across repeat
+      // ticks: buildMatchSettlementJobId derives the same job id from the
+      // same final score, so re-finalizing while the provider keeps
+      // returning this match a while longer is a safe no-op.
+      if (existing) {
+        const finalSets = buildApiTennisSets(liveFx.scores);
+        const finalHomeScore = finalSets.filter(([h, a]) => h > a).length;
+        const finalAwayScore = finalSets.filter(([h, a]) => a > h).length;
+        const finalState: LiveMatchState = {
+          ...existing,
+          homeScore: finalHomeScore,
+          awayScore: finalAwayScore,
+          status: liveFx.event_status || "Finished",
+          _liveExtra: { ...existing._liveExtra, sets: finalSets },
+        };
+        try {
+          await finalizeStaleLiveMatch(finalState);
+        } catch (err) {
+          logger.error({ err, id }, "[api-tennis] finalizeStaleLiveMatch failed (status-based)");
+        }
+        liveMatchState.delete(id);
+      }
+      continue; // never re-enters currentIds/results — no longer "ao vivo"
+    }
+    currentIds.add(id);
+
+    const sets = buildApiTennisSets(liveFx.scores);
+    const homeScore = sets.filter(([h, a]) => h > a).length;
+    const awayScore = sets.filter(([h, a]) => a > h).length;
+    const currentPoints = parseApiTennisGameResult(liveFx.event_game_result);
+    const serving = parseApiTennisServer(liveFx.event_serve);
+
+    let liveOddsRef: ApiTennisLiveOddsEntry[] | undefined = existing?._apiTennisLiveOddsRef;
+    const liveOddsEntry = bulkLiveOdds[fx.event_key];
+    if (liveOddsEntry?.live_odds) liveOddsRef = liveOddsEntry.live_odds;
+
+    // Real live markets from get_live_odds — confirmed real 2026-09-11
+    // (user-reported: live tennis odds weren't updating at all; root cause
+    // was this exact data being fetched into _apiTennisLiveOddsRef every
+    // tick but never actually read anywhere downstream). Preferred over
+    // get_odds' "Home/Away" (candidate below), which is a prematch/daily
+    // snapshot, not the true in-play price.
+    const realLiveMarkets = extractApiTennisLiveMarkets(liveOddsRef);
+
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    if (realLiveMarkets.moneyline) {
+      resultOdds = { home: realLiveMarkets.moneyline.home, draw: 0, away: realLiveMarkets.moneyline.away };
+    } else {
+      const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
+      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
+    }
+
+    const syntheticP = apiTennisSyntheticP(home, away);
+    const baseOdds = makeTennisMoneylineFromP(syntheticP);
+    const baseMarkets = makeTennisMarketsFromPlayers(home, away, syntheticP);
+    // Patch the synthetic tennisExtra with real per-market data wherever
+    // get_live_odds has it this tick — same "real data patches synthetic"
+    // convention every other provider in this file follows. Fields with no
+    // real value this tick keep the synthetic estimate untouched.
+    if (realLiveMarkets.set1) Object.assign(baseMarkets.tennisExtra.firstSet, realLiveMarkets.set1);
+    if (realLiveMarkets.set2) Object.assign(baseMarkets.tennisExtra.set2, realLiveMarkets.set2);
+    if (realLiveMarkets.set3) Object.assign(baseMarkets.tennisExtra.set3, realLiveMarkets.set3);
+    if (realLiveMarkets.gameHandicap) Object.assign(baseMarkets.tennisExtra.gameHandicap, realLiveMarkets.gameHandicap);
+    if (realLiveMarkets.totalGamesLines && realLiveMarkets.totalGamesLines.length > 0) {
+      baseMarkets.tennisExtra.totalGamesLines = realLiveMarkets.totalGamesLines;
+      const mid = realLiveMarkets.totalGamesLines[Math.floor(realLiveMarkets.totalGamesLines.length / 2)]!;
+      baseMarkets.tennisExtra.totalGames = mid;
+    }
+    if (realLiveMarkets.set1GamesLines && realLiveMarkets.set1GamesLines.length > 0) {
+      const mid = realLiveMarkets.set1GamesLines[Math.floor(realLiveMarkets.set1GamesLines.length / 2)]!;
+      baseMarkets.tennisExtra.set1Games = mid;
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: fx.tournament_name || fx.event_type_type || "Tênis",
+      country: "Internacional",
+      sport: "tennis",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: liveFx.event_status || "",
+      hasRealOdds: !!resultOdds,
+      // Fresh every tick, not frozen at first-seen (real bug fixed
+      // 2026-09-11 — user-reported: live tennis odds never updated at
+      // all). Unlike football, no separate drift engine processes tennis
+      // (applyTieredMarketDrift's poll loop is football-only), so this
+      // builder is the only place tennis odds/markets are ever written —
+      // freezing them here after the first tick meant they froze forever.
+      // Falls back to the last known value only when this tick's fetch
+      // genuinely produced nothing (never regress to the synthetic
+      // baseline just because of a transient API hiccup).
+      odds: resultOdds ?? existing?.odds ?? baseOdds,
+      markets: baseMarkets,
+      _baseOdds: resultOdds ?? baseOdds,
+      _baseMarkets: baseMarkets,
+      _apiTennisLiveOddsRef: liveOddsRef,
+      events: existing?.events ?? [],
+      _liveExtra: {
+        ...existing?._liveExtra,
+        sets,
+        currentPoints,
+        serving,
+        pointByPoint: liveFx.pointbypoint?.length ? liveFx.pointbypoint : existing?._liveExtra?.pointByPoint,
+      },
+      homeLogoUrl: liveFx.event_first_player_logo ?? existing?.homeLogoUrl,
+      awayLogoUrl: liveFx.event_second_player_logo ?? existing?.awayLogoUrl,
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith(API_TENNIS_ID_PREFIX)) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > API_TENNIS_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[api-tennis] finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Basketball prematch from PropLine — NBA/WNBA/NCAAB, real moneyline via
+ * extractProplineBasketballOdds wherever a bookmaker prices it; falls back
+ * to the synthetic model otherwise (hasRealOdds:false). */
+async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const [perLeague, q1PerLeague, h1PerLeague] = await Promise.all([
+    proplineFetchBasketballOddsAllLeagues(),
+    proplineFetchBasketballPeriodOddsAllLeagues("q1"),
+    proplineFetchBasketballPeriodOddsAllLeagues("h1"),
+  ]);
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] basketball upcoming raw event counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const { sportKey, events } of perLeague) {
+    const leagueTitle = PROPLINE_BASKETBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const q1Events = q1PerLeague.find((l) => l.sportKey === sportKey)?.events ?? [];
+    const h1Events = h1PerLeague.find((l) => l.sportKey === sportKey)?.events ?? [];
+    for (const ev of events) {
+      if (ev.live) continue;
+      const home = stripGenderTeamSuffix(ev.home_team);
+      const away = stripGenderTeamSuffix(ev.away_team);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const resultOdds = extractProplineBasketballOdds(ev.bookmakers, ev.home_team, ev.away_team);
+      const markets = makeBasketballMarketsFromTeams(home, away);
+      const odds = resultOdds ?? { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
+      const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      // Real 1st-quarter/1st-half markets from PropLine's ?period= filter,
+      // overriding basketballExtra's synthetic q1 (and populating firstHalf,
+      // which has no synthetic fallback) when a bookmaker actually prices
+      // that event's segment — most events won't have one, so this quietly
+      // no-ops rather than requiring it.
+      const q1Ev = q1Events.find((e) => e.id === ev.id);
+      const q1Odds = q1Ev ? extractProplineBasketballOdds(q1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      const h1Ev = h1Events.find((e) => e.id === ev.id);
+      const h1Odds = h1Ev ? extractProplineBasketballOdds(h1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      if (markets.basketballExtra && (q1Odds || h1Odds)) {
+        if (q1Odds) markets.basketballExtra.q1 = { home: q1Odds.home, away: q1Odds.away };
+        if (h1Odds) markets.basketballExtra.firstHalf = { home: h1Odds.home, away: h1Odds.away };
+      }
+
+      results.push({
+        id: `propline-basketball-${ev.id}`,
+        home,
+        away,
+        league: leagueTitle,
+        country: sportKey === "basketball_wnba" ? "EUA (Feminino)" : "EUA",
+        time,
+        date,
+        sport: "basketball",
+        hasRealOdds: !!resultOdds,
+        odds,
+        markets,
+        isWomens: sportKey === "basketball_wnba",
+      });
+    }
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+/** Basketball live from PropLine — cross-references /scores with the
+ * cached /odds by event id. Basketball IS in PropLine's confirmed
+ * near-real-time sport list, so this is built with the same confidence as
+ * pré-jogo. */
+async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const perLeague = await proplineFetchBasketballLiveAllLeagues();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const { sportKey, events } of perLeague) {
+    if (events.length === 0) continue;
+    const leagueTitle = PROPLINE_BASKETBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const oddsEvents = (await proplineFetchBasketballOddsAllLeagues()).find((l) => l.sportKey === sportKey)?.events ?? [];
+
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      const score = extractProplineScore(sc);
+      if (!score) continue;
+
+      const id = `propline-basketball-${sc.id}`;
+      currentIds.add(id);
+      const existing = liveMatchState.get(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractProplineBasketballOdds(oddsEv.bookmakers, home, away) : null;
+      const baseMarkets = makeBasketballMarketsFromTeams(home, away);
+
+      let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+        ? { ...existing.marketSuspension }
+        : undefined;
+      if (marketSuspension) {
+        const active = Object.fromEntries(
+          Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+        );
+        marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+      }
+      let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+      const pointsScored =
+        !!existing && (score.home !== existing.homeScore || score.away !== existing.awayScore);
+      if (pointsScored) {
+        const now = Date.now();
+        marketSuspension = { result: now + 8_000, handicap: now + 8_000, totalGoals: now + 8_000 };
+        suspensionReason = "PONTOS!";
+      }
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: leagueTitle,
+        country: sportKey === "basketball_wnba" ? "EUA (Feminino)" : "EUA",
+        sport: "basketball",
+        homeScore: score.home,
+        awayScore: score.away,
+        minute: 0,
+        status: score.status || "Ao vivo",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+        markets: baseMarkets,
+        events: [],
+        _lastSeenAt: Date.now(),
+        marketSuspension,
+        _suspensionReason: suspensionReason,
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-basketball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] basketball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+const PROPLINE_BASEBALL_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Baseball (MLB) prematch from PropLine — real moneyline via
+ * extractProplineBaseballOdds wherever a bookmaker prices it; falls back
+ * to makeMLBMoneylineFromTeams's synthetic model otherwise. This was the
+ * missing counterpart to buildBasketballUpcomingFromPropLine — baseball
+ * had no PropLine module at all (a permanent dead stub regardless of
+ * PROPLINE_API_KEY), even though .env.example's PROPLINE_ENABLED_SPORTS
+ * default has always listed baseball_mlb. */
+async function buildBaseballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const perLeague = await proplineFetchBaseballOddsAllLeagues();
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] baseball upcoming raw event counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const { sportKey, events } of perLeague) {
+    const leagueTitle = PROPLINE_BASEBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    for (const ev of events) {
+      if (ev.live) continue;
+      const home = stripGenderTeamSuffix(ev.home_team);
+      const away = stripGenderTeamSuffix(ev.away_team);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const resultOdds = extractProplineBaseballOdds(ev.bookmakers, ev.home_team, ev.away_team);
+      const markets = makeMLBMarketsFromTeams(home, away, resultOdds?.home, resultOdds?.away);
+      const odds = resultOdds ?? { ...makeMLBMoneylineFromTeams(home, away), draw: 0 };
+      const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      results.push({
+        id: `propline-baseball-${ev.id}`,
+        home,
+        away,
+        league: leagueTitle,
+        country: "EUA",
+        time,
+        date,
+        sport: "baseball",
+        hasRealOdds: !!resultOdds,
+        odds,
+        markets,
+      });
+    }
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+/** Baseball live from PropLine — cross-references /scores with the cached
+ * /odds by event id. Baseball IS in PropLine's confirmed near-real-time
+ * sport list, so this is built with the same confidence as pré-jogo,
+ * mirroring buildBasketballLiveFromPropLine exactly. */
+async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const perLeague = await proplineFetchBaseballLiveAllLeagues();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const { sportKey, events } of perLeague) {
+    if (events.length === 0) continue;
+    const leagueTitle = PROPLINE_BASEBALL_LEAGUE_TITLES[sportKey] ?? sportKey;
+    const oddsEvents = (await proplineFetchBaseballOddsAllLeagues()).find((l) => l.sportKey === sportKey)?.events ?? [];
+
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      const score = extractProplineScore(sc);
+      if (!score) continue;
+
+      const id = `propline-baseball-${sc.id}`;
+      currentIds.add(id);
+      const existing = liveMatchState.get(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractProplineBaseballOdds(oddsEv.bookmakers, home, away) : null;
+      const baseMarkets = makeMLBMarketsFromTeams(home, away, resultOdds?.home, resultOdds?.away);
+
+      let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+        ? { ...existing.marketSuspension }
+        : undefined;
+      if (marketSuspension) {
+        const active = Object.fromEntries(
+          Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+        );
+        marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+      }
+      let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+      const runsScored =
+        !!existing && (score.home !== existing.homeScore || score.away !== existing.awayScore);
+      if (runsScored) {
+        const now = Date.now();
+        marketSuspension = { result: now + 8_000, handicap: now + 8_000, totalGoals: now + 8_000 };
+        suspensionReason = "PONTOS!";
+      }
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: leagueTitle,
+        country: "EUA",
+        sport: "baseball",
+        homeScore: score.home,
+        awayScore: score.away,
+        minute: 0,
+        status: score.status || "Ao vivo",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+        markets: baseMarkets,
+        events: [],
+        _lastSeenAt: Date.now(),
+        marketSuspension,
+        _suspensionReason: suspensionReason,
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-baseball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_BASEBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] baseball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+const PROPLINE_HOCKEY_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Hockey (NHL) prematch from PropLine. */
+async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const [perLeague, p1PerLeague] = await Promise.all([
+    proplineFetchHockeyOddsAllLeagues(),
+    proplineFetchHockeyPeriod1OddsAllLeagues(),
+  ]);
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] hockey upcoming raw event counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const { events } of perLeague) {
+    const p1Events = p1PerLeague.find((l) => l.sportKey === "hockey_nhl")?.events ?? [];
+    for (const ev of events) {
+      if (ev.live) continue;
+      const home = stripGenderTeamSuffix(ev.home_team);
+      const away = stripGenderTeamSuffix(ev.away_team);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const resultOdds = extractProplineHockeyOdds(ev.bookmakers, ev.home_team, ev.away_team);
+      const markets = makeHockeyMarketsFromTeams(home, away);
+      const odds = resultOdds ?? makeHockeyMoneylineFromTeams(home, away);
+      const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      // Real 1st-period market from PropLine's ?period=p1 filter, overriding
+      // the synthetic halfTime field (this app's slot for hockey's period-1
+      // 3-way result) when a bookmaker actually prices it — most events
+      // won't, so this quietly no-ops otherwise.
+      const p1Ev = p1Events.find((e) => e.id === ev.id);
+      const p1Odds = p1Ev ? extractProplineHockeyPeriod1Odds(p1Ev.bookmakers, ev.home_team, ev.away_team) : null;
+      if (p1Odds) markets.halfTime = p1Odds;
+
+      results.push({
+        id: `propline-hockey-${ev.id}`,
+        home,
+        away,
+        league: "NHL",
+        country: "EUA/Canadá",
+        time,
+        date,
+        sport: "hockey",
+        hasRealOdds: !!resultOdds,
+        odds,
+        markets,
+      });
+    }
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+/** Hockey (NHL) live from PropLine — NHL IS in PropLine's confirmed
+ * near-real-time sport list, same confidence as pré-jogo. */
+async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const perLeague = await proplineFetchHockeyLiveAllLeagues();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const { sportKey, events } of perLeague) {
+    if (events.length === 0) continue;
+    const oddsEvents = (await proplineFetchHockeyOddsAllLeagues()).find((l) => l.sportKey === sportKey)?.events ?? [];
+
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      const score = extractProplineScore(sc);
+      if (!score) continue;
+
+      const id = `propline-hockey-${sc.id}`;
+      currentIds.add(id);
+      const existing = liveMatchState.get(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractProplineHockeyOdds(oddsEv.bookmakers, home, away) : null;
+      const baseMarkets = makeHockeyMarketsFromTeams(home, away);
+
+      let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+        ? { ...existing.marketSuspension }
+        : undefined;
+      if (marketSuspension) {
+        const active = Object.fromEntries(
+          Object.entries(marketSuspension).filter(([, ts]) => ts > Date.now()),
+        );
+        marketSuspension = Object.keys(active).length > 0 ? active : undefined;
+      }
+      let suspensionReason = marketSuspension ? existing?._suspensionReason : undefined;
+      const goalScored =
+        !!existing && (score.home !== existing.homeScore || score.away !== existing.awayScore);
+      if (goalScored) {
+        const now = Date.now();
+        marketSuspension = { result: now + 8_000, handicap: now + 8_000, totalGoals: now + 8_000 };
+        // "GOLO!" not "GOL!" — see suspensionEngine.ts's identical fix.
+        suspensionReason = "GOLO!";
+      }
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: "NHL",
+        country: "EUA/Canadá",
+        sport: "hockey",
+        homeScore: score.home,
+        awayScore: score.away,
+        minute: 0,
+        status: score.status || "Ao vivo",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+        markets: baseMarkets,
+        events: [],
+        _lastSeenAt: Date.now(),
+        marketSuspension,
+        _suspensionReason: suspensionReason,
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-hockey-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_HOCKEY_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] hockey finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+/** Volleyball prematch from PropLine — single global "volleyball"
+ * sport_key, no per-league breakdown. */
+async function buildVolleyballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const events = await proplineFetchVolleyballOdds();
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    if (ev.live) continue;
+    const home = stripGenderTeamSuffix(ev.home_team);
+    const away = stripGenderTeamSuffix(ev.away_team);
+    if (!home || !away) continue;
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const resultOdds = extractProplineVolleyballOdds(ev.bookmakers, ev.home_team, ev.away_team);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    // Flat neutral fallback, not makeAdvancedMarketsFromTeams's internal
+    // Poisson odds (football-specific, meaningless for volleyball).
+    const odds = resultOdds ?? { home: 1.85, draw: 0, away: 1.85 };
+    const { date, time } = proplineEventDateTime(ev.commence_time);
+
+    results.push({
+      id: `propline-volleyball-${ev.id}`,
+      home,
+      away,
+      league: "Voleibol",
+      country: "Internacional",
+      time,
+      date,
+      sport: "volleyball",
+      hasRealOdds: !!resultOdds,
+      odds,
+      markets: baseMarkets,
+    });
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+// 120s, not the 15s most other PropLine live builders use — PropLine's
+// /scores feed is cached for 30s upstream, and this grace should survive
+// a couple of bad cycles before giving up, same spirit as this app's
+// existing 5-minute mergeStickyLive grace for other flaky provider feeds.
+const PROPLINE_VOLLEYBALL_DISAPPEAR_GRACE_MS = 120_000;
+
+/** Volleyball live from PropLine — confirmed real (2026-09-08, this
+ * session's earlier PropLine work): PropLine's /scores feed for volleyball
+ * never actually transitions to a usable live score (status stays
+ * "upcoming" and home_score/away_score stay null even for live:true
+ * events), so this correctly returns [] in practice today. Kept wired as
+ * an honest candidate — if PropLine ever starts populating real volleyball
+ * scores, this activates without needing a rewrite. Schema limitation
+ * confirmed for tennis (home_score/away_score are cumulative POINTS in the
+ * match, not the current set) is handled defensively here too via a
+ * rolling per-set baseline, same derivation as tennis's builder used
+ * (never fabricated). */
+async function buildVolleyballLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const events = await proplineFetchVolleyballLive();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  if (events.length > 0) {
+    const oddsEvents = await proplineFetchVolleyballOdds();
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      const score = extractProplineScore(sc);
+      if (!score) continue;
+
+      const id = `propline-volleyball-${sc.id}`;
+      currentIds.add(id);
+      const existing = liveMatchState.get(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractProplineVolleyballOdds(oddsEv.bookmakers, home, away) : null;
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+
+      const setMatch = /Set\s*(\d+)(?:\s*[·.]?\s*sets\s*(\d+)\s*-\s*(\d+))?/i.exec(score.status ?? "");
+      const currentSetNum = setMatch ? parseInt(setMatch[1]!, 10) : 1;
+      const realPriorSets: [number, number] | null =
+        setMatch && setMatch[2] !== undefined && setMatch[3] !== undefined
+          ? [parseInt(setMatch[2], 10), parseInt(setMatch[3], 10)]
+          : null;
+      const cumulative: [number, number] = [score.home, score.away];
+      const prevBase = existing?._liveExtra?.propLineSetBaseGames ?? null;
+      const prevSets = existing?._liveExtra?.vollSets ?? [];
+      let setsWonHome = realPriorSets ? realPriorSets[0] : (existing?.homeScore ?? 0);
+      let setsWonAway = realPriorSets ? realPriorSets[1] : (existing?.awayScore ?? 0);
+      let base: [number, number];
+      let vollSets: Array<[number, number]>;
+      if (prevBase === null) {
+        base = cumulative;
+        vollSets = [[0, 0]];
+      } else if (currentSetNum > prevSets.length) {
+        const finishedDelta = prevSets[prevSets.length - 1] ?? [0, 0];
+        if (!realPriorSets) {
+          if (finishedDelta[0] > finishedDelta[1]) setsWonHome++;
+          else if (finishedDelta[1] > finishedDelta[0]) setsWonAway++;
+        }
+        base = [prevBase[0] + finishedDelta[0], prevBase[1] + finishedDelta[1]];
+        const delta: [number, number] = [
+          Math.max(0, cumulative[0] - base[0]),
+          Math.max(0, cumulative[1] - base[1]),
+        ];
+        vollSets = [...prevSets, delta];
+      } else {
+        base = prevBase;
+        const delta: [number, number] = [
+          Math.max(0, cumulative[0] - base[0]),
+          Math.max(0, cumulative[1] - base[1]),
+        ];
+        vollSets = [...prevSets.slice(0, -1), delta];
+      }
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: "Voleibol",
+        country: "Internacional",
+        sport: "volleyball",
+        homeScore: setsWonHome,
+        awayScore: setsWonAway,
+        minute: 0,
+        status: `Set ${Math.max(1, currentSetNum)}`,
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+        markets: baseMarkets,
+        events: [],
+        _lastSeenAt: Date.now(),
+        _liveExtra: { vollSets, currentPts: vollSets[vollSets.length - 1]!, propLineSetBaseGames: base },
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-volleyball-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_VOLLEYBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] volleyball finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+/** MMA/boxing prematch from PropLine — combines mma_ufc + boxing under
+ * this app's single "mma" tab. */
+async function buildMmaUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const perLeague = await proplineFetchMmaOddsAllLeagues();
+  logger.info(
+    { counts: perLeague.map((l) => ({ sportKey: l.sportKey, events: l.events.length })) },
+    "[propline] mma upcoming raw event counts",
+  );
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const { sportKey, events } of perLeague) {
+    const leagueName = sportKey === "boxing" ? "Boxe" : "MMA";
+    for (const ev of events) {
+      if (ev.live) continue;
+      const home = stripGenderTeamSuffix(ev.home_team);
+      const away = stripGenderTeamSuffix(ev.away_team);
+      if (!home || !away) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const resultOdds = extractProplineMmaOdds(ev.bookmakers, ev.home_team, ev.away_team);
+      const markets = makeMmaMarketsFromTeams(home, away);
+      const odds = resultOdds ?? { ...makeMmaMoneylineFromTeams(home, away), draw: 0 };
+      const { date, time } = proplineEventDateTime(ev.commence_time);
+
+      results.push({
+        id: `propline-mma-${ev.id}`,
+        home,
+        away,
+        league: leagueName,
+        country: "Internacional",
+        time,
+        date,
+        sport: "mma",
+        hasRealOdds: !!resultOdds,
+        odds,
+        markets,
+        // No PropLine data source for "goes the distance"/total-rounds yet
+        // — omit mmaExtra entirely (it's fully optional) rather than a
+        // {yes:0,no:0} placeholder, which the frontend renders as a real
+        // 0.00 market instead of hiding it (only checks the object's
+        // presence, not its values).
+      });
+    }
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+const PROPLINE_MMA_DISAPPEAR_GRACE_MS = 120_000;
+
+/** MMA/boxing live from PropLine — not in PropLine's confirmed near-real-
+ * time sport list, but that blanket caveat proved wrong for football in
+ * this session's earlier work, so this is kept as an honest tri-fallback
+ * candidate. */
+async function buildMmaLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const perLeague = await proplineFetchMmaLiveAllLeagues();
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const { sportKey, events } of perLeague) {
+    if (events.length === 0) continue;
+    const leagueName = sportKey === "boxing" ? "Boxe" : "MMA";
+    const oddsEvents = (await proplineFetchMmaOddsAllLeagues()).find((l) => l.sportKey === sportKey)?.events ?? [];
+
+    for (const sc of events) {
+      const home = stripGenderTeamSuffix(sc.home_team);
+      const away = stripGenderTeamSuffix(sc.away_team);
+      if (!home || !away) continue;
+      const score = extractProplineScore(sc);
+      if (!score) continue;
+
+      const id = `propline-mma-${sc.id}`;
+      currentIds.add(id);
+
+      const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+      const resultOdds = oddsEv ? extractProplineMmaOdds(oddsEv.bookmakers, home, away) : null;
+      const markets = makeMmaMarketsFromTeams(home, away);
+
+      const state: LiveMatchState = {
+        id,
+        home,
+        away,
+        league: leagueName,
+        country: "Internacional",
+        sport: "mma",
+        homeScore: score.home,
+        awayScore: score.away,
+        minute: 0,
+        status: score.status || "Ao vivo",
+        hasRealOdds: !!resultOdds,
+        odds: resultOdds ?? { ...makeMmaMoneylineFromTeams(home, away), draw: 0 },
+        markets,
+        // See buildMmaUpcomingFromPropLine's comment — omit mmaExtra
+        // entirely rather than a {yes:0,no:0} placeholder the frontend
+        // renders as a real 0.00 market.
+        events: [],
+        _lastSeenAt: Date.now(),
+      };
+      liveMatchState.set(id, state);
+      results.push(state);
+    }
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-mma-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_MMA_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] mma finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -7463,6 +9537,15 @@ export { buildUpcomingMatches, getUpcomingAll };
 // This means a V1 score patch triggers a broadcast in ~5ms instead of ~200ms.
 let _allUpcomingCache: UpcomingMatch[] = [];
 let _allUpcomingCacheBuiltAt = 0;
+
+/** Read-only snapshot for callers outside this module (e.g. the admin
+ * Eventos table) that need team names / PulseScore price status for
+ * pré-jogo fixtures without triggering their own fetch — this cache is
+ * already kept warm by every /live poll (buildLivePayload's cache-warm
+ * check above). */
+export function getUpcomingMatchesSnapshot(): UpcomingMatch[] {
+  return _allUpcomingCache;
+}
 const UPCOMING_CACHE_TTL_MS = 30_000;
 let _upcomingRebuildInProgress = false;
 
@@ -7485,14 +9568,13 @@ async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
-    // All sports-data providers removed (2026-09-08) — every sport below
-    // runs with zero candidates, which chooseUpcomingProvider handles by
-    // returning [].
+    // GOAL API restored 2026-09-09 for football.
     let football: UpcomingMatch[] = [];
     try {
-      // All football data providers removed (2026-09-08) — no candidates
-      // left, chooseUpcomingProvider gracefully returns [] below.
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.GOAL_API_KEY) {
+        candidates.push({ provider: "goalapi", matches: await buildFootballUpcomingFromGoalApi() });
+      }
       football = chooseUpcomingProvider("football", candidates);
       _lastGoodFootballUpcoming = football;
     } catch (err) {
@@ -7502,18 +9584,70 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       football = _lastGoodFootballUpcoming;
     }
-    // All non-football data providers removed (2026-09-08) — no candidates
-    // left for any of these sports either.
-    const tennis: UpcomingMatch[] = chooseUpcomingProvider("tennis", []);
+    // api-tennis.com restored 2026-09-09 for tennis — first real tennis
+    // provider this platform has ever had.
+    let tennis: UpcomingMatch[] = [];
+    try {
+      const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.TENNIS_API_KEY) {
+        tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
+      }
+      tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+    } catch (err) {
+      logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
+    }
     _lastGoodTennisUpcoming = tennis;
-    const basketball: UpcomingMatch[] = chooseUpcomingProvider("basketball", []);
-    _lastGoodBasketballUpcoming = basketball;
-    const hockey: UpcomingMatch[] = chooseUpcomingProvider("hockey", []);
-    _lastGoodHockeyUpcoming = hockey;
-    const volleyball: UpcomingMatch[] = chooseUpcomingProvider("volleyball", []);
-    _lastGoodVolleyballUpcoming = volleyball;
-    const mma: UpcomingMatch[] = chooseUpcomingProvider("mma", []);
-    _lastGoodMmaUpcoming = mma;
+    // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
+    // (football and tennis excluded from PropLine's scope per user decision
+    // — each gets its own separate, dedicated provider later).
+    let basketball: UpcomingMatch[] = [];
+    try {
+      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.PROPLINE_API_KEY) {
+        candidates.push({ provider: "propline", matches: await buildBasketballUpcomingFromPropLine() });
+      }
+      basketball = chooseUpcomingProvider("basketball", candidates);
+      _lastGoodBasketballUpcoming = basketball;
+    } catch (err) {
+      logger.error({ err }, "[tri-fallback] basketball upcoming failed this cycle — keeping last good prematch list");
+      basketball = _lastGoodBasketballUpcoming;
+    }
+    let hockey: UpcomingMatch[] = [];
+    try {
+      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.PROPLINE_API_KEY) {
+        candidates.push({ provider: "propline", matches: await buildHockeyUpcomingFromPropLine() });
+      }
+      hockey = chooseUpcomingProvider("hockey", candidates);
+      _lastGoodHockeyUpcoming = hockey;
+    } catch (err) {
+      logger.error({ err }, "[tri-fallback] hockey upcoming failed this cycle — keeping last good prematch list");
+      hockey = _lastGoodHockeyUpcoming;
+    }
+    let volleyball: UpcomingMatch[] = [];
+    try {
+      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.PROPLINE_API_KEY) {
+        candidates.push({ provider: "propline", matches: await buildVolleyballUpcomingFromPropLine() });
+      }
+      volleyball = chooseUpcomingProvider("volleyball", candidates);
+      _lastGoodVolleyballUpcoming = volleyball;
+    } catch (err) {
+      logger.error({ err }, "[tri-fallback] volleyball upcoming failed this cycle — keeping last good prematch list");
+      volleyball = _lastGoodVolleyballUpcoming;
+    }
+    let mma: UpcomingMatch[] = [];
+    try {
+      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.PROPLINE_API_KEY) {
+        candidates.push({ provider: "propline", matches: await buildMmaUpcomingFromPropLine() });
+      }
+      mma = chooseUpcomingProvider("mma", candidates);
+      _lastGoodMmaUpcoming = mma;
+    } catch (err) {
+      logger.error({ err }, "[tri-fallback] mma upcoming failed this cycle — keeping last good prematch list");
+      mma = _lastGoodMmaUpcoming;
+    }
     const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...mma];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
@@ -7547,9 +9681,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    // All football data providers removed (2026-09-08) — no candidates
-    // left, chooseLiveProvider gracefully returns [] below.
+    // GOAL API restored 2026-09-09 for football.
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.GOAL_API_KEY) {
+      candidates.push({ provider: "goalapi", matches: await buildFootballLiveFromGoalApi() });
+    }
     footballLiveRaw = chooseLiveProvider("football", candidates);
   } catch (err) {
     logger.error(
@@ -7558,22 +9694,70 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
-  // All non-football data providers removed (2026-09-08) too — no
-  // candidates left for any of these sports either.
-  const basketballLiveRaw: LiveMatchState[] = chooseLiveProvider("basketball", []);
+  // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
+  // (football and tennis excluded from PropLine's scope — separate
+  // dedicated providers planned for each later).
+  let basketballLiveRaw: LiveMatchState[] = [];
+  try {
+    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildBasketballLiveFromPropLine() });
+    }
+    basketballLiveRaw = chooseLiveProvider("basketball", candidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] basketball live failed this tick");
+  }
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
-  const hockeyLiveRaw: LiveMatchState[] = chooseLiveProvider("hockey", []);
+  let hockeyLiveRaw: LiveMatchState[] = [];
+  try {
+    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildHockeyLiveFromPropLine() });
+    }
+    hockeyLiveRaw = chooseLiveProvider("hockey", candidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] hockey live failed this tick");
+  }
   const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
-  const baseballLiveRaw: LiveMatchState[] = chooseLiveProvider("baseball", []);
+  let baseballLiveRaw: LiveMatchState[] = [];
+  try {
+    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildBaseballLiveFromPropLine() });
+    }
+    baseballLiveRaw = chooseLiveProvider("baseball", candidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] baseball live failed this tick");
+  }
   const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
-  const volleyballLiveRaw: LiveMatchState[] = chooseLiveProvider("volleyball", []);
+  let volleyballLiveRaw: LiveMatchState[] = [];
+  try {
+    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildVolleyballLiveFromPropLine() });
+    }
+    volleyballLiveRaw = chooseLiveProvider("volleyball", candidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] volleyball live failed this tick");
+  }
   const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
-  const tennisLiveRaw: LiveMatchState[] = chooseLiveProvider("tennis", []);
+  let tennisLiveRaw: LiveMatchState[] = [];
+  try {
+    const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.TENNIS_API_KEY) {
+      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
+    }
+    tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
+  } catch (err) {
+    logger.error({ err }, "[tri-fallback] tennis live failed this tick");
+  }
   const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
-  // No data provider left (all removed) — always empty.
   let mmaLiveRaw: LiveMatchState[] = [];
   try {
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildMmaLiveFromPropLine() });
+    }
     mmaLiveRaw = chooseLiveProvider("mma", candidates);
   } catch (err) {
     logger.error(
@@ -7813,9 +9997,23 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
+  // Reverted 2026-09-11 per the user's explicit decision: a GOAL-API
+  // football fixture is only shown in the Ao Vivo list once PulseScore has
+  // actually priced its headline 1X2 market (`_priceSource ===
+  // "pulsescore"`). This replaces the 2026-09-10 "hybrid" gate (which
+  // showed every GOAL-API live fixture regardless of pricing, betting or
+  // not) — the user weighed the tradeoff (many minor-league fixtures never
+  // get PulseScore coverage and will simply never appear) and chose to
+  // hide unpriced fixtures entirely rather than show a match nobody can
+  // trust the odds on. Any fixture flagged liveDecisions.visible=false by
+  // admin still gets hidden by the outer filter regardless of provider.
+  const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
+    !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
+    || m._priceSource === "pulsescore";
+
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
-      (m) => liveDecisions.get(String(m.id))?.visible ?? true,
+      (m) => (liveDecisions.get(String(m.id))?.visible ?? true) && isVisibleFootballFixture(m),
     ),
     liveDecisions,
   );
@@ -8350,7 +10548,16 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
+  // no-store added 2026-09-11 (user-reported: an open match's live odds/
+  // score stayed frozen on a stale snapshot even across a full page
+  // reload) — bet62.plus sits behind Cloudflare (confirmed via the
+  // reporting user's own Network tab, remote address in Cloudflare's
+  // published ASN range), whose edge cache/buffering doesn't necessarily
+  // honor nginx's X-Accel-Buffering convention or a bare `no-cache`
+  // (which only requires revalidation, not "never store") the way this
+  // endpoint needs. `no-store` is the strongest standard signal to never
+  // cache a response at any layer.
+  res.setHeader("Cache-Control", "no-cache, no-store, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
 
@@ -8411,6 +10618,7 @@ type UpcomingTopCache = {
   hockey: UpcomingMatch[];
   volleyball: UpcomingMatch[];
   baseball: UpcomingMatch[];
+  mma: UpcomingMatch[];
   boxing: UpcomingMatch[];
   cricket: UpcomingMatch[];
   handball: UpcomingMatch[];
@@ -8533,16 +10741,53 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 }
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
-  // All sports-data providers removed (2026-09-08) — every sport below
-  // stays empty.
-  const football: UpcomingMatch[] = [];
+  // GOAL API restored 2026-09-09 for football.
+  let football: UpcomingMatch[] = [];
+  if (CONFIG.GOAL_API_KEY) {
+    try {
+      football = await buildFootballUpcomingFromGoalApi();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] football GOAL API fetch failed");
+    }
+  }
   const tennis: UpcomingMatch[] = [];
-  const basketball: UpcomingMatch[] = [];
-  const hockey: UpcomingMatch[] = [];
-  const volleyball: UpcomingMatch[] = [];
-  const baseball: UpcomingMatch[] = [];
+  // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
+  // (football and tennis excluded from PropLine's scope — separate
+  // dedicated providers planned for each later).
+  let basketball: UpcomingMatch[] = [];
+  let hockey: UpcomingMatch[] = [];
+  let volleyball: UpcomingMatch[] = [];
+  let mma: UpcomingMatch[] = [];
+  let baseball: UpcomingMatch[] = [];
+  if (CONFIG.PROPLINE_API_KEY) {
+    try {
+      basketball = await buildBasketballUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] basketball PropLine fetch failed");
+    }
+    try {
+      hockey = await buildHockeyUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] hockey PropLine fetch failed");
+    }
+    try {
+      volleyball = await buildVolleyballUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] volleyball PropLine fetch failed");
+    }
+    try {
+      mma = await buildMmaUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] mma PropLine fetch failed");
+    }
+    try {
+      baseball = await buildBaseballUpcomingFromPropLine();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] baseball PropLine fetch failed");
+    }
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma]);
   upcomingTopCache = {
     football,
     tennis,
@@ -8550,6 +10795,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey,
     volleyball,
     baseball,
+    mma,
     boxing: [],
     cricket: [],
     handball: [],
@@ -8602,6 +10848,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
               hockey: [],
               volleyball: [],
               baseball: [],
+              mma: [],
               boxing: [],
               cricket: [],
               handball: [],
@@ -8617,6 +10864,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "hockey") matches = cache.hockey;
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
+  else if (sport === "mma") matches = cache.mma;
   else if (sport === "boxing") matches = cache.boxing;
   else if (sport === "cricket") matches = cache.cricket;
   else if (sport === "handball") matches = cache.handball;
@@ -8629,6 +10877,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.hockey,
       ...cache.volleyball,
       ...cache.baseball,
+      ...cache.mma,
       ...cache.boxing,
       ...cache.cricket,
       ...cache.handball,
@@ -8722,6 +10971,8 @@ router.get("/stats", async (req: Request, res: Response) => {
   const homeOdd = parseFloat(String(req.query["homeOdd"] ?? "2")) || 2;
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
+  const homeTeamIdQuery = String(req.query["homeTeamId"] ?? "");
+  const awayTeamIdQuery = String(req.query["awayTeamId"] ?? "");
 
   const rawHome = 1 / homeOdd;
   const rawDraw = 1 / drawOdd;
@@ -8946,6 +11197,23 @@ router.get("/stats", async (req: Request, res: Response) => {
 
   let homeForm: FormEntry[] = [];
   let awayForm: FormEntry[] = [];
+
+  // Real replacement for the synthetic fallback below (GOAL API,
+  // 2026-09-09): when the frontend has real GOAL API team ids for this
+  // fixture (populated on the football live/upcoming builders), fetch each
+  // team's actual last results and derive real form from them instead.
+  if (sport === "football" && homeTeamIdQuery && awayTeamIdQuery && CONFIG.GOAL_API_KEY) {
+    try {
+      const [homeResults, awayResults] = await Promise.all([
+        goalApi.getTeamResults(homeTeamIdQuery).catch(() => null),
+        goalApi.getTeamResults(awayTeamIdQuery).catch(() => null),
+      ]);
+      homeForm = buildGoalApiForm(homeResults);
+      awayForm = buildGoalApiForm(awayResults);
+    } catch (err) {
+      logger.error({ err, homeTeamIdQuery, awayTeamIdQuery }, "[goal-api] team form fetch failed");
+    }
+  }
 
   const realHomeCount = homeForm.length;
   const realAwayCount = awayForm.length;
@@ -10475,11 +12743,66 @@ function buildLeagueStandings(
   };
 }
 
+/** Real name+tour only — get_tournaments has no category/surface/location/
+ * dates/prize_money (only tournament_key/name/event_type_key/type), so the
+ * rest of TournamentRaw stays empty rather than fabricated. tour is derived
+ * from the real event_type_type text (e.g. "Wta Singles"), not guessed. */
 async function getActiveTournaments(): Promise<ActiveTournament[]> {
+  if (!CONFIG.TENNIS_API_KEY) return tourListCache ?? [];
+  if (tourListCache && Date.now() - tourListFetchedAt < TOUR_CACHE_TTL) return tourListCache;
+  try {
+    const tournaments = await apiTennis.getTournaments();
+    tourListCache = tournaments.map((t) => ({
+      id: t.tournament_key,
+      name: t.tournament_name,
+      category: "",
+      surface: "",
+      location: "",
+      date_start: "",
+      date_end: "",
+      prize_money: "",
+      tour: /wta/i.test(t.event_type_type) ? "wta" : "atp",
+    }));
+    tourListFetchedAt = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] tournaments fetch failed");
+  }
   return tourListCache ?? [];
 }
 
+/** Yesterday-through-today finished singles matches, mapped to the
+ * pre-existing TennisDailyResult shape. api-tennis.com has no "results"
+ * endpoint of its own — get_fixtures with a date range already includes
+ * finished matches, same source buildTennisUpcomingFromApiTennis uses for
+ * not-yet-started ones. */
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
+  if (!CONFIG.TENNIS_API_KEY) return tennisResultsCache ?? [];
+  if (tennisResultsCache && Date.now() - tennisResultsFetchedAt < TENNIS_RESULTS_CACHE_TTL) {
+    return tennisResultsCache;
+  }
+  try {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateStart = yesterday.toISOString().slice(0, 10);
+    const dateStop = new Date().toISOString().slice(0, 10);
+    const fixtures = await apiTennis.getFixtures({ date_start: dateStart, date_stop: dateStop });
+    tennisResultsCache = fixtures
+      .filter((fx) => fx.event_winner && fx.event_live !== "1")
+      .map((fx) => ({
+        id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
+        home: fx.event_first_player,
+        away: fx.event_second_player,
+        sets: buildApiTennisSets(fx.scores),
+        homeWon: fx.event_winner === "First Player",
+        status: fx.event_status || "Finished",
+        tournament: fx.tournament_name || fx.event_type_type || "Tênis",
+        date: fx.event_date,
+        time: fx.event_time,
+      }));
+    tennisResultsFetchedAt = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] daily results fetch failed");
+  }
   return tennisResultsCache ?? [];
 }
 
@@ -10528,10 +12851,96 @@ const ROUND_ORDER: Record<string, number> = {
   final: 7,
 };
 
+/** get_draw's bracket (rounds → matches → seeds/TBD/next_slot) flattened
+ * into the pre-existing flat TournamentMatch[] list — lossy (loses round
+ * grouping/seeding/progression, which the new TournamentBracket component
+ * renders in full instead), but reuses the already-working card with zero
+ * new frontend shape. get_draw carries no date/time per match, so fixtures
+ * for the same tournament_key are cross-referenced by match_key to backfill
+ * real date/status; a draw slot with no matching fixture (future round,
+ * not yet scheduled) keeps the draw's own status string and an empty date
+ * rather than a fabricated "Not Started"/today's date. */
 async function getTournamentDetail(id: string): Promise<TournamentDetail> {
   const cached = tourDetailCache.get(id);
-  if (cached) return cached.data;
-  throw new Error("Detalhe de torneio indisponível");
+  if (cached && Date.now() - cached.at < TOUR_DETAIL_TTL) return cached.data;
+  if (!CONFIG.TENNIS_API_KEY) {
+    if (cached) return cached.data;
+    throw new Error("Detalhe de torneio indisponível");
+  }
+  try {
+    const draw = await apiTennis.getDraw({ tournament_key: id });
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - 21);
+    const rangeStop = new Date();
+    rangeStop.setDate(rangeStop.getDate() + 21);
+    const fixtures = await apiTennis
+      .getFixtures({
+        date_start: rangeStart.toISOString().slice(0, 10),
+        date_stop: rangeStop.toISOString().slice(0, 10),
+        tournament_key: id,
+      })
+      .catch(() => [] as ApiTennisMatch[]);
+    const fixtureByKey = new Map(fixtures.map((fx) => [String(fx.event_key), fx]));
+
+    const toPlayer = (
+      p: { player_key: number; name: string } | null,
+      winnerKey: number | null,
+    ): TournamentMatchPlayer | null =>
+      p
+        ? {
+            id: String(p.player_key),
+            name: p.name,
+            totalscore: "",
+            s1: "",
+            s2: "",
+            s3: "",
+            s4: "",
+            s5: "",
+            winner: winnerKey != null && winnerKey === p.player_key,
+            serve: false,
+          }
+        : null;
+
+    const matches: TournamentMatch[] = [];
+    for (const bracket of draw.brackets) {
+      bracket.rounds.forEach((round, roundIdx) => {
+        for (const m of round.matches) {
+          const fx = m.match_key != null ? fixtureByKey.get(String(m.match_key)) : undefined;
+          const players: TournamentMatchPlayer[] = [];
+          const p1 = toPlayer(m.first_player, m.winner_player_key);
+          const p2 = toPlayer(m.second_player, m.winner_player_key);
+          if (p1) players.push(p1);
+          if (p2) players.push(p2);
+          if (players.length > 0 && players.some((p) => p.totalscore === "") && m.result) {
+            for (const p of players) p.totalscore = m.result;
+          }
+          matches.push({
+            id: `${API_TENNIS_ID_PREFIX}${m.match_key ?? `draw-${m.draw_key}`}`,
+            status: fx ? fx.event_status || "Not Started" : m.status || "",
+            date: fx?.event_date ?? "",
+            time: fx?.event_time ?? "",
+            court: "",
+            round: round.round_name,
+            roundOrder: ROUND_ORDER[round.round_name.toLowerCase()] ?? roundIdx + 1,
+            players,
+          });
+        }
+      });
+    }
+
+    const detail: TournamentDetail = {
+      id,
+      league: draw.tournament.tournament_name,
+      season: draw.tournament.tournament_season,
+      matches,
+    };
+    tourDetailCache.set(id, { data: detail, at: Date.now() });
+    return detail;
+  } catch (err) {
+    logger.error({ err, id }, "[api-tennis] tournament detail fetch failed");
+    if (cached) return cached.data;
+    throw new Error("Detalhe de torneio indisponível");
+  }
 }
 
 router.get("/tournaments", async (_req: Request, res: Response) => {
@@ -10557,7 +12966,33 @@ let standingsCache: StandingsTour | null = null;
 let standingsFetchedAt = 0;
 const STANDINGS_CACHE_TTL = 30 * 60 * 1000;
 
+function apiTennisStandingToPlayer(s: ApiTennisStanding): StandingPlayer {
+  return {
+    id: s.player_key,
+    name: s.player,
+    country: s.country,
+    rank: s.place,
+    points: s.points,
+    movement: s.movement,
+  };
+}
+
 async function getTennisStandings(): Promise<StandingsTour> {
+  if (!CONFIG.TENNIS_API_KEY) return standingsCache ?? { atp: [], wta: [] };
+  if (standingsCache && Date.now() - standingsFetchedAt < STANDINGS_CACHE_TTL) return standingsCache;
+  try {
+    const [atp, wta] = await Promise.all([
+      apiTennis.getStandings("ATP"),
+      apiTennis.getStandings("WTA"),
+    ]);
+    standingsCache = {
+      atp: atp.map(apiTennisStandingToPlayer),
+      wta: wta.map(apiTennisStandingToPlayer),
+    };
+    standingsFetchedAt = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] standings fetch failed");
+  }
   return standingsCache ?? { atp: [], wta: [] };
 }
 
@@ -10580,12 +13015,58 @@ router.get("/tournaments/:id", async (req: Request, res: Response) => {
   }
 });
 
+// Raw get_draw passthrough (rounds → matches → seeds/TBD/next_slot) for the
+// TournamentBracket component — /tournaments/:id above flattens the same
+// data into the pre-existing TournamentMatch[] list, which loses the round
+// grouping/seeding/progression this renders instead. apiTennis.getDraw
+// already caches internally, so this shares that cache with
+// getTournamentDetail rather than doubling the network calls.
+router.get("/tournaments/:id/draw", async (req: Request, res: Response) => {
+  const id = String(req.params["id"]);
+  if (!CONFIG.TENNIS_API_KEY) {
+    res.status(404).json({ error: "Chave do torneio indisponível" });
+    return;
+  }
+  try {
+    const draw = await apiTennis.getDraw({ tournament_key: id });
+    res.json(draw);
+  } catch (err) {
+    logger.error({ err, id }, "[api-tennis] raw draw fetch failed");
+    res.status(404).json({ error: "Chave do torneio indisponível" });
+  }
+});
+
 router.get("/results", async (_req: Request, res: Response) => {
   try {
     const results = await getTennisDailyResults();
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+// get_news is Ultra-plan-only per api-tennis.com's docs — a subscription-tier
+// error is handled the same as any other failure here (empty fallback), no
+// special guard. No UI consumes this yet; the route exists ready for when
+// one does.
+router.get("/tennis-news", async (req: Request, res: Response) => {
+  if (!CONFIG.TENNIS_API_KEY) {
+    res.json({ articles: [] });
+    return;
+  }
+  try {
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - 7);
+    const articles = await apiTennis.getNews({
+      date_start: rangeStart.toISOString().slice(0, 10),
+      date_stop: new Date().toISOString().slice(0, 10),
+      player_key: req.query.player_key ? String(req.query.player_key) : undefined,
+      tournament_key: req.query.tournament_key ? String(req.query.tournament_key) : undefined,
+    });
+    res.json({ articles });
+  } catch (err) {
+    logger.error({ err }, "[api-tennis] news fetch failed");
+    res.json({ articles: [] });
   }
 });
 
@@ -10612,6 +13093,49 @@ router.get("/mlb-results", async (_req: Request, res: Response) => {
   res.json({ results: [] });
 });
 
+// Football's own finished-match feed — GOAL API's dedicated /results/today
+// and /results/yesterday endpoints, real and populated (unlike the dead
+// stubs above, whose providers were removed). Distinct from
+// finishedMatchResults (in-memory, only covers matches this server was
+// itself tracking live) — this is the provider's own authoritative list of
+// every finished fixture for the day, regardless of whether we ever polled it.
+router.get("/football-results", async (req: Request, res: Response) => {
+  const range = req.query.range === "today" ? "today" : "yesterday";
+  const leagueId = typeof req.query.leagueId === "string" ? req.query.leagueId : "";
+  if (!CONFIG.GOAL_API_KEY) {
+    res.json({ results: [] });
+    return;
+  }
+  try {
+    // When the panel is scoped to a specific match's league, /results/league/:id
+    // returns only that competition's finished matches instead of the global
+    // today/yesterday feed mixing in every league worldwide.
+    const raw = leagueId
+      ? await goalApi.getResultsByLeague(leagueId)
+      : range === "today"
+        ? await goalApi.getResultsToday()
+        : await goalApi.getResultsYesterday();
+    res.json({ results: buildGoalApiResults(raw) });
+  } catch (err) {
+    logger.error({ err, range, leagueId }, "[goal-api] /football-results fetch failed");
+    res.json({ results: [] });
+  }
+});
+
+router.get("/football-results-stats", async (_req: Request, res: Response) => {
+  if (!CONFIG.GOAL_API_KEY) {
+    res.json({ stats: null });
+    return;
+  }
+  try {
+    const raw = await goalApi.getResultsStats();
+    res.json({ stats: buildGoalApiResultsStats(raw) });
+  } catch (err) {
+    logger.error({ err }, "[goal-api] /football-results-stats fetch failed");
+    res.json({ stats: null });
+  }
+});
+
 
 // getTennisOdds() (SportsAPI Pro V2 getUpcomingLeagueEventsV2/getPreMatchOddsV2
 // tennis odds + /tennis-odds route) and refreshTennisV2LeagueCache were
@@ -10620,8 +13144,32 @@ router.get("/mlb-results", async (_req: Request, res: Response) => {
 // extractTennisOverride) — makeTennisBaseOdds' _tennisPreMatchOdds cache
 // simply never gets a hit any more and falls through to its neutral default.
 
+// GOAL API's leagueId (fx.leagueId, populated on the football
+// upcoming/live builders) lets this route return a real table instead of
+// buildLeagueStandings' fully synthetic ELO-seeded generator — same
+// "real data patches synthetic" convention every other GOAL API-backed
+// route in this file follows. Falls back to the synthetic table on any
+// failure or when no leagueId is given (non-football, or GOAL API not
+// configured).
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
+  const leagueId = String(req.query["leagueId"] ?? "");
+  if (leagueId && CONFIG.GOAL_API_KEY) {
+    try {
+      const [raw, zonesRaw] = await Promise.all([
+        goalApi.getLeagueStandings(leagueId),
+        goalApi.getLeagueStandingsZones(leagueId).catch(() => null),
+      ]);
+      const zoneByTeamId = buildGoalApiStandingZoneMap(zonesRaw);
+      const built = buildGoalApiStandings(raw, league, zoneByTeamId);
+      if (built.teams.length > 0) {
+        res.json(built);
+        return;
+      }
+    } catch (err) {
+      logger.error({ err, leagueId }, "[goal-api] standings fetch failed");
+    }
+  }
   try {
     const standing = buildLeagueStandings(league, "", "");
     res.json(standing);
@@ -11505,6 +14053,13 @@ setInterval(() => {
   let anyChange = false;
   for (const [id, state] of liveMatchState.entries()) {
     if (state.sport !== "football") continue;
+    // A real PulseScore price is never touched by the synthetic Poisson
+    // drift model — shadowMatchSync.ts's runOddsComparisonPhase is the only
+    // writer of odds/markets for these fixtures. Suspension (goal/red-card
+    // delay) is computed independently in buildFootballLiveFromGoalApi off
+    // GOAL API's own event feed and still applies regardless of price
+    // source — skipping the drift loop here doesn't affect that.
+    if (state._priceSource === "pulsescore") continue;
     const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
     if (skip.includes(state.status)) continue;
     if (state.marketSuspension) {
@@ -11541,6 +14096,10 @@ setInterval(() => {
       updated.markets.cards !== state.markets.cards ||
       updated.markets.teamGoals !== state.markets.teamGoals;
 
+    if (oddsChanged || marketsChanged) {
+      updated.marketVersion = (state.marketVersion ?? 0) + 1;
+    }
+
     // Always advance state so _driftPhase / _marketNextUpdate are current
     liveMatchState.set(id, updated);
 
@@ -11548,13 +14107,12 @@ setInterval(() => {
       broadcastMatchDelta(id, {
         odds: updated.odds,
         markets: updated.markets,
+        marketVersion: updated.marketVersion,
         _marketNextUpdate: updated._marketNextUpdate,
       });
       anyChange = true;
     }
   }
-  // Push a full snapshot when any value actually changed so that clients
-  // which missed the delta (e.g. connected mid-cycle) see fresh data.
   if (anyChange) {
     broadcastLive().catch(() => {
       /* ignore */
@@ -11573,11 +14131,26 @@ type ConfrontosH2HMeeting = {
   league: string;
   country?: string;
 };
+type ConfrontosRecentMatch = {
+  date: string;
+  opponent: string;
+  score: string;
+  result: "W" | "D" | "L";
+  home: boolean;
+  league?: string;
+};
 type ConfrontosResult = {
   homeWins: number;
   awayWins: number;
   draws: number;
   recentMeetings: ConfrontosH2HMeeting[];
+  // Each team's OWN last matches (against whichever opponents they
+  // actually played, not necessarily each other) — separate from the
+  // recentMeetings head-to-head above. Football only for now (same
+  // GOAL API /teams/:id/results source buildGoalApiForm's "Forma" tab
+  // already uses); empty for tennis/other sports.
+  homeRecentMatches: ConfrontosRecentMatch[];
+  awayRecentMatches: ConfrontosRecentMatch[];
   team1Name: string;
   team2Name: string;
   sport: string;
@@ -11594,8 +14167,10 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   const matchId = String(req.query["matchId"] ?? "");
   const home = String(req.query["home"] ?? "").trim();
   const away = String(req.query["away"] ?? "").trim();
+  const homeTeamId = String(req.query["homeTeamId"] ?? "").trim();
+  const awayTeamId = String(req.query["awayTeamId"] ?? "").trim();
 
-  const cacheKey = `confrontos:${sport}:${matchId}:${home}:${away}`;
+  const cacheKey = `confrontos:${sport}:${matchId}:${home}:${away}:${homeTeamId}:${awayTeamId}`;
   const cached = confrontosCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < CONFRONTOS_TTL) {
     res.json(cached.data);
@@ -11605,18 +14180,82 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   let homeWins = 0,
     awayWins = 0,
     draws = 0;
-  const recentMeetings: ConfrontosH2HMeeting[] = [];
+  let recentMeetings: ConfrontosH2HMeeting[] = [];
+  let homeRecentMatches: ConfrontosRecentMatch[] = [];
+  let awayRecentMatches: ConfrontosRecentMatch[] = [];
   let team1Name = home,
     team2Name = away;
 
-  // No data provider left (all removed, 2026-09-08) — every matchId scheme
-  // now gets an empty recentMeetings/0-0-0 result below rather than a crash.
+  // Reported 2026-09-11: this route only ever had real H2H data for
+  // tennis (api-tennis.com's own /get_H2H) — every football match, and
+  // every other sport, always fell back to the hardcoded 0-0-0/empty
+  // result below (dead code note from 2026-09-08's provider removals).
+  // First football pass derived H2H by filtering one team's own
+  // /teams/:id/results for the opponent's name, believing GOAL API had no
+  // dedicated H2H endpoint — a user-captured live response same day proved
+  // that wrong: /h2h/:id1/:id2 is real, see buildGoalApiConfrontos.
+  if (sport === "football" && homeTeamId && awayTeamId && home && away) {
+    try {
+      const h2h = await goalApi.getH2H(homeTeamId, awayTeamId);
+      const built = buildGoalApiConfrontos(h2h, homeTeamId, home, away);
+      homeWins = built.homeWins;
+      awayWins = built.awayWins;
+      draws = built.draws;
+      recentMeetings = built.recentMeetings;
+    } catch (err) {
+      logger.error({ err, homeTeamId, awayTeamId }, "[goal-api] H2H fetch failed");
+    }
+    // Each team's own last 5 results — separate from the head-to-head
+    // above, requested so a team's real recent form (against whichever
+    // opponents they actually faced) shows alongside the direct history,
+    // both pré-jogo and ao vivo. Fetched independently so one team's
+    // failure doesn't blank out the other's.
+    const [homeResultsSettled, awayResultsSettled] = await Promise.allSettled([
+      goalApi.getTeamResults(homeTeamId),
+      goalApi.getTeamResults(awayTeamId),
+    ]);
+    if (homeResultsSettled.status === "fulfilled") {
+      homeRecentMatches = buildGoalApiRecentMatches(homeResultsSettled.value);
+    } else {
+      logger.error({ err: homeResultsSettled.reason, homeTeamId }, "[goal-api] home team results fetch failed");
+    }
+    if (awayResultsSettled.status === "fulfilled") {
+      awayRecentMatches = buildGoalApiRecentMatches(awayResultsSettled.value);
+    } else {
+      logger.error({ err: awayResultsSettled.reason, awayTeamId }, "[goal-api] away team results fetch failed");
+    }
+  } else if (sport === "tennis" && matchId && CONFIG.TENNIS_API_KEY) {
+    try {
+      const rangeStart = new Date();
+      rangeStart.setDate(rangeStart.getDate() - 3);
+      const rangeStop = new Date();
+      rangeStop.setDate(rangeStop.getDate() + 3);
+      const fixtures = await apiTennis.getFixtures({
+        date_start: rangeStart.toISOString().slice(0, 10),
+        date_stop: rangeStop.toISOString().slice(0, 10),
+        match_key: matchId,
+      });
+      const fx = fixtures[0];
+      if (fx?.first_player_key && fx?.second_player_key) {
+        const h2h = await apiTennis.getH2H(fx.first_player_key, fx.second_player_key);
+        const built = buildApiTennisConfrontos(h2h, home, away);
+        homeWins = built.homeWins;
+        awayWins = built.awayWins;
+        draws = built.draws;
+        recentMeetings = built.recentMeetings;
+      }
+    } catch (err) {
+      logger.error({ err, matchId }, "[api-tennis] H2H fetch failed");
+    }
+  }
 
   const result: ConfrontosResult = {
     homeWins,
     awayWins,
     draws,
     recentMeetings,
+    homeRecentMatches,
+    awayRecentMatches,
     team1Name,
     team2Name,
     sport,
@@ -11627,23 +14266,86 @@ router.get("/confrontos", async (req: Request, res: Response) => {
 
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
 // Used to be sourced from SportMonks team schedules; that provider was
-// removed and nothing replaces it, so this just reports no fixtures rather
-// than 404 on the frontend's existing per-match fetch — same degraded-but-
-// not-broken shape as /storylines below.
-router.get("/team-upcoming", async (_req: Request, res: Response) => {
-  res.json({ fixtures: [] });
+// removed. Football now resolves it via GOAL API: the frontend passes the
+// fixture's matchId + which side (home/away) it wants, so this resolves
+// that side's real team id off the fixture (goalapi-football-<fixtureId>)
+// and asks GOAL API for that team's upcoming fixtures directly.
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "");
+  const side = req.query["side"] === "away" ? "away" : "home";
+  const limit = Math.max(1, Math.min(20, Number(req.query["limit"]) || 5));
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const fixture = await goalApi.getFixtureById(fixtureId);
+    const teamId = side === "home" ? fixture.homeTeam?.id : fixture.awayTeam?.id;
+    if (!teamId) {
+      res.json({ fixtures: [] });
+      return;
+    }
+    const upcoming = await goalApi.getTeamUpcoming(teamId);
+    res.json({ fixtures: buildGoalApiTeamUpcoming(upcoming, teamId).slice(0, limit) });
+  } catch (err) {
+    logger.error({ err, matchId, side }, "[goal-api] team-upcoming fetch failed");
+    res.json({ fixtures: [] });
+  }
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
-// Used to be sourced from SportMonks; that provider was removed and nothing
-// replaces it, so this reports "unavailable" rather than a stale/fake profile.
+// Used to be sourced from SportMonks (numeric ids); that provider was
+// removed and left this hardcoded to 404 ever since. GOAL API's /players/:id
+// (confirmed real 2026-09-09) is the real replacement — ids are opaque cuid
+// strings, not numbers, hence the frontend's playerId type moving from
+// number to string alongside this fix.
 router.get("/player-profile/:id", async (req: Request, res: Response) => {
-  const playerId = Number(req.params.id);
-  if (!Number.isFinite(playerId) || playerId <= 0) {
-    res.status(400).json({ error: "invalid player id" });
+  const playerId = String(req.params.id ?? "");
+  const sport = String(req.query.sport ?? "football");
+  if (!playerId) {
+    res.status(404).json({ error: "player profile unavailable" });
     return;
   }
-  res.status(404).json({ error: "player profile unavailable" });
+
+  if (sport === "tennis") {
+    if (!CONFIG.TENNIS_API_KEY) {
+      res.status(404).json({ error: "player profile unavailable" });
+      return;
+    }
+    try {
+      const players = await apiTennis.getPlayers({ player_key: playerId });
+      const player = players[0];
+      if (!player?.player_key) {
+        res.status(404).json({ error: "player profile unavailable" });
+        return;
+      }
+      res.json({ ...buildApiTennisPlayerProfile(player), sport: "tennis" });
+    } catch (err) {
+      logger.error({ err, playerId }, "[api-tennis] player profile fetch failed");
+      res.status(404).json({ error: "player profile unavailable" });
+    }
+    return;
+  }
+
+  if (!CONFIG.GOAL_API_KEY) {
+    res.status(404).json({ error: "player profile unavailable" });
+    return;
+  }
+  try {
+    const [player, stats] = await Promise.all([
+      goalApi.getPlayerById(playerId),
+      goalApi.getPlayerStatistics(playerId).catch(() => null),
+    ]);
+    if (!player?.id) {
+      res.status(404).json({ error: "player profile unavailable" });
+      return;
+    }
+    res.json({ ...buildGoalApiPlayerProfile(player, stats), sport: "football" });
+  } catch (err) {
+    logger.error({ err, playerId }, "[goal-api] player profile fetch failed");
+    res.status(404).json({ error: "player profile unavailable" });
+  }
 });
 
 // ─── Live Storylines ────────────────────────────────────────────────────────
@@ -11653,6 +14355,79 @@ router.get("/player-profile/:id", async (req: Request, res: Response) => {
 // not-broken shape as /volleyball-results etc. above.
 router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
   res.json({ storyline: null });
+});
+
+// ─── Lineups ────────────────────────────────────────────────────────────────
+// Same dead-until-now situation as /storylines above, but football now has a
+// real replacement: GOAL API's /fixtures/:id/lineups — field names confirmed
+// real 2026-09-09 (see GoalApiLineupEntry). Non-football matchIds (or GOAL
+// API not configured) get the same empty-but-valid shape the frontend
+// already treats as "not available".
+const GOAL_API_FOOTBALL_ID_PREFIX = "goalapi-football-";
+// ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
+// GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
+// by GOAL API's own leagueId (fx.leagueId, now populated on the football
+// upcoming/live builders above), not by league name like the legacy
+// /league-standings route.
+router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
+  const leagueId = req.params.leagueId ?? "";
+  if (!leagueId || !CONFIG.GOAL_API_KEY) {
+    res.json({ scorers: [] });
+    return;
+  }
+  try {
+    const raw = await goalApi.getLeagueTopScorers(leagueId);
+    res.json({ scorers: buildGoalApiTopScorers(raw) });
+  } catch (err) {
+    logger.error({ err, leagueId }, "[goal-api] top-scorers fetch failed");
+    res.json({ scorers: [] });
+  }
+});
+
+router.get("/lineups/:matchId", async (req: Request, res: Response) => {
+  const matchId = req.params.matchId ?? "";
+  const empty = {
+    confirmed: false,
+    home: { starters: [], bench: [] },
+    away: { starters: [], bench: [] },
+  };
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json(empty);
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const [raw, fixture] = await Promise.all([
+      goalApi.getFixtureLineups(fixtureId),
+      goalApi.getFixtureById(fixtureId).catch(() => null),
+    ]);
+    logger.info({ fixtureId, raw }, "[goal-api] lineups raw response");
+    res.json(buildGoalApiLineups(raw, fixture?.homeTeamSystem, fixture?.awayTeamSystem));
+  } catch (err) {
+    logger.error({ err, fixtureId }, "[goal-api] lineups fetch failed");
+    res.json(empty);
+  }
+});
+
+// GOAL API's own model-computed match-outcome probabilities — a distinct
+// data source from this file's odds-derived "Biblioteca de Combinações"
+// (predictions.ts's publishCombosForMatch, which works off match.odds/
+// markets, not this endpoint). Informational only — feeds the "Previsão"
+// card, not settlement.
+router.get("/prediction/:matchId", async (req: Request, res: Response) => {
+  const matchId = req.params.matchId ?? "";
+  if (!matchId.startsWith(GOAL_API_FOOTBALL_ID_PREFIX) || !CONFIG.GOAL_API_KEY) {
+    res.json({ prediction: null });
+    return;
+  }
+  const fixtureId = matchId.slice(GOAL_API_FOOTBALL_ID_PREFIX.length);
+  try {
+    const raw = await goalApi.getFixturePrediction(fixtureId);
+    res.json({ prediction: buildGoalApiPrediction(raw) });
+  } catch (err) {
+    logger.error({ err, fixtureId }, "[goal-api] prediction fetch failed");
+    res.json({ prediction: null });
+  }
 });
 
 // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────

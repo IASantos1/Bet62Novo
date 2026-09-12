@@ -243,6 +243,39 @@ export async function initDb(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS provider_competitions_provider_key_idx
         ON provider_competitions (provider, provider_sport, provider_competition_key);
 
+      CREATE TABLE IF NOT EXISTS canonical_matches (
+        id                    SERIAL PRIMARY KEY,
+        sport                 TEXT NOT NULL,
+        home_name             TEXT NOT NULL,
+        away_name             TEXT NOT NULL,
+        normalized_home_name  TEXT NOT NULL,
+        normalized_away_name  TEXT NOT NULL,
+        competition_id        INTEGER,
+        league_name           TEXT,
+        kickoff_utc           TIMESTAMPTZ,
+        status                TEXT NOT NULL DEFAULT 'scheduled',
+        created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS match_provider_mapping (
+        id                SERIAL PRIMARY KEY,
+        provider          TEXT NOT NULL,
+        provider_sport    TEXT NOT NULL,
+        provider_match_id TEXT NOT NULL,
+        match_id          INTEGER NOT NULL REFERENCES canonical_matches(id) ON DELETE CASCADE,
+        home_name_raw     TEXT NOT NULL,
+        away_name_raw     TEXT NOT NULL,
+        confidence        INTEGER NOT NULL DEFAULT 100,
+        first_seen_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS match_provider_mapping_provider_key_idx
+        ON match_provider_mapping (provider, provider_sport, provider_match_id);
+
       CREATE TABLE IF NOT EXISTS competition_configs (
         id                            SERIAL PRIMARY KEY,
         competition_id                INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,

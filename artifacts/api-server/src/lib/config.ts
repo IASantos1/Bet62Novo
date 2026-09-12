@@ -57,6 +57,204 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
+// ── BET62 Live + Match Tracker + Streaming ──
+//
+//  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
+//    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
+//      polling para futebol e tênis; WebSocket (~1s) dedicado ao futebol
+//      mas ainda não consumido no payload ao vivo (só observação — ver
+//      footballWs.ts).
+//    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
+//
+//  TRACKER LIVE: StatScore — placar/minuto/incidentes AO VIVO.
+//    • Endpoint: /get_pushes/{eventId}. Auth: header X-Auth (OBRIGATÓRIO) + query ?auth= fallback compat.
+//    • Requer Referer: https://widgets.statscore.com/. Payload mais rico (minute, status, incidents[]).
+//    • Requer mapeamento MANUAL do admin (live_stream_mappings.statscore_event_id).
+//    • Fallback automático: SportScore -> Statpal -> PulseScore (por nome de time, zero trabalho manual).
+//
+//  STATS/EVENTOS: StatPal — dados estatísticos, play-by-play, metadados.
+//    • RESPONSABILIDADES: Estatísticas de jogo, play-by-play, H2H, rankings/standings, logos, ligas detalhadas.
+//    • NÃO FAZ: Agregação multi-bookmaker de odds (isso é PulseScore).
+//    • Soccer: /v2/soccer/matches/live + /match/{id}/statistics. Outros esportes: /v1/*
+//    • Cota: 300.000 requests/dia. Cache TTL rigoroso. Verificação de quota via /user-request-count (GRÁTIS, não conta na cota).
+//    • 100% AUTOMÁTICO por nome de time (ZERO trabalho manual por partida — futebol apenas).
+//
+//  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
+//  7 campos de vídeo em live_stream_mappings por evento.
+// SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
+// between the host and /playlist.m3u8 was originally assumed to be a fixed
+// per-account value, but two real BetBY captures for two different matches
+// showed two different segments — it's per-match/per-stream, so it lives in
+// live_stream_mappings.videoBasePath (admin-set per event, like the key)
+// rather than as a config default here. statsHost + per-video
+// matchId/sportId/tournamentId/key/basePath come from live_stream_mappings.
+const SMYTDRYT_HOST_URL =
+  process.env["SMYTDRYT_HOST_URL"]?.trim() || "https://edg05.smytdryt.live";
+const SMYTDRYT_DEFAULT_STATS_HOST =
+  process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
+
+// PropLine — AGREGADOR CROSS-BOOK DE ODDS + PLAYER PROPS + +EV + HISTORY + RESULTS.
+//   - RESPONSABILIDADES: 24 bookmakers (tradicionais + DFS exchanges), odds em
+//     tempo real, player props completos (até 500+ mercados/jogo), fair-line
+//     no-vig + cálculo +EV embutido (/ev), line-movement history, closing-line
+//     (CLV), resolução real de player props contra box-scores (/results),
+//     placar live (/scores ~90s), webhooks push de line_movement e resolution.
+//   - Plano STREAMING $79/mês ativado: 1.000.000 req/dia + 10 webhooks ativos.
+//   - Compatível com the-odds-api (troca só a base URL).
+//   - SPORT KEYS PROPRIOS do PropLine, mapeados no football.ts: baseball_mlb,
+//     basketball_nba, hockey_nhl, soccer_epl / soccer_la_liga / soccer_serie_a /
+//     soccer_bundesliga / soccer_ligue_1 / soccer_mls (+ aliases the-odds-api).
+const PROPLINE_API_KEY = process.env["PROPLINE_API_KEY"] ?? "";
+const PROPLINE_BASE_URL =
+  process.env["PROPLINE_BASE_URL"]?.trim() || "https://api.prop-line.com";
+const PROPLINE_API_VERSION =
+  process.env["PROPLINE_API_VERSION"]?.trim() || "v1";
+const PROPLINE_ENABLED_SPORTS = (
+  process.env["PROPLINE_ENABLED_SPORTS"]?.trim() || ""
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const PROPLINE_DEFAULT_BOOKMAKERS = (
+  process.env["PROPLINE_DEFAULT_BOOKMAKERS"]?.trim() || ""
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// GOAL API (api.goal-api.com) — dedicated football provider (2026-09-09).
+// Auth is Bearer (not X-API-Key/query param like PropLine). Odds have no
+// realtime push even over WebSocket — the provider's own docs confirm live
+// odds only refresh every ~2 minutes — so GOAL_API_ODDS_POLL_MS matches that
+// cadence rather than polling faster for no benefit. GOAL_API_MAX_WS_MATCHES
+// mirrors the account's plan tier (FREE=0, BASIC=5, PRO=20, ENTERPRISE=1000
+// concurrent match subscriptions) — defaults to 0 (FREE) so the WebSocket
+// Data Collector stays inert until this is raised, with no code change
+// needed when upgrading plans.
+const GOAL_API_KEY = process.env["GOAL_API_KEY"] ?? "";
+const GOAL_API_BASE_URL =
+  process.env["GOAL_API_BASE_URL"]?.trim() || "https://api.goal-api.com/v1";
+const GOAL_API_WS_URL =
+  process.env["GOAL_API_WS_URL"]?.trim() || "wss://api.goal-api.com/ws";
+const GOAL_API_WEBHOOK_SECRET = process.env["GOAL_API_WEBHOOK_SECRET"] ?? "";
+const GOAL_API_MAX_WS_MATCHES = Number(process.env["GOAL_API_MAX_WS_MATCHES"] ?? "0") || 0;
+const GOAL_API_ODDS_POLL_MS = Number(process.env["GOAL_API_ODDS_POLL_MS"] ?? "120000") || 120_000;
+const GOAL_API_MAX_ODDS_DELTA_PCT = Number(process.env["GOAL_API_MAX_ODDS_DELTA_PCT"] ?? "40") || 40;
+
+// api-tennis.com — dedicated tennis provider (2026-09-09), the first tennis
+// data source this platform has ever had (PulseScore/SportMonks tennis were
+// both removed earlier this session). Auth is an `APIkey` QUERY PARAM (not
+// a Bearer header like GOAL API), and every operation goes through one
+// endpoint with a `method=` selector rather than separate REST paths — the
+// response envelope is `{success, result}`, not GOAL API's `{success,
+// data}`. get_fixtures/get_livescore already embed pointbypoint/scores/
+// statistics inline (no separate per-match calls needed). A real inbound
+// WebSocket (confirmed 2026-09-09) pushes live event + point-by-point
+// updates using the SAME APIkey — same auth, separate endpoint — used as a
+// low-latency layer on top of the REST poll, never a replacement for it.
+const TENNIS_API_KEY = process.env["TENNIS_API_KEY"] ?? "";
+const TENNIS_API_BASE_URL =
+  process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";
+const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss.api-tennis.com/live";
+
+// PulseScore (api.pulsescore.net) — dedicated odds/markets/bookmakers
+// provider (2026-09-10), confirmed real via 5 endpoints the user pasted
+// (soccer/leagues, soccer/events list+detail, live-events list+detail).
+// Auth is a plain `x-secret: <key>` header — a third distinct auth style
+// from GOAL API's Bearer and api-tennis's APIkey query param. Every
+// response is already normalized on PulseScore's side into
+// canonicalMarket/canonicalOutcome (MATCH_RESULT, OVER_UNDER,
+// ASIAN_HANDICAP, ...) with numeric `odds` and a raw `rawOdds` string kept
+// alongside — this client only wraps the transport, real market/odds
+// normalization into BET62's own shape is a separate, later step (see
+// providers/pulsescore/README.md).
+const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
+const PULSESCORE_BASE_URL =
+  process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net";
+// Confirmed real in production (2026-09-10): the account's PRO plan enforces
+// 1 request/second per bookmaker (HTTP 429 "Too many requests..." on the
+// second request), and PulseScoreClient had no throttling — the shadow-match
+// sync's own pagination loop tripped it (two requests 27ms apart). Default
+// is slightly over 1000ms to leave margin for clock/network jitter.
+const PULSESCORE_MIN_REQUEST_INTERVAL_MS =
+  Number(process.env["PULSESCORE_MIN_REQUEST_INTERVAL_MS"] ?? "1100") || 1100;
+// Confirmed real via the user-provided PulseScore docs (2026-09-10): the
+// PRO plan (this account's plan) includes 1 concurrent WebSocket
+// connection per bookmaker, auth via a `key` QUERY PARAM (not the REST
+// client's `x-secret` header) — this is the 1xBet ("onexbet") bookmaker's
+// endpoint specifically, matching every REST path this integration already
+// uses.
+// UNCONFIRMED 2026-09-11: mirrors the REST path's onexbet->v3/bet365
+// switch, but unlike the REST paths (each verified via a real request),
+// this exact WS path was never tested against bet365. Low risk either
+// way — startPulseScoreWebSocket() is called with no callback (see
+// api/index.ts), so nothing consumes its frames yet; a wrong URL just
+// means silent reconnect attempts, no functional impact.
+const PULSESCORE_WS_URL =
+  process.env["PULSESCORE_WS_URL"]?.trim() || "wss://api.pulsescore.net/api/v3/bet365/ws/live";
+
+// sports.bzzoiro.com — dedicated real ball-position provider (2026-09-11),
+// added specifically to drive the mini pitch tracker's ball movement with
+// real x/y coordinates instead of a text-derived zone guess. Confirmed real
+// via the user's own captured REST (`/events/`, `/events/:id/stats/`) and
+// WebSocket (`livedata`/`action` frames with real per-play coordinates)
+// responses the same day. Auth is `Authorization: Token <key>` for REST and
+// a `?token=` query param for the WebSocket (confirmed working against a
+// real match, live-tested by the user 2026-09-11). This is strictly
+// additive: GOAL API remains the source of score/commentary/stats, and
+// PulseScore remains the sole live football odds source — this provider
+// only ever supplies `_ballPosition` on LiveMatchState, nothing else.
+const BZZOIRO_API_KEY = process.env["BZZOIRO_API_KEY"] ?? "";
+const BZZOIRO_BASE_URL =
+  process.env["BZZOIRO_BASE_URL"]?.trim() || "https://sports.bzzoiro.com/api/v2";
+const BZZOIRO_WS_URL =
+  process.env["BZZOIRO_WS_URL"]?.trim() || "wss://sports.bzzoiro.com/live/football/";
+
+// Football (soccer) provider selection knobs — two independent switches so
+// we can mix-and-match sources without code changes, and A/B the best
+// provider for each job independently. These are NOW the SOURCE OF TRUTH
+// for matches.ts scheduling (2026-09-10) — no more "matches.ts reads
+// providers in its own order" caveat; we collapsed the routing here so a
+// single env-var flip re-routes both upcoming and live pipelines.
+//
+// Legend (matches the hybrid architecture diagram exactly):
+//
+//   DAILY FIXTURES / LIVE TRACKER (partidas, score, eventos, estatísticas,
+//     commentary, xG) — GOAL API is the authority. PulseScore and PropLine
+//     NEVER return fixture schedules or match state, only odds/markets +
+//     their own scoreboards (treated as 2nd class cross-check, never the
+//     user-visible clock). Fallback chain: goalapi → propline (bask/hock/
+//     volley/mma only) → pulsescore → statpal.
+//   ODDS / MERCADOS (1X2, Handicap, O/U, BTTS, Correct Score, Corners,
+//     Cards, Next Goal, Asian, Goalscorers, ...) — PULSESCORE live +
+//     PropLine cross-book fallback for player props/+EV/history. FOOTBALL
+//     ODDS are ALWAYS gated on a real upstream price; the synthetic Poisson
+//     baseline is now ONLY used as (a) the anchor for drift calculations
+//     inside a live match and (b) a preview/placeholder in the UI before a
+//     real price loads — routes/bets.ts NEVER accepts a bet without a real
+//     upstream source tagged in _priceSource.
+//   REFERENCE / STATS / HISTORICAL (H2H, standings, settled results,
+//     league metadata, deep statistics per team) — STATPAL first (richest
+//     soccer payload in the stack, Brasileirão Série C/D + state cups OK),
+//     then PulseScore tournament endpoints, then GOAL API's own stats as a
+//     last resort (its stats payload is live-only, no historical pull).
+//
+// Env override knobs (all 3 are explicit so Railway can flip any single
+// tier without code):
+//   FOOTBALL_DAILY_PROVIDER     = "goalapi" | "propline" | "pulsescore" | "statpal"
+//   FOOTBALL_ODDS_PROVIDER      = "pulsescore" | "propline" | "goalapi" | "statpal"   ← NEW
+//   FOOTBALL_REFERENCE_PROVIDER = "statpal" | "pulsescore" | "goalapi"
+type FootballProvider = "goalapi" | "propline" | "pulsescore" | "statpal";
+const FOOTBALL_DAILY_PROVIDER: FootballProvider =
+  (process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() as FootballProvider | undefined) ??
+  (GOAL_API_KEY ? "goalapi" : PROPLINE_API_KEY ? "propline" : "pulsescore");
+const FOOTBALL_ODDS_PROVIDER: FootballProvider =
+  (process.env["FOOTBALL_ODDS_PROVIDER"]?.trim() as FootballProvider | undefined) ??
+  (PULSESCORE_API_KEY ? "pulsescore" : PROPLINE_API_KEY ? "propline" : "goalapi");
+const FOOTBALL_REFERENCE_PROVIDER: FootballProvider =
+  (process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() as FootballProvider | undefined) ??
+  "statpal";
+
 export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
@@ -68,6 +266,33 @@ export const CONFIG = {
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
+  SMYTDRYT_HOST_URL,
+  SMYTDRYT_DEFAULT_STATS_HOST,
+  PROPLINE_API_KEY,
+  PROPLINE_BASE_URL,
+  PROPLINE_API_VERSION,
+  PROPLINE_ENABLED_SPORTS,
+  PROPLINE_DEFAULT_BOOKMAKERS,
+  GOAL_API_KEY,
+  GOAL_API_BASE_URL,
+  GOAL_API_WS_URL,
+  GOAL_API_WEBHOOK_SECRET,
+  GOAL_API_MAX_WS_MATCHES,
+  GOAL_API_ODDS_POLL_MS,
+  GOAL_API_MAX_ODDS_DELTA_PCT,
+  TENNIS_API_KEY,
+  TENNIS_API_BASE_URL,
+  TENNIS_API_WS_URL,
+  PULSESCORE_API_KEY,
+  PULSESCORE_BASE_URL,
+  PULSESCORE_MIN_REQUEST_INTERVAL_MS,
+  PULSESCORE_WS_URL,
+  BZZOIRO_API_KEY,
+  BZZOIRO_BASE_URL,
+  BZZOIRO_WS_URL,
+  FOOTBALL_DAILY_PROVIDER,
+  FOOTBALL_ODDS_PROVIDER,
+  FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,
