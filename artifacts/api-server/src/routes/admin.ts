@@ -2924,6 +2924,82 @@ router.get("/pulsescore-market-dump", adminMiddleware, async (req: AdminRequest,
   }
 });
 
+// User asked directly (2026-09-12): "quantos mercados a api pulsescore
+// usando bet365 disponibiliza" — surveys N real matches (live-priced first,
+// then prematch-priced) and tallies every distinct (period, canonicalMarket,
+// rawName) market type bet365 actually sent across them. Sequential calls
+// through the shared `pulseScore` client instance already serialize through
+// its own 1 req/sec PRO-plan throttle (see client.ts) — no separate rate
+// limiting needed here, but it does mean this request takes roughly
+// `limit` seconds to complete.
+router.get("/pulsescore-market-survey", adminMiddleware, async (req: AdminRequest, res) => {
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 40));
+
+  const eventIds: string[] = [];
+  for (const state of liveMatchState.values()) {
+    const s = state as unknown as { _priceSource?: string; _pulseScoreEventId?: string };
+    if (s._priceSource === "pulsescore" && s._pulseScoreEventId) {
+      eventIds.push(s._pulseScoreEventId);
+      if (eventIds.length >= limit) break;
+    }
+  }
+  if (eventIds.length < limit) {
+    for (const gid of getPrematchPulseScorePricedFixtureIds()) {
+      const p = getPrematchPulsePrice(gid);
+      if (p?.pulseScoreEventId) eventIds.push(p.pulseScoreEventId);
+      if (eventIds.length >= limit) break;
+    }
+  }
+
+  type MarketTally = {
+    period: string;
+    canonicalMarket: string;
+    rawName: string;
+    matchesSeen: number;
+    sampleSelectionCounts: number[];
+  };
+  const marketStats = new Map<string, MarketTally>();
+  const errors: string[] = [];
+  let matchesSurveyed = 0;
+
+  for (const eventId of eventIds) {
+    try {
+      let raw;
+      try {
+        raw = await pulseScore.getLiveEventById(eventId);
+      } catch {
+        raw = await pulseScore.getSoccerEventById(eventId);
+      }
+      matchesSurveyed++;
+      for (const m of raw.markets) {
+        const key = `${m.period}::${m.canonicalMarket}::${m.rawName}`;
+        const entry = marketStats.get(key) ?? {
+          period: m.period,
+          canonicalMarket: m.canonicalMarket,
+          rawName: m.rawName,
+          matchesSeen: 0,
+          sampleSelectionCounts: [],
+        };
+        entry.matchesSeen++;
+        if (entry.sampleSelectionCounts.length < 3) entry.sampleSelectionCounts.push(m.selections.length);
+        marketStats.set(key, entry);
+      }
+    } catch (err) {
+      errors.push(`${eventId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const markets = [...marketStats.values()].sort((a, b) => b.matchesSeen - a.matchesSeen);
+
+  res.json({
+    matchesSurveyed,
+    distinctEventIdsRequested: eventIds.length,
+    distinctMarketTypes: markets.length,
+    markets,
+    errors,
+  });
+});
+
 router.get("/propline-sports", adminMiddleware, async (_req: AdminRequest, res) => {
   if (!CONFIG.PROPLINE_API_KEY) {
     res.status(503).json({ configured: false });
