@@ -2886,6 +2886,7 @@ router.get("/pulsescore-market-dump", adminMiddleware, async (req: AdminRequest,
         selectionCount: m.selections.length,
         sampleSelections: m.selections.slice(0, 8).map((s) => ({
           canonicalOutcome: s.canonicalOutcome,
+          rawName: s.rawName,
           line: s.line,
           odds: s.odds,
           isActive: s.isActive,
