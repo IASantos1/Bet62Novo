@@ -284,6 +284,42 @@ function findLiveOverUnderLines(
   return out.sort((a, b) => a.line - b.line);
 }
 
+/** Maps /get_fixtures and /get_livescore's `statistics[]` array (real per
+ * confirmed docs — aces, double faults, % of first-serve points won,
+ * break points, etc., keyed by player_key/stat_period/stat_type/stat_name)
+ * onto the same {title, rows: [{name, home, away}]} shape the football
+ * side's buildGoalApiMatchStats already produces for the shared
+ * "Estatísticas" tab — real bug fixed 2026-09-12 (user-reported: that tab
+ * was always empty for tennis matches, since nothing ever built this
+ * shape from api-tennis.com's real statistics field even though the docs
+ * confirm it's populated once available). Only stat_period === "match"
+ * rows are used — this widget shows whole-match totals, not a per-set
+ * breakdown (api-tennis.com's docs don't show a per-set stat_period value
+ * in any real example, so grouping by anything else would be guessing). */
+export function buildApiTennisMatchStats(
+  statistics: ApiTennisMatch["statistics"] | null | undefined,
+  homePlayerKey: string,
+  awayPlayerKey: string,
+): Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> {
+  if (!statistics || statistics.length === 0) return [];
+  const groups = new Map<string, Map<string, { home: string; away: string }>>();
+  for (const s of statistics) {
+    if (s.stat_period !== "match") continue;
+    if (!groups.has(s.stat_type)) groups.set(s.stat_type, new Map());
+    const rows = groups.get(s.stat_type)!;
+    if (!rows.has(s.stat_name)) rows.set(s.stat_name, { home: "-", away: "-" });
+    const row = rows.get(s.stat_name)!;
+    if (String(s.player_key) === String(homePlayerKey)) row.home = s.stat_value;
+    else if (String(s.player_key) === String(awayPlayerKey)) row.away = s.stat_value;
+  }
+  return [...groups.entries()]
+    .map(([title, rows]) => ({
+      title,
+      rows: [...rows.entries()].map(([name, v]) => ({ name, ...v })),
+    }))
+    .filter((g) => g.rows.some((r) => r.home !== "-" || r.away !== "-"));
+}
+
 export function extractApiTennisLiveMarkets(
   rows: ApiTennisLiveOddsEntry[] | null | undefined,
 ): ApiTennisRealLiveMarkets {
