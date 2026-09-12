@@ -307,7 +307,12 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
       })()
     : undefined;
 
-  const correctScoreMarket = findMarketLoose(ev, ["CORRECT_SCORE", "EXACT_SCORE"], "FULL_TIME");
+  // Real bet365 payload (confirmed 2026-09-12): the full-time correct-score
+  // market comes back as rawName "Final Score" (canonicalMarket "OTHER"),
+  // not "Correct Score"/"Exact Score" — added as its own needle. The
+  // per-selection parsing below already has a rawName-regex fallback
+  // ("1-0" etc match directly), so finding the market is the only gap.
+  const correctScoreMarket = findMarketLoose(ev, ["CORRECT_SCORE", "EXACT_SCORE", "final score"], "FULL_TIME");
   const correctScore: Record<string, number> | undefined = correctScoreMarket
     ? (() => {
         const out: Record<string, number> = {};
@@ -415,8 +420,20 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
         if (s.line == null || !Number.isFinite(s.line)) continue;
         const rec = m.get(s.line) ?? { over: undefined as number | undefined, under: undefined as number | undefined };
         const out = s.canonicalOutcome.toUpperCase();
-        if (out === "OVER" || out.startsWith("O") || out.startsWith("MORE")) rec.over = s.odds;
-        else if (out === "UNDER" || out.startsWith("U") || out.startsWith("LESS")) rec.under = s.odds;
+        // Real bet365 payload (confirmed 2026-09-12): corners over/under
+        // markets ("Match Corners", "2-Way Corners", "Asian Corners") tag
+        // EVERY selection generic canonicalOutcome "OTHER" — the previous
+        // `out.startsWith("O")` fuzzy match treated "OTHER" itself as a
+        // match for "Over", so a same-line "Exactly" selection (also
+        // "OTHER", also with a `line`) could silently clobber the real Over
+        // price. Match exact canonicalOutcome first, falling back to
+        // rawName only when canonicalOutcome is the generic placeholder —
+        // never a fuzzy prefix that "OTHER" itself satisfies.
+        const rawOut = s.rawName.trim().toUpperCase();
+        const isOver = out === "OVER" || out === "MORE" || (out === "OTHER" && rawOut === "OVER");
+        const isUnder = out === "UNDER" || out === "LESS" || (out === "OTHER" && rawOut === "UNDER");
+        if (isOver) rec.over = s.odds;
+        else if (isUnder) rec.under = s.odds;
         m.set(s.line, rec as { over: number; under: number });
       }
     }
@@ -439,7 +456,17 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   // mapped here (would need its own market type, out of scope for this
   // pass; see the session notes on this decision).
   const handicapLines = asianHandicapAllLines;
-  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER"], "FULL_TIME");
+  // Real bet365 payload (confirmed 2026-09-12): the actual corners
+  // over/under markets ("Match Corners", "2-Way Corners", "Asian Corners")
+  // come back tagged canonicalMarket "OTHER" — CORNERS_OVER_UNDER only ever
+  // matched a HOME/AWAY-winner "Corners" market with no lines at all
+  // (contributes nothing here since it has no OVER/UNDER selections), so
+  // the real lines were never found. "corners" as a rawName needle catches
+  // all three real markets; findMarketsLoose already scopes to FULL_TIME,
+  // and any non-over/under corners market it also matches (the winner
+  // market, "Corners Race") is harmlessly dropped by the clean-map filter
+  // above since it never populates both sides of a line.
+  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER", "corners"], "FULL_TIME");
   const cardsLines = aggregateLineMarkets(["BOOKINGS_TOTAL", "TOTAL_CARDS", "CARDS_OVER_UNDER"], "FULL_TIME");
   const asianTotalLines = aggregateLineMarkets(["TOTAL_GOALS", "GOALS_TOTAL", "TOTAL"], "FULL_TIME");
   // Per-team goals/corners over-under — real canonicalMarkets
