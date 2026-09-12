@@ -97,6 +97,7 @@ import {
   extractApiTennisLiveMarkets,
   buildApiTennisConfrontos,
   buildApiTennisPlayerProfile,
+  buildApiTennisMatchStats,
 } from "../services/apitennis/common.js";
 
 
@@ -8626,6 +8627,16 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       baseMarkets.tennisExtra.set1Games = mid;
     }
 
+    // Real bug fixed 2026-09-12 (user-reported: the "Estatísticas" tab was
+    // always empty for tennis matches) — api-tennis.com's own statistics[]
+    // array (aces, double faults, % first-serve points won, etc.) was
+    // never mapped onto the shared V2StatsGroup shape the frontend reads.
+    let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
+    if (liveFx.statistics && liveFx.statistics.length > 0) {
+      const built = buildApiTennisMatchStats(liveFx.statistics, fx.first_player_key, fx.second_player_key);
+      if (built.length > 0) matchStats = built;
+    }
+
     const state: LiveMatchState = {
       id,
       home,
@@ -8653,6 +8664,7 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       _baseMarkets: baseMarkets,
       _apiTennisLiveOddsRef: liveOddsRef,
       events: existing?.events ?? [],
+      matchStats,
       _liveExtra: {
         ...existing?._liveExtra,
         sets,
