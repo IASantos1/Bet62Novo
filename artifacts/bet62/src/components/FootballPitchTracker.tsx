@@ -166,6 +166,37 @@ function translateAction(action: string): string {
   return action.charAt(0).toUpperCase() + action.slice(1);
 }
 
+/** Real sports.bzzoiro.com `livedata.situation` values, translated for the
+ * event badge — confirmed real ones from a live capture: "safe" and
+ * "dangerous_attack" (matching the reference bookmaker UI's own "Bola
+ * segura"/"Ataque Perigoso" badges). Any other value bzzoiro sends is
+ * humanized (underscores → spaces, capitalized) rather than guessed at,
+ * same "derived, not fabricated" rule the rest of this file follows —
+ * bzzoiro has no published enum of every possible situation string. */
+function translateBzzoiroSituation(situation: string): string {
+  const s = situation.toLowerCase();
+  if (s === "safe") return "Bola segura";
+  if (s === "dangerous_attack") return "Ataque perigoso";
+  if (s === "attack") return "Em ataque";
+  if (s === "corner") return "Escanteio";
+  if (s === "free_kick") return "Falta";
+  if (s === "penalty") return "Pênalti";
+  if (s === "shot" || s === "shot_on_target") return "Finalização";
+  if (s === "goal") return "Golo!";
+  if (!situation) return "";
+  return situation.charAt(0).toUpperCase() + situation.slice(1).replace(/_/g, " ");
+}
+
+/** Real bzzoiro situations that count as a dangerous moment for the arrow's
+ * color escalation and badge styling — same set of concepts
+ * translateBzzoiroSituation recognizes by name (goal excluded here since
+ * that's handled by the existing goalFlash celebration, not the danger
+ * tint). */
+function isDangerousBzzoiroSituation(situation: string): boolean {
+  const s = situation.toLowerCase();
+  return s === "dangerous_attack" || s === "corner" || s === "penalty" || s === "shot" || s === "shot_on_target";
+}
+
 /** Same key stat rows the Força panel (home.tsx's MomentumChart) already
  * picks out of v2StatsGroups — duplicated here at a smaller scope (just
  * the 4 the user asked for) since that extraction isn't exported. */
@@ -210,12 +241,21 @@ export default function FootballPitchTracker({
   // a goal specifically can draw its shot-trail line from the real spot
   // it was struck from instead of appearing out of nowhere at the net.
   const [moveOrigin, setMoveOrigin] = useState<BallSpot | null>(null);
+  // Bumped on every drawn trail (commentary-driven or real-position-driven)
+  // so the trail div's `key` changes and React remounts it, restarting the
+  // CSS fade animation — decoupled from `current.id` specifically since a
+  // real bzzoiro move has no commentary entry to key off of.
+  const [trailKey, setTrailKey] = useState(0);
   const [view, setView] = useState<View>("pitch");
   const [current, setCurrent] = useState<PitchTrackerCommentaryEntry | null>(null);
   const [queue, setQueue] = useState<PitchTrackerCommentaryEntry[]>([]);
 
   const seenIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
+  // Last real bzzoiro fix seen for this match — separate from `ballRef`
+  // (the commentary-driven resting spot) so a real move can draw its own
+  // trail without disturbing the commentary state machine.
+  const realBallSpotRef = useRef<BallSpot | null>(null);
   const matchKey = `${home}__${away}`;
   const prevMatchKeyRef = useRef(matchKey);
 
@@ -233,6 +273,7 @@ export default function FootballPitchTracker({
     setMoveOrigin(null);
     ballRef.current = CENTER;
     setBall(CENTER);
+    realBallSpotRef.current = null;
   }, [matchKey]);
 
   // Diff each commentary update against what's already been shown; queue
@@ -275,6 +316,7 @@ export default function FootballPitchTracker({
     const isGoal = /\bgoal\b/i.test(p.action) && !/goal kick/i.test(p.action);
     if (spot) {
       setMoveOrigin(ballRef.current); // where it came from, for the fading movement trail
+      setTrailKey((k) => k + 1);
       ballRef.current = spot;
       setBall(spot);
     }
@@ -290,33 +332,69 @@ export default function FootballPitchTracker({
     };
   }, [queueHeadId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Real bug fixed 2026-09-12 (user-reported: the fading movement trail
+  // never appeared once real bzzoiro position data started flowing —
+  // only the commentary queue above ever triggered it, and GOAL API's
+  // commentary only writes a new line every ~2 minutes). Mirrors that
+  // same moveOrigin/trailKey mechanism, driven by realBallPosition.
+  // updatedAt changing instead — every genuinely new real fix that moved
+  // the ball a meaningful distance draws its own trail.
+  useEffect(() => {
+    if (!realBallPosition) return;
+    const spot: BallSpot = { x: realBallPosition.x, y: realBallPosition.y };
+    const prev = realBallSpotRef.current;
+    realBallSpotRef.current = spot;
+    if (!prev) return; // first fix for this match — nothing to draw a trail from yet
+    const dx = spot.x - prev.x;
+    const dy = spot.y - prev.y;
+    if (Math.sqrt(dx * dx + dy * dy) < 2) return; // negligible movement — no trail
+    setMoveOrigin(prev);
+    setTrailKey((k) => k + 1);
+  }, [realBallPosition?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const parsed = current ? parseCommentaryLine(current.text, home, away) : null;
-  const actionLower = (parsed?.action ?? "").toLowerCase();
-  const isDangerZone =
-    actionLower.includes("dangerous") ||
-    actionLower.includes("shot") ||
-    actionLower.includes("corner") ||
-    actionLower.includes("penalty");
 
   // The ball's actual rendered position — real coordinates when bzzoiro
   // has a fresh fix on this fixture, otherwise the commentary-derived
-  // zoneForAction guess. Only the ball's resting position and the
-  // momentum arrow's tip use this; the move-trail effect above stays
-  // tied to the commentary/queue state machine (moveOrigin/ball) since
-  // it's about narrating a specific commentary-driven moment, not "where
-  // is the ball right now".
+  // zoneForAction guess.
   const hasFreshRealBall =
     !!realBallPosition && Date.now() - realBallPosition.updatedAt < REAL_BALL_POSITION_MAX_AGE_MS;
   const displayBall: BallSpot = hasFreshRealBall
     ? { x: realBallPosition!.x, y: realBallPosition!.y }
     : ball;
 
+  // Real bug fixed 2026-09-12 (user-reported, screenshots vs a reference
+  // bookmaker's own mini-pitch): the event badge, momentum arrow and
+  // danger-zone tint were ALWAYS driven by `parsed` (GOAL API's own
+  // commentary, which only writes new lines every ~2 minutes) even once
+  // real bzzoiro position data started flowing every ~5s — so once the
+  // ball visually moved to the away side, the badge kept showing whichever
+  // team GOAL API's last commentary line happened to name. Real bzzoiro
+  // data (side + situation) now takes priority whenever fresh, with the
+  // commentary-derived guess only as a fallback when bzzoiro hasn't
+  // matched/covered this fixture (or its fix has gone stale).
+  const activeSide: "home" | "away" = hasFreshRealBall
+    ? (realBallPosition!.side ?? parsed?.side ?? "home")
+    : (parsed?.side ?? "home");
+  const activeLabelText = hasFreshRealBall
+    ? translateBzzoiroSituation(realBallPosition!.situation)
+    : parsed
+      ? translateAction(parsed.action) || current?.text || ""
+      : current?.text ?? "";
+  const isDangerZone = hasFreshRealBall
+    ? isDangerousBzzoiroSituation(realBallPosition!.situation)
+    : (() => {
+        const a = (parsed?.action ?? "").toLowerCase();
+        return a.includes("dangerous") || a.includes("shot") || a.includes("corner") || a.includes("penalty");
+      })();
+  const hasActiveSignal = hasFreshRealBall || (!!current && !!parsed);
+
   // How deep into the attacking third the acting side currently is —
   // reuses the same left-to-right/right-to-left mirroring convention as
   // zoneForAction (home attacks toward x≈100, away toward x≈0) so the
   // momentum arrow always points at whichever goal is under pressure,
   // and its color escalates with how threatening the current action is.
-  const attackDepth = parsed ? (parsed.side === "home" ? displayBall.x : 100 - displayBall.x) : 0;
+  const attackDepth = hasActiveSignal ? (activeSide === "home" ? displayBall.x : 100 - displayBall.x) : 0;
   const momentumTier: "neutral" | "attacking" | "danger" = isDangerZone
     ? "danger"
     : attackDepth > 60
@@ -331,8 +409,8 @@ export default function FootballPitchTracker({
   // mild taper at the ball end (not a thin sharp dagger).
   const ARROW_TAPER = 6;
   const arrowClipPath = (() => {
-    if (!current || !parsed) return undefined;
-    const nearX = parsed.side === "home" ? 0 : 100;
+    if (!hasActiveSignal) return undefined;
+    const nearX = activeSide === "home" ? 0 : 100;
     const farX = displayBall.x;
     const dir = farX >= nearX ? 1 : -1;
     const bodyEdge = dir === 1 ? Math.max(nearX, farX - ARROW_TAPER) : Math.min(nearX, farX + ARROW_TAPER);
@@ -348,23 +426,27 @@ export default function FootballPitchTracker({
     danger: ["rgba(255, 120, 120, 0.2)", "rgba(210, 10, 10, 0.58)"],
   };
   const arrowBackground = (() => {
-    if (!current || !parsed) return undefined;
+    if (!hasActiveSignal) return undefined;
     const [from, to] = ARROW_GRADIENT[momentumTier];
-    const towardHome = parsed.side === "home"; // home's own goal is at x≈0, so the gradient runs left→right
+    const towardHome = activeSide === "home"; // home's own goal is at x≈0, so the gradient runs left→right
     return `linear-gradient(to ${towardHome ? "right" : "left"}, ${from}, ${to})`;
   })();
 
   // A comet-style line from where the ball just was to where it is now —
   // shown on every move (fading out as it "dissolves" behind the ball),
-  // not only goals; a goal reuses the exact same geometry but in the
-  // bolder gold "shot map" style since that's a real strike on net.
-  // Angle/length are computed in the same 0-100 % coordinate space
-  // everything else here uses (a stylized approximation, not literal
-  // pixel physics).
+  // whether the move came from a new commentary line or a fresh real
+  // bzzoiro position (see the realBallSpotRef effect below) — not only
+  // goals; a goal reuses the exact same geometry but in the bolder gold
+  // "shot map" style since that's a real strike on net. Angle/length are
+  // computed in the same 0-100% coordinate space everything else here
+  // uses (a stylized approximation, not literal pixel physics). Anchored
+  // to displayBall (whichever position is actually rendered) rather than
+  // the commentary-only `ball` state, so the trail always ends exactly
+  // where the ball icon itself is.
   const moveTrail = (() => {
-    if (!current || !moveOrigin) return null;
-    const dx = ball.x - moveOrigin.x;
-    const dy = ball.y - moveOrigin.y;
+    if (!moveOrigin) return null;
+    const dx = displayBall.x - moveOrigin.x;
+    const dy = displayBall.y - moveOrigin.y;
     const lengthPct = Math.sqrt(dx * dx + dy * dy);
     if (lengthPct < 2) return null; // negligible/no movement — nothing to draw
     const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
@@ -401,7 +483,7 @@ export default function FootballPitchTracker({
       <div className="bet62-pitch-wrapper">
         {view === "pitch" && (
           <div className="bet62-pitch">
-            {current && parsed && (
+            {hasActiveSignal && (
               <div
                 className={`bet62-momentum-arrow ${momentumTier === "danger" ? "tier-danger" : ""}`}
                 style={{ clipPath: arrowClipPath, background: arrowBackground }}
@@ -439,7 +521,7 @@ export default function FootballPitchTracker({
 
             {moveTrail && (
               <div
-                key={current?.id}
+                key={trailKey}
                 className={`bet62-shot-line ${goalFlash ? "trail-goal" : "trail-move"}`}
                 style={{
                   left: `${moveTrail.x}%`,
@@ -450,7 +532,7 @@ export default function FootballPitchTracker({
               />
             )}
             <div
-              className={`bet62-ball-trail ${parsed?.side === "away" ? "trail-away" : "trail-home"} ${isDangerZone ? "trail-danger" : ""}`}
+              className={`bet62-ball-trail ${activeSide === "away" ? "trail-away" : "trail-home"} ${isDangerZone ? "trail-danger" : ""}`}
               style={{ left: `${displayBall.x}%`, top: `${displayBall.y}%` }}
             />
             {goalFlash && (
@@ -466,13 +548,23 @@ export default function FootballPitchTracker({
               ⚽
             </div>
 
-            {current && (
-              <div className={`bet62-event-badge ${goalFlash ? "event-goal" : isDangerZone ? "event-danger" : ""}`}>
-                <span className={`bet62-event-bar ${parsed?.side === "away" ? "bar-away" : "bar-home"}`} />
+            {hasActiveSignal && (
+              <div
+                className={`bet62-event-badge ${goalFlash ? "event-goal" : isDangerZone ? "event-danger" : ""} ${hasFreshRealBall ? "badge-floating" : ""}`}
+                style={
+                  hasFreshRealBall
+                    ? {
+                        left: `clamp(20%, ${displayBall.x}%, 80%)`,
+                        top: `clamp(14%, ${displayBall.y > 55 ? displayBall.y - 20 : displayBall.y + 20}%, 86%)`,
+                      }
+                    : undefined
+                }
+              >
+                <span className={`bet62-event-bar ${activeSide === "away" ? "bar-away" : "bar-home"}`} />
                 <div className="bet62-event-text">
-                  <div className="bet62-event-team truncate">{parsed?.side === "away" ? away : home}</div>
+                  <div className="bet62-event-team truncate">{activeSide === "away" ? away : home}</div>
                   <div className="bet62-event-action truncate">
-                    <small>{current.time}</small> {parsed ? translateAction(parsed.action) || current.text : current.text}
+                    {!hasFreshRealBall && current && <small>{current.time}</small>} {activeLabelText}
                   </div>
                 </div>
               </div>
@@ -756,6 +848,23 @@ const PITCH_TRACKER_CSS = `
   animation: bet62EventIn 250ms ease-out;
   max-width: 92%;
 }
+/* Real bug fixed 2026-09-12 (user-reported, screenshots vs a reference
+ * bookmaker's own mini-pitch): once real bzzoiro data drives the badge's
+ * text (see FootballPitchTracker's activeLabelText), it should float near
+ * wherever the ball actually is and read as translucent overlay chrome —
+ * not sit pinned at the bottom of the pitch like a permanent caption bar,
+ * which is only right for the commentary-only fallback (rare event, worth
+ * a fixed, fully-opaque banner). left/top for this modifier come from the
+ * inline style (computed from the live ball position), transitioning
+ * smoothly on the same cadence as the ball/arrow so it visibly "follows"
+ * the play. */
+.bet62-event-badge.badge-floating {
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  background: rgba(10, 10, 12, 0.55);
+  border-color: rgba(255, 255, 255, 0.12);
+  transition: left 900ms cubic-bezier(0.22, 1, 0.36, 1), top 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 .bet62-event-bar { width: 4px; border-radius: 3px; background: currentColor; flex-shrink: 0; }
 .bet62-event-bar.bar-home { color: #ff5050; }
 .bet62-event-bar.bar-away { color: #5096ff; }
@@ -841,6 +950,9 @@ html.light-mode .bet62-event-badge {
   background: rgba(255, 255, 255, 0.9);
   color: #18181b;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+html.light-mode .bet62-event-badge.badge-floating {
+  background: rgba(255, 255, 255, 0.62);
 }
 html.light-mode .bet62-event-team { color: #18181b; }
 html.light-mode .bet62-event-action { color: #52525b; }
