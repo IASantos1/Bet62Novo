@@ -90,10 +90,19 @@ function startHeartbeat(socket: WsClient): void {
   }, HEARTBEAT_INTERVAL_MS);
 }
 
+// Real bug fixed 2026-09-12 (root cause of _ballPosition never populating
+// for ANY subscribed match, confirmed via a standalone reproduction outside
+// this app): the wire field is `action`, not `type` — sending `{"type":
+// "subscribe", ...}` got back `{"type":"error","code":"bad_action",
+// "message":"Unknown action: None"}` every single time, silently, since
+// nothing here ever inspected the response. `{"action": "subscribe", ...}`
+// gets back a real "subscribed" ack plus real "livedata" frames
+// immediately. Incoming frames still use "type" (confirmed unchanged) —
+// this asymmetry is a bzzoiro protocol quirk, not a mistake on our side.
 function sendSubscribeFrames(): void {
   if (!ws || !connected) return;
   for (const eventId of subscribedEventIds) {
-    ws.send(JSON.stringify({ type: "subscribe", event_id: eventId }));
+    ws.send(JSON.stringify({ action: "subscribe", event_id: eventId }));
   }
 }
 
@@ -197,7 +206,7 @@ export function subscribeBzzoiroEvent(eventId: number): void {
   if (subscribedEventIds.has(eventId)) return;
   subscribedEventIds.add(eventId);
   if (ws && connected) {
-    ws.send(JSON.stringify({ type: "subscribe", event_id: eventId }));
+    ws.send(JSON.stringify({ action: "subscribe", event_id: eventId }));
   }
 }
 
@@ -205,7 +214,7 @@ export function unsubscribeBzzoiroEvent(eventId: number): void {
   if (!subscribedEventIds.has(eventId)) return;
   subscribedEventIds.delete(eventId);
   if (ws && connected) {
-    ws.send(JSON.stringify({ type: "unsubscribe", event_id: eventId }));
+    ws.send(JSON.stringify({ action: "unsubscribe", event_id: eventId }));
   }
 }
 
