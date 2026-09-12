@@ -577,6 +577,7 @@ async function runOddsComparisonPhase(
         odds: newOdds,
         markets: newMarkets,
         _priceSource: "pulsescore",
+        _pulseScoreEventId: pulseScoreEvent.eventId,
         marketVersion: versionBumped ? (liveState.marketVersion ?? 0) + 1 : liveState.marketVersion,
       };
       liveMatchState.set(liveMatchId, updatedState);

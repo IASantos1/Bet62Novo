@@ -567,6 +567,12 @@ export type LiveMatchState = {
   // yet simply doesn't appear for betting rather than showing a fabricated
   // one. GOAL API remains the source of score/events/stats regardless.
   _priceSource?: "pulsescore";
+  // Traceability: the raw PulseScore event id behind this fixture's real
+  // markets (set alongside _priceSource by shadowMatchSync.ts) — lets
+  // GET /api/admin/pulsescore-market-dump re-fetch the exact upstream
+  // bet365 event to compare its raw market list against what actually got
+  // extracted, for diagnosing sparse/missing markets.
+  _pulseScoreEventId?: string;
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
   // BET62 Fase 0 (2026-09-10) — monotonic counter, bumped only when
@@ -8225,6 +8231,12 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       // true. Must mirror hasRealOdds's own wasPulseBefore-gated
       // preservation exactly.
       _priceSource: wasPulseBefore ? existing?._priceSource : undefined,
+      // Same wipe bug _priceSource was fixed for (2026-09-11): this object
+      // literal used to omit _pulseScoreEventId entirely, so runOddsComparisonPhase's
+      // write got silently erased by the very next GOAL API poll — losing the
+      // traceability link needed to look up this fixture's raw PulseScore markets
+      // (GET /api/admin/pulsescore-market-dump) for more than an instant.
+      _pulseScoreEventId: wasPulseBefore ? existing?._pulseScoreEventId : undefined,
       events: matchEvents,
       matchStats,
       _commentary: commentary,
