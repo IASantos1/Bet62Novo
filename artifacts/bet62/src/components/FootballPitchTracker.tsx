@@ -550,15 +550,11 @@ export default function FootballPitchTracker({
 
             {hasActiveSignal && (
               <div
-                className={`bet62-event-badge ${goalFlash ? "event-goal" : isDangerZone ? "event-danger" : ""} ${hasFreshRealBall ? "badge-floating" : ""}`}
-                style={
-                  hasFreshRealBall
-                    ? {
-                        left: `clamp(20%, ${displayBall.x}%, 80%)`,
-                        top: `clamp(14%, ${displayBall.y > 55 ? displayBall.y - 20 : displayBall.y + 20}%, 86%)`,
-                      }
-                    : undefined
-                }
+                className={`bet62-event-badge badge-floating ${goalFlash ? "event-goal" : isDangerZone ? "event-danger" : ""}`}
+                style={{
+                  left: `clamp(20%, ${displayBall.x}%, 80%)`,
+                  top: `clamp(14%, ${displayBall.y > 55 ? displayBall.y - 20 : displayBall.y + 20}%, 86%)`,
+                }}
               >
                 <span className={`bet62-event-bar ${activeSide === "away" ? "bar-away" : "bar-home"}`} />
                 <div className="bet62-event-text">
@@ -849,15 +845,17 @@ const PITCH_TRACKER_CSS = `
   max-width: 92%;
 }
 /* Real bug fixed 2026-09-12 (user-reported, screenshots vs a reference
- * bookmaker's own mini-pitch): once real bzzoiro data drives the badge's
- * text (see FootballPitchTracker's activeLabelText), it should float near
- * wherever the ball actually is and read as translucent overlay chrome —
- * not sit pinned at the bottom of the pitch like a permanent caption bar,
- * which is only right for the commentary-only fallback (rare event, worth
- * a fixed, fully-opaque banner). left/top for this modifier come from the
- * inline style (computed from the live ball position), transitioning
- * smoothly on the same cadence as the ball/arrow so it visibly "follows"
- * the play. */
+ * bookmaker's own mini-pitch): the badge should float near wherever the
+ * ball actually is and read as translucent overlay chrome, following the
+ * momentum arrow — not sit pinned at a fixed spot at the bottom of the
+ * pitch. This applies regardless of whether displayBall's position came
+ * from real bzzoiro data or the commentary-derived zoneForAction guess —
+ * it's a presentation choice, not tied to data-source freshness (a first
+ * version of this fix wrongly gated it on hasFreshRealBall, so the
+ * commentary-only fallback — the common case for most matches — kept the
+ * old fixed/opaque look). left/top come from the inline style (computed
+ * from the live ball position), transitioning smoothly on the same
+ * cadence as the ball/arrow so it visibly "follows" the play. */
 .bet62-event-badge.badge-floating {
   bottom: auto;
   transform: translate(-50%, -50%);
