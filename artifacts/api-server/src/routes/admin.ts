@@ -45,7 +45,10 @@ import {
   getPulseScorePrematchStatus,
   getPrematchPulseScorePricedFixtureIds,
   getPrematchPulsePrice,
+  buildPulseScoreMarkets,
 } from "../providers/pulsescore/shadowMatchSync.js";
+import { pulseScore } from "../providers/pulsescore/client.js";
+import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
@@ -2741,6 +2744,7 @@ router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest,
       fixture: `${m.home} vs ${m.away}`,
       league: m.league,
       _priceSource: m._priceSource ?? null,
+      _pulseScoreEventId: m._pulseScoreEventId ?? null,
       _suspensionReason: m._suspensionReason ?? null,
       hasRealOdds: m.hasRealOdds,
       odds1x2: m.odds,
@@ -2820,6 +2824,179 @@ router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest,
             pct(upWithPulse.length, upFootball.length) === 100
           ? "✅ 100% COBERTURA PULSESCORE (LIVE + PREMATCH)"
           : `⚠️ Cobertura incompleta LIVE ${pct(liveWithPulse.length, liveGoalApiFootball.length)}% · PREMATCH ${pct(upWithPulse.length, upFootball.length)}%.`,
+  });
+});
+
+// Diagnoses the 2026-09-12 "mercados de futebol mediocre" report: bet62OddsAreReal
+// being true only proves the headline 1X2 came from PulseScore — it says nothing
+// about how many of the OTHER ~20 AdvancedMarkets slots (doubleChance/totalGoals/
+// handicap/asianTotals/corners/cards/htft/correctScore/goalscorers/...) actually
+// got populated for this specific fixture, since buildPulseScoreMarkets zeroes
+// (never fabricates) any slot PulseScore's normalizer didn't find a real market
+// for (see that function's header + normalizer.ts). This pulls the SAME raw
+// PulseScore event fresh, runs it through normalizePulseScoreEvent +
+// buildPulseScoreMarkets exactly like the live/prematch builders do, and returns
+// all three layers side by side — raw bet365 market list (so we can see what
+// bet365 genuinely offers this match right now), the normalizer's extracted
+// summary (so we can see which real markets it failed to map, if any), and the
+// final AdvancedMarkets-shaped object the frontend actually receives — so a
+// "mediocre" list can be told apart from "bet365 itself just isn't offering much
+// for this match/moment" vs "a real gap in normalizer.ts is silently dropping
+// markets bet365 does offer".
+router.get("/pulsescore-market-dump", adminMiddleware, async (req: AdminRequest, res) => {
+  const pulseScoreEventId = typeof req.query.pulseScoreEventId === "string" ? req.query.pulseScoreEventId : undefined;
+  const matchId = typeof req.query.matchId === "string" ? req.query.matchId : undefined;
+
+  let eventId = pulseScoreEventId;
+  let fixtureLabel: string | undefined;
+  if (!eventId && matchId) {
+    const state = liveMatchState.get(matchId) as any;
+    if (state?._pulseScoreEventId) {
+      eventId = state._pulseScoreEventId;
+      fixtureLabel = `${state.home} vs ${state.away}`;
+    }
+  }
+  if (!eventId) {
+    res.status(400).json({
+      error:
+        "Informe ?pulseScoreEventId=<id> (pegue em sampleWithPulse de /pulsescore-odds-audit) ou ?matchId=goalapi-football-... de um jogo AO VIVO já casado (_priceSource=pulsescore).",
+    });
+    return;
+  }
+
+  try {
+    let raw;
+    try {
+      raw = await pulseScore.getLiveEventById(eventId);
+    } catch {
+      raw = await pulseScore.getSoccerEventById(eventId);
+    }
+    const normalized = normalizePulseScoreEvent(raw);
+    const built = buildPulseScoreMarkets(normalized);
+    const mapEntries = (m: Map<number, unknown> | undefined) => (m ? Object.fromEntries(m) : null);
+
+    res.json({
+      fixture: fixtureLabel ?? `${raw.home} vs ${raw.away}`,
+      pulseScoreEventId: eventId,
+      rawMarketCount: raw.markets.length,
+      rawMarkets: raw.markets.map((m) => ({
+        canonicalMarket: m.canonicalMarket,
+        rawName: m.rawName,
+        period: m.period,
+        selectionCount: m.selections.length,
+        sampleSelections: m.selections.slice(0, 30).map((s) => ({
+          canonicalOutcome: s.canonicalOutcome,
+          rawName: s.rawName,
+          line: s.line,
+          odds: s.odds,
+          isActive: s.isActive,
+        })),
+      })),
+      normalizedSummary: {
+        matchResult: normalized.matchResult ?? null,
+        matchResult1H: normalized.matchResult1H ?? null,
+        matchResult2H: normalized.matchResult2H ?? null,
+        doubleChance: normalized.doubleChance ?? null,
+        bothTeamsToScore: normalized.bothTeamsToScore ?? null,
+        totalGoalsOddEven: normalized.totalGoalsOddEven ?? null,
+        drawNoBet: normalized.drawNoBet ?? null,
+        firstGoalTeam: normalized.firstGoalTeam ?? null,
+        htft: normalized.htft ?? null,
+        correctScoreCount: normalized.correctScore ? Object.keys(normalized.correctScore).length : 0,
+        htCorrectScoreCount: normalized.htCorrectScore ? Object.keys(normalized.htCorrectScore).length : 0,
+        anytimeGoalscorerCount: normalized.anytimeGoalscorer?.length ?? 0,
+        firstGoalscorerCount: normalized.firstGoalscorer?.length ?? 0,
+        lastGoalscorerCount: normalized.lastGoalscorer?.length ?? 0,
+        asianHandicapFull: normalized.asianHandicapFull ?? null,
+        handicapLines: mapEntries(normalized.handicapLines),
+        cornersLines: mapEntries(normalized.cornersLines),
+        cardsLines: mapEntries(normalized.cardsLines),
+        asianTotalLines: mapEntries(normalized.asianTotalLines),
+        teamGoalsHomeLines: mapEntries(normalized.teamGoalsHomeLines),
+        teamGoalsAwayLines: mapEntries(normalized.teamGoalsAwayLines),
+        homeCornersLines: mapEntries(normalized.homeCornersLines),
+        awayCornersLines: mapEntries(normalized.awayCornersLines),
+      },
+      finalMarketsWrittenToLiveState: built,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao consultar PulseScore", detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// User asked directly (2026-09-12): "quantos mercados a api pulsescore
+// usando bet365 disponibiliza" — surveys N real matches (live-priced first,
+// then prematch-priced) and tallies every distinct (period, canonicalMarket,
+// rawName) market type bet365 actually sent across them. Sequential calls
+// through the shared `pulseScore` client instance already serialize through
+// its own 1 req/sec PRO-plan throttle (see client.ts) — no separate rate
+// limiting needed here, but it does mean this request takes roughly
+// `limit` seconds to complete.
+router.get("/pulsescore-market-survey", adminMiddleware, async (req: AdminRequest, res) => {
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 40));
+
+  const eventIds: string[] = [];
+  for (const state of liveMatchState.values()) {
+    const s = state as unknown as { _priceSource?: string; _pulseScoreEventId?: string };
+    if (s._priceSource === "pulsescore" && s._pulseScoreEventId) {
+      eventIds.push(s._pulseScoreEventId);
+      if (eventIds.length >= limit) break;
+    }
+  }
+  if (eventIds.length < limit) {
+    for (const gid of getPrematchPulseScorePricedFixtureIds()) {
+      const p = getPrematchPulsePrice(gid);
+      if (p?.pulseScoreEventId) eventIds.push(p.pulseScoreEventId);
+      if (eventIds.length >= limit) break;
+    }
+  }
+
+  type MarketTally = {
+    period: string;
+    canonicalMarket: string;
+    rawName: string;
+    matchesSeen: number;
+    sampleSelectionCounts: number[];
+  };
+  const marketStats = new Map<string, MarketTally>();
+  const errors: string[] = [];
+  let matchesSurveyed = 0;
+
+  for (const eventId of eventIds) {
+    try {
+      let raw;
+      try {
+        raw = await pulseScore.getLiveEventById(eventId);
+      } catch {
+        raw = await pulseScore.getSoccerEventById(eventId);
+      }
+      matchesSurveyed++;
+      for (const m of raw.markets) {
+        const key = `${m.period}::${m.canonicalMarket}::${m.rawName}`;
+        const entry = marketStats.get(key) ?? {
+          period: m.period,
+          canonicalMarket: m.canonicalMarket,
+          rawName: m.rawName,
+          matchesSeen: 0,
+          sampleSelectionCounts: [],
+        };
+        entry.matchesSeen++;
+        if (entry.sampleSelectionCounts.length < 3) entry.sampleSelectionCounts.push(m.selections.length);
+        marketStats.set(key, entry);
+      }
+    } catch (err) {
+      errors.push(`${eventId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const markets = [...marketStats.values()].sort((a, b) => b.matchesSeen - a.matchesSeen);
+
+  res.json({
+    matchesSurveyed,
+    distinctEventIdsRequested: eventIds.length,
+    distinctMarketTypes: markets.length,
+    markets,
+    errors,
   });
 });
 

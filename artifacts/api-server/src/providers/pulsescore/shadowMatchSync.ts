@@ -245,15 +245,22 @@ const OVER_UNDER_LINES: Array<{
 function extractPulseScoreOverUnderByLine(
   markets: NormalizedMarketGroup[],
 ): Map<number, { over?: number; under?: number }> {
-  const group = markets.find((m) => m.market === "OVER_UNDER" && m.period === "FULL_TIME");
+  // Real bet365 payload confirmed 2026-09-12: a single live match carried
+  // THREE separate OVER_UNDER/FULL_TIME market groups ("Match Goals" — just
+  // the main 2.5 line, "Alternative Match Goals" — 0.5/1.5/3.5/4.5/5.5, and
+  // a third "Goal Line" group) — .find() picking only the first group
+  // silently dropped every line except 2.5. Merge all matching groups
+  // instead, same fix as normalizer.ts's aggregateLineMarkets.
+  const groups = markets.filter((m) => m.market === "OVER_UNDER" && m.period === "FULL_TIME");
   const byLine = new Map<number, { over?: number; under?: number }>();
-  if (!group) return byLine;
-  for (const sel of group.selections) {
-    if (sel.line == null || (sel.outcome !== "OVER" && sel.outcome !== "UNDER")) continue;
-    const entry = byLine.get(sel.line) ?? {};
-    if (sel.outcome === "OVER") entry.over = sel.odds;
-    else entry.under = sel.odds;
-    byLine.set(sel.line, entry);
+  for (const group of groups) {
+    for (const sel of group.selections) {
+      if (sel.line == null || (sel.outcome !== "OVER" && sel.outcome !== "UNDER")) continue;
+      const entry = byLine.get(sel.line) ?? {};
+      if (sel.outcome === "OVER") entry.over = sel.odds;
+      else entry.under = sel.odds;
+      byLine.set(sel.line, entry);
+    }
   }
   return byLine;
 }
@@ -577,6 +584,7 @@ async function runOddsComparisonPhase(
         odds: newOdds,
         markets: newMarkets,
         _priceSource: "pulsescore",
+        _pulseScoreEventId: pulseScoreEvent.eventId,
         marketVersion: versionBumped ? (liveState.marketVersion ?? 0) + 1 : liveState.marketVersion,
       };
       liveMatchState.set(liveMatchId, updatedState);

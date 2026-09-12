@@ -99,6 +99,25 @@ function findMarketLoose(ev: PulseScoreEvent, needles: string[], period: string)
   return undefined;
 }
 
+/** Plural version of findMarketLoose — bet365 commonly splits a single
+ *  conceptual line-market into several PulseScore market groups sharing the
+ *  same canonicalMarket+period (confirmed real 2026-09-12: a live match
+ *  carried THREE separate OVER_UNDER/FULL_TIME groups — "Match Goals" with
+ *  just the main 2.5 line, "Alternative Match Goals" with 0.5/1.5/3.5/4.5/
+ *  5.5, and a third "Goal Line" group). findMarketLoose's first-match-wins
+ *  behavior silently dropped every line except whichever group happened to
+ *  come first in the array — this returns every matching group so callers
+ *  needing a line-indexed union (aggregateLineMarkets) can merge them. */
+function findMarketsLoose(ev: PulseScoreEvent, needles: string[], period: string): PulseScoreMarket[] {
+  return ev.markets.filter((m) => {
+    if (m.period !== period) return false;
+    return (
+      needles.some((n) => m.canonicalMarket.toLowerCase().includes(n.toLowerCase())) ||
+      needles.some((n) => m.rawName.toLowerCase().includes(n.toLowerCase()))
+    );
+  });
+}
+
 function findOutcomeOdds(
   selections: PulseScoreEvent["markets"][number]["selections"],
   outcome: string,
@@ -152,9 +171,27 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   const doubleChanceMarket = findMarket(ev, "DOUBLE_CHANCE", "FULL_TIME");
   const doubleChance = doubleChanceMarket
     ? (() => {
-        const homeOrDraw = findOutcomeOdds(doubleChanceMarket.selections, "HOME_DRAW");
-        const homeOrAway = findOutcomeOdds(doubleChanceMarket.selections, "HOME_AWAY");
-        const drawOrAway = findOutcomeOdds(doubleChanceMarket.selections, "DRAW_AWAY");
+        let homeOrDraw = findOutcomeOdds(doubleChanceMarket.selections, "HOME_DRAW");
+        let homeOrAway = findOutcomeOdds(doubleChanceMarket.selections, "HOME_AWAY");
+        let drawOrAway = findOutcomeOdds(doubleChanceMarket.selections, "DRAW_AWAY");
+        // Real bet365 payload (confirmed 2026-09-12) tags every DOUBLE_CHANCE
+        // selection generic canonicalOutcome "OTHER" — but its rawName spells
+        // out the real pairing verbatim ("<home> or Draw", "<away> or Draw",
+        // "<home> or <away>"), so match on that text instead of an outcome
+        // name this feed never sends.
+        if (homeOrDraw == null || homeOrAway == null || drawOrAway == null) {
+          const homeLower = ev.home.toLowerCase();
+          const awayLower = ev.away.toLowerCase();
+          for (const s of doubleChanceMarket.selections) {
+            const raw = s.rawName.toLowerCase();
+            const hasHome = raw.includes(homeLower);
+            const hasAway = raw.includes(awayLower);
+            const hasDraw = raw.includes("draw");
+            if (hasHome && hasDraw && homeOrDraw == null) homeOrDraw = s.odds;
+            else if (hasAway && hasDraw && drawOrAway == null) drawOrAway = s.odds;
+            else if (hasHome && hasAway && homeOrAway == null) homeOrAway = s.odds;
+          }
+        }
         if (homeOrDraw == null || homeOrAway == null || drawOrAway == null) return undefined;
         return { homeOrDraw, homeOrAway, drawOrAway };
       })()
@@ -178,8 +215,17 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
     findMarketLoose(ev, ["goals odd/even", "odd/even", "total goals odd"], "FULL_TIME");
   const totalGoalsOddEven = oddEvenMarket
     ? (() => {
-        const even = findOutcomeOdds(oddEvenMarket.selections, "EVEN");
-        const odd = findOutcomeOdds(oddEvenMarket.selections, "ODD");
+        let even = findOutcomeOdds(oddEvenMarket.selections, "EVEN");
+        let odd = findOutcomeOdds(oddEvenMarket.selections, "ODD");
+        // Real bet365 payload (confirmed 2026-09-12) tags both selections
+        // generic canonicalOutcome "OTHER" — rawName is literally "Odd"/"Even"
+        // though, so fall back to that exact text.
+        if (even == null) {
+          even = oddEvenMarket.selections.find((s) => s.rawName.trim().toLowerCase() === "even")?.odds;
+        }
+        if (odd == null) {
+          odd = oddEvenMarket.selections.find((s) => s.rawName.trim().toLowerCase() === "odd")?.odds;
+        }
         if (even == null || odd == null) return undefined;
         return { even, odd };
       })()
@@ -202,27 +248,36 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
     : undefined;
 
   // "FIRST_TEAM_TO_SCORE" is PulseScore's real canonicalMarket name for this
-  // (confirmed 2026-09-11 against real captured payloads) — the other
-  // needles below never matched anything real; kept as harmless fallbacks
-  // in case a different bookmaker feed uses a different name.
-  const fgTeamMarket = findMarketLoose(ev, ["FIRST_TEAM_TO_SCORE", "NEXT_GOAL_TEAM", "FIRST_GOAL_TEAM", "NEXT_GOAL", "WHICH_TEAM_SCORES_NEXT"], "FULL_TIME");
+  // on some feeds (confirmed 2026-09-11); a different real payload
+  // (confirmed 2026-09-12) instead sent it as canonicalMarket "OTHER" with
+  // rawName "1st Goal" — "1st goal" added below to catch that shape too.
+  const fgTeamMarket = findMarketLoose(ev, ["FIRST_TEAM_TO_SCORE", "NEXT_GOAL_TEAM", "FIRST_GOAL_TEAM", "NEXT_GOAL", "WHICH_TEAM_SCORES_NEXT", "1st goal"], "FULL_TIME");
   const firstGoalTeam = fgTeamMarket
     ? (() => {
-        const home =
-          findOutcomeOdds(fgTeamMarket.selections, "HOME") ??
-          findOutcomeOdds(fgTeamMarket.selections, "HOME_FIRST") ??
-          findOutcomeOdds(fgTeamMarket.selections, "HOME_NEXT");
-        const away =
-          findOutcomeOdds(fgTeamMarket.selections, "AWAY") ??
-          findOutcomeOdds(fgTeamMarket.selections, "AWAY_FIRST") ??
-          findOutcomeOdds(fgTeamMarket.selections, "AWAY_NEXT");
+        const homeSel = fgTeamMarket.selections.find(
+          (s) => s.canonicalOutcome === "HOME" || s.canonicalOutcome === "HOME_FIRST" || s.canonicalOutcome === "HOME_NEXT",
+        );
+        const awaySel = fgTeamMarket.selections.find(
+          (s) => s.canonicalOutcome === "AWAY" || s.canonicalOutcome === "AWAY_FIRST" || s.canonicalOutcome === "AWAY_NEXT",
+        );
+        const home = homeSel?.odds;
+        const away = awaySel?.odds;
         // "NEITHER" is PulseScore's real canonicalOutcome for "no goal at
-        // all" on FIRST_TEAM_TO_SCORE (confirmed 2026-09-11).
-        const noGoal =
+        // all" on some feeds (confirmed 2026-09-11); the "1st Goal" shape
+        // above (confirmed 2026-09-12) instead tags this same selection
+        // generic "OTHER" with no distinguishing outcome name at all — in a
+        // confirmed exactly-3-way market where the other two selections are
+        // already identified as HOME/AWAY, the remaining selection can only
+        // be the no-goal case, so pick it by elimination rather than by a
+        // name that doesn't exist on this shape.
+        let noGoal =
           findOutcomeOdds(fgTeamMarket.selections, "NEITHER") ??
           findOutcomeOdds(fgTeamMarket.selections, "NO_GOAL") ??
           findOutcomeOdds(fgTeamMarket.selections, "NONE") ??
           findOutcomeOdds(fgTeamMarket.selections, "NO_MORE_GOALS");
+        if (noGoal == null && homeSel && awaySel && fgTeamMarket.selections.length === 3) {
+          noGoal = fgTeamMarket.selections.find((s) => s !== homeSel && s !== awaySel)?.odds;
+        }
         if (home == null || away == null || noGoal == null) return undefined;
         return { home, noGoal, away };
       })()
@@ -252,7 +307,12 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
       })()
     : undefined;
 
-  const correctScoreMarket = findMarketLoose(ev, ["CORRECT_SCORE", "EXACT_SCORE"], "FULL_TIME");
+  // Real bet365 payload (confirmed 2026-09-12): the full-time correct-score
+  // market comes back as rawName "Final Score" (canonicalMarket "OTHER"),
+  // not "Correct Score"/"Exact Score" — added as its own needle. The
+  // per-selection parsing below already has a rawName-regex fallback
+  // ("1-0" etc match directly), so finding the market is the only gap.
+  const correctScoreMarket = findMarketLoose(ev, ["CORRECT_SCORE", "EXACT_SCORE", "final score"], "FULL_TIME");
   const correctScore: Record<string, number> | undefined = correctScoreMarket
     ? (() => {
         const out: Record<string, number> = {};
@@ -349,16 +409,33 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   // signs per line, not the same one, so that mode always returned nothing
   // useful; see pairAsianHandicapLines above for the correct approach.)
   const aggregateLineMarkets = (needles: string[], period: string) => {
-    const mkt = findMarketLoose(ev, needles, period);
-    if (!mkt) return undefined;
+    // Merges every matching market group, not just the first — see
+    // findMarketsLoose's header for why a single findMarketLoose() call
+    // here used to silently drop bet365's "alternative lines" groups.
+    const mkts = findMarketsLoose(ev, needles, period);
+    if (mkts.length === 0) return undefined;
     const m = new Map<number, { over: number; under: number }>();
-    for (const s of mkt.selections) {
-      if (s.line == null || !Number.isFinite(s.line)) continue;
-      const rec = m.get(s.line) ?? { over: undefined as number | undefined, under: undefined as number | undefined };
-      const out = s.canonicalOutcome.toUpperCase();
-      if (out === "OVER" || out.startsWith("O") || out.startsWith("MORE")) rec.over = s.odds;
-      else if (out === "UNDER" || out.startsWith("U") || out.startsWith("LESS")) rec.under = s.odds;
-      m.set(s.line, rec as { over: number; under: number });
+    for (const mkt of mkts) {
+      for (const s of mkt.selections) {
+        if (s.line == null || !Number.isFinite(s.line)) continue;
+        const rec = m.get(s.line) ?? { over: undefined as number | undefined, under: undefined as number | undefined };
+        const out = s.canonicalOutcome.toUpperCase();
+        // Real bet365 payload (confirmed 2026-09-12): corners over/under
+        // markets ("Match Corners", "2-Way Corners", "Asian Corners") tag
+        // EVERY selection generic canonicalOutcome "OTHER" — the previous
+        // `out.startsWith("O")` fuzzy match treated "OTHER" itself as a
+        // match for "Over", so a same-line "Exactly" selection (also
+        // "OTHER", also with a `line`) could silently clobber the real Over
+        // price. Match exact canonicalOutcome first, falling back to
+        // rawName only when canonicalOutcome is the generic placeholder —
+        // never a fuzzy prefix that "OTHER" itself satisfies.
+        const rawOut = s.rawName.trim().toUpperCase();
+        const isOver = out === "OVER" || out === "MORE" || (out === "OTHER" && rawOut === "OVER");
+        const isUnder = out === "UNDER" || out === "LESS" || (out === "OTHER" && rawOut === "UNDER");
+        if (isOver) rec.over = s.odds;
+        else if (isUnder) rec.under = s.odds;
+        m.set(s.line, rec as { over: number; under: number });
+      }
     }
     const clean = new Map<number, { over: number; under: number }>();
     for (const [l, v] of m.entries()) if (v.over != null && v.under != null) clean.set(l, v);
@@ -379,7 +456,17 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   // mapped here (would need its own market type, out of scope for this
   // pass; see the session notes on this decision).
   const handicapLines = asianHandicapAllLines;
-  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER"], "FULL_TIME");
+  // Real bet365 payload (confirmed 2026-09-12): the actual corners
+  // over/under markets ("Match Corners", "2-Way Corners", "Asian Corners")
+  // come back tagged canonicalMarket "OTHER" — CORNERS_OVER_UNDER only ever
+  // matched a HOME/AWAY-winner "Corners" market with no lines at all
+  // (contributes nothing here since it has no OVER/UNDER selections), so
+  // the real lines were never found. "corners" as a rawName needle catches
+  // all three real markets; findMarketsLoose already scopes to FULL_TIME,
+  // and any non-over/under corners market it also matches (the winner
+  // market, "Corners Race") is harmlessly dropped by the clean-map filter
+  // above since it never populates both sides of a line.
+  const cornersLines = aggregateLineMarkets(["CORNERS_TOTAL", "TOTAL_CORNERS", "CORNERS_OVER_UNDER", "corners"], "FULL_TIME");
   const cardsLines = aggregateLineMarkets(["BOOKINGS_TOTAL", "TOTAL_CARDS", "CARDS_OVER_UNDER"], "FULL_TIME");
   const asianTotalLines = aggregateLineMarkets(["TOTAL_GOALS", "GOALS_TOTAL", "TOTAL"], "FULL_TIME");
   // Per-team goals/corners over-under — real canonicalMarkets
