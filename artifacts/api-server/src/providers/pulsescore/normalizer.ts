@@ -171,9 +171,27 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
   const doubleChanceMarket = findMarket(ev, "DOUBLE_CHANCE", "FULL_TIME");
   const doubleChance = doubleChanceMarket
     ? (() => {
-        const homeOrDraw = findOutcomeOdds(doubleChanceMarket.selections, "HOME_DRAW");
-        const homeOrAway = findOutcomeOdds(doubleChanceMarket.selections, "HOME_AWAY");
-        const drawOrAway = findOutcomeOdds(doubleChanceMarket.selections, "DRAW_AWAY");
+        let homeOrDraw = findOutcomeOdds(doubleChanceMarket.selections, "HOME_DRAW");
+        let homeOrAway = findOutcomeOdds(doubleChanceMarket.selections, "HOME_AWAY");
+        let drawOrAway = findOutcomeOdds(doubleChanceMarket.selections, "DRAW_AWAY");
+        // Real bet365 payload (confirmed 2026-09-12) tags every DOUBLE_CHANCE
+        // selection generic canonicalOutcome "OTHER" — but its rawName spells
+        // out the real pairing verbatim ("<home> or Draw", "<away> or Draw",
+        // "<home> or <away>"), so match on that text instead of an outcome
+        // name this feed never sends.
+        if (homeOrDraw == null || homeOrAway == null || drawOrAway == null) {
+          const homeLower = ev.home.toLowerCase();
+          const awayLower = ev.away.toLowerCase();
+          for (const s of doubleChanceMarket.selections) {
+            const raw = s.rawName.toLowerCase();
+            const hasHome = raw.includes(homeLower);
+            const hasAway = raw.includes(awayLower);
+            const hasDraw = raw.includes("draw");
+            if (hasHome && hasDraw && homeOrDraw == null) homeOrDraw = s.odds;
+            else if (hasAway && hasDraw && drawOrAway == null) drawOrAway = s.odds;
+            else if (hasHome && hasAway && homeOrAway == null) homeOrAway = s.odds;
+          }
+        }
         if (homeOrDraw == null || homeOrAway == null || drawOrAway == null) return undefined;
         return { homeOrDraw, homeOrAway, drawOrAway };
       })()
@@ -197,8 +215,17 @@ export function normalizePulseScoreEvent(ev: PulseScoreEvent): NormalizedFootbal
     findMarketLoose(ev, ["goals odd/even", "odd/even", "total goals odd"], "FULL_TIME");
   const totalGoalsOddEven = oddEvenMarket
     ? (() => {
-        const even = findOutcomeOdds(oddEvenMarket.selections, "EVEN");
-        const odd = findOutcomeOdds(oddEvenMarket.selections, "ODD");
+        let even = findOutcomeOdds(oddEvenMarket.selections, "EVEN");
+        let odd = findOutcomeOdds(oddEvenMarket.selections, "ODD");
+        // Real bet365 payload (confirmed 2026-09-12) tags both selections
+        // generic canonicalOutcome "OTHER" — rawName is literally "Odd"/"Even"
+        // though, so fall back to that exact text.
+        if (even == null) {
+          even = oddEvenMarket.selections.find((s) => s.rawName.trim().toLowerCase() === "even")?.odds;
+        }
+        if (odd == null) {
+          odd = oddEvenMarket.selections.find((s) => s.rawName.trim().toLowerCase() === "odd")?.odds;
+        }
         if (even == null || odd == null) return undefined;
         return { even, odd };
       })()
