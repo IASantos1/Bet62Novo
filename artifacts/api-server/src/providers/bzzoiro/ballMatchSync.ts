@@ -258,6 +258,8 @@ export function getBzzoiroSubscriptionDetails(): Array<{
   hasBallPosition: boolean;
   ballPositionAgeMs: number | null;
   subscribedAckAgeMs: number | null;
+  hasRealOdds: boolean;
+  priceSource: LiveMatchState["_priceSource"] | null;
 }> {
   const out: Array<{
     bzzoiroEventId: number;
@@ -266,6 +268,8 @@ export function getBzzoiroSubscriptionDetails(): Array<{
     hasBallPosition: boolean;
     ballPositionAgeMs: number | null;
     subscribedAckAgeMs: number | null;
+    hasRealOdds: boolean;
+    priceSource: LiveMatchState["_priceSource"] | null;
   }> = [];
   for (const [eventId, liveMatchId] of currentSubscriptions.entries()) {
     const state = liveMatchState.get(liveMatchId);
@@ -279,6 +283,12 @@ export function getBzzoiroSubscriptionDetails(): Array<{
       // null here means bzzoiro never acknowledged this specific subscribe
       // request — distinct from "acked but no livedata yet".
       subscribedAckAgeMs: getBzzoiroSubscribedAckAgeMs(eventId),
+      // Added 2026-09-14 alongside handleOdds() — lets a caller see whether
+      // this specific subscribed match has actually been priced yet
+      // (real bookmaker odds via bzzoiro's own WS "odds" frame), not just
+      // whether ball position is flowing.
+      hasRealOdds: state?.hasRealOdds ?? false,
+      priceSource: state?._priceSource ?? null,
     });
   }
   return out;
