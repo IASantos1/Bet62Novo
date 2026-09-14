@@ -90,6 +90,22 @@ export function getBzzoiroLastFrame(frameType: string, eventId: number): Bzzoiro
 // to a server-sent ping, but does nothing to notice the *absence* of any
 // traffic on its own.
 const HEARTBEAT_INTERVAL_MS = 30_000;
+// Real second zombie variant confirmed 2026-09-14, once bzzoiro odds pricing
+// went live on ~220 simultaneous subscriptions: ping/pong stayed perfectly
+// healthy (proving the TCP/WS transport was alive) while zero real data
+// frames — livedata, odds, anything — arrived for 4+ minutes straight,
+// repeating within minutes of a fresh reconnect that itself worked
+// immediately (a standalone test subscribing to ONE match got real frames
+// in 463ms). This means ping/pong is answered by something in front of
+// bzzoiro's actual application layer (a proxy/LB) that doesn't notice the
+// backend has stopped pushing — the original heartbeat above only catches
+// the transport dying, not the app-level stream going silent while the
+// transport stays up. Treating prolonged silence on `lastFrameAt` as its
+// own zombie signal, alongside the existing pong-timeout one, catches this
+// too — real data should arrive roughly every ~5s per subscribed match, so
+// 3x the heartbeat interval is generous margin, never a false trigger on a
+// legitimate brief lull.
+const STALE_DATA_THRESHOLD_MS = HEARTBEAT_INTERVAL_MS * 3;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let awaitingPong = false;
 
@@ -107,6 +123,18 @@ function startHeartbeat(socket: WsClient): void {
     if (awaitingPong) {
       logger.warn("[bzzoiro-ws] no response to heartbeat ping — terminating stale connection");
       socket.terminate(); // forces "close", which schedules a real reconnect
+      return;
+    }
+    if (
+      subscribedEventIds.size > 0 &&
+      lastFrameAt > 0 &&
+      Date.now() - lastFrameAt > STALE_DATA_THRESHOLD_MS
+    ) {
+      logger.warn(
+        { subscribedCount: subscribedEventIds.size, lastFrameAgeMs: Date.now() - lastFrameAt },
+        "[bzzoiro-ws] ping/pong healthy but no real data frame in too long — terminating stale connection",
+      );
+      socket.terminate();
       return;
     }
     awaitingPong = true;
