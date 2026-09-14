@@ -26,7 +26,7 @@ import { logger } from "../../lib/logger.js";
 // this exact gap) — import the `ws` package's class explicitly instead of
 // relying on a runtime global that may not exist.
 import { WebSocket as WsClient } from "ws";
-import type { BzzoiroWsFrame, BzzoiroLiveDataFrame } from "./types.js";
+import type { BzzoiroWsFrame, BzzoiroLiveDataFrame, BzzoiroOddsFrame } from "./types.js";
 
 let ws: WsClient | null = null;
 let connected = false;
@@ -52,6 +52,9 @@ let pongsReceived = 0;
 const subscribedAckAt = new Map<number, number>();
 
 let onLiveData: ((frame: BzzoiroLiveDataFrame) => void) | null = null;
+// Real odds handler (2026-09-14) — bzzoiro odds are now the primary price
+// source for football; see ballMatchSync.ts's registerBzzoiroOddsHandler.
+let onOdds: ((frame: BzzoiroOddsFrame) => void) | null = null;
 
 // Investigation-only (added 2026-09-13, see /bzzoiro-capabilities-probe):
 // the "odds"/"action"/"event" frame types are real (confirmed in this
@@ -181,6 +184,9 @@ function connect(): void {
     if (msg.type === "livedata" && onLiveData) {
       onLiveData(msg as BzzoiroLiveDataFrame);
     }
+    if (msg.type === "odds" && onOdds) {
+      onOdds(msg as BzzoiroOddsFrame);
+    }
     if (msg.type === "subscribed" && "event_id" in msg) {
       subscribedAckAt.set((msg as { event_id: number }).event_id, Date.now());
     }
@@ -215,8 +221,12 @@ function connect(): void {
 /** Call once at server startup, gated on CONFIG.BZZOIRO_API_KEY being set.
  * onLiveDataCallback receives every real `livedata` frame for any
  * currently-subscribed match. */
-export function startBzzoiroWebSocket(onLiveDataCallback?: (frame: BzzoiroLiveDataFrame) => void): void {
+export function startBzzoiroWebSocket(
+  onLiveDataCallback?: (frame: BzzoiroLiveDataFrame) => void,
+  onOddsCallback?: (frame: BzzoiroOddsFrame) => void,
+): void {
   onLiveData = onLiveDataCallback ?? null;
+  onOdds = onOddsCallback ?? null;
   if (!CONFIG.BZZOIRO_API_KEY) return;
   if (startedOnce) return;
   startedOnce = true;
