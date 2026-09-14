@@ -12,6 +12,9 @@ import type {
   BzzoiroEvent,
   BzzoiroUpcomingEventsResponse,
   BzzoiroUpcomingEvent,
+  BzzoiroEventOddsSummary,
+  BzzoiroOddsFeedResponse,
+  BzzoiroOddsFeedRow,
 } from "./types.js";
 
 // Two more real, captured-but-never-wrapped endpoints (see this file's own
@@ -120,4 +123,36 @@ export async function getBzzoiroCoverageRaw(): Promise<unknown> {
  * anything to read them for real. */
 export async function getBzzoiroEventStatsRaw(eventId: number | string): Promise<unknown> {
   return rawGet<unknown>(`/events/${encodeURIComponent(String(eventId))}/stats/`);
+}
+
+// The two odds endpoints below are added 2026-09-14 straight from the
+// user's own pasted bzzoiro docs — investigation-only for now, same as
+// getBzzoiroCoverageRaw/getBzzoiroEventStatsRaw: we do not yet trust a
+// vendor doc's shape for a money-critical field until a real production
+// capture confirms it (see this session's established rule). Once a real
+// capture matches BzzoiroEventOddsSummary/BzzoiroOddsFeedRow, these become
+// the basis for a prematch (and possibly live, per the docs' own
+// update_reason: "match is in play") odds normalizer — bzzoiro currently
+// has no prematch odds path in BET62 at all.
+
+/** GET /events/:id/odds/ — the free-tier consensus summary (11 fixed
+ * keys, home_win/draw/away_win + O/U at 1.5/2.5/3.5 + BTTS, full-time
+ * only per the docs). Docs claim this keeps refreshing during play too
+ * (update_reason: "match is in play", ~15 min cadence) — unconfirmed
+ * until a real live event is probed. */
+export async function getBzzoiroEventOddsSummary(eventId: number | string): Promise<BzzoiroEventOddsSummary> {
+  return rawGet<BzzoiroEventOddsSummary>(`/events/${encodeURIComponent(String(eventId))}/odds/`);
+}
+
+/** GET /api/v2/odds/?event_id=...&market=... — the only documented way to
+ * reach asian_handicap (full quarter-line grid with push), double_chance,
+ * draw_no_bet, and total_corners; none of those are in
+ * BzzoiroEventOddsSummary's fixed set. One row per outcome (consensus) or
+ * per outcome × bookmaker (Football Unlimited). `market` is one of
+ * 1x2 / over_under_15 / over_under_25 / over_under_35 / btts /
+ * double_chance / draw_no_bet / asian_handicap / total_corners — see the
+ * docs' own market/outcome validation table. */
+export async function getBzzoiroOddsFeed(eventId: number | string, market: string): Promise<BzzoiroOddsFeedRow[]> {
+  const resp = await rawGet<BzzoiroOddsFeedResponse>("/odds/", { event_id: eventId, market });
+  return resp.results ?? [];
 }
