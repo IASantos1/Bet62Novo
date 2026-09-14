@@ -168,7 +168,16 @@ const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss
 // alongside — this client only wraps the transport, real market/odds
 // normalization into BET62's own shape is a separate, later step (see
 // providers/pulsescore/README.md).
-const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
+// Deactivated 2026-09-14 on explicit user instruction: bzzoiro is now the
+// sole primary data source for every sport it offers (odds, stats, ball
+// position), and PulseScore is retired for football. Forced to "" here
+// rather than deleting the integration outright — every PulseScore call
+// site (shadowMatchSync's live/prematch crons, the WebSocket wake-up
+// signal, matches.ts's odds path) already gates on
+// `if (CONFIG.PULSESCORE_API_KEY)`, so this one line turns all of them
+// off regardless of whether the real key is still set in Railway.
+// Reversible by deleting this line if PulseScore is ever needed again.
+const PULSESCORE_API_KEY = "";
 const PULSESCORE_BASE_URL =
   process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net";
 // Confirmed real in production (2026-09-10): the account's PRO plan enforces
