@@ -556,17 +556,19 @@ export type LiveMatchState = {
   _pendingScoreHome?: number;
   _pendingScoreAway?: number;
   // Set once a live football fixture's odds/markets are being driven by a
-  // real PulseScore price instead of GOAL API's synthetic Poisson fallback
-  // (see shadowMatchSync.ts's runOddsComparisonPhase, the only writer of
-  // this field). Two things key off it: the drift-engine setInterval loop
-  // skips any state with this set (never overwrites a real PulseScore price
-  // with a synthetic one), and buildLivePayload's visibility filter
-  // requires it before a football/GOAL-API fixture is shown as bettable —
-  // per the user's explicit decision (2026-09-10): PulseScore is the sole
-  // live football odds source, so a fixture with no real PulseScore price
-  // yet simply doesn't appear for betting rather than showing a fabricated
-  // one. GOAL API remains the source of score/events/stats regardless.
-  _priceSource?: "pulsescore";
+  // real price instead of GOAL API's synthetic Poisson fallback (written by
+  // shadowMatchSync.ts's runOddsComparisonPhase for "pulsescore", or
+  // bzzoiro/ballMatchSync.ts's odds handler for "bzzoiro"). Two things key
+  // off it via hasRealPriceSource() below: the drift-engine setInterval loop
+  // skips any state with a real source set (never overwrites a real price
+  // with a synthetic one), and buildLivePayload's visibility filter requires
+  // one before a football/GOAL-API fixture is shown as bettable — per the
+  // user's explicit decisions (2026-09-10 for PulseScore, 2026-09-14 for
+  // bzzoiro becoming the primary source): a fixture with no real price yet
+  // simply doesn't appear for betting rather than showing a fabricated one.
+  // GOAL API remains the source of score/events/stats regardless, pending
+  // task #105's settlement-data validation.
+  _priceSource?: "pulsescore" | "bzzoiro";
   // Traceability: the raw PulseScore event id behind this fixture's real
   // markets (set alongside _priceSource by shadowMatchSync.ts) — lets
   // GET /api/admin/pulsescore-market-dump re-fetch the exact upstream
@@ -764,11 +766,20 @@ export type UpcomingMatch = {
    *  display/diagnostic flag now — per the user's 2026-09-11 decision
    *  (routes/bets.ts), a bet is accepted on whichever price is shown,
    *  real or synthetic; this no longer gates acceptance. */
-  _priceSource?: "pulsescore";
+  _priceSource?: "pulsescore" | "bzzoiro";
   /** Traceability: the raw PulseScore event id used for this fixture's
    *  real markets (matches getPrematchPulsePrice + canonical DB mapping). */
   _pulseScoreEventId?: string;
 };
+
+/** Any provider that has priced a fixture with a REAL number, as opposed to
+ * GOAL API's synthetic Poisson fallback — see _priceSource's own comment
+ * for the full write/read contract. Centralized so "which sources count as
+ * real" is a single fact, not three separately-maintained string
+ * comparisons across the drift loop, visibility filter, and rebuild logic. */
+function hasRealPriceSource(source: "pulsescore" | "bzzoiro" | undefined): boolean {
+  return source === "pulsescore" || source === "bzzoiro";
+}
 
 type ProviderQualitySnapshot = {
   provider: string;
@@ -8172,7 +8183,7 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     // so the match still shows a moving, browsable price instead of a
     // blank "--" while bets.ts continues to refuse real wagers on it
     // (gate: `_priceSource !== "pulsescore"`).
-    const wasPulseBefore = existing?._priceSource === "pulsescore";
+    const wasPulseBefore = hasRealPriceSource(existing?._priceSource);
     const displayOdds = wasPulseBefore ? existing.odds : (existing?.odds ?? baseOdds);
     const displayMarkets = wasPulseBefore ? existing.markets : (existing?.markets ?? baseMarkets);
     const state: LiveMatchState = {
@@ -10022,18 +10033,19 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   };
 
   // Reverted 2026-09-11 per the user's explicit decision: a GOAL-API
-  // football fixture is only shown in the Ao Vivo list once PulseScore has
-  // actually priced its headline 1X2 market (`_priceSource ===
-  // "pulsescore"`). This replaces the 2026-09-10 "hybrid" gate (which
-  // showed every GOAL-API live fixture regardless of pricing, betting or
-  // not) — the user weighed the tradeoff (many minor-league fixtures never
-  // get PulseScore coverage and will simply never appear) and chose to
-  // hide unpriced fixtures entirely rather than show a match nobody can
-  // trust the odds on. Any fixture flagged liveDecisions.visible=false by
-  // admin still gets hidden by the outer filter regardless of provider.
+  // football fixture is only shown in the Ao Vivo list once a real provider
+  // has actually priced its headline 1X2 market (hasRealPriceSource —
+  // PulseScore originally, bzzoiro added 2026-09-14). This replaces the
+  // 2026-09-10 "hybrid" gate (which showed every GOAL-API live fixture
+  // regardless of pricing, betting or not) — the user weighed the tradeoff
+  // (many minor-league fixtures never get real coverage and will simply
+  // never appear) and chose to hide unpriced fixtures entirely rather than
+  // show a match nobody can trust the odds on. Any fixture flagged
+  // liveDecisions.visible=false by admin still gets hidden by the outer
+  // filter regardless of provider.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
-    || m._priceSource === "pulsescore";
+    || hasRealPriceSource(m._priceSource);
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -14077,13 +14089,15 @@ setInterval(() => {
   let anyChange = false;
   for (const [id, state] of liveMatchState.entries()) {
     if (state.sport !== "football") continue;
-    // A real PulseScore price is never touched by the synthetic Poisson
-    // drift model — shadowMatchSync.ts's runOddsComparisonPhase is the only
-    // writer of odds/markets for these fixtures. Suspension (goal/red-card
-    // delay) is computed independently in buildFootballLiveFromGoalApi off
-    // GOAL API's own event feed and still applies regardless of price
-    // source — skipping the drift loop here doesn't affect that.
-    if (state._priceSource === "pulsescore") continue;
+    // A real price (PulseScore or, since 2026-09-14, bzzoiro) is never
+    // touched by the synthetic Poisson drift model — shadowMatchSync.ts's
+    // runOddsComparisonPhase and bzzoiro/ballMatchSync.ts's odds handler are
+    // the only writers of odds/markets for these fixtures. Suspension
+    // (goal/red-card delay) is computed independently in
+    // buildFootballLiveFromGoalApi off GOAL API's own event feed and still
+    // applies regardless of price source — skipping the drift loop here
+    // doesn't affect that.
+    if (hasRealPriceSource(state._priceSource)) continue;
     const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
     if (skip.includes(state.status)) continue;
     if (state.marketSuspension) {

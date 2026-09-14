@@ -30,7 +30,8 @@ import {
   getBzzoiroSubscribedAckAgeMs,
 } from "./websocketClient.js";
 import { liveMatchState, broadcastMatchDelta, type LiveMatchState } from "../../routes/matches.js";
-import type { BzzoiroLiveDataFrame } from "./types.js";
+import type { BzzoiroLiveDataFrame, BzzoiroOddsFrame } from "./types.js";
+import { buildBzzoiroMarkets } from "./oddsNormalizer.js";
 
 const PROVIDER = "bzzoiro";
 const SYNC_INTERVAL_MS = 20_000;
@@ -166,6 +167,41 @@ function handleLiveData(frame: BzzoiroLiveDataFrame): void {
   broadcastMatchDelta(liveMatchId, { _ballPosition: ballPosition });
 }
 
+// Real odds pricing (2026-09-14) — bzzoiro's "odds" WS frame is now
+// BET62's primary football price source (see matches.ts's
+// hasRealPriceSource). Same "never partially priced" rule
+// runOddsComparisonPhase (PulseScore) already follows: only write when the
+// frame actually carries a real match_winner 1X2, and bump marketVersion
+// only when the value genuinely changed, not on every tick.
+function handleOdds(frame: BzzoiroOddsFrame): void {
+  const liveMatchId = currentSubscriptions.get(frame.event_id);
+  if (!liveMatchId) return;
+  const existing = liveMatchState.get(liveMatchId);
+  if (!existing) return;
+
+  const mw = frame.odds.match_winner;
+  const all1x2LegsReal = mw && Number.isFinite(mw.home) && mw.home > 1 && Number.isFinite(mw.draw) && mw.draw > 1 && Number.isFinite(mw.away) && mw.away > 1;
+  if (!all1x2LegsReal) return;
+
+  const { odds, markets } = buildBzzoiroMarkets(frame);
+  const oddsChanged = JSON.stringify(odds) !== JSON.stringify(existing.odds);
+  const marketsChanged = JSON.stringify(markets) !== JSON.stringify(existing.markets);
+  const versionBumped = oddsChanged || marketsChanged || existing._priceSource !== "bzzoiro";
+
+  const updatedState: LiveMatchState = {
+    ...existing,
+    odds,
+    markets,
+    hasRealOdds: true,
+    _priceSource: "bzzoiro",
+    marketVersion: versionBumped ? (existing.marketVersion ?? 0) + 1 : existing.marketVersion,
+  };
+  liveMatchState.set(liveMatchId, updatedState);
+  if (oddsChanged || marketsChanged) {
+    broadcastMatchDelta(liveMatchId, { odds, markets, marketVersion: updatedState.marketVersion });
+  }
+}
+
 let intervalStarted = false;
 
 export async function runBzzoiroBallSyncOnce(): Promise<void> {
@@ -189,7 +225,7 @@ export async function runBzzoiroBallSyncOnce(): Promise<void> {
  * loop. */
 export function startBzzoiroBallSync(): void {
   if (!CONFIG.BZZOIRO_API_KEY) return;
-  startBzzoiroWebSocket(handleLiveData);
+  startBzzoiroWebSocket(handleLiveData, handleOdds);
   if (intervalStarted) return;
   intervalStarted = true;
   runBzzoiroBallSyncOnce().catch(() => {});
@@ -222,6 +258,8 @@ export function getBzzoiroSubscriptionDetails(): Array<{
   hasBallPosition: boolean;
   ballPositionAgeMs: number | null;
   subscribedAckAgeMs: number | null;
+  hasRealOdds: boolean;
+  priceSource: LiveMatchState["_priceSource"] | null;
 }> {
   const out: Array<{
     bzzoiroEventId: number;
@@ -230,6 +268,8 @@ export function getBzzoiroSubscriptionDetails(): Array<{
     hasBallPosition: boolean;
     ballPositionAgeMs: number | null;
     subscribedAckAgeMs: number | null;
+    hasRealOdds: boolean;
+    priceSource: LiveMatchState["_priceSource"] | null;
   }> = [];
   for (const [eventId, liveMatchId] of currentSubscriptions.entries()) {
     const state = liveMatchState.get(liveMatchId);
@@ -243,6 +283,12 @@ export function getBzzoiroSubscriptionDetails(): Array<{
       // null here means bzzoiro never acknowledged this specific subscribe
       // request — distinct from "acked but no livedata yet".
       subscribedAckAgeMs: getBzzoiroSubscribedAckAgeMs(eventId),
+      // Added 2026-09-14 alongside handleOdds() — lets a caller see whether
+      // this specific subscribed match has actually been priced yet
+      // (real bookmaker odds via bzzoiro's own WS "odds" frame), not just
+      // whether ball position is flowing.
+      hasRealOdds: state?.hasRealOdds ?? false,
+      priceSource: state?._priceSource ?? null,
     });
   }
   return out;
