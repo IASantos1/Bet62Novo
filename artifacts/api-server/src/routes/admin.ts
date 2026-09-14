@@ -56,6 +56,7 @@ import {
   getBzzoiroUpcomingEvents,
   getBzzoiroEventOddsSummary,
   getBzzoiroOddsFeed,
+  getBzzoiroEventIncidentsRaw,
 } from "../providers/bzzoiro/client.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
@@ -2760,6 +2761,31 @@ router.get("/bzzoiro-capabilities-probe", adminMiddleware, async (req: AdminRequ
     result.lastOddsFrame = getBzzoiroLastFrame("odds", eventId) ?? null;
     result.lastActionFrame = getBzzoiroLastFrame("action", eventId) ?? null;
     result.lastEventFrame = getBzzoiroLastFrame("event", eventId) ?? null;
+
+    // Added 2026-09-14 per explicit user instruction to move settlement
+    // (score/goals/cards deciding real-money bet outcomes) onto bzzoiro
+    // too — currently GOAL API's job. This is the highest-risk swap in the
+    // whole migration, so before any normalizer or wiring exists, compare
+    // bzzoiro's real /incidents/ against GOAL API's own live events for
+    // the SAME matched fixture, side by side, in one probe call.
+    try {
+      result.incidents = await getBzzoiroEventIncidentsRaw(eventId);
+    } catch (err) {
+      result.incidentsError = err instanceof Error ? err.message : String(err);
+    }
+    const matchedSub = subs.find((s) => s.bzzoiroEventId === eventId);
+    if (matchedSub) {
+      const goalApiState = liveMatchState.get(matchedSub.liveMatchId);
+      result.goalApiComparison = goalApiState
+        ? {
+            liveMatchId: matchedSub.liveMatchId,
+            homeScore: goalApiState.homeScore,
+            awayScore: goalApiState.awayScore,
+            minute: goalApiState.minute,
+            events: goalApiState.events,
+          }
+        : null;
+    }
 
     // Added 2026-09-14 straight from the user's own pasted bzzoiro docs —
     // this endpoint is documented to keep answering during play

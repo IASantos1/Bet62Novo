@@ -125,6 +125,19 @@ export async function getBzzoiroEventStatsRaw(eventId: number | string): Promise
   return rawGet<unknown>(`/events/${encodeURIComponent(String(eventId))}/stats/`);
 }
 
+/** GET /events/:id/incidents/ raw — never wrapped before. Added 2026-09-14
+ * per the user's explicit instruction to move BET62 fully onto bzzoiro,
+ * including settlement (score/goals/cards deciding real-money bet
+ * outcomes) — currently GOAL API's job. Investigation-only: this is the
+ * single highest-risk swap in the whole migration, so before any
+ * normalizer or wiring exists, this needs a real side-by-side capture
+ * against GOAL API's own incident feed on the same live match (goal
+ * scorer/minute, card player/type, VAR overturns) — never trust a vendor
+ * doc's shape for money. */
+export async function getBzzoiroEventIncidentsRaw(eventId: number | string): Promise<unknown> {
+  return rawGet<unknown>(`/events/${encodeURIComponent(String(eventId))}/incidents/`);
+}
+
 // The two odds endpoints below are added 2026-09-14 straight from the
 // user's own pasted bzzoiro docs — investigation-only for now, same as
 // getBzzoiroCoverageRaw/getBzzoiroEventStatsRaw: we do not yet trust a
