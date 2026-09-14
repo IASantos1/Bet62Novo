@@ -136,7 +136,21 @@ async function refreshSubscriptions(): Promise<number> {
   for (const fx of matched) {
     const eventId = Number(fx.otherProviderMatchId);
     if (!Number.isFinite(eventId)) continue;
-    nextSubscriptions.set(eventId, `goalapi-football-${fx.goalApiProviderMatchId}`);
+    const liveMatchId = `goalapi-football-${fx.goalApiProviderMatchId}`;
+    // Real bug found 2026-09-14 via getBzzoiroOddsFrameOutcomeCounts() in
+    // production: 312 of 316 real odds frames were dropped with
+    // noLiveMatchState — getMatchedLiveFootballFixtures() reads the DB's
+    // matchesTable.status flag, which canonicalMatchCatalog.ts's own
+    // header already flags as "not yet a source of truth for anything":
+    // it's only ever written TO "live" (whenever GOAL API's poll still
+    // sees the fixture) and never written back off it once GOAL API stops
+    // returning it, so it accumulates a permanent backlog of long-finished
+    // matches nothing ever expires. Cross-checking against the real
+    // in-memory liveMatchState (GOAL API's own live poll, always accurate)
+    // before subscribing avoids wasting a shard slot — and therefore ever
+    // seeing a real odds price — on a match that isn't live anymore.
+    if (!liveMatchState.has(liveMatchId)) continue;
+    nextSubscriptions.set(eventId, liveMatchId);
   }
   for (const eventId of currentSubscriptions.keys()) {
     if (!nextSubscriptions.has(eventId)) unsubscribeBzzoiroEvent(eventId);
