@@ -65,7 +65,18 @@ let onOdds: ((frame: BzzoiroOddsFrame) => void) | null = null;
 // sending, ahead of the user's request to evaluate bzzoiro as a full
 // replacement for GOAL API/PulseScore (odds + stats + xG + ball position).
 const lastFrameByType = new Map<string, Map<number, BzzoiroWsFrame>>();
+// Added 2026-09-14 alongside the odds pricing rollout: with "with real
+// odds" stuck at a single match for many minutes despite lastFrameAgeMs
+// staying low (frames ARE arriving), the open question is whether "odds"
+// frames are simply rare among real traffic (livedata/action/ingest_debug
+// dominate, entirely plausible if only a handful of the ~220 subscribed
+// matches carry real bookmaker coverage right now) or whether something in
+// the odds pipeline itself is silently dropping frames that do arrive.
+// Counting every frame by type, regardless of event_id, answers that
+// without guessing.
+const frameTypeCounts = new Map<string, number>();
 function captureFrame(frame: BzzoiroWsFrame): void {
+  frameTypeCounts.set(frame.type, (frameTypeCounts.get(frame.type) ?? 0) + 1);
   if (!("event_id" in frame) || typeof (frame as { event_id?: unknown }).event_id !== "number") return;
   const eventId = (frame as { event_id: number }).event_id;
   if (!lastFrameByType.has(frame.type)) lastFrameByType.set(frame.type, new Map());
@@ -76,6 +87,13 @@ function captureFrame(frame: BzzoiroWsFrame): void {
  * event_id, or undefined if none has arrived yet. Investigation-only. */
 export function getBzzoiroLastFrame(frameType: string, eventId: number): BzzoiroWsFrame | undefined {
   return lastFrameByType.get(frameType)?.get(eventId);
+}
+
+/** Total frames seen by type since this process started, e.g.
+ * { livedata: 4021, action: 812, odds: 3, ingest_debug: 55 }.
+ * Investigation-only — see frameTypeCounts's header. */
+export function getBzzoiroFrameTypeCounts(): Record<string, number> {
+  return Object.fromEntries(frameTypeCounts);
 }
 
 // Real bug fixed 2026-09-11 (user-reported: _ballPosition never populates
@@ -286,6 +304,7 @@ export function getBzzoiroWsStatus(): {
   subscribedCount: number;
   pingsSent: number;
   pongsReceived: number;
+  frameTypeCounts: Record<string, number>;
 } {
   return {
     connected,
@@ -294,6 +313,7 @@ export function getBzzoiroWsStatus(): {
     subscribedCount: subscribedEventIds.size,
     pingsSent,
     pongsReceived,
+    frameTypeCounts: getBzzoiroFrameTypeCounts(),
   };
 }
 
