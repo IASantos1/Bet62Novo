@@ -58,6 +58,7 @@ import {
   getBzzoiroOddsFeed,
   getBzzoiroEventIncidentsRaw,
 } from "../providers/bzzoiro/client.js";
+import { goalApi } from "../services/goalapi/index.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
@@ -2785,6 +2786,19 @@ router.get("/bzzoiro-capabilities-probe", adminMiddleware, async (req: AdminRequ
             events: goalApiState.events,
           }
         : null;
+      // Added 2026-09-14: LiveMatchState.events above is BET62's OWN
+      // already-processed cache — an empty array there could mean "GOAL
+      // API really has nothing" OR "our own events pipeline dropped it
+      // for this match" (unrelated to bzzoiro). Fetching GOAL API's raw
+      // /fixtures/:id/events directly, bypassing our cache entirely, is
+      // the only way to tell those apart before trusting (or distrusting)
+      // a bzzoiro incident that our own cache doesn't corroborate.
+      const rawGoalApiId = matchedSub.liveMatchId.replace(/^goalapi-football-/, "");
+      try {
+        result.goalApiRawEvents = await goalApi.getFixtureEvents(rawGoalApiId);
+      } catch (err) {
+        result.goalApiRawEventsError = err instanceof Error ? err.message : String(err);
+      }
     }
 
     // Added 2026-09-14 straight from the user's own pasted bzzoiro docs —
