@@ -22,6 +22,7 @@ import {
 import { matchGoalApiFixtureToBzzoiro, debugBestCandidateBzzoiro } from "../../matching/bzzoiroMatchEngine.js";
 import type { GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
 import { getBzzoiroLiveEvents } from "./client.js";
+import type { BzzoiroEvent } from "./types.js";
 import {
   startBzzoiroWebSocket,
   subscribeBzzoiroEvent,
@@ -36,10 +37,30 @@ import { buildBzzoiroMarkets } from "./oddsNormalizer.js";
 const PROVIDER = "bzzoiro";
 const SYNC_INTERVAL_MS = 20_000;
 
-// bzzoiro event_id -> "goalapi-football-<id>" liveMatchId, refreshed every
-// sync round. This is the routing table the WS handler below uses to know
-// which LiveMatchState entry a given event_id's livedata frame belongs to.
+// bzzoiro event_id -> liveMatchId ("goalapi-football-<id>" for a fixture
+// GOAL API also tracks, "bzzoiro-football-<id>" for one bzzoiro alone
+// discovered — see nativeLiveEvents below), refreshed every sync round.
+// This is the routing table the WS handler below uses to know which
+// LiveMatchState entry a given event_id's livedata/odds/event frame
+// belongs to.
 let currentSubscriptions = new Map<number, string>();
+
+// Added 2026-09-14 on explicit user instruction: bzzoiro becomes BET62's
+// own football discovery source, not just an odds/ball-position add-on
+// bolted onto GOAL API's fixture list. Every currently-live bzzoiro event
+// NOT already matched to a GOAL API fixture gets its own native
+// "bzzoiro-football-<id>" entry here — matches.ts's buildFootballLiveFromBzzoiro
+// reads this to build real LiveMatchState rows for them (score/minute from
+// the WS `event` frame, odds/ball position from the same handleOdds/
+// handleLiveData handlers below, unchanged).
+const nativeLiveEvents = new Map<number, BzzoiroEvent>();
+
+/** Currently-live bzzoiro events with no GOAL API counterpart — read by
+ * matches.ts's buildFootballLiveFromBzzoiro() to build native LiveMatchState
+ * rows. Refreshed every refreshSubscriptions() round (20s). */
+export function getBzzoiroNativeLiveEvents(): BzzoiroEvent[] {
+  return [...nativeLiveEvents.values()];
+}
 
 const NEAR_MISS_SAMPLE_CAP = 8;
 
@@ -152,6 +173,23 @@ async function refreshSubscriptions(): Promise<number> {
     if (!liveMatchState.has(liveMatchId)) continue;
     nextSubscriptions.set(eventId, liveMatchId);
   }
+
+  // Native discovery (added 2026-09-14 on explicit user instruction):
+  // bzzoiro is now BET62's own football discovery source, not just an
+  // odds/ball-position add-on bolted onto GOAL API's fixture list. Every
+  // currently-live bzzoiro event NOT already matched to a GOAL API
+  // fixture above gets its own "bzzoiro-football-<id>" entry — see
+  // matches.ts's buildFootballLiveFromBzzoiro, which builds the actual
+  // LiveMatchState rows for these from getBzzoiroNativeLiveEvents() below.
+  const nextNativeEvents = new Map<number, BzzoiroEvent>();
+  const liveBzzoiroEvents = await getBzzoiroLiveEvents();
+  for (const ev of liveBzzoiroEvents) {
+    if (ev.status !== "inprogress") continue;
+    if (nextSubscriptions.has(ev.id)) continue; // already matched to a GOAL API fixture above
+    nextNativeEvents.set(ev.id, ev);
+    nextSubscriptions.set(ev.id, `bzzoiro-football-${ev.id}`);
+  }
+
   for (const eventId of currentSubscriptions.keys()) {
     if (!nextSubscriptions.has(eventId)) unsubscribeBzzoiroEvent(eventId);
   }
@@ -159,6 +197,8 @@ async function refreshSubscriptions(): Promise<number> {
     if (!currentSubscriptions.has(eventId)) subscribeBzzoiroEvent(eventId);
   }
   currentSubscriptions = nextSubscriptions;
+  nativeLiveEvents.clear();
+  for (const [id, ev] of nextNativeEvents) nativeLiveEvents.set(id, ev);
   return currentSubscriptions.size;
 }
 
