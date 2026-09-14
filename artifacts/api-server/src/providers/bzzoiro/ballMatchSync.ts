@@ -167,6 +167,28 @@ function handleLiveData(frame: BzzoiroLiveDataFrame): void {
   broadcastMatchDelta(liveMatchId, { _ballPosition: ballPosition });
 }
 
+// Diagnostic added 2026-09-14: after the subscribed-snapshot fix (every
+// subscribe now carries an "odds" snapshot, confirmed real — 228
+// subscriptions produced exactly 228 captured "odds" frames in
+// production), "with real odds" stayed stuck at the same 4 matches. That
+// could mean bzzoiro's real coverage of THIS specific pool of live
+// matches (skewed toward lower South American divisions per GOAL API's
+// own coverage) is simply sparse — or it could mean frames are being
+// dropped somewhere in this function for an unrelated reason. Counting
+// exactly where each odds frame exits this function answers that without
+// guessing, same rule this session has followed throughout.
+const oddsFrameOutcomeCounts = {
+  noSubscriptionMapping: 0,
+  noLiveMatchState: 0,
+  noRealPriceYet: 0,
+  priced: 0,
+};
+
+/** Investigation-only — see oddsFrameOutcomeCounts's header. */
+export function getBzzoiroOddsFrameOutcomeCounts(): typeof oddsFrameOutcomeCounts {
+  return { ...oddsFrameOutcomeCounts };
+}
+
 // Real odds pricing (2026-09-14) — bzzoiro's "odds" WS frame is now
 // BET62's primary football price source (see matches.ts's
 // hasRealPriceSource). Same "never partially priced" rule
@@ -175,13 +197,23 @@ function handleLiveData(frame: BzzoiroLiveDataFrame): void {
 // only when the value genuinely changed, not on every tick.
 function handleOdds(frame: BzzoiroOddsFrame): void {
   const liveMatchId = currentSubscriptions.get(frame.event_id);
-  if (!liveMatchId) return;
+  if (!liveMatchId) {
+    oddsFrameOutcomeCounts.noSubscriptionMapping++;
+    return;
+  }
   const existing = liveMatchState.get(liveMatchId);
-  if (!existing) return;
+  if (!existing) {
+    oddsFrameOutcomeCounts.noLiveMatchState++;
+    return;
+  }
 
   const mw = frame.odds.match_winner;
   const all1x2LegsReal = mw && Number.isFinite(mw.home) && mw.home > 1 && Number.isFinite(mw.draw) && mw.draw > 1 && Number.isFinite(mw.away) && mw.away > 1;
-  if (!all1x2LegsReal) return;
+  if (!all1x2LegsReal) {
+    oddsFrameOutcomeCounts.noRealPriceYet++;
+    return;
+  }
+  oddsFrameOutcomeCounts.priced++;
 
   const { odds, markets } = buildBzzoiroMarkets(frame);
   const oddsChanged = JSON.stringify(odds) !== JSON.stringify(existing.odds);
@@ -234,10 +266,15 @@ export function startBzzoiroBallSync(): void {
   }, SYNC_INTERVAL_MS);
 }
 
-export function getBzzoiroBallSyncStatus(): { ws: ReturnType<typeof getBzzoiroWsStatus>; subscribedMatches: number } {
+export function getBzzoiroBallSyncStatus(): {
+  ws: ReturnType<typeof getBzzoiroWsStatus>;
+  subscribedMatches: number;
+  oddsFrameOutcomes: ReturnType<typeof getBzzoiroOddsFrameOutcomeCounts>;
+} {
   return {
     ws: getBzzoiroWsStatus(),
     subscribedMatches: currentSubscriptions.size,
+    oddsFrameOutcomes: getBzzoiroOddsFrameOutcomeCounts(),
   };
 }
 
