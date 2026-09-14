@@ -54,6 +54,7 @@ import {
 import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
 import { getBzzoiroNativeLiveEvents } from "../providers/bzzoiro/ballMatchSync.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
+import { getBzzoiroUpcomingEvents } from "../providers/bzzoiro/client.js";
 import type { BzzoiroEventFrame } from "../providers/bzzoiro/types.js";
 import {
   extractGoalApi1x2Odds,
@@ -7939,6 +7940,64 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+// Added 2026-09-14 on explicit user instruction: bzzoiro becomes BET62's
+// primary football source, including prematch discovery (not just live
+// odds/ball position). Real fixture discovery only for now — real prices
+// per upcoming fixture would mean fetchBzzoiroMarketsFromRest's 5 REST
+// calls (summary + 4 market feeds) per fixture, hundreds of times per
+// request; GOAL API's own builder avoids exactly this cost by reading
+// getPrematchPulsePrice's background-synced cache instead of fetching
+// inline, and bzzoiro prematch pricing needs the same treatment — tracked
+// as a fast-follow, not done here. Fixtures show hasRealOdds: false /
+// zerofillAdvancedMarkets() until then, the same honest "no price yet"
+// state a newly-discovered match shows anywhere else in this file.
+async function buildFootballUpcomingFromBzzoiro(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const dateFrom = new Date().toISOString().slice(0, 10);
+  const dateTo = new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10);
+  const events = await getBzzoiroUpcomingEvents(dateFrom, dateTo).catch(() => []);
+
+  const results: UpcomingMatch[] = [];
+  for (const ev of events) {
+    if (ev.status !== "notstarted") continue;
+    if (isBlockedLeague(ev.round_label ?? "") || isWomensLeague(ev.round_label ?? "")) continue;
+    const home = stripGenderTeamSuffix(ev.home_team);
+    const away = stripGenderTeamSuffix(ev.away_team);
+    if (!home || !away) continue;
+
+    const kickoff = new Date(ev.event_date);
+    if (Number.isNaN(kickoff.getTime())) continue;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Lisbon",
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(kickoff);
+    const p: Record<string, string> = {};
+    for (const part of parts) p[part.type] = part.value;
+    const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+
+    results.push({
+      id: `bzzoiro-football-${ev.id}`,
+      home,
+      away,
+      // bzzoiro's /events/ prematch list only carries league_id, not a
+      // resolved name (confirmed real — see BzzoiroUpcomingEvent) — a real
+      // name needs a batched /leagues/ lookup, not done here yet.
+      league: `Liga #${ev.league_id}`,
+      country: "Internacional",
+      time: `${hh}:${p["minute"] ?? "00"}`,
+      date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+      sport: "football",
+      hasRealOdds: false,
+      odds: { home: 0, draw: 0, away: 0 },
+      markets: zerofillAdvancedMarkets(),
+      homeTeamId: String(ev.home_team_id),
+      awayTeamId: String(ev.away_team_id),
+    });
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
 const GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
 
 // No confirmed elapsed-minute field exists on /fixtures/live yet (never
@@ -8411,10 +8470,18 @@ export async function applyGoalApiWebhookEvent(event: {
 // first tick right after discovery, before the subscribe ack lands) shows
 // 0-0/minute 0 rather than nothing, same as GOAL API's own builder falling
 // back to its last-known state.
+// Grace period before a native bzzoiro match that stops appearing in
+// getBzzoiroNativeLiveEvents() is treated as finished — same value and
+// same reasoning as GOAL_API_FOOTBALL_DISAPPEAR_GRACE_MS: a single missed
+// poll tick shouldn't finalize (and settle real bets on) a match that's
+// still genuinely live.
+const BZZOIRO_FOOTBALL_DISAPPEAR_GRACE_MS = 15_000;
+
 async function buildFootballLiveFromBzzoiro(): Promise<LiveMatchState[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   const nativeEvents = getBzzoiroNativeLiveEvents();
   const results: LiveMatchState[] = [];
+  const currentIds = new Set<string>();
 
   for (const ev of nativeEvents) {
     if (isBlockedLeague(ev.league_name ?? "") || isWomensLeague(ev.league_name ?? "")) continue;
@@ -8423,6 +8490,7 @@ async function buildFootballLiveFromBzzoiro(): Promise<LiveMatchState[]> {
     if (!home || !away) continue;
 
     const id = `bzzoiro-football-${ev.id}`;
+    currentIds.add(id);
     const existing = liveMatchState.get(id);
     const frame = getBzzoiroLastFrame("event", ev.id) as BzzoiroEventFrame | undefined;
 
@@ -8438,7 +8506,15 @@ async function buildFootballLiveFromBzzoiro(): Promise<LiveMatchState[]> {
     const odds = existing?.hasRealOdds ? existing.odds : makeOddsFromTeams(home, away);
     const markets = existing?.hasRealOdds ? existing.markets : makeAdvancedMarketsFromTeams(home, away);
 
-    results.push({
+    // Real bug found 2026-09-14 while adding the disappearance/finalize
+    // handling below and re-reading buildFootballLiveFromGoalApi's own
+    // pattern: this function used to only push to `results` (the response
+    // for THIS request) without ever writing into the persistent
+    // liveMatchState map. handleOdds()/handleLiveData() (ballMatchSync.ts)
+    // both do `liveMatchState.get(liveMatchId)` and silently bail if
+    // nothing is there — so a native match's real odds/ball position could
+    // never actually attach, no matter how many real WS frames arrived.
+    const state: LiveMatchState = {
       id,
       home,
       away,
@@ -8457,8 +8533,36 @@ async function buildFootballLiveFromBzzoiro(): Promise<LiveMatchState[]> {
       _ballPosition: existing?._ballPosition,
       _priceSource: existing?._priceSource,
       marketVersion: existing?.marketVersion,
-    });
+      _missingSinceAt: undefined,
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
   }
+
+  // Disappearance/finalize handling — same pattern as
+  // buildFootballLiveFromGoalApi's own loop right after it. Without this a
+  // native match that finishes would simply sit in liveMatchState forever
+  // once getBzzoiroNativeLiveEvents() stops returning it: nothing would
+  // ever call finalizeStaleLiveMatch() to persist the final score into
+  // matchResultsTable, so every bet on it would stay pending permanently.
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("bzzoiro-football-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > BZZOIRO_FOOTBALL_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[bzzoiro] football finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
   return results;
 }
 
@@ -9680,6 +9784,17 @@ async function rebuildUpcomingCache(): Promise<void> {
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
       if (CONFIG.GOAL_API_KEY) {
         candidates.push({ provider: "goalapi", matches: await buildFootballUpcomingFromGoalApi() });
+      }
+      // bzzoiro prematch discovery added 2026-09-14 — unlike the live path
+      // (buildFootballLiveFromBzzoiro, additive/non-overlapping by
+      // construction), a prematch fixture here hasn't gone through any
+      // cross-provider matching, so GOAL API and bzzoiro's lists can
+      // legitimately describe the SAME real-world fixtures under different
+      // ids. Routed through chooseUpcomingProvider (single-winner, same as
+      // the live path used to be before bzzoiro's native discovery) rather
+      // than concatenated, to avoid showing every match twice.
+      if (CONFIG.BZZOIRO_API_KEY) {
+        candidates.push({ provider: "bzzoiro", matches: await buildFootballUpcomingFromBzzoiro() });
       }
       football = chooseUpcomingProvider("football", candidates);
       _lastGoodFootballUpcoming = football;
