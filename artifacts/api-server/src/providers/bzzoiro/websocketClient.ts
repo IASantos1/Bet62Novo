@@ -26,7 +26,7 @@ import { logger } from "../../lib/logger.js";
 // this exact gap) — import the `ws` package's class explicitly instead of
 // relying on a runtime global that may not exist.
 import { WebSocket as WsClient } from "ws";
-import type { BzzoiroWsFrame, BzzoiroLiveDataFrame, BzzoiroOddsFrame } from "./types.js";
+import type { BzzoiroWsFrame, BzzoiroLiveDataFrame, BzzoiroOddsFrame, BzzoiroErrorFrame } from "./types.js";
 
 let ws: WsClient | null = null;
 let connected = false;
@@ -94,6 +94,34 @@ export function getBzzoiroLastFrame(frameType: string, eventId: number): Bzzoiro
  * Investigation-only — see frameTypeCounts's header. */
 export function getBzzoiroFrameTypeCounts(): Record<string, number> {
   return Object.fromEntries(frameTypeCounts);
+}
+
+// Added 2026-09-14: a production check right after a restart showed
+// frameTypeCounts of { subscribed: 30, error: 642 } across 224
+// subscriptions — i.e. almost nothing but rejected subscribes, zero
+// livedata/odds/action frames at all. The existing error handler already
+// logs every error frame, but only to Railway logs — nothing here ever
+// remembered *what* the errors said, so there was no way to see the actual
+// code/message (bad token? unknown event_id? plan/tier limit? subscribe
+// rate limit from firing all 224 "subscribe" sends in one tight loop?)
+// without live log access. Track counts per distinct code+message and the
+// single latest raw frame so a probe can show it directly.
+const errorFrameCounts = new Map<string, number>();
+let lastErrorFrame: BzzoiroErrorFrame | null = null;
+
+function recordErrorFrame(frame: BzzoiroErrorFrame): void {
+  lastErrorFrame = frame;
+  const key = `${frame.code ?? "?"}:${frame.message ?? "?"}`;
+  errorFrameCounts.set(key, (errorFrameCounts.get(key) ?? 0) + 1);
+}
+
+/** Distinct server-sent "error" frames seen (keyed by code+message) with
+ * their counts, plus the single most recent one. Investigation-only. */
+export function getBzzoiroErrorSummary(): {
+  lastErrorFrame: BzzoiroErrorFrame | null;
+  counts: Record<string, number>;
+} {
+  return { lastErrorFrame, counts: Object.fromEntries(errorFrameCounts) };
 }
 
 // Real bug fixed 2026-09-11 (user-reported: _ballPosition never populates
@@ -241,6 +269,7 @@ function connect(): void {
       // plan/tier limit, unknown event_id, ...) would otherwise look
       // identical to "connection fine, bzzoiro just isn't sending data".
       logger.warn({ msg }, "[bzzoiro-ws] server sent an error frame");
+      recordErrorFrame(msg as BzzoiroErrorFrame);
     }
     // unsubscribed/event/action/odds/ingest_debug frames are all real
     // (confirmed via the user's capture) but unused here — this
@@ -305,6 +334,7 @@ export function getBzzoiroWsStatus(): {
   pingsSent: number;
   pongsReceived: number;
   frameTypeCounts: Record<string, number>;
+  serverErrors: { lastErrorFrame: BzzoiroErrorFrame | null; counts: Record<string, number> };
 } {
   return {
     connected,
@@ -314,6 +344,7 @@ export function getBzzoiroWsStatus(): {
     pingsSent,
     pongsReceived,
     frameTypeCounts: getBzzoiroFrameTypeCounts(),
+    serverErrors: getBzzoiroErrorSummary(),
   };
 }
 
