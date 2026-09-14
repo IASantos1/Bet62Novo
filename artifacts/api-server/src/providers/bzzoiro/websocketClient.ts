@@ -280,6 +280,16 @@ function connectShard(shard: Shard): void {
         captureFrame(syntheticOddsFrame);
         onOdds(syntheticOddsFrame);
       }
+      // Same reasoning as the odds snapshot above, added 2026-09-14
+      // alongside bzzoiro becoming BET62's own football discovery source
+      // (not just an odds/ball-position add-on): a natively-discovered
+      // match has no GOAL API poll to source its initial score/minute
+      // from, so this embedded snapshot — "same shape as the event frame"
+      // per the docs — is the only way to get a real score before the
+      // next real "event" delta frame (sent only on a state change) lands.
+      if (sub.event) {
+        captureFrame(sub.event);
+      }
     }
     if (msg.type === "error") {
       // Never silently swallow this — a rejected subscribe (bad token,

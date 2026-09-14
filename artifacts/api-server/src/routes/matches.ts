@@ -52,6 +52,9 @@ import {
   proplineFetchMmaLiveAllLeagues,
 } from "../services/propline/mma.js";
 import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
+import { getBzzoiroNativeLiveEvents } from "../providers/bzzoiro/ballMatchSync.js";
+import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
+import type { BzzoiroEventFrame } from "../providers/bzzoiro/types.js";
 import {
   extractGoalApi1x2Odds,
   extractGoalApiOverUnder25,
@@ -8391,6 +8394,74 @@ export async function applyGoalApiWebhookEvent(event: {
   }
 }
 
+// ── bzzoiro football — native discovery source (added 2026-09-14 on
+// explicit user instruction: bzzoiro becomes BET62's primary source for
+// every sport it offers, not just an odds/ball-position add-on bolted onto
+// GOAL API's fixture list). Reads getBzzoiroNativeLiveEvents() —
+// currently-live bzzoiro events with NO GOAL API counterpart, refreshed
+// every 20s alongside the existing GOAL-matched subscription cycle in
+// providers/bzzoiro/ballMatchSync.ts's refreshSubscriptions(). Score/minute
+// come from the real WS `event` frame (either a genuine delta, or the
+// snapshot embedded in the "subscribed" ack — see websocketClient.ts's own
+// note on why that snapshot matters here more than it looks like it
+// should); odds/markets and _ballPosition are filled in afterwards by the
+// exact same handleOdds/handleLiveData handlers already driving the
+// GOAL-matched path, keyed off the same currentSubscriptions routing table
+// — no changes needed there. A match with no "event" frame yet (the very
+// first tick right after discovery, before the subscribe ack lands) shows
+// 0-0/minute 0 rather than nothing, same as GOAL API's own builder falling
+// back to its last-known state.
+async function buildFootballLiveFromBzzoiro(): Promise<LiveMatchState[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const nativeEvents = getBzzoiroNativeLiveEvents();
+  const results: LiveMatchState[] = [];
+
+  for (const ev of nativeEvents) {
+    if (isBlockedLeague(ev.league_name ?? "") || isWomensLeague(ev.league_name ?? "")) continue;
+    const home = stripGenderTeamSuffix(ev.home_team);
+    const away = stripGenderTeamSuffix(ev.away_team);
+    if (!home || !away) continue;
+
+    const id = `bzzoiro-football-${ev.id}`;
+    const existing = liveMatchState.get(id);
+    const frame = getBzzoiroLastFrame("event", ev.id) as BzzoiroEventFrame | undefined;
+
+    const homeScore = frame?.score?.home ?? existing?.homeScore ?? 0;
+    const awayScore = frame?.score?.away ?? existing?.awayScore ?? 0;
+    const minute = frame?.time?.minute ?? existing?.minute ?? 0;
+
+    // Real odds/markets are only ever written by handleOdds() (see
+    // ballMatchSync.ts) once a genuine bzzoiro price lands — never
+    // fabricated here. Until then this falls back to the same synthetic
+    // Poisson placeholder every other sport/provider uses pre-price,
+    // which isVisibleFootballFixture (below) keeps hidden from betting.
+    const odds = existing?.hasRealOdds ? existing.odds : makeOddsFromTeams(home, away);
+    const markets = existing?.hasRealOdds ? existing.markets : makeAdvancedMarketsFromTeams(home, away);
+
+    results.push({
+      id,
+      home,
+      away,
+      league: ev.league_name ?? "",
+      country: existing?.country ?? "",
+      sport: "football",
+      homeScore,
+      awayScore,
+      minute,
+      status: "live",
+      hasRealOdds: existing?.hasRealOdds ?? false,
+      odds,
+      markets,
+      events: existing?.events ?? [],
+      matchStats: existing?.matchStats,
+      _ballPosition: existing?._ballPosition,
+      _priceSource: existing?._priceSource,
+      marketVersion: existing?.marketVersion,
+    });
+  }
+  return results;
+}
+
 // ── Tennis (api-tennis.com) — first real tennis provider this platform has
 // ever had; every prior attempt (PulseScore, SportMonks) was removed. ──────
 
@@ -9722,6 +9793,19 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       candidates.push({ provider: "goalapi", matches: await buildFootballLiveFromGoalApi() });
     }
     footballLiveRaw = chooseLiveProvider("football", candidates);
+    // bzzoiro native discovery added 2026-09-14 (see buildFootballLiveFromBzzoiro's
+    // own header): concatenated rather than run through chooseLiveProvider
+    // above, since that function picks ONE candidate's entire list as the
+    // best single source of the SAME matches — the right call when GOAL API
+    // was the only real football candidate this file ever had, but wrong
+    // here, where bzzoiro's native list is guaranteed non-overlapping (it
+    // explicitly excludes anything already GOAL-matched — see
+    // ballMatchSync.ts's refreshSubscriptions) and should always be
+    // additive. Once GOAL_API_KEY is deactivated, footballLiveRaw is empty
+    // and this becomes the entire football live list.
+    if (CONFIG.BZZOIRO_API_KEY) {
+      footballLiveRaw = [...footballLiveRaw, ...(await buildFootballLiveFromBzzoiro())];
+    }
   } catch (err) {
     logger.error(
       { err },
@@ -10043,9 +10127,15 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // show a match nobody can trust the odds on. Any fixture flagged
   // liveDecisions.visible=false by admin still gets hidden by the outer
   // filter regardless of provider.
+  // Widened 2026-09-14: this used to only gate GOAL API fixtures
+  // (id.startsWith("goalapi-football-")) — a bzzoiro-native match
+  // (buildFootballLiveFromBzzoiro, id "bzzoiro-football-*") would have
+  // fallen through the negated prefix check and shown its synthetic
+  // Poisson placeholder as if it were a real bettable price. The rule is
+  // "any football fixture, whatever its provider" now, matching the
+  // "never show unpriced football" policy this filter was built for.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
-    !(m.sport === "football" && m.id.startsWith("goalapi-football-"))
-    || hasRealPriceSource(m._priceSource);
+    m.sport !== "football" || hasRealPriceSource(m._priceSource);
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
