@@ -83,10 +83,38 @@ export type BzzoiroEventFrame = {
   websocket_plus?: boolean;
 };
 
+// Real bug found 2026-09-14, straight from the user's own pasted "Live
+// football channel" docs: the `subscribed` snapshot bzzoiro sends
+// immediately on every subscribe carries `event`/`livedata`/`history`/
+// `odds` (the LAST comment on this file's own `odds` frame type explains
+// why this matters more than it looks like it should) — this type never
+// modeled any of that, so it was silently discarded. The docs are
+// explicit about why that's costly: a real `odds` delta frame is ONLY
+// re-sent when a price actually changes, and "the underlying prices are
+// re-read on a cadence measured in tens of minutes, not seconds" — so for
+// any match that was already priced before this process subscribed to
+// it, this snapshot's `odds` field may be the ONLY odds data that shard
+// sees for a long while. `odds` here is the inner odds object only (same
+// shape as BzzoiroOddsFrame's own `odds` field), not a full odds frame.
 export type BzzoiroSubscribedFrame = {
   type: "subscribed";
   event_id: number;
   source: "basic" | "full";
+  event?: BzzoiroEventFrame;
+  livedata?: BzzoiroLiveDataFrame[];
+  history?: unknown[];
+  odds?: {
+    match_winner?: { home: number; draw: number; away: number };
+    over_under?: Record<string, number>;
+    btts?: { yes: number; no: number };
+    asian_handicap?: Array<{
+      line: number;
+      push: "none" | "half" | "full";
+      home: number;
+      away: number;
+      bookmaker_count: number;
+    }>;
+  };
 };
 
 export type BzzoiroUnsubscribedFrame = { type: "unsubscribed"; event_id: number };

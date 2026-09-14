@@ -29,7 +29,7 @@ import { logger } from "../../lib/logger.js";
 // this exact gap) — import the `ws` package's class explicitly instead of
 // relying on a runtime global that may not exist.
 import { WebSocket as WsClient } from "ws";
-import type { BzzoiroWsFrame, BzzoiroLiveDataFrame, BzzoiroOddsFrame, BzzoiroErrorFrame } from "./types.js";
+import type { BzzoiroWsFrame, BzzoiroLiveDataFrame, BzzoiroOddsFrame, BzzoiroErrorFrame, BzzoiroSubscribedFrame } from "./types.js";
 
 // Confirmed real 2026-09-14 via bzzoiro's own "Connect to live WebSockets"
 // docs: "Up to 10 concurrent subscriptions per socket." This is the actual
@@ -257,7 +257,29 @@ function connectShard(shard: Shard): void {
       onOdds(msg as BzzoiroOddsFrame);
     }
     if (msg.type === "subscribed" && "event_id" in msg) {
-      subscribedAckAt.set((msg as { event_id: number }).event_id, Date.now());
+      const sub = msg as BzzoiroSubscribedFrame;
+      subscribedAckAt.set(sub.event_id, Date.now());
+      // Real bug found 2026-09-14, straight from the user's own pasted
+      // docs: bzzoiro sends this snapshot's `odds` field on every single
+      // subscribe, but a real "odds" delta frame is only re-sent when a
+      // price actually changes — and "the underlying prices are re-read
+      // on a cadence measured in tens of minutes, not seconds". For any
+      // match already priced before this process subscribed, this
+      // snapshot may be the ONLY odds data this shard sees for a long
+      // while. Feed it through the exact same path a real "odds" frame
+      // takes (captureFrame + onOdds) rather than discarding it.
+      if (sub.odds && onOdds) {
+        const syntheticOddsFrame: BzzoiroOddsFrame = {
+          type: "odds",
+          event_id: sub.event_id,
+          odds: sub.odds,
+          updated_at: null,
+          next_update_at: null,
+          update_reason: "subscribed-snapshot",
+        };
+        captureFrame(syntheticOddsFrame);
+        onOdds(syntheticOddsFrame);
+      }
     }
     if (msg.type === "error") {
       // Never silently swallow this — a rejected subscribe (bad token,
