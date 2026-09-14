@@ -166,3 +166,65 @@ export type BzzoiroUpcomingEventsResponse = {
   previous: string | null;
   results: BzzoiroUpcomingEvent[];
 };
+
+// Added 2026-09-14, per the user's own pasted docs for
+// GET /events/{id}/odds/ — the free-tier, full-time-only consensus summary
+// (11 fixed keys, any of them null if that market isn't quoted). Docs say
+// this endpoint keeps answering during play too (update_reason: "match is
+// in play", update_interval_seconds: 900) — unconfirmed against our own
+// production data until a real capture proves it, per this session's
+// "verify against real payloads, never the docs alone" rule.
+export type BzzoiroEventOddsSummary = {
+  event_id: number;
+  odds: {
+    home_win: number | null;
+    draw: number | null;
+    away_win: number | null;
+    over_15_goals: number | null;
+    over_25_goals: number | null;
+    over_35_goals: number | null;
+    under_15_goals: number | null;
+    under_25_goals: number | null;
+    under_35_goals: number | null;
+    btts_yes: number | null;
+    btts_no: number | null;
+  };
+  last_update_at: string | null;
+  next_update_at: string | null;
+  update_interval_seconds: number | null;
+  update_reason: string;
+};
+
+// Added 2026-09-14, per the user's own pasted docs for GET /api/v2/odds/ —
+// one row per event × market × outcome × bookmaker (or one "consensus" row
+// per outcome on a free-tier key, per the docs). This is the only
+// documented way to reach asian_handicap/double_chance/draw_no_bet/
+// total_corners — none of those are in BzzoiroEventOddsSummary's fixed
+// 11-key set. `outcome` is validated server-side against `market`
+// (1x2→HOME/DRAW/AWAY, btts→yes/no, double_chance→1X/12/X2, ...) — see the
+// docs' own market/outcome table before trusting a combination not listed
+// there. `line`/`push` only apply to asian_handicap/total_corners rows.
+export type BzzoiroOddsFeedRow = {
+  event_id: number;
+  market: string;
+  outcome: string;
+  bookmaker_slug: string;
+  bookmaker_name: string;
+  bookmaker_count: number | null;
+  decimal_odds: number;
+  previous_decimal_odds: number | null;
+  opening_decimal_odds: number;
+  opening_at: string;
+  updated_at: string;
+  movement: "SHORTENING" | "DRIFTING" | null;
+  is_max_quote?: boolean;
+  line?: number;
+  push?: "none" | "half" | "full";
+};
+
+export type BzzoiroOddsFeedResponse = {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: BzzoiroOddsFeedRow[];
+};
