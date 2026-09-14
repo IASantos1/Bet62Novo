@@ -50,7 +50,7 @@ import {
 import { pulseScore } from "../providers/pulsescore/client.js";
 import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
-import { getBzzoiroCoverageRaw, getBzzoiroEventStatsRaw } from "../providers/bzzoiro/client.js";
+import { getBzzoiroCoverageRaw, getBzzoiroEventStatsRaw, getBzzoiroUpcomingEvents } from "../providers/bzzoiro/client.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
@@ -2759,6 +2759,37 @@ router.get("/bzzoiro-capabilities-probe", adminMiddleware, async (req: AdminRequ
   }
 
   res.json(result);
+});
+
+// Diagnostic for the 2026-09-14 bzzoiro-as-primary-source migration: confirms
+// getBzzoiroUpcomingEvents() (GET /events/?date_from=&date_to=, paginated)
+// actually returns bzzoiro's real prematch fixture list in production, before
+// anything downstream is built on top of it. Defaults to a 7-day window
+// (?days=N to widen/narrow) — matches the exact window already validated by
+// hand (618 rows, consistent with /coverage/'s own events_next_7d).
+router.get("/bzzoiro-upcoming-probe", adminMiddleware, async (req: AdminRequest, res) => {
+  const days = Math.max(1, Math.min(Number(req.query.days) || 7, 30));
+  const dateFrom = new Date().toISOString().slice(0, 10);
+  const dateTo = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  try {
+    const events = await getBzzoiroUpcomingEvents(dateFrom, dateTo);
+    res.json({
+      dateFrom,
+      dateTo,
+      count: events.length,
+      sample: events.slice(0, 5).map((e) => ({
+        id: e.id,
+        fixture: `${e.home_team} vs ${e.away_team}`,
+        event_date: e.event_date,
+        status: e.status,
+        league_id: e.league_id,
+        has_xg: e.has_xg,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao consultar bzzoiro", detail: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // api-tennis.com WebSocket push status — read-only, mirrors /bzzoiro-status.

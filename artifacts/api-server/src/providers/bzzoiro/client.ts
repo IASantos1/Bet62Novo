@@ -7,7 +7,12 @@
 // ball position via the WebSocket (see websocketClient.ts), not REST.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import type { BzzoiroEventsListResponse, BzzoiroEvent } from "./types.js";
+import type {
+  BzzoiroEventsListResponse,
+  BzzoiroEvent,
+  BzzoiroUpcomingEventsResponse,
+  BzzoiroUpcomingEvent,
+} from "./types.js";
 
 // Two more real, captured-but-never-wrapped endpoints (see this file's own
 // header) — exposed now (2026-09-13) purely for the capabilities probe the
@@ -56,6 +61,48 @@ export async function getBzzoiroLiveEvents(): Promise<BzzoiroEvent[]> {
   } catch (err) {
     logger.error({ err }, "[bzzoiro] getBzzoiroLiveEvents failed");
     return [];
+  }
+}
+
+const UPCOMING_PAGE_LIMIT = 50;
+// Safety cap on pages followed via `next` — a 7-day football window was
+// confirmed real at 618 events (13 pages @ 50/page); 40 pages (2000 events)
+// leaves headroom for busier weeks without ever looping unbounded if
+// bzzoiro's `next` cursor were to misbehave.
+const UPCOMING_MAX_PAGES = 40;
+
+/** GET /events/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD — bzzoiro's real
+ * prematch fixture list (confirmed 2026-09-14: date_from/date_to are the
+ * genuine working filter params, unlike status= — see BzzoiroEvent's
+ * header). Follows the DRF `next` cursor to collect every page in range;
+ * bzzoiro's own /coverage/ reported 608 football events in the next 7
+ * days, and this same window returned 618 real rows via this endpoint —
+ * consistent, not a guess. */
+export async function getBzzoiroUpcomingEvents(dateFrom: string, dateTo: string): Promise<BzzoiroUpcomingEvent[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const out: BzzoiroUpcomingEvent[] = [];
+  try {
+    let resp = await rawGet<BzzoiroUpcomingEventsResponse>("/events/", {
+      date_from: dateFrom,
+      date_to: dateTo,
+      limit: UPCOMING_PAGE_LIMIT,
+    });
+    out.push(...resp.results);
+    let pages = 1;
+    while (resp.next && pages < UPCOMING_MAX_PAGES) {
+      const nextResp = await fetch(resp.next, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { Authorization: `Token ${CONFIG.BZZOIRO_API_KEY}` },
+      });
+      if (!nextResp.ok) break;
+      resp = (await nextResp.json()) as BzzoiroUpcomingEventsResponse;
+      out.push(...resp.results);
+      pages++;
+    }
+    return out;
+  } catch (err) {
+    logger.error({ err }, "[bzzoiro] getBzzoiroUpcomingEvents failed");
+    return out; // partial results better than none if a later page failed
   }
 }
 
