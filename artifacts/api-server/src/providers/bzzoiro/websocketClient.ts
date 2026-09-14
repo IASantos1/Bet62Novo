@@ -53,6 +53,28 @@ const subscribedAckAt = new Map<number, number>();
 
 let onLiveData: ((frame: BzzoiroLiveDataFrame) => void) | null = null;
 
+// Investigation-only (added 2026-09-13, see /bzzoiro-capabilities-probe):
+// the "odds"/"action"/"event" frame types are real (confirmed in this
+// file's own header) but were never captured anywhere — this deliberately
+// does NOT change any existing behavior (still never read for real
+// decisions), it just remembers the single latest raw frame of each type
+// per event_id so a probe endpoint can show what bzzoiro is actually
+// sending, ahead of the user's request to evaluate bzzoiro as a full
+// replacement for GOAL API/PulseScore (odds + stats + xG + ball position).
+const lastFrameByType = new Map<string, Map<number, BzzoiroWsFrame>>();
+function captureFrame(frame: BzzoiroWsFrame): void {
+  if (!("event_id" in frame) || typeof (frame as { event_id?: unknown }).event_id !== "number") return;
+  const eventId = (frame as { event_id: number }).event_id;
+  if (!lastFrameByType.has(frame.type)) lastFrameByType.set(frame.type, new Map());
+  lastFrameByType.get(frame.type)!.set(eventId, frame);
+}
+
+/** Latest raw frame of a given type ("odds"/"action"/"event"/...) for one
+ * event_id, or undefined if none has arrived yet. Investigation-only. */
+export function getBzzoiroLastFrame(frameType: string, eventId: number): BzzoiroWsFrame | undefined {
+  return lastFrameByType.get(frameType)?.get(eventId);
+}
+
 // Real bug fixed 2026-09-11 (user-reported: _ballPosition never populates
 // for any subscribed live match). Confirmed via /api/admin/bzzoiro-status:
 // `connected: true` with `lastFrameAgeMs` past 5 minutes across 5
@@ -155,6 +177,7 @@ function connect(): void {
     } catch {
       return; // non-JSON keepalive — ignore
     }
+    captureFrame(msg);
     if (msg.type === "livedata" && onLiveData) {
       onLiveData(msg as BzzoiroLiveDataFrame);
     }

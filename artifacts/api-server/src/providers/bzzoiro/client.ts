@@ -9,6 +9,16 @@ import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import type { BzzoiroEventsListResponse, BzzoiroEvent } from "./types.js";
 
+// Two more real, captured-but-never-wrapped endpoints (see this file's own
+// header) — exposed now (2026-09-13) purely for the capabilities probe the
+// user requested: before pausing GOAL API/PulseScore in favor of bzzoiro
+// alone (odds + stats + xG + ball position, now that a paid plan is in
+// hand), we need to see real /coverage/ and /events/:id/stats/ payloads to
+// know bzzoiro's actual league breadth and whether xG/possession/shots are
+// really in there — not guessed from the docs. Returns the raw JSON
+// untyped on purpose: this is a one-off investigation, not a shape BET62
+// commits to reading yet.
+
 async function rawGet<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(`${CONFIG.BZZOIRO_BASE_URL.replace(/\/+$/, "")}${path}`);
   if (params) {
@@ -47,4 +57,20 @@ export async function getBzzoiroLiveEvents(): Promise<BzzoiroEvent[]> {
     logger.error({ err }, "[bzzoiro] getBzzoiroLiveEvents failed");
     return [];
   }
+}
+
+/** GET /coverage/ raw — real endpoint, never wrapped before (see header).
+ * Investigation-only: tells us which leagues/competitions bzzoiro actually
+ * covers, to compare against GOAL API + PulseScore's combined breadth
+ * before considering either replaceable. */
+export async function getBzzoiroCoverageRaw(): Promise<unknown> {
+  return rawGet<unknown>("/coverage/");
+}
+
+/** GET /events/:id/stats/ raw — real endpoint, never wrapped before (see
+ * header). Investigation-only: tells us whether xG/possession/shots/
+ * corners/cards are actually present and in what shape, before wiring
+ * anything to read them for real. */
+export async function getBzzoiroEventStatsRaw(eventId: number | string): Promise<unknown> {
+  return rawGet<unknown>(`/events/${encodeURIComponent(String(eventId))}/stats/`);
 }

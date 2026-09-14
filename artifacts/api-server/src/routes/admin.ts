@@ -50,6 +50,8 @@ import {
 import { pulseScore } from "../providers/pulsescore/client.js";
 import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
+import { getBzzoiroCoverageRaw, getBzzoiroEventStatsRaw } from "../providers/bzzoiro/client.js";
+import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 
@@ -2709,6 +2711,54 @@ router.get("/bzzoiro-status", adminMiddleware, async (_req: AdminRequest, res) =
     sync: getBzzoiroBallSyncStatus(),
     subscriptions: getBzzoiroSubscriptionDetails(),
   });
+});
+
+// User asked directly (2026-09-13): now that a paid bzzoiro plan is in
+// hand, can GOAL API + PulseScore be PAUSED entirely and bzzoiro become the
+// sole source for odds, statistics, xG, and ball x/y? This provider was
+// built to read exactly one thing (real ball position, see this file's own
+// header note on bzzoiro/client.ts) — /coverage/, /events/:id/stats/, and
+// the WS "odds"/"action" frame types are all real (confirmed in a user
+// capture 2026-09-11) but were deliberately never wrapped/typed since GOAL
+// API/PulseScore already covered that need. Before touching either
+// production provider, we need real answers to: how many leagues does
+// bzzoiro actually cover (vs GOAL API+PulseScore's combined ~392 upcoming +
+// ~60 live football fixtures spanning obscure leagues), does
+// /events/:id/stats/ really carry xG/possession/shots, and does an "odds"
+// frame carry real market prices at all (the paid plan may be what
+// unlocks these — the free/basic tier this was captured on may not have).
+// Pure read-only investigation: nothing here changes what BET62 actually
+// uses to price or display anything.
+router.get("/bzzoiro-capabilities-probe", adminMiddleware, async (req: AdminRequest, res) => {
+  const requestedEventId = typeof req.query.eventId === "string" ? Number(req.query.eventId) : undefined;
+  const subs = getBzzoiroSubscriptionDetails();
+  const eventId = requestedEventId ?? subs[0]?.bzzoiroEventId;
+
+  const result: Record<string, unknown> = {
+    subscribedEvents: subs.map((s) => ({ bzzoiroEventId: s.bzzoiroEventId, fixture: s.fixture })),
+    probedEventId: eventId ?? null,
+  };
+
+  try {
+    result.coverage = await getBzzoiroCoverageRaw();
+  } catch (err) {
+    result.coverageError = err instanceof Error ? err.message : String(err);
+  }
+
+  if (eventId != null) {
+    try {
+      result.stats = await getBzzoiroEventStatsRaw(eventId);
+    } catch (err) {
+      result.statsError = err instanceof Error ? err.message : String(err);
+    }
+    result.lastOddsFrame = getBzzoiroLastFrame("odds", eventId) ?? null;
+    result.lastActionFrame = getBzzoiroLastFrame("action", eventId) ?? null;
+    result.lastEventFrame = getBzzoiroLastFrame("event", eventId) ?? null;
+  } else {
+    result.note = "Nenhum jogo bzzoiro subscrito agora — informe ?eventId=<id> manualmente ou aguarde um jogo casado.";
+  }
+
+  res.json(result);
 });
 
 // api-tennis.com WebSocket push status — read-only, mirrors /bzzoiro-status.
