@@ -3348,6 +3348,53 @@ const OTHER_SPORTS: {
       "Ligue Nationale de Handball",
     ],
   },
+  {
+    key: "darts",
+    label: "Dardos",
+    icon: "🎯",
+    leagues: [
+      "Premier League Darts",
+      "PDC World Darts Championship",
+      "Modus Super Series",
+      "World Matchplay",
+      "Grand Slam of Darts",
+      "Players Championship",
+      "European Tour",
+      "UK Open",
+      "World Grand Prix",
+    ],
+  },
+  {
+    key: "cs2",
+    label: "CS2",
+    icon: "💣",
+    leagues: [
+      "BLAST Premier",
+      "ESL Pro League",
+      "IEM",
+      "Major",
+      "PGL Major",
+      "CCT",
+      "ESEA Premier",
+      "Elisa Invitational",
+      "Thunderpick World Championship",
+    ],
+  },
+  {
+    key: "horseracing",
+    label: "Corridas de Cavalos",
+    icon: "🐎",
+    leagues: [
+      "Ascot",
+      "Cheltenham",
+      "Grand National",
+      "Kentucky Derby",
+      "Dubai World Cup",
+      "Prix de l'Arc de Triomphe",
+      "Breeders Cup",
+      "Melbourne Cup",
+    ],
+  },
 ];
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
@@ -3418,17 +3465,7 @@ function SidebarTreeContent({
             {topLeagues.map((l) => {
               const flag =
                 COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ??
-                (l.sport === "basketball"
-                  ? "🏀"
-                  : l.sport === "tennis"
-                    ? "🎾"
-                    : l.sport === "hockey"
-                      ? "🏒"
-                      : l.sport === "volleyball"
-                        ? "🏐"
-                        : l.sport === "baseball"
-                          ? "⚾"
-                          : "⚽");
+                sportEmoji(l.sport);
               const active = selectedLeague === l.league;
               return (
                 <button
@@ -3584,7 +3621,7 @@ function SidebarTreeContent({
                       />
                     ) : (
                       <span className="text-xs leading-none shrink-0">
-                        {LEAGUE_FLAGS[league] ?? "🏆"}
+                        {LEAGUE_FLAGS[league] ?? sportEmoji(key)}
                       </span>
                     )}
                     <span className="truncate">{league}</span>
@@ -4555,6 +4592,9 @@ function sportEmoji(sport?: string): string {
   if (sport === "cricket") return "🏏";
   if (sport === "handball") return "🤾";
   if (sport === "mma") return "🥋";
+  if (sport === "darts") return "🎯";
+  if (sport === "csgo" || sport === "cs2") return "💣";
+  if (sport === "horseracing") return "🐎";
   return "⚽";
 }
 
@@ -10185,6 +10225,14 @@ export default function Home({
       }
       if (sport === "tennis" && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
+      if (
+        sport === "darts" ||
+        sport === "cs2" ||
+        sport === "csgo" ||
+        sport === "horseracing"
+      ) {
+        return match.status ?? "Ao vivo";
+      }
 
       const tag = getFootballPhaseTag(match, minute);
       if (tag === "HT") return "HT";
@@ -22394,6 +22442,10 @@ export default function Home({
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
                   { key: "hockey", emoji: "🏒", label: "Hóquei no Gelo" },
                   { key: "basketball", emoji: "🏀", label: "Basquete" },
+                  { key: "darts", emoji: "🎯", label: "Dardos" },
+                  { key: "cs2", emoji: "💣", label: "CS2" },
+                  { key: "csgo", emoji: "💣", label: "CS2 (CS:GO)" },
+                  { key: "horseracing", emoji: "🐎", label: "Corridas de Cavalos" },
                   { key: "volleyball", emoji: "🏐", label: "Voleibol" },
                   { key: "baseball", emoji: "⚾", label: "Beisebol" },
                   { key: "boxing", emoji: "🥊", label: "Boxing" },
@@ -25093,12 +25145,16 @@ export default function Home({
                       label: string;
                       icon: string;
                     }[] = [
-                      // Ordem Ao Vivo: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
+                      // Ordem Ao Vivo: Futebol → Ténis → Hóquei → Basquete → Dardos → CS2 → Corridas → Voleibol → Beisebol → outros
                       { key: "all", label: "Todos", icon: "⚡" },
                       { key: "football", label: "Futebol", icon: "⚽" },
                       { key: "tennis", label: "Ténis", icon: "🎾" },
                       { key: "hockey", label: "Hóquei", icon: "🏒" },
                       { key: "basketball", label: "Basquete", icon: "🏀" },
+                      { key: "darts", label: "Dardos", icon: "🎯" },
+                      { key: "cs2", label: "CS2", icon: "💣" },
+                      { key: "csgo", label: "CS:GO", icon: "💣" },
+                      { key: "horseracing", label: "Corridas", icon: "🐎" },
                       { key: "volleyball", label: "Voleibol", icon: "🏐" },
                       { key: "baseball", label: "Beisebol", icon: "⚾" },
                       { key: "boxing", label: "Boxing", icon: "🥊" },
@@ -26123,7 +26179,13 @@ export default function Home({
                                   const displayMin = lm
                                     ? lm.status === "HT"
                                       ? "HT"
-                                      : lm.sport === "tennis"
+                                      : lm.sport === "tennis" ||
+                                          lm.sport === "basketball" ||
+                                          lm.sport === "hockey" ||
+                                          lm.sport === "darts" ||
+                                          lm.sport === "cs2" ||
+                                          lm.sport === "csgo" ||
+                                          lm.sport === "horseracing"
                                         ? (lm.status ?? "Em Jogo")
                                         : `${lm.minute ?? 0}'`
                                     : null;
