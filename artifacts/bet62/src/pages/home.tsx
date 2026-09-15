@@ -10123,21 +10123,23 @@ export default function Home({
             const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
             const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
             return (
-              <div className="relative shrink-0 w-[22px] h-[22px]">
-                <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
-                  {leagueLogo ? (
-                    <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
-                  ) : (
-                    <>
-                      <span className="absolute inset-0 flex items-center justify-center text-[10px] leading-none">{flag}</span>
-                      {fUrl && <StableImage src={fUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                    </>
+                <div className="relative shrink-0 w-[22px] h-[22px]">
+                  <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
+                    {leagueLogo ? (
+                      <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
+                    ) : (
+                      <>
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] leading-none">{flag}</span>
+                        {fUrl && <StableImage src={fUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+                      </>
+                    )}
+                  </div>
+                  {!leagueLogo && !fUrl && countryFlag && (
+                    <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
+                      <span className="text-[7px] leading-none">{sportEmoji(match.sport)}</span>
+                    </div>
                   )}
                 </div>
-                <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
-                  <span className="text-[7px] leading-none">{sportEmoji(match.sport)}</span>
-                </div>
-              </div>
             );
           })()}
           <span className="text-[11px] text-zinc-500 truncate">
