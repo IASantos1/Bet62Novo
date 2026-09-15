@@ -73,6 +73,13 @@ import {
   averageStickSportTotal,
 } from "../providers/bzzoiro/stickSportOdds.js";
 import {
+  getBzzoiroTennisUpcoming,
+  getBzzoiroTennisLive,
+  getBzzoiroTennisOdds,
+  parseBzzoiroTennisSets,
+  isBzzoiroTennisLiveStatus,
+} from "../providers/bzzoiro/tennis.js";
+import {
   extractGoalApi1x2Odds,
   extractGoalApiOverUnder25,
   extractGoalApiBothTeamsToScore,
@@ -8915,6 +8922,139 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
   return results;
 }
 
+// bzzoiro tennis — added 2026-09-15 per the user's explicit instruction
+// (already confirmed earlier: bzzoiro should replace api-tennis.com as
+// tennis's primary source). Wired as an ADDITIONAL candidate rather than a
+// hard cut — see tennis.ts's own header for why: bzzoiro's real captured
+// docs show no in-play point/game/server field on live matches (only sets
+// won + status), unlike api-tennis.com's already-shipped WebSocket, which
+// pushes real point-by-point data. chooseLiveProvider's existing quality
+// gate (favors real clock/point data) is left to pick the richer source
+// per tick rather than forcing a choice here.
+const BZZOIRO_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
+
+async function buildTennisUpcomingFromBzzoiro(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const dateFrom = new Date().toISOString().slice(0, 10);
+  const dateTo = new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10);
+  const matches = await getBzzoiroTennisUpcoming(dateFrom, dateTo).catch(() => []);
+
+  const results: UpcomingMatch[] = [];
+  for (const m of matches) {
+    if (m.status !== "scheduled") continue;
+    const home = m.player1.name;
+    const away = m.player2.name;
+    if (!home || !away) continue;
+    const kickoff = new Date(m.match_date);
+    if (Number.isNaN(kickoff.getTime())) continue;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Lisbon",
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(kickoff);
+    const p: Record<string, string> = {};
+    for (const part of parts) p[part.type] = part.value;
+    const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+
+    let resultOdds: { home: number; draw: number; away: number } | null = null;
+    if (typeof m.odds_player1 === "number" && typeof m.odds_player2 === "number") {
+      resultOdds = { home: m.odds_player1, draw: 0, away: m.odds_player2 };
+    }
+    const prob = resultOdds
+      ? mc(1 / resultOdds.home / (1 / resultOdds.home + 1 / resultOdds.away), 0.02, 0.98)
+      : apiTennisSyntheticP(home, away);
+    const markets = makeTennisMarketsFromPlayers(home, away, prob);
+    const odds = resultOdds ?? makeTennisMoneylineFromP(prob);
+
+    results.push({
+      id: `bzzoiro-tennis-${m.id}`,
+      home,
+      away,
+      league: m.tournament.name || "Tênis",
+      country: "Internacional",
+      time: `${hh}:${p["minute"] ?? "00"}`,
+      date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+      sport: "tennis",
+      hasRealOdds: !!resultOdds,
+      odds,
+      markets,
+    });
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+async function buildTennisLiveFromBzzoiro(): Promise<LiveMatchState[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const matches = await getBzzoiroTennisLive().catch(() => []);
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const m of matches) {
+    const home = m.player1.name;
+    const away = m.player2.name;
+    if (!home || !away) continue;
+    if (!isBzzoiroTennisLiveStatus(m.status)) continue;
+
+    const id = `bzzoiro-tennis-${m.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const sets = parseBzzoiroTennisSets(m.sets_detail);
+    const homeScore = m.player1_sets ?? sets.filter(([h, a]) => h > a).length;
+    const awayScore = m.player2_sets ?? sets.filter(([h, a]) => a > h).length;
+
+    const oddsResp = await getBzzoiroTennisOdds(m.id).catch(() => null);
+    const resultOdds = oddsResp ? { home: oddsResp.odds_player1, draw: 0, away: oddsResp.odds_player2 } : null;
+
+    const syntheticP = apiTennisSyntheticP(home, away);
+    const baseOdds = makeTennisMoneylineFromP(syntheticP);
+    const baseMarkets = makeTennisMarketsFromPlayers(home, away, syntheticP);
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: m.tournament.name || "Tênis",
+      country: "Internacional",
+      sport: "tennis",
+      homeScore,
+      awayScore,
+      minute: 0,
+      status: m.status === "interrupted" ? "Interrompido" : "Ao vivo",
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? existing?.odds ?? baseOdds,
+      markets: baseMarkets,
+      _baseOdds: resultOdds ?? baseOdds,
+      _baseMarkets: baseMarkets,
+      events: existing?.events ?? [],
+      _liveExtra: { ...existing?._liveExtra, sets },
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("bzzoiro-tennis-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > BZZOIRO_TENNIS_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[bzzoiro] tennis finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
 
 /** Basketball prematch from PropLine — NBA/WNBA/NCAAB, real moneyline via
@@ -10108,6 +10248,9 @@ async function rebuildUpcomingCache(): Promise<void> {
       if (CONFIG.TENNIS_API_KEY) {
         tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
       }
+      if (CONFIG.BZZOIRO_API_KEY) {
+        tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisUpcomingFromBzzoiro() });
+      }
       tennis = chooseUpcomingProvider("tennis", tennisCandidates);
     } catch (err) {
       logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
@@ -10287,6 +10430,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
     if (CONFIG.TENNIS_API_KEY) {
       tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
+    }
+    if (CONFIG.BZZOIRO_API_KEY) {
+      tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisLiveFromBzzoiro() });
     }
     tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
   } catch (err) {
