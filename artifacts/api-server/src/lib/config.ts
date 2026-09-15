@@ -161,6 +161,8 @@ const GOAL_API_MAX_ODDS_DELTA_PCT = Number(process.env["GOAL_API_MAX_ODDS_DELTA_
 // WebSocket (confirmed 2026-09-09) pushes live event + point-by-point
 // updates using the SAME APIkey — same auth, separate endpoint — used as a
 // low-latency layer on top of the REST poll, never a replacement for it.
+// OBSOLETO 2026-09-15: api-tennis.com DESATIVADO DEFINITIVAMENTE.
+// Fonte única de tênis = GOALDIR/BZZOIRO (BZZOIRO_API_KEY).
 const TENNIS_API_KEY = process.env["TENNIS_API_KEY"] ?? "";
 const TENNIS_API_BASE_URL =
   process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";

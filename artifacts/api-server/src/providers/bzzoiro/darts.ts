@@ -104,14 +104,16 @@ export async function getBzzoiroDartsUpcoming(dateFrom: string, dateTo: string):
   try {
     let offset = 0;
     for (let page = 0; page < UPCOMING_MAX_PAGES; page++) {
-      const resp = await dartsGet<BzzoiroDartsListResponse>("/matches/", {
+      const resp = await dartsGet<BzzoiroDartsListResponse | BzzoiroDartsMatch[]>("/matches/", {
         date_from: dateFrom,
         date_to: dateTo,
+        status: "scheduled",
         limit: UPCOMING_PAGE_LIMIT,
         offset,
       });
-      out.push(...resp.results);
-      if (!resp.next) break;
+      const results = Array.isArray(resp) ? resp : resp.results;
+      out.push(...results);
+      if (Array.isArray(resp) || !resp.next) break;
       offset += UPCOMING_PAGE_LIMIT;
     }
   } catch (err) {
@@ -123,8 +125,8 @@ export async function getBzzoiroDartsUpcoming(dateFrom: string, dateTo: string):
 export async function getBzzoiroDartsLive(): Promise<BzzoiroDartsMatch[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   try {
-    const resp = await dartsGet<BzzoiroDartsListResponse>("/matches/live/");
-    return resp.results ?? [];
+    const resp = await dartsGet<BzzoiroDartsListResponse | BzzoiroDartsMatch[]>("/matches/live/");
+    return Array.isArray(resp) ? resp : (resp.results ?? []);
   } catch (err) {
     logger.error({ err }, "[bzzoiro-darts] getBzzoiroDartsLive failed");
     return [];

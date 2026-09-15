@@ -5,7 +5,6 @@ import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
-import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
 import { liveMatchState } from "../routes/matches.js";
 import { startBzzoiroBallSync } from "../providers/bzzoiro/ballMatchSync.js";
 import { getBzzoiroUpcomingEvents } from "../providers/bzzoiro/client.js";
@@ -60,13 +59,13 @@ server.listen(port, () => {
 
   logger.info("=== Provedores Esportivos ===");
   logger.info({ provider: "bzzoiro", status: CONFIG.BZZOIRO_API_KEY ? "ATIVO" : "DESLIGADO" }, "bzzoiro");
-  logger.info({ provider: "apitennis", status: CONFIG.TENNIS_API_KEY ? "ATIVO" : "DESLIGADO" }, "apitennis");
-  logger.info({ provider: "goalapi", status: CONFIG.GOAL_API_KEY ? "ATIVO" : "DESLIGADO" }, "goalapi");
-  logger.info({ provider: "pulsescore", status: CONFIG.PULSESCORE_API_KEY ? "ATIVO" : "DESLIGADO" }, "pulsescore");
-  logger.info({ provider: "propline", status: CONFIG.PROPLINE_API_KEY ? "ATIVO" : "DESLIGADO" }, "propline");
+  logger.info({ provider: "apitennis", status: CONFIG.TENNIS_API_KEY ? "ATIVO (OBSOLETO — NÃO USADO)" : "DESLIGADO" }, "apitennis (OBSOLETO 2026-09-15)");
+  logger.info({ provider: "goalapi", status: CONFIG.GOAL_API_KEY ? "ATIVO (OBSOLETO — NÃO USADO)" : "DESLIGADO" }, "goalapi (OBSOLETO 2026-09-15)");
+  logger.info({ provider: "pulsescore", status: CONFIG.PULSESCORE_API_KEY ? "ATIVO (OBSOLETO — NÃO USADO)" : "DESLIGADO" }, "pulsescore (OBSOLETO 2026-09-15)");
+  logger.info({ provider: "propline", status: CONFIG.PROPLINE_API_KEY ? "ATIVO (OBSOLETO — NÃO USADO)" : "DESLIGADO" }, "propline (OBSOLETO 2026-09-15)");
 
   if (!CONFIG.BZZOIRO_API_KEY) {
-    logger.warn("BZZOIRO_API_KEY NÃO CONFIGURADA: futebol pré-jogo/ao-vivo, basquete, hóquei, darts não terão fixture/odds/stats");
+    logger.warn("🔴 CRÍTICO: BZZOIRO_API_KEY NÃO CONFIGURADA. ZERO partidas de futebol (pré-jogo/ao-vivo), basquete, hóquei, dardos, tênis serão carregadas. TODOS OS ESPORTES DEPENDEM EXCLUSIVAMENTE DESTA CHAVE (fonte única).");
   }
 
   logger.info({ footballDaily: CONFIG.FOOTBALL_DAILY_PROVIDER, footballOdds: CONFIG.FOOTBALL_ODDS_PROVIDER, footballReference: CONFIG.FOOTBALL_REFERENCE_PROVIDER }, "[routing] Seleção de provedores de futebol inicializada");
@@ -77,13 +76,13 @@ server.listen(port, () => {
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
 
-  logger.info({ provedor: "BZZOIRO como fonte única", apiTennis: "paralelo tênis mantido" }, "[providers] Módulos de provedores esportivos carregados (PulseScore/GoalAPI/PropLine removidos 2026-09-14)");
+  logger.info({ provedor: "BZZOIRO como FONTE ÚNICA TODOS OS ESPORTES", apiTennis: "OBSOLETO DESATIVADO 2026-09-15" }, "[providers] Módulos de provedores esportivos carregados (PulseScore/GoalAPI/PropLine/api-tennis REMOVIDOS 2026-09-15)");
 
-  // api-tennis.com live push — no-op while TENNIS_API_KEY is unset.
-  // Lowers latency on top of buildTennisLiveFromApiTennis's REST poll;
-  // never a hard dependency (see websocketClient.ts's own comment).
+  // api-tennis.com — OBSOLETO DESDE 2026-09-15. NÃO USAR. Tênis = FONTE ÚNICA GOALDIR/BZZOIRO.
+  // Conexão WS e candidatos em matches.ts foram removidos. Este bloco apenas evita crash se
+  // a variável antiga ainda estiver definida em ambientes legados — NÃO TEM MAIS EFEITO.
   if (CONFIG.TENNIS_API_KEY) {
-    startApiTennisWebSocket();
+    logger.warn({ apitennis_key: CONFIG.TENNIS_API_KEY.slice(0, 4) + "****" }, "[providers] TENNIS_API_KEY ainda configurada mas api-tennis.com ESTÁ DESATIVADO DEFINITIVAMENTE. Ignorando.");
   }
 
   // sports.bzzoiro.com — FONTE ÚNICA (desde 2026-09-14). Liga tudo:
@@ -99,19 +98,39 @@ server.listen(port, () => {
   // bate na home os preços já estão cacheados.
   if (CONFIG.BZZOIRO_API_KEY) {
     async function runBzzoiroPrematchSweep(): Promise<void> {
+      const startedAt = Date.now();
       const today = new Date();
       const dateFrom = today.toISOString().slice(0, 10);
       const dateTo = new Date(today.getTime() + 8 * 86_400_000).toISOString().slice(0, 10);
       try {
         const events = await getBzzoiroUpcomingEvents(dateFrom, dateTo);
         const ids = events.map((ev) => ev.id);
+        const withOdds = events.filter((e) => {
+          const odds = (e as unknown as Record<string, unknown>).odds_count ?? (e as unknown as Record<string, unknown>).oddsSummary;
+          return typeof odds === "number" ? odds > 0 : !!odds;
+        }).length;
+        const elapsedMs = Date.now() - startedAt;
         logger.info(
-          { events: ids.length, dateFrom, dateTo },
-          "[bzzoiro-prematch-sweep] iniciando prime de preços prematch",
+          {
+            rawEvents: events.length,
+            withOddsSummary: withOdds,
+            idsToPrime: ids.length,
+            dateFrom,
+            dateTo,
+            elapsedMs,
+            elapsedHuman: `${(elapsedMs / 1000).toFixed(1)}s`,
+          },
+          "[bzzoiro-prematch-sweep] listagem concluída — iniciando prime de preços",
         );
         await primeBzzoiroPrematchPrices(ids);
+        const primeElapsed = Date.now() - startedAt;
+        logger.info(
+          { idsPrimed: ids.length, totalMs: primeElapsed, totalHuman: `${(primeElapsed / 1000).toFixed(1)}s` },
+          "[bzzoiro-prematch-sweep] prime de preços prematch CONCLUÍDO",
+        );
       } catch (err) {
-        logger.error({ err }, "[bzzoiro-prematch-sweep] falhou");
+        const elapsedMs = Date.now() - startedAt;
+        logger.error({ err, elapsedMs }, "[bzzoiro-prematch-sweep] falhou");
       }
     }
     void runBzzoiroPrematchSweep();
@@ -119,9 +138,9 @@ server.listen(port, () => {
   }
 
   logger.info({
-    apiTennisWs: !!CONFIG.TENNIS_API_KEY,
+    apiTennisWs: "OBSOLETO DESATIVADO",
     bzzoiroWs: !!CONFIG.BZZOIRO_API_KEY,
-  }, "[websocket] Inicialização de conexões WebSocket de provedores concluída (BZZOIRO único, GoalAPI/PulseScore/PropLine removidos)");
+  }, "[websocket] Inicialização de conexões WebSocket de provedores concluída (BZZOIRO único — GoalAPI/PulseScore/PropLine/api-tennis REMOVIDOS 2026-09-15)");
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY

@@ -70,14 +70,16 @@ export async function getBzzoiroHockeyUpcoming(dateFrom: string, dateTo: string)
   try {
     let offset = 0;
     for (let page = 0; page < UPCOMING_MAX_PAGES; page++) {
-      const resp = await hockeyGet<BzzoiroHockeyListResponse>("/matches/", {
+      const resp = await hockeyGet<BzzoiroHockeyListResponse | BzzoiroHockeyMatch[]>("/matches/", {
         date_from: dateFrom,
         date_to: dateTo,
+        status: "scheduled",
         limit: UPCOMING_PAGE_LIMIT,
         offset,
       });
-      out.push(...resp.results);
-      if (!resp.next) break;
+      const results = Array.isArray(resp) ? resp : resp.results;
+      out.push(...results);
+      if (Array.isArray(resp) || !resp.next) break;
       offset += UPCOMING_PAGE_LIMIT;
     }
   } catch (err) {
@@ -89,8 +91,8 @@ export async function getBzzoiroHockeyUpcoming(dateFrom: string, dateTo: string)
 export async function getBzzoiroHockeyLive(): Promise<BzzoiroHockeyMatch[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   try {
-    const resp = await hockeyGet<BzzoiroHockeyListResponse>("/matches/live/");
-    return resp.results ?? [];
+    const resp = await hockeyGet<BzzoiroHockeyListResponse | BzzoiroHockeyMatch[]>("/matches/live/");
+    return Array.isArray(resp) ? resp : (resp.results ?? []);
   } catch (err) {
     logger.error({ err }, "[bzzoiro-hockey] getBzzoiroHockeyLive failed");
     return [];

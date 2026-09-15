@@ -121,14 +121,16 @@ export async function getBzzoiroBasketballUpcoming(
   try {
     let offset = 0;
     for (let page = 0; page < UPCOMING_MAX_PAGES; page++) {
-      const resp = await basketballGet<BzzoiroBasketballListResponse>("/events/", {
+      const resp = await basketballGet<BzzoiroBasketballListResponse | BzzoiroBasketballGame[]>("/events/", {
         date_from: dateFrom,
         date_to: dateTo,
+        status: "scheduled",
         limit: UPCOMING_PAGE_LIMIT,
         offset,
       });
-      out.push(...resp.results);
-      if (!resp.next) break;
+      const results = Array.isArray(resp) ? resp : resp.results;
+      out.push(...results);
+      if (Array.isArray(resp) || !resp.next) break;
       offset += UPCOMING_PAGE_LIMIT;
     }
   } catch (err) {
@@ -140,8 +142,8 @@ export async function getBzzoiroBasketballUpcoming(
 export async function getBzzoiroBasketballLive(): Promise<BzzoiroBasketballGame[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   try {
-    const resp = await basketballGet<BzzoiroBasketballListResponse>("/events/live/");
-    return resp.results ?? [];
+    const resp = await basketballGet<BzzoiroBasketballListResponse | BzzoiroBasketballGame[]>("/events/live/");
+    return Array.isArray(resp) ? resp : (resp.results ?? []);
   } catch (err) {
     logger.error({ err }, "[bzzoiro-basketball] getBzzoiroBasketballLive failed");
     return [];

@@ -3,20 +3,10 @@
 // Sports Addon gating and Authorization: Token auth as basketball/hockey —
 // see basketball.ts's own header for the shared rationale).
 //
-// IMPORTANT gap, flagged rather than guessed: bzzoiro's docs mention a
-// tennis WebSocket channel (the shared multi-sport legacy channel at
-// wss://sports.bzzoiro.com/ws/live/, subscribing with {"sport":"tennis"})
-// but the user never pasted its actual frame reference — only football's
-// frame shapes were captured in full. The real REST /matches/live/ example
-// captured here also carries no in-play point/game/server field, only
-// sets won and status — unlike api-tennis.com's already-shipped WebSocket,
-// which pushes real point-by-point, current game score and server. Until
-// a real tennis WS frame capture (or a /matches/{id}/point-by-point/ REST
-// poll) is verified, this client is REST-only and live coverage here is
-// shallower than the existing api-tennis.com integration. Wired as an
-// ADDITIONAL candidate (never a hard cut of api-tennis.com) so the
-// existing chooseLiveProvider quality gate — which favors real clock/point
-// data — keeps picking whichever source is actually richer per match.
+// IMPORTANT: api-tennis.com DESATIVADO DEFINITIVAMENTE 2026-09-15.
+// GOALDIR/BZZOIRO = FONTE ÚNICA DE TÊNIS — sem paralelismo, sem fallback para
+// provedor antigo. Todos endpoints REST (upcoming/live/odds) e WebSocket
+// compartilhado (wss://sports.bzzoiro.com/ws/live/ sport:tennis) são 100% BZZOIRO.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 
@@ -83,14 +73,16 @@ export async function getBzzoiroTennisUpcoming(dateFrom: string, dateTo: string)
   try {
     let offset = 0;
     for (let page = 0; page < UPCOMING_MAX_PAGES; page++) {
-      const resp = await tennisGet<BzzoiroTennisListResponse>("/matches/", {
+      const resp = await tennisGet<BzzoiroTennisListResponse | BzzoiroTennisMatch[]>("/matches/", {
         date_from: dateFrom,
         date_to: dateTo,
+        status: "scheduled",
         limit: UPCOMING_PAGE_LIMIT,
         offset,
       });
-      out.push(...resp.results);
-      if (!resp.next) break;
+      const results = Array.isArray(resp) ? resp : resp.results;
+      out.push(...results);
+      if (Array.isArray(resp) || !resp.next) break;
       offset += UPCOMING_PAGE_LIMIT;
     }
   } catch (err) {
@@ -102,8 +94,8 @@ export async function getBzzoiroTennisUpcoming(dateFrom: string, dateTo: string)
 export async function getBzzoiroTennisLive(): Promise<BzzoiroTennisMatch[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   try {
-    const resp = await tennisGet<BzzoiroTennisListResponse>("/matches/live/");
-    return resp.results ?? [];
+    const resp = await tennisGet<BzzoiroTennisListResponse | BzzoiroTennisMatch[]>("/matches/live/");
+    return Array.isArray(resp) ? resp : (resp.results ?? []);
   } catch (err) {
     logger.error({ err }, "[bzzoiro-tennis] getBzzoiroTennisLive failed");
     return [];

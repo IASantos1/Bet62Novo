@@ -10500,20 +10500,17 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       football = _lastGoodFootballUpcoming;
     }
-    // api-tennis.com restored 2026-09-09 for tennis — first real tennis
-    // provider this platform has ever had.
+    // BZZOIRO-only 2026-09-15 — api-tennis.com DESATIVADO DEFINITIVAMENTE.
+    // Fonte única tênis = GOALDIR/BZZOIRO.
     let tennis: UpcomingMatch[] = [];
     try {
       const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.TENNIS_API_KEY) {
-        tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
-      }
       if (CONFIG.BZZOIRO_API_KEY) {
         tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisUpcomingFromBzzoiro() });
       }
       tennis = chooseUpcomingProvider("tennis", tennisCandidates);
     } catch (err) {
-      logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
+      logger.error({ err }, "[bzzoiro-only] tennis upcoming failed this cycle");
     }
     _lastGoodTennisUpcoming = tennis;
     // BZZOIRO-only 2026-09-15 (propline removed)
@@ -10588,8 +10585,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const allUpcoming = _allUpcomingCache;
 
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
-  // BZZOIRO-only 2026-09-15 (goalapi/propline removed). api-tennis.com kept
-  // for tennis alongside bzzoiro. Anti-flicker via sportWithFallback 35s TTL.
+  // BZZOIRO-only 2026-09-15 (goalapi/propline + api-tennis removidos).
+  // Anti-flicker via sportWithFallback 35s TTL.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
@@ -10646,15 +10643,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
     const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-    if (CONFIG.TENNIS_API_KEY) {
-      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
-    }
     if (CONFIG.BZZOIRO_API_KEY) {
       tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisLiveFromBzzoiro() });
     }
     tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
   } catch (err) {
-    logger.error({ err }, "[tri-fallback] tennis live failed this tick");
+    logger.error({ err }, "[bzzoiro-only] tennis live failed this tick");
   }
   const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
   // MMA — no BZZOIRO builders yet.
@@ -11683,9 +11677,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let tennis: UpcomingMatch[] = [];
   try {
     const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.TENNIS_API_KEY) {
-      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
-    }
     if (CONFIG.BZZOIRO_API_KEY) {
       tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisUpcomingFromBzzoiro() });
     }

@@ -80,7 +80,8 @@ function scoreCandidateRaw(fixture: GoalApiFixtureRef, ev: PulseScoreEvent): Foo
     fixture.kickoffUtc,
     ev.startTime,
   );
-  const leagueSimilarity = fixture.leagueName && ev.league ? nameSimilarity(fixture.leagueName, ev.league) : null;
+  const leagueRaw = typeof ev.league === "string" ? ev.league : ev.league?.name;
+  const leagueSimilarity = fixture.leagueName && leagueRaw ? nameSimilarity(fixture.leagueName, leagueRaw) : null;
 
   // Missing signals (no kickoff time on either side, or no league name)
   // are treated as neutral — neither a bonus nor a penalty — since we
