@@ -256,3 +256,104 @@ export type BzzoiroOddsFeedResponse = {
   previous: string | null;
   results: BzzoiroOddsFeedRow[];
 };
+
+export type BzzoiroStatRow = {
+  type: string;
+  home: number | string | null;
+  away: number | string | null;
+};
+
+export type BzzoiroStatsPeriod = {
+  period: string;
+  stats: BzzoiroStatRow[];
+};
+
+export type BzzoiroShotmapEntry = {
+  id?: number;
+  team: "home" | "away";
+  player?: string;
+  player_id?: number;
+  minute?: number;
+  xg?: number | null;
+  result?: "goal" | "saved" | "blocked" | "off_target" | "woodwork" | string;
+  location?: { x: number; y: number };
+  body_part?: string;
+  situation?: string;
+};
+
+export type BzzoiroXgTimelineEntry = {
+  minute: number;
+  home_xg?: number;
+  away_xg?: number;
+};
+
+export type BzzoiroAveragePositionEntry = {
+  player_id?: number;
+  player?: string;
+  team: "home" | "away";
+  position?: { x: number; y: number };
+};
+
+export type BzzoiroEventStatsResponse = {
+  event_id: number;
+  home_team?: { id: number; name: string };
+  away_team?: { id: number; name: string };
+  stats?: BzzoiroStatsPeriod[];
+  shotmap?: BzzoiroShotmapEntry[];
+  xg_timeline?: BzzoiroXgTimelineEntry[];
+  average_positions?: BzzoiroAveragePositionEntry[];
+  xg_home?: number | null;
+  xg_away?: number | null;
+  possession_home?: number | null;
+  possession_away?: number | null;
+  shots_home?: number | null;
+  shots_away?: number | null;
+  shots_on_target_home?: number | null;
+  shots_on_target_away?: number | null;
+  corners_home?: number | null;
+  corners_away?: number | null;
+  yellow_cards_home?: number | null;
+  yellow_cards_away?: number | null;
+  red_cards_home?: number | null;
+  red_cards_away?: number | null;
+  fouls_home?: number | null;
+  fouls_away?: number | null;
+  offsides_home?: number | null;
+  offsides_away?: number | null;
+  saves_home?: number | null;
+  saves_away?: number | null;
+  dangerous_attacks_home?: number | null;
+  dangerous_attacks_away?: number | null;
+  attacks_home?: number | null;
+  attacks_away?: number | null;
+  throw_ins_home?: number | null;
+  throw_ins_away?: number | null;
+  passes_home?: number | null;
+  passes_away?: number | null;
+  pass_accuracy_home?: number | null;
+  pass_accuracy_away?: number | null;
+};
+
+export type BzzoiroIncident = {
+  id?: number;
+  type: "goal" | "yellow_card" | "red_card" | "substitution" | "penalty" | "penalty_missed" | "penalty_saved" | "var" | "injury" | "kickoff" | "halftime" | "fulltime" | "et_kickoff" | "et_halftime" | "penalty_shootout_kick" | string;
+  team?: "home" | "away" | null;
+  minute?: number;
+  minute_display?: string;
+  player?: string | null;
+  player_id?: number | null;
+  secondary_player?: string | null;
+  secondary_player_id?: number | null;
+  detail?: string | null;
+  home_score_after?: number | null;
+  away_score_after?: number | null;
+  is_own_goal?: boolean;
+  is_penalty?: boolean;
+  period?: number;
+  sort_order?: number;
+};
+
+export type BzzoiroEventIncidentsResponse = {
+  event_id: number;
+  incidents: BzzoiroIncident[];
+};

@@ -5,15 +5,11 @@ import { logger } from "../lib/logger.js";
 import { CONFIG } from "../lib/config.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
-import { propline } from "../services/propline/index.js";
-import { proplineAllActiveSports } from "../services/propline/football.js";
-import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goalapi/websocketClient.js";
 import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
-import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
-import { runPulseScoreShadowMatchSync, triggerPrematchPulseScoreSync } from "../providers/pulsescore/shadowMatchSync.js";
-import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClient.js";
+import { liveMatchState } from "../routes/matches.js";
 import { startBzzoiroBallSync } from "../providers/bzzoiro/ballMatchSync.js";
-import { goalApi } from "../services/goalapi/index.js";
+import { getBzzoiroUpcomingEvents } from "../providers/bzzoiro/client.js";
+import { primeBzzoiroPrematchPrices } from "../providers/bzzoiro/prematchPriceCache.js";
 
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
@@ -59,56 +55,21 @@ if (Number.isNaN(port) || port <= 0) {
 
 const server = createServer(app);
 
-// ── PropLine Startup Probe + Quota Check ────────────────────────────────────
-// PropLine já retorna quota/daily-usage via headers em TODA resposta autenticada.
-// O probe() acerta /sports (barato, conta 1 req de 1M/dia) e preenche os
-// snapshots internos. Avisa no log a qualquer sinal de <10% remaining.
-let lastProplineWarnRemainingPct = -1;
-async function proplineStartupAndPeriodicCheck(phase: "startup" | "periodic"): Promise<void> {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    logger.debug("[propline] PROPLINE_API_KEY não configurada — skip check");
-    return;
-  }
-  try {
-    const probe = await propline.probe();
-    const usage = propline.usage();
-    const dailyLimit = usage.dailyLimit ?? 1_000_000;
-    const dailyUsed = usage.dailyUsed ?? 0;
-    const dailyRemaining = usage.dailyRemaining ?? Math.max(0, dailyLimit - dailyUsed);
-    const remainingPct = dailyLimit > 0 ? Math.round((dailyRemaining / dailyLimit) * 1000) / 10 : 100;
-    const info = {
-      ok: probe.ok,
-      sportCount: probe.sportCount,
-      enabledSports: proplineAllActiveSports(),
-      defaultBookmakers: CONFIG.PROPLINE_DEFAULT_BOOKMAKERS,
-      dailyLimit,
-      dailyUsed,
-      dailyRemaining,
-      remainingPct,
-      rateLimitRemaining: usage.rateLimitRemaining,
-      rateLimitResetSec: usage.rateLimitReset,
-      dailyResetAtUnix: usage.dailyReset,
-      phase,
-    };
-    if (remainingPct < 5) {
-      logger.error(info, "[propline] CRÍTICO: <5% de quota restante");
-    } else if (remainingPct < 10) {
-      if (lastProplineWarnRemainingPct >= 10 || phase === "startup") {
-        logger.warn(info, "[propline] ATENÇÃO: <10% de quota restante");
-      }
-    } else if (phase === "startup") {
-      logger.info(info, "[propline] Startup probe OK");
-    } else {
-      logger.debug(info, "[propline] Periodic check OK");
-    }
-    lastProplineWarnRemainingPct = remainingPct < 10 ? 10 : remainingPct;
-  } catch (err) {
-    logger.warn({ err, phase }, "[propline] probe falhou (transiente) — ignora");
-  }
-}
-
 server.listen(port, () => {
   logger.info({ port }, "API server started");
+
+  logger.info("=== Provedores Esportivos ===");
+  logger.info({ provider: "bzzoiro", status: CONFIG.BZZOIRO_API_KEY ? "ATIVO" : "DESLIGADO" }, "bzzoiro");
+  logger.info({ provider: "apitennis", status: CONFIG.TENNIS_API_KEY ? "ATIVO" : "DESLIGADO" }, "apitennis");
+  logger.info({ provider: "goalapi", status: CONFIG.GOAL_API_KEY ? "ATIVO" : "DESLIGADO" }, "goalapi");
+  logger.info({ provider: "pulsescore", status: CONFIG.PULSESCORE_API_KEY ? "ATIVO" : "DESLIGADO" }, "pulsescore");
+  logger.info({ provider: "propline", status: CONFIG.PROPLINE_API_KEY ? "ATIVO" : "DESLIGADO" }, "propline");
+
+  if (!CONFIG.BZZOIRO_API_KEY) {
+    logger.warn("BZZOIRO_API_KEY NÃO CONFIGURADA: futebol pré-jogo/ao-vivo, basquete, hóquei, darts não terão fixture/odds/stats");
+  }
+
+  logger.info({ footballDaily: CONFIG.FOOTBALL_DAILY_PROVIDER, footballOdds: CONFIG.FOOTBALL_ODDS_PROVIDER, footballReference: CONFIG.FOOTBALL_REFERENCE_PROVIDER }, "[routing] Seleção de provedores de futebol inicializada");
 
   // Start the auto-settlement worker after the server is up.
   // This scans all pending bets and settles them as matches finish
@@ -116,29 +77,7 @@ server.listen(port, () => {
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
 
-  void proplineStartupAndPeriodicCheck("startup");
-  setInterval(() => void proplineStartupAndPeriodicCheck("periodic"), 60 * 60 * 1000);
-
-  // GOAL API Data Collector — no-op while GOAL_API_MAX_WS_MATCHES is 0
-  // (the FREE plan's real concurrent-match limit for WebSocket
-  // subscriptions), so this activates automatically once the account
-  // upgrades, with no code change. Every match_update just triggers a
-  // refresh through the same REST-derived state path the webhook receiver
-  // and poll loop use (routes/matches.ts's applyGoalApiWebhookEvent) —
-  // one source of truth for state regardless of what woke it up.
-  if (CONFIG.GOAL_API_KEY) {
-    startGoalApiWebSocket((fixtureId) => {
-      applyGoalApiWebhookEvent({ event: "score.changed", data: { fixtureId } }).catch((err) => {
-        logger.error({ err, fixtureId }, "[goal-api-ws] update handling failed");
-      });
-    });
-    setInterval(() => {
-      const ids = [...liveMatchState.keys()]
-        .filter((id) => id.startsWith("goalapi-football-"))
-        .map((id) => id.slice("goalapi-football-".length));
-      syncGoalApiSubscriptions(ids);
-    }, 30_000);
-  }
+  logger.info({ provedor: "BZZOIRO como fonte única", apiTennis: "paralelo tênis mantido" }, "[providers] Módulos de provedores esportivos carregados (PulseScore/GoalAPI/PropLine removidos 2026-09-14)");
 
   // api-tennis.com live push — no-op while TENNIS_API_KEY is unset.
   // Lowers latency on top of buildTennisLiveFromApiTennis's REST poll;
@@ -147,98 +86,46 @@ server.listen(port, () => {
     startApiTennisWebSocket();
   }
 
-  // PulseScore Fase 1 — matching + the REAL live football odds source as
-  // of 2026-09-10 (see providers/pulsescore/shadowMatchSync.ts's header):
-  // once a fixture is matched, this round also writes PulseScore's own
-  // price into liveMatchState/routes/bets.ts's read path. 15s (down from
-  // the original 120s, which was sized for matching cadence, not odds
-  // freshness) — PulseScore's own REST throttle (1 req/sec via the
-  // client's serialized queue) already caps real request volume regardless
-  // of how often this fires, so the shorter interval only makes already-
-  // fetched data get re-applied more often. Inert until PULSESCORE_API_KEY
-  // is set.
-  if (CONFIG.PULSESCORE_API_KEY) {
-    void runPulseScoreShadowMatchSync();
-    setInterval(() => runPulseScoreShadowMatchSync(), 15_000);
-  }
-
-  // PulseScore WebSocket — confirmed real via the docs the user pasted
-  // 2026-09-10: the PRO plan (this account's) includes 1 concurrent
-  // connection. Treated purely as a wake-up signal (see
-  // providers/pulsescore/websocketClient.ts's header for why) — not yet
-  // wired into shadowMatchSync's fetch cadence, just connected and logging
-  // for now. Inert until PULSESCORE_API_KEY is set.
-  if (CONFIG.PULSESCORE_API_KEY) {
-    startPulseScoreWebSocket();
-  }
-
-  // sports.bzzoiro.com — confirmed real via the user's own live-tested
-  // connection 2026-09-11: real ball x/y + situation over WebSocket, used
-  // solely to drive the mini pitch tracker's ball movement. Strictly
-  // additive to GOAL API (score/commentary/stats) and PulseScore (odds) —
-  // see providers/bzzoiro/ballMatchSync.ts's header. Inert until
-  // BZZOIRO_API_KEY is set.
+  // sports.bzzoiro.com — FONTE ÚNICA (desde 2026-09-14). Liga tudo:
+  // bola x/y mini-campo, fixtures, odds, stats, xg, timeline de eventos
+  // para futebol, basquete, hóquei, tênis, dardos e outros cobertos.
   if (CONFIG.BZZOIRO_API_KEY) {
     startBzzoiroBallSync();
   }
 
-  // PulseScore Fase 2 — PRÉ-JOGO (upcoming 8 dias): mesma arquitetura híbrida
-  // do Fase 1 mas cadência mais longa (3 min vs 15s do live) — prematch não
-  // se move tão rápido e 80 páginas de PulseScore por rodada custam ~80s com
-  // o 1req/s throttle. Executa 1x no startup e depois a cada 3 min, mesmo
-  // sem tráfego de usuários, garantindo que todos os jogos de hoje já estão
-  // com odds reais no Map cache quando o primeiro usuário abrir a home.
-  // Requer ambas as chaves (GOAL_API fixtures + PULSESCORE_API odds).
-  if (CONFIG.PULSESCORE_API_KEY && CONFIG.GOAL_API_KEY) {
-    async function runPrematchCron(): Promise<void> {
+  // BZZOIRO Fase 2 — PRÉ-JOGO (upcoming 8 dias): sweep periodico dos IDs das
+  // partidas para popular o cache de odds prematch. Executa 1x no startup e
+  // depois a cada 3 min, mesmo sem tráfego. Assim quando o primeiro usuário
+  // bate na home os preços já estão cacheados.
+  if (CONFIG.BZZOIRO_API_KEY) {
+    async function runBzzoiroPrematchSweep(): Promise<void> {
       const today = new Date();
-      const dates = Array.from({ length: 8 }, (_, i) => {
-        const d = new Date(today);
-        d.setDate(d.getDate() + i);
-        return d.toISOString().slice(0, 10);
-      });
-      const perDay = await Promise.all(
-        dates.map((date) => goalApi.getFixturesByDate(date).catch(() => [])),
-      );
-      const seen = new Set<string>();
-      const refs: {
-        providerMatchId: string;
-        home: string;
-        away: string;
-        leagueName: string;
-        kickoffUtc: Date | null;
-      }[] = [];
-      for (const fixtures of perDay) {
-        for (const fx of fixtures as any[]) {
-          if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
-          if (isBlockedLeague(fx.leagueName ?? "") || isWomensLeague(fx.leagueName ?? "")) continue;
-          const home = stripGenderTeamSuffix(fx.homeTeam?.name);
-          const away = stripGenderTeamSuffix(fx.awayTeam?.name);
-          if (!home || !away) continue;
-          const key = `${home}|${away}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          refs.push({
-            providerMatchId: String(fx.id),
-            home,
-            away,
-            leagueName: fx.leagueName ?? "",
-            kickoffUtc: fx.kickoffUtc ? new Date(fx.kickoffUtc) : null,
-          });
-        }
+      const dateFrom = today.toISOString().slice(0, 10);
+      const dateTo = new Date(today.getTime() + 8 * 86_400_000).toISOString().slice(0, 10);
+      try {
+        const events = await getBzzoiroUpcomingEvents(dateFrom, dateTo);
+        const ids = events.map((ev) => ev.id);
+        logger.info(
+          { events: ids.length, dateFrom, dateTo },
+          "[bzzoiro-prematch-sweep] iniciando prime de preços prematch",
+        );
+        await primeBzzoiroPrematchPrices(ids);
+      } catch (err) {
+        logger.error({ err }, "[bzzoiro-prematch-sweep] falhou");
       }
-      logger.info(
-        { count: refs.length },
-        "[pulsescore-prematch-cron] disparando sync de referências upcoming",
-      );
-      void triggerPrematchPulseScoreSync(refs);
     }
-    void runPrematchCron();
-    setInterval(() => void runPrematchCron(), 3 * 60 * 1000);
+    void runBzzoiroPrematchSweep();
+    setInterval(() => void runBzzoiroPrematchSweep(), 3 * 60 * 1000);
   }
+
+  logger.info({
+    apiTennisWs: !!CONFIG.TENNIS_API_KEY,
+    bzzoiroWs: !!CONFIG.BZZOIRO_API_KEY,
+  }, "[websocket] Inicialização de conexões WebSocket de provedores concluída (BZZOIRO único, GoalAPI/PulseScore/PropLine removidos)");
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY
   // is unset or AI_CRON_ENABLED=false. No user traffic is affected.
   startAiAgentsCron();
+  logger.info({ aiAgentsKey: !!CONFIG.AI_AGENTS_API_KEY, model: CONFIG.AI_AGENTS_MODEL }, "[ai-agents] Sistema de agentes de IA (Risk/Odds/Payments/Compliance/Orchestrator) inicializado");
 });

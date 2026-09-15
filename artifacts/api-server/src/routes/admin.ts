@@ -32,23 +32,7 @@ import {
   getPalaceCasinoAgentInfo,
 } from "../services/palaceCasino/client.js";
 import { memberAccountForUser } from "./casino.js";
-import { propline } from "../services/propline/index.js";
-import {
-  proplineFindEventByName,
-  resolveProplineSportKey,
-  proplineAllActiveSports,
-} from "../services/propline/football.js";
 import { getGoalApiProviderHealth } from "../health/providerHealth.js";
-import { getPulseScoreHealth } from "../providers/pulsescore/health.js";
-import {
-  getPulseScoreShadowSyncStatus,
-  getPulseScorePrematchStatus,
-  getPrematchPulseScorePricedFixtureIds,
-  getPrematchPulsePrice,
-  buildPulseScoreMarkets,
-} from "../providers/pulsescore/shadowMatchSync.js";
-import { pulseScore } from "../providers/pulsescore/client.js";
-import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
 import {
   getBzzoiroCoverageRaw,
@@ -58,7 +42,6 @@ import {
   getBzzoiroOddsFeed,
   getBzzoiroEventIncidentsRaw,
 } from "../providers/bzzoiro/client.js";
-import { goalApi } from "../services/goalapi/index.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
@@ -2672,40 +2655,15 @@ router.post("/casino/banners/ai-generate", adminMiddleware, async (req: AdminReq
 });
 
 router.get("/propline-probe", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(503).json({ configured: false, error: "PROPLINE_API_KEY não configurada" });
-    return;
-  }
-  try {
-    const probe = await propline.probe();
-    const usage = propline.usage();
-    res.json({ configured: true, probe, usage });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-probe error");
-    res.status(500).json({ configured: true, error: "Erro ao consultar PropLine", detail: err instanceof Error ? err.message : String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-usage", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(503).json({ configured: false });
-    return;
-  }
-  res.json({ configured: true, usage: propline.usage() });
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
-// BET62 PulseScore Fase 1 — read-only status probe: confirms whether GOAL
-// API and PulseScore are both actually reachable, and what the shadow-match
-// sync's last round found (match rate, confidence, odds comparisons). Pure
-// observability — reading this never affects the odds a bettor sees. See
-// providers/pulsescore/shadowMatchSync.ts for what the numbers mean.
 router.get("/pulsescore-status", adminMiddleware, async (_req: AdminRequest, res) => {
-  res.json({
-    goalApi: getGoalApiProviderHealth(),
-    pulseScore: getPulseScoreHealth(),
-    shadowSync: getPulseScoreShadowSyncStatus(),
-    prematchSync: getPulseScorePrematchStatus(),
-  });
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 // sports.bzzoiro.com real-ball-position status — read-only, mirrors
@@ -2793,12 +2751,8 @@ router.get("/bzzoiro-capabilities-probe", adminMiddleware, async (req: AdminRequ
       // /fixtures/:id/events directly, bypassing our cache entirely, is
       // the only way to tell those apart before trusting (or distrusting)
       // a bzzoiro incident that our own cache doesn't corroborate.
-      const rawGoalApiId = matchedSub.liveMatchId.replace(/^goalapi-football-/, "");
-      try {
-        result.goalApiRawEvents = await goalApi.getFixtureEvents(rawGoalApiId);
-      } catch (err) {
-        result.goalApiRawEventsError = err instanceof Error ? err.message : String(err);
-      }
+      result.goalApiRawEvents = null;
+      result.goalApiRawEventsError = "DESCONTINUADO — GOAL API removido; BZZOIRO é a fonte única agora";
     }
 
     // Added 2026-09-14 straight from the user's own pasted bzzoiro docs —
@@ -2897,465 +2851,59 @@ router.get("/apitennis-ws-status", adminMiddleware, async (_req: AdminRequest, r
 });
 
 router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest, res) => {
-  const liveRows = [...liveMatchState.values()];
-  const liveGoalApiFootball = liveRows.filter(
-    (m) => m.sport === "football" && m.id.startsWith("goalapi-football-"),
-  );
-  const livePulsescoreFootball = liveRows.filter(
-    (m) => m.sport === "football" && m.id.startsWith("pulsescore-football-"),
-  );
-  const liveWithPulse = liveGoalApiFootball.filter(
-    (m) => (m as any)._priceSource === "pulsescore",
-  );
-  const liveWithoutPulse = liveGoalApiFootball.filter(
-    (m) => (m as any)._priceSource !== "pulsescore",
-  );
-  function sampleLive(rows: typeof liveRows, n: number) {
-    return rows.slice(0, n).map((m: any) => ({
-      id: m.id,
-      fixture: `${m.home} vs ${m.away}`,
-      league: m.league,
-      _priceSource: m._priceSource ?? null,
-      _pulseScoreEventId: m._pulseScoreEventId ?? null,
-      _suspensionReason: m._suspensionReason ?? null,
-      hasRealOdds: m.hasRealOdds,
-      odds1x2: m.odds,
-    }));
-  }
-
-  const upcoming = await buildUpcomingMatches().catch(() => [] as any[]);
-  const upFootball = upcoming.filter(
-    (m: any) => m.sport === "football" && String(m.id).startsWith("goalapi-football-"),
-  );
-  const upWithPulse = upFootball.filter((m: any) => m._priceSource === "pulsescore");
-  const upWithoutPulse = upFootball.filter(
-    (m: any) => m._priceSource !== "pulsescore",
-  );
-  const prematchMapCacheSize = getPrematchPulseScorePricedFixtureIds().size;
-  function stripGoalApiPrefix(id: string): string {
-    return id.startsWith("goalapi-football-") ? id.slice("goalapi-football-".length) : id;
-  }
-  function sampleUpcoming(rows: any[], n: number) {
-    return rows.slice(0, n).map((m) => {
-      const gid = stripGoalApiPrefix(String(m.id));
-      const inPrematchMap = gid ? getPrematchPulsePrice(gid) !== undefined : false;
-      return {
-        id: m.id,
-        goalApiFixtureId: gid,
-        fixture: `${m.home} vs ${m.away}`,
-        league: m.league,
-        date: m.date,
-        time: m.time,
-        _priceSource: m._priceSource ?? null,
-        _pulseScoreEventId: m._pulseScoreEventId ?? null,
-        inPrematchMapCache: inPrematchMap,
-        hasRealOdds: m.hasRealOdds,
-        odds1x2: m.odds,
-      };
-    });
-  }
-
-  const pct = (have: number, total: number): number =>
-    total === 0 ? 100 : Number(((have / total) * 100).toFixed(2));
-
-  res.json({
-    generatedAt: new Date().toISOString(),
-    live: {
-      totalLiveFootball: liveRows.filter((m) => m.sport === "football").length,
-      goalApiFootballCount: liveGoalApiFootball.length,
-      pulseScoreNativeFootballCount: livePulsescoreFootball.length,
-      goalApiWithPulsePriceSource: liveWithPulse.length,
-      goalApiWithoutPulsePriceSource: liveWithoutPulse.length,
-      coveragePct: pct(
-        liveWithPulse.length,
-        liveGoalApiFootball.length,
-      ),
-      sampleWithPulse: sampleLive(liveWithPulse, 5),
-      sampleWithoutPulse: sampleLive(liveWithoutPulse, 5),
-    },
-    prematch: {
-      prematchSync: getPulseScorePrematchStatus(),
-      prematchMapCacheSize,
-      totalUpcomingFootball: upcoming.filter((m: any) => m.sport === "football").length,
-      goalApiFootballCount: upFootball.length,
-      goalApiWithPulsePriceSource: upWithPulse.length,
-      goalApiWithoutPulsePriceSource: upWithoutPulse.length,
-      coveragePct: pct(
-        upWithPulse.length,
-        upFootball.length,
-      ),
-      sampleWithPulse: sampleUpcoming(upWithPulse, 5),
-      sampleWithoutPulse: sampleUpcoming(upWithoutPulse, 5),
-    },
-    oddsGateInRoutesBetsTs:
-      "APLICADO 100% — POST /api/bets/place bloqueia goalapi-football upcoming sem prematchMap cache E live sem _priceSource === pulsescore",
-    conclusion:
-      liveGoalApiFootball.length + upFootball.length === 0
-        ? "Nenhum fixture goalapi-football encontrado agora (sem jogos ao vivo e cron prematch ainda não rodou 1ª vez no startup). Aguarde 3 min e chame de novo."
-        : pct(liveWithPulse.length, liveGoalApiFootball.length) === 100 &&
-            pct(upWithPulse.length, upFootball.length) === 100
-          ? "✅ 100% COBERTURA PULSESCORE (LIVE + PREMATCH)"
-          : `⚠️ Cobertura incompleta LIVE ${pct(liveWithPulse.length, liveGoalApiFootball.length)}% · PREMATCH ${pct(upWithPulse.length, upFootball.length)}%.`,
-  });
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
-// Diagnoses the 2026-09-12 "mercados de futebol mediocre" report: bet62OddsAreReal
-// being true only proves the headline 1X2 came from PulseScore — it says nothing
-// about how many of the OTHER ~20 AdvancedMarkets slots (doubleChance/totalGoals/
-// handicap/asianTotals/corners/cards/htft/correctScore/goalscorers/...) actually
-// got populated for this specific fixture, since buildPulseScoreMarkets zeroes
-// (never fabricates) any slot PulseScore's normalizer didn't find a real market
-// for (see that function's header + normalizer.ts). This pulls the SAME raw
-// PulseScore event fresh, runs it through normalizePulseScoreEvent +
-// buildPulseScoreMarkets exactly like the live/prematch builders do, and returns
-// all three layers side by side — raw bet365 market list (so we can see what
-// bet365 genuinely offers this match right now), the normalizer's extracted
-// summary (so we can see which real markets it failed to map, if any), and the
-// final AdvancedMarkets-shaped object the frontend actually receives — so a
-// "mediocre" list can be told apart from "bet365 itself just isn't offering much
-// for this match/moment" vs "a real gap in normalizer.ts is silently dropping
-// markets bet365 does offer".
 router.get("/pulsescore-market-dump", adminMiddleware, async (req: AdminRequest, res) => {
-  const pulseScoreEventId = typeof req.query.pulseScoreEventId === "string" ? req.query.pulseScoreEventId : undefined;
-  const matchId = typeof req.query.matchId === "string" ? req.query.matchId : undefined;
-
-  let eventId = pulseScoreEventId;
-  let fixtureLabel: string | undefined;
-  if (!eventId && matchId) {
-    const state = liveMatchState.get(matchId) as any;
-    if (state?._pulseScoreEventId) {
-      eventId = state._pulseScoreEventId;
-      fixtureLabel = `${state.home} vs ${state.away}`;
-    }
-  }
-  if (!eventId) {
-    res.status(400).json({
-      error:
-        "Informe ?pulseScoreEventId=<id> (pegue em sampleWithPulse de /pulsescore-odds-audit) ou ?matchId=goalapi-football-... de um jogo AO VIVO já casado (_priceSource=pulsescore).",
-    });
-    return;
-  }
-
-  try {
-    let raw;
-    try {
-      raw = await pulseScore.getLiveEventById(eventId);
-    } catch {
-      raw = await pulseScore.getSoccerEventById(eventId);
-    }
-    const normalized = normalizePulseScoreEvent(raw);
-    const built = buildPulseScoreMarkets(normalized);
-    const mapEntries = (m: Map<number, unknown> | undefined) => (m ? Object.fromEntries(m) : null);
-
-    res.json({
-      fixture: fixtureLabel ?? `${raw.home} vs ${raw.away}`,
-      pulseScoreEventId: eventId,
-      rawMarketCount: raw.markets.length,
-      rawMarkets: raw.markets.map((m) => ({
-        canonicalMarket: m.canonicalMarket,
-        rawName: m.rawName,
-        period: m.period,
-        selectionCount: m.selections.length,
-        sampleSelections: m.selections.slice(0, 30).map((s) => ({
-          canonicalOutcome: s.canonicalOutcome,
-          rawName: s.rawName,
-          line: s.line,
-          odds: s.odds,
-          isActive: s.isActive,
-        })),
-      })),
-      normalizedSummary: {
-        matchResult: normalized.matchResult ?? null,
-        matchResult1H: normalized.matchResult1H ?? null,
-        matchResult2H: normalized.matchResult2H ?? null,
-        doubleChance: normalized.doubleChance ?? null,
-        bothTeamsToScore: normalized.bothTeamsToScore ?? null,
-        totalGoalsOddEven: normalized.totalGoalsOddEven ?? null,
-        drawNoBet: normalized.drawNoBet ?? null,
-        firstGoalTeam: normalized.firstGoalTeam ?? null,
-        htft: normalized.htft ?? null,
-        correctScoreCount: normalized.correctScore ? Object.keys(normalized.correctScore).length : 0,
-        htCorrectScoreCount: normalized.htCorrectScore ? Object.keys(normalized.htCorrectScore).length : 0,
-        anytimeGoalscorerCount: normalized.anytimeGoalscorer?.length ?? 0,
-        firstGoalscorerCount: normalized.firstGoalscorer?.length ?? 0,
-        lastGoalscorerCount: normalized.lastGoalscorer?.length ?? 0,
-        asianHandicapFull: normalized.asianHandicapFull ?? null,
-        handicapLines: mapEntries(normalized.handicapLines),
-        cornersLines: mapEntries(normalized.cornersLines),
-        cardsLines: mapEntries(normalized.cardsLines),
-        asianTotalLines: mapEntries(normalized.asianTotalLines),
-        teamGoalsHomeLines: mapEntries(normalized.teamGoalsHomeLines),
-        teamGoalsAwayLines: mapEntries(normalized.teamGoalsAwayLines),
-        homeCornersLines: mapEntries(normalized.homeCornersLines),
-        awayCornersLines: mapEntries(normalized.awayCornersLines),
-      },
-      finalMarketsWrittenToLiveState: built,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao consultar PulseScore", detail: err instanceof Error ? err.message : String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
-// User asked directly (2026-09-12): "quantos mercados a api pulsescore
-// usando bet365 disponibiliza" — surveys N real matches (live-priced first,
-// then prematch-priced) and tallies every distinct (period, canonicalMarket,
-// rawName) market type bet365 actually sent across them. Sequential calls
-// through the shared `pulseScore` client instance already serialize through
-// its own 1 req/sec PRO-plan throttle (see client.ts) — no separate rate
-// limiting needed here, but it does mean this request takes roughly
-// `limit` seconds to complete.
 router.get("/pulsescore-market-survey", adminMiddleware, async (req: AdminRequest, res) => {
-  const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 40));
-
-  const eventIds: string[] = [];
-  for (const state of liveMatchState.values()) {
-    const s = state as unknown as { _priceSource?: string; _pulseScoreEventId?: string };
-    if (s._priceSource === "pulsescore" && s._pulseScoreEventId) {
-      eventIds.push(s._pulseScoreEventId);
-      if (eventIds.length >= limit) break;
-    }
-  }
-  if (eventIds.length < limit) {
-    for (const gid of getPrematchPulseScorePricedFixtureIds()) {
-      const p = getPrematchPulsePrice(gid);
-      if (p?.pulseScoreEventId) eventIds.push(p.pulseScoreEventId);
-      if (eventIds.length >= limit) break;
-    }
-  }
-
-  type MarketTally = {
-    period: string;
-    canonicalMarket: string;
-    rawName: string;
-    matchesSeen: number;
-    sampleSelectionCounts: number[];
-  };
-  const marketStats = new Map<string, MarketTally>();
-  const errors: string[] = [];
-  let matchesSurveyed = 0;
-
-  for (const eventId of eventIds) {
-    try {
-      let raw;
-      try {
-        raw = await pulseScore.getLiveEventById(eventId);
-      } catch {
-        raw = await pulseScore.getSoccerEventById(eventId);
-      }
-      matchesSurveyed++;
-      for (const m of raw.markets) {
-        const key = `${m.period}::${m.canonicalMarket}::${m.rawName}`;
-        const entry = marketStats.get(key) ?? {
-          period: m.period,
-          canonicalMarket: m.canonicalMarket,
-          rawName: m.rawName,
-          matchesSeen: 0,
-          sampleSelectionCounts: [],
-        };
-        entry.matchesSeen++;
-        if (entry.sampleSelectionCounts.length < 3) entry.sampleSelectionCounts.push(m.selections.length);
-        marketStats.set(key, entry);
-      }
-    } catch (err) {
-      errors.push(`${eventId}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  const markets = [...marketStats.values()].sort((a, b) => b.matchesSeen - a.matchesSeen);
-
-  res.json({
-    matchesSurveyed,
-    distinctEventIdsRequested: eventIds.length,
-    distinctMarketTypes: markets.length,
-    markets,
-    errors,
-  });
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-sports", adminMiddleware, async (_req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(503).json({ configured: false });
-    return;
-  }
-  try {
-    const sports = await propline.getSports();
-    res.json({ configured: true, configuredEnabled: CONFIG.PROPLINE_ENABLED_SPORTS, count: sports.length, sports });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-sports error");
-    res.status(500).json({ error: "Erro ao consultar PropLine", detail: err instanceof Error ? err.message : String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-freshness", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(503).json({ configured: false });
-    return;
-  }
-  try {
-    const sportKey = typeof req.query.sport ? String(req.query.sport) : undefined;
-    const data = await propline.getFreshness(sportKey);
-    res.json({ configured: true, freshness: data });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-freshness error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-odds", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(503).json({ configured: false });
-    return;
-  }
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "soccer_epl";
-  const markets = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : ["h2h", "spreads", "totals"];
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw ?? sportRaw);
-    if (!sportKey) { res.status(400).json({ error: "Sport inválido" }); return; }
-    const events = await propline.getOdds(sportKey, {
-      markets,
-      includeLinks: true,
-      includeBookIds: true,
-    });
-    res.json({ configured: true, sport: sportKey, eventCount: events.length, events });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-odds error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-event/:eventId", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) {
-    res.status(503).json({ configured: false });
-    return;
-  }
-  const eventId = String(req.params.eventId ?? "");
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "";
-  const marketsRaw = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : undefined;
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
-    if (!sportKey) { res.status(400).json({ error: "Sport inválido" }); return; }
-    const event = await propline.getEventOdds(sportKey, eventId, { markets: marketsRaw, includeLinks: true, includeBookIds: true });
-    res.json({ configured: true, sport: sportKey, event });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-event error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-match", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "";
-  const home = typeof req.query.home ? String(req.query.home) : "";
-  const away = typeof req.query.away ? String(req.query.away) : "";
-  if (!sportRaw || (!home && !away)) { res.status(400).json({ error: "Informe sport + (home ou away)" }); return; }
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw);
-    if (!sportKey) { res.status(400).json({ error: "Sport inválido" }); return; }
-    const events = await propline.getEvents(sportKey);
-    const found = proplineFindEventByName(events, { home, away });
-    if (!found) {
-      res.json({ configured: true, sport: sportKey, matched: null, search: { home, away }, candidates: events.slice(0, 10).map(e => ({ id: e.id, home: e.home_team, away: e.away_team, commence_time: e.commence_time })) });
-      return;
-    }
-    const full = await propline.getEventOdds(sportKey, found.id, { includeLinks: true, includeBookIds: true });
-    res.json({ configured: true, sport: sportKey, matched: found, full });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-match error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline/scores", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "soccer_epl";
-  const daysFrom = typeof req.query.daysFrom ? Number(req.query.daysFrom) : undefined;
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
-    const scores = await propline.getScores(sportKey, { daysFrom });
-    res.json({ configured: true, sport: sportKey, scores });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-scores error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline/results", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "baseball_mlb";
-  const daysFrom = typeof req.query.daysFrom ? Number(req.query.daysFrom) : 1;
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
-    const results = await propline.getResults(sportKey, { daysFrom });
-    res.json({ configured: true, sport: sportKey, results });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-results error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline/ev", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "baseball_mlb";
-  const markets = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : ["h2h"];
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
-    const data = await propline.getEV(sportKey, { markets });
-    res.json({ configured: true, sport: sportKey, ev: data });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-ev error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline/best-line", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const sportRaw = typeof req.query.sport ? String(req.query.sport) : "baseball_mlb";
-  const markets = typeof req.query.markets ? String(req.query.markets).split(",").map(s => s.trim()).filter(Boolean) : ["h2h"];
-  try {
-    const sportKey = resolveProplineSportKey(sportRaw) ?? sportRaw;
-    const data = await propline.getBestLine(sportKey, { markets, includeLinks: true });
-    res.json({ configured: true, sport: sportKey, bestLine: data });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-best-line error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 router.get("/propline-player-trends", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const name = typeof req.query.name ? String(req.query.name) : "";
-  if (!name) { res.status(400).json({ error: "Informe name" }); return; }
-  try {
-    const data = await propline.getPlayerTrends(name);
-    res.json({ configured: true, name, trends: data });
-  } catch (err) {
-    logger.error({ err }, "GET /api/admin/propline-player-trends error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
-// Wildcard debug endpoint that forwards ANY raw sub-path directly to
-// PropLine's upstream API. Avoids Express/router path-to-regexp v8 wildcard
-// syntax (path: "*", "param*" modifiers are removed in v8) by reading the
-// sub-path from the `path` query parameter instead of a dynamic route
-// segment. Usage: GET /api/admin/propline/raw?path=/sports (or
-// /odds/ev, /scores, etc.). All other query params are forwarded verbatim.
 router.get("/propline/raw", adminMiddleware, async (req: AdminRequest, res) => {
-  if (!CONFIG.PROPLINE_API_KEY) { res.status(503).json({ configured: false }); return; }
-  const rawPath = typeof req.query["path"] === "string" ? req.query["path"] : "";
-  const wild = rawPath.startsWith("/") ? rawPath.slice(1) : rawPath;
-  const params: Record<string, any> = {};
-  for (const [k, v] of Object.entries(req.query)) {
-    if (k === "path") continue;
-    params[k] = typeof v === "string" ? v : JSON.stringify(v);
-  }
-  try {
-    const data = await propline.raw(`/${wild}`, params);
-    res.json({ configured: true, path: "/" + wild, params, data });
-  } catch (err) {
-    logger.error({ err, wild }, "GET /api/admin/propline/raw error");
-    res.status(500).json({ error: String(err) });
-  }
+  res.status(410).json({code:410, msg:"DESCONTINUADO — provedor removido; use rotas BZZOIRO"});
 });
 
 export default router;

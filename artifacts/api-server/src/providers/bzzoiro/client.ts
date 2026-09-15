@@ -15,17 +15,10 @@ import type {
   BzzoiroEventOddsSummary,
   BzzoiroOddsFeedResponse,
   BzzoiroOddsFeedRow,
+  BzzoiroEventStatsResponse,
+  BzzoiroEventIncidentsResponse,
+  BzzoiroIncident,
 } from "./types.js";
-
-// Two more real, captured-but-never-wrapped endpoints (see this file's own
-// header) — exposed now (2026-09-13) purely for the capabilities probe the
-// user requested: before pausing GOAL API/PulseScore in favor of bzzoiro
-// alone (odds + stats + xG + ball position, now that a paid plan is in
-// hand), we need to see real /coverage/ and /events/:id/stats/ payloads to
-// know bzzoiro's actual league breadth and whether xG/possession/shots are
-// really in there — not guessed from the docs. Returns the raw JSON
-// untyped on purpose: this is a one-off investigation, not a shape BET62
-// commits to reading yet.
 
 async function rawGet<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(`${CONFIG.BZZOIRO_BASE_URL.replace(/\/+$/, "")}${path}`);
@@ -45,17 +38,6 @@ async function rawGet<T>(path: string, params?: Record<string, string | number |
   return (await resp.json()) as T;
 }
 
-/** GET /events/live/ — the real dedicated live-events endpoint (confirmed
- * real 2026-09-11 via the user's own live requests). NOT /events/?status=
- * live: that generic list silently ignores the status query param
- * server-side and always returns the same fixed dump of unrelated
- * "notstarted" fixtures (confirmed by the user getting an identical
- * count/status distribution with and without the param) — this dedicated
- * path is the one that actually returns only currently-relevant matches.
- * Used only to find a live football fixture's event id to match against a
- * live GOAL API fixture — see matchSync.ts, which still filters on
- * `status === "inprogress"` itself since this endpoint can also list a
- * just-finished match. */
 export async function getBzzoiroLiveEvents(): Promise<BzzoiroEvent[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   try {
@@ -68,19 +50,8 @@ export async function getBzzoiroLiveEvents(): Promise<BzzoiroEvent[]> {
 }
 
 const UPCOMING_PAGE_LIMIT = 50;
-// Safety cap on pages followed via `next` — a 7-day football window was
-// confirmed real at 618 events (13 pages @ 50/page); 40 pages (2000 events)
-// leaves headroom for busier weeks without ever looping unbounded if
-// bzzoiro's `next` cursor were to misbehave.
 const UPCOMING_MAX_PAGES = 40;
 
-/** GET /events/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD — bzzoiro's real
- * prematch fixture list (confirmed 2026-09-14: date_from/date_to are the
- * genuine working filter params, unlike status= — see BzzoiroEvent's
- * header). Follows the DRF `next` cursor to collect every page in range;
- * bzzoiro's own /coverage/ reported 608 football events in the next 7
- * days, and this same window returned 618 real rows via this endpoint —
- * consistent, not a guess. */
 export async function getBzzoiroUpcomingEvents(dateFrom: string, dateTo: string): Promise<BzzoiroUpcomingEvent[]> {
   if (!CONFIG.BZZOIRO_API_KEY) return [];
   const out: BzzoiroUpcomingEvent[] = [];
@@ -105,67 +76,465 @@ export async function getBzzoiroUpcomingEvents(dateFrom: string, dateTo: string)
     return out;
   } catch (err) {
     logger.error({ err }, "[bzzoiro] getBzzoiroUpcomingEvents failed");
-    return out; // partial results better than none if a later page failed
+    return out;
   }
 }
 
-/** GET /coverage/ raw — real endpoint, never wrapped before (see header).
- * Investigation-only: tells us which leagues/competitions bzzoiro actually
- * covers, to compare against GOAL API + PulseScore's combined breadth
- * before considering either replaceable. */
 export async function getBzzoiroCoverageRaw(): Promise<unknown> {
   return rawGet<unknown>("/coverage/");
 }
 
-/** GET /events/:id/stats/ raw — real endpoint, never wrapped before (see
- * header). Investigation-only: tells us whether xG/possession/shots/
- * corners/cards are actually present and in what shape, before wiring
- * anything to read them for real. */
-export async function getBzzoiroEventStatsRaw(eventId: number | string): Promise<unknown> {
-  return rawGet<unknown>(`/events/${encodeURIComponent(String(eventId))}/stats/`);
+const STATS_CACHE_TTL_MS = 90_000;
+const INCIDENTS_CACHE_TTL_MS = 60_000;
+const INFLIGHT_MAX_AGE_MS = 30_000;
+
+type CacheEntry<T> = { data: T; fetchedAt: number };
+
+const statsCache = new Map<string, CacheEntry<BzzoiroEventStatsResponse>>();
+const incidentsCache = new Map<string, CacheEntry<BzzoiroEventIncidentsResponse>>();
+const statsInflight = new Map<string, Promise<BzzoiroEventStatsResponse>>();
+const incidentsInflight = new Map<string, Promise<BzzoiroEventIncidentsResponse>>();
+const statsInflightStartedAt = new Map<string, number>();
+const incidentsInflightStartedAt = new Map<string, number>();
+
+function cachedGet<T>(
+  key: string,
+  cache: Map<string, CacheEntry<T>>,
+  inflight: Map<string, Promise<T>>,
+  inflightStartedAt: Map<string, number>,
+  ttlMs: number,
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < ttlMs) {
+    return Promise.resolve(cached.data);
+  }
+  const existingInflight = inflight.get(key);
+  if (existingInflight) {
+    const startedAt = inflightStartedAt.get(key) ?? 0;
+    if (Date.now() - startedAt < INFLIGHT_MAX_AGE_MS) {
+      return existingInflight;
+    }
+    inflight.delete(key);
+    inflightStartedAt.delete(key);
+  }
+  const promise = (async () => {
+    try {
+      const data = await fetcher();
+      cache.set(key, { data, fetchedAt: Date.now() });
+      return data;
+    } finally {
+      inflight.delete(key);
+      inflightStartedAt.delete(key);
+    }
+  })();
+  inflight.set(key, promise);
+  inflightStartedAt.set(key, Date.now());
+  return promise;
 }
 
-/** GET /events/:id/incidents/ raw — never wrapped before. Added 2026-09-14
- * per the user's explicit instruction to move BET62 fully onto bzzoiro,
- * including settlement (score/goals/cards deciding real-money bet
- * outcomes) — currently GOAL API's job. Investigation-only: this is the
- * single highest-risk swap in the whole migration, so before any
- * normalizer or wiring exists, this needs a real side-by-side capture
- * against GOAL API's own incident feed on the same live match (goal
- * scorer/minute, card player/type, VAR overturns) — never trust a vendor
- * doc's shape for money. */
-export async function getBzzoiroEventIncidentsRaw(eventId: number | string): Promise<unknown> {
-  return rawGet<unknown>(`/events/${encodeURIComponent(String(eventId))}/incidents/`);
+export async function getBzzoiroEventStatsRaw(eventId: number | string): Promise<BzzoiroEventStatsResponse> {
+  const key = String(eventId);
+  return cachedGet(
+    key,
+    statsCache,
+    statsInflight,
+    statsInflightStartedAt,
+    STATS_CACHE_TTL_MS,
+    () => rawGet<BzzoiroEventStatsResponse>(`/events/${encodeURIComponent(String(eventId))}/stats/`),
+  );
 }
 
-// The two odds endpoints below are added 2026-09-14 straight from the
-// user's own pasted bzzoiro docs — investigation-only for now, same as
-// getBzzoiroCoverageRaw/getBzzoiroEventStatsRaw: we do not yet trust a
-// vendor doc's shape for a money-critical field until a real production
-// capture confirms it (see this session's established rule). Once a real
-// capture matches BzzoiroEventOddsSummary/BzzoiroOddsFeedRow, these become
-// the basis for a prematch (and possibly live, per the docs' own
-// update_reason: "match is in play") odds normalizer — bzzoiro currently
-// has no prematch odds path in BET62 at all.
+export async function getBzzoiroEventIncidentsRaw(eventId: number | string): Promise<BzzoiroEventIncidentsResponse> {
+  const key = String(eventId);
+  return cachedGet(
+    key,
+    incidentsCache,
+    incidentsInflight,
+    incidentsInflightStartedAt,
+    INCIDENTS_CACHE_TTL_MS,
+    () => rawGet<BzzoiroEventIncidentsResponse>(`/events/${encodeURIComponent(String(eventId))}/incidents/`),
+  );
+}
 
-/** GET /events/:id/odds/ — the free-tier consensus summary (11 fixed
- * keys, home_win/draw/away_win + O/U at 1.5/2.5/3.5 + BTTS, full-time
- * only per the docs). Docs claim this keeps refreshing during play too
- * (update_reason: "match is in play", ~15 min cadence) — unconfirmed
- * until a real live event is probed. */
 export async function getBzzoiroEventOddsSummary(eventId: number | string): Promise<BzzoiroEventOddsSummary> {
   return rawGet<BzzoiroEventOddsSummary>(`/events/${encodeURIComponent(String(eventId))}/odds/`);
 }
 
-/** GET /api/v2/odds/?event_id=...&market=... — the only documented way to
- * reach asian_handicap (full quarter-line grid with push), double_chance,
- * draw_no_bet, and total_corners; none of those are in
- * BzzoiroEventOddsSummary's fixed set. One row per outcome (consensus) or
- * per outcome × bookmaker (Football Unlimited). `market` is one of
- * 1x2 / over_under_15 / over_under_25 / over_under_35 / btts /
- * double_chance / draw_no_bet / asian_handicap / total_corners — see the
- * docs' own market/outcome validation table. */
 export async function getBzzoiroOddsFeed(eventId: number | string, market: string): Promise<BzzoiroOddsFeedRow[]> {
   const resp = await rawGet<BzzoiroOddsFeedResponse>("/odds/", { event_id: eventId, market });
   return resp.results ?? [];
+}
+
+const BZZOIRO_STAT_LABELS: Record<string, string> = {
+  possession: "Posse de bola",
+  ball_possession: "Posse de bola",
+  shots: "Remates",
+  total_shots: "Remates",
+  shots_on_target: "Remates à baliza",
+  on_target: "Remates à baliza",
+  shots_off_target: "Remates fora",
+  off_target: "Remates fora",
+  corners: "Cantos",
+  corner_kicks: "Cantos",
+  fouls: "Faltas",
+  fouls_committed: "Faltas",
+  attacks: "Ataques",
+  dangerous_attacks: "Ataques perigosos",
+  free_kicks: "Livres",
+  goal_kicks: "Pontapé de baliza",
+  throw_ins: "Lançamentos laterais",
+  penalties: "Grandes penalidades",
+  substitutions: "Substituições",
+  offsides: "Fora de jogo",
+  yellow_cards: "Cartões amarelos",
+  red_cards: "Cartões vermelhos",
+  saves: "Defesas",
+  goalkeeper_saves: "Defesas",
+  passes: "Passes",
+  pass_accuracy: "Precisão de passes",
+  crosses: "Cruzamentos",
+  woodwork: "Travões",
+  blocked_shots: "Remates bloqueados",
+  xg: "xG (Golos Esperados)",
+  expected_goals: "xG (Golos Esperados)",
+};
+
+type MatchStatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
+type LiveExtraStats = {
+  cornersTotal?: number;
+  cardsTotal?: number;
+  cornersHome?: number;
+  cornersAway?: number;
+  possessionHome?: number;
+  possessionAway?: number;
+  shotsTotalHome?: number;
+  shotsTotalAway?: number;
+  shotsOnTargetHome?: number;
+  shotsOnTargetAway?: number;
+  shotsOffTargetHome?: number;
+  shotsOffTargetAway?: number;
+  shotsBlockedHome?: number;
+  shotsBlockedAway?: number;
+  woodworkHome?: number;
+  woodworkAway?: number;
+  foulsHome?: number;
+  foulsAway?: number;
+  yellowCardsHome?: number;
+  yellowCardsAway?: number;
+  offsidesHome?: number;
+  offsidesAway?: number;
+  savesHome?: number;
+  savesAway?: number;
+  dangerousAttacksHome?: number;
+  dangerousAttacksAway?: number;
+  attacksHome?: number;
+  attacksAway?: number;
+  xgHome?: number;
+  xgAway?: number;
+  throwInsHome?: number;
+  throwInsAway?: number;
+  crossesHome?: number;
+  crossesAway?: number;
+  passesHome?: number;
+  passesAway?: number;
+  passAccuracyHome?: number;
+  passAccuracyAway?: number;
+};
+
+export function normalizeBzzoiroStats(raw: BzzoiroEventStatsResponse | null | undefined): {
+  matchStats: MatchStatsGroup[];
+  liveExtra: LiveExtraStats;
+  redCardsHome?: number;
+  redCardsAway?: number;
+} {
+  const matchStatsRows: Array<{ name: string; home: string; away: string }> = [];
+  const liveExtra: LiveExtraStats = {};
+  let redCardsHome: number | undefined;
+  let redCardsAway: number | undefined;
+
+  const n = (v: unknown): number | undefined => {
+    if (v == null || v === "") return undefined;
+    const n2 = Number(v);
+    return Number.isFinite(n2) ? n2 : undefined;
+  };
+  const add = (name: string, home: unknown, away: unknown) => {
+    if (home == null && away == null) return;
+    matchStatsRows.push({
+      name,
+      home: home != null ? String(home) : "-",
+      away: away != null ? String(away) : "-",
+    });
+  };
+
+  const xgHome = n(raw?.xg_home);
+  const xgAway = n(raw?.xg_away);
+  if (xgHome != null || xgAway != null) {
+    add("xG (Golos Esperados)", xgHome ?? "-", xgAway ?? "-");
+    if (xgHome != null) liveExtra.xgHome = xgHome;
+    if (xgAway != null) liveExtra.xgAway = xgAway;
+  }
+
+  const possessionHome = n(raw?.possession_home);
+  const possessionAway = n(raw?.possession_away);
+  if (possessionHome != null || possessionAway != null) {
+    const ph = possessionHome != null ? `${possessionHome}%` : "-";
+    const pa = possessionAway != null ? `${possessionAway}%` : "-";
+    add("Posse de bola", ph, pa);
+    if (possessionHome != null) liveExtra.possessionHome = possessionHome;
+    if (possessionAway != null) liveExtra.possessionAway = possessionAway;
+  }
+
+  const shotsHome = n(raw?.shots_home);
+  const shotsAway = n(raw?.shots_away);
+  if (shotsHome != null || shotsAway != null) {
+    add("Remates", shotsHome ?? "-", shotsAway ?? "-");
+    if (shotsHome != null) liveExtra.shotsTotalHome = shotsHome;
+    if (shotsAway != null) liveExtra.shotsTotalAway = shotsAway;
+  }
+
+  const shotsOnTargetHome = n(raw?.shots_on_target_home);
+  const shotsOnTargetAway = n(raw?.shots_on_target_away);
+  if (shotsOnTargetHome != null || shotsOnTargetAway != null) {
+    add("Remates à baliza", shotsOnTargetHome ?? "-", shotsOnTargetAway ?? "-");
+    if (shotsOnTargetHome != null) liveExtra.shotsOnTargetHome = shotsOnTargetHome;
+    if (shotsOnTargetAway != null) liveExtra.shotsOnTargetAway = shotsOnTargetAway;
+  }
+
+  const cornersHome = n(raw?.corners_home);
+  const cornersAway = n(raw?.corners_away);
+  if (cornersHome != null || cornersAway != null) {
+    add("Cantos", cornersHome ?? "-", cornersAway ?? "-");
+    if (cornersHome != null) liveExtra.cornersHome = cornersHome;
+    if (cornersAway != null) liveExtra.cornersAway = cornersAway;
+    if (cornersHome != null && cornersAway != null) liveExtra.cornersTotal = cornersHome + cornersAway;
+    else if (cornersHome != null) liveExtra.cornersTotal = cornersHome;
+    else if (cornersAway != null) liveExtra.cornersTotal = cornersAway;
+  }
+
+  const yellowCardsHome = n(raw?.yellow_cards_home);
+  const yellowCardsAway = n(raw?.yellow_cards_away);
+  if (yellowCardsHome != null || yellowCardsAway != null) {
+    add("Cartões amarelos", yellowCardsHome ?? "-", yellowCardsAway ?? "-");
+    if (yellowCardsHome != null) liveExtra.yellowCardsHome = yellowCardsHome;
+    if (yellowCardsAway != null) liveExtra.yellowCardsAway = yellowCardsAway;
+  }
+
+  const redCardsHomeRaw = n(raw?.red_cards_home);
+  const redCardsAwayRaw = n(raw?.red_cards_away);
+  if (redCardsHomeRaw != null || redCardsAwayRaw != null) {
+    add("Cartões vermelhos", redCardsHomeRaw ?? "-", redCardsAwayRaw ?? "-");
+    if (redCardsHomeRaw != null) redCardsHome = redCardsHomeRaw;
+    if (redCardsAwayRaw != null) redCardsAway = redCardsAwayRaw;
+  }
+
+  if ((yellowCardsHome != null || redCardsHomeRaw != null) && (yellowCardsAway != null || redCardsAwayRaw != null)) {
+    const ch = (yellowCardsHome ?? 0) + (redCardsHomeRaw ?? 0);
+    const ca = (yellowCardsAway ?? 0) + (redCardsAwayRaw ?? 0);
+    liveExtra.cardsTotal = ch + ca;
+  }
+
+  const foulsHome = n(raw?.fouls_home);
+  const foulsAway = n(raw?.fouls_away);
+  if (foulsHome != null || foulsAway != null) {
+    add("Faltas", foulsHome ?? "-", foulsAway ?? "-");
+    if (foulsHome != null) liveExtra.foulsHome = foulsHome;
+    if (foulsAway != null) liveExtra.foulsAway = foulsAway;
+  }
+
+  const offsidesHome = n(raw?.offsides_home);
+  const offsidesAway = n(raw?.offsides_away);
+  if (offsidesHome != null || offsidesAway != null) {
+    add("Fora de jogo", offsidesHome ?? "-", offsidesAway ?? "-");
+    if (offsidesHome != null) liveExtra.offsidesHome = offsidesHome;
+    if (offsidesAway != null) liveExtra.offsidesAway = offsidesAway;
+  }
+
+  const savesHome = n(raw?.saves_home);
+  const savesAway = n(raw?.saves_away);
+  if (savesHome != null || savesAway != null) {
+    add("Defesas", savesHome ?? "-", savesAway ?? "-");
+    if (savesHome != null) liveExtra.savesHome = savesHome;
+    if (savesAway != null) liveExtra.savesAway = savesAway;
+  }
+
+  const dangerousAttacksHome = n(raw?.dangerous_attacks_home);
+  const dangerousAttacksAway = n(raw?.dangerous_attacks_away);
+  if (dangerousAttacksHome != null || dangerousAttacksAway != null) {
+    add("Ataques perigosos", dangerousAttacksHome ?? "-", dangerousAttacksAway ?? "-");
+    if (dangerousAttacksHome != null) liveExtra.dangerousAttacksHome = dangerousAttacksHome;
+    if (dangerousAttacksAway != null) liveExtra.dangerousAttacksAway = dangerousAttacksAway;
+  }
+
+  const attacksHome = n(raw?.attacks_home);
+  const attacksAway = n(raw?.attacks_away);
+  if (attacksHome != null || attacksAway != null) {
+    add("Ataques", attacksHome ?? "-", attacksAway ?? "-");
+    if (attacksHome != null) liveExtra.attacksHome = attacksHome;
+    if (attacksAway != null) liveExtra.attacksAway = attacksAway;
+  }
+
+  const throwInsHome = n(raw?.throw_ins_home);
+  const throwInsAway = n(raw?.throw_ins_away);
+  if (throwInsHome != null || throwInsAway != null) {
+    add("Lançamentos laterais", throwInsHome ?? "-", throwInsAway ?? "-");
+    if (throwInsHome != null) liveExtra.throwInsHome = throwInsHome;
+    if (throwInsAway != null) liveExtra.throwInsAway = throwInsAway;
+  }
+
+  const passesHome = n(raw?.passes_home);
+  const passesAway = n(raw?.passes_away);
+  if (passesHome != null || passesAway != null) {
+    add("Passes", passesHome ?? "-", passesAway ?? "-");
+    if (passesHome != null) liveExtra.passesHome = passesHome;
+    if (passesAway != null) liveExtra.passesAway = passesAway;
+  }
+
+  const passAccuracyHome = n(raw?.pass_accuracy_home);
+  const passAccuracyAway = n(raw?.pass_accuracy_away);
+  if (passAccuracyHome != null || passAccuracyAway != null) {
+    const pah = passAccuracyHome != null ? `${passAccuracyHome}%` : "-";
+    const paa = passAccuracyAway != null ? `${passAccuracyAway}%` : "-";
+    add("Precisão de passes", pah, paa);
+    if (passAccuracyHome != null) liveExtra.passAccuracyHome = passAccuracyHome;
+    if (passAccuracyAway != null) liveExtra.passAccuracyAway = passAccuracyAway;
+  }
+
+  const fullTimeStats = raw?.stats?.find((s) => s.period?.toLowerCase() === "fulltime" || s.period?.toLowerCase() === "full_time" || s.period === "FULL_TIME" || s.period === "1H2H");
+  if (fullTimeStats?.stats?.length) {
+    const seenKeys = new Set(matchStatsRows.map((r) => r.name));
+    for (const row of fullTimeStats.stats) {
+      const label = BZZOIRO_STAT_LABELS[row.type] ?? row.type;
+      if (seenKeys.has(label)) continue;
+      seenKeys.add(label);
+      add(label, row.home, row.away);
+    }
+  }
+
+  const matchStats: MatchStatsGroup[] = matchStatsRows.length > 0 ? [{ title: "Estatísticas do Jogo", rows: matchStatsRows }] : [];
+
+  return { matchStats, liveExtra, redCardsHome, redCardsAway };
+}
+
+export type NormalizedBzzoiroEvent = {
+  type: string;
+  team: "home" | "away";
+  minute: number;
+  player: string;
+  playerId?: string;
+  detail?: string;
+};
+
+export function normalizeBzzoiroIncidents(raw: BzzoiroEventIncidentsResponse | null | undefined): NormalizedBzzoiroEvent[] {
+  if (!raw?.incidents?.length) return [];
+  const out: NormalizedBzzoiroEvent[] = [];
+  const sorted = [...raw.incidents].sort((a, b) => {
+    const sa = a.sort_order ?? 0;
+    const sb = b.sort_order ?? 0;
+    if (sa !== sb) return sa - sb;
+    const ma = a.minute ?? 0;
+    const mb = b.minute ?? 0;
+    return ma - mb;
+  });
+  for (const inc of sorted) {
+    const team = inc.team === "away" ? "away" : "home";
+    const minute = Number(inc.minute) || 0;
+    const player = inc.player ?? "?";
+    const playerId = inc.player_id != null ? String(inc.player_id) : undefined;
+    const typeLower = String(inc.type ?? "").toLowerCase();
+
+    let typeOut: string | null = null;
+    const details: string[] = [];
+
+    if (typeLower === "goal") {
+      typeOut = "goal";
+      if (inc.is_own_goal) details.push("Golo contra");
+      if (inc.is_penalty) details.push("Grande Penalidade");
+      if (inc.detail) details.push(inc.detail);
+      if (inc.secondary_player) details.push(`Assistência: ${inc.secondary_player}`);
+    } else if (typeLower === "yellow_card" || typeLower === "yellow") {
+      typeOut = "yellow_card";
+      if (inc.detail) details.push(inc.detail);
+    } else if (typeLower === "red_card" || typeLower === "red") {
+      typeOut = "red_card";
+      if (inc.detail) details.push(inc.detail);
+    } else if (typeLower === "substitution" || typeLower === "sub") {
+      typeOut = "substitution";
+      if (inc.secondary_player) details.push(`Saiu: ${inc.secondary_player}`);
+    } else if (typeLower === "penalty" || typeLower === "penalty_shootout_kick") {
+      typeOut = "goal";
+      details.push("Grande Penalidade");
+      if (inc.detail) details.push(inc.detail);
+    } else if (typeLower === "penalty_missed") {
+      typeOut = "penalty_missed";
+      if (inc.detail) details.push(inc.detail);
+    } else if (typeLower === "penalty_saved") {
+      typeOut = "penalty_saved";
+      if (inc.detail) details.push(inc.detail);
+    } else {
+      continue;
+    }
+
+    if (!typeOut) continue;
+
+    out.push({
+      type: typeOut,
+      team,
+      minute,
+      player,
+      playerId,
+      detail: details.length > 0 ? details.join(" · ") : inc.detail ?? undefined,
+    });
+  }
+
+  const homeGoalMinutes: number[] = [];
+  const awayGoalMinutes: number[] = [];
+  for (const ev of out) {
+    if (ev.type === "goal") {
+      if (ev.team === "home") homeGoalMinutes.push(ev.minute);
+      else awayGoalMinutes.push(ev.minute);
+    }
+  }
+  (out as NormalizedBzzoiroEvent[] & { _homeGoalMinutes?: number[]; _awayGoalMinutes?: number[] })._homeGoalMinutes = homeGoalMinutes;
+  (out as NormalizedBzzoiroEvent[] & { _homeGoalMinutes?: number[]; _awayGoalMinutes?: number[] })._awayGoalMinutes = awayGoalMinutes;
+
+  return out;
+}
+
+export function extractBzzoiroGoalMinutes(events: NormalizedBzzoiroEvent[]): { homeGoalMinutes: number[]; awayGoalMinutes: number[] } {
+  const augmented = events as NormalizedBzzoiroEvent[] & { _homeGoalMinutes?: number[]; _awayGoalMinutes?: number[] };
+  if (augmented._homeGoalMinutes || augmented._awayGoalMinutes) {
+    return { homeGoalMinutes: augmented._homeGoalMinutes ?? [], awayGoalMinutes: augmented._awayGoalMinutes ?? [] };
+  }
+  const homeGoalMinutes: number[] = [];
+  const awayGoalMinutes: number[] = [];
+  for (const ev of events) {
+    if (ev.type === "goal") {
+      if (ev.team === "home") homeGoalMinutes.push(ev.minute);
+      else awayGoalMinutes.push(ev.minute);
+    }
+  }
+  return { homeGoalMinutes, awayGoalMinutes };
+}
+
+export function getCachedBzzoiroEventStatsSync(eventId: number | string): BzzoiroEventStatsResponse | undefined {
+  const key = String(eventId);
+  const cached = statsCache.get(key);
+  if (!cached) return undefined;
+  if (Date.now() - cached.fetchedAt >= STATS_CACHE_TTL_MS) {
+    statsCache.delete(key);
+    return undefined;
+  }
+  return cached.data;
+}
+
+export function getCachedBzzoiroEventIncidentsSync(eventId: number | string): BzzoiroEventIncidentsResponse | undefined {
+  const key = String(eventId);
+  const cached = incidentsCache.get(key);
+  if (!cached) return undefined;
+  if (Date.now() - cached.fetchedAt >= INCIDENTS_CACHE_TTL_MS) {
+    incidentsCache.delete(key);
+    return undefined;
+  }
+  return cached.data;
 }

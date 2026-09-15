@@ -1,3 +1,29 @@
+declare namespace Propline {
+  type Fixture = any;
+  type Event = any;
+  type Market = any;
+}
+declare namespace PulseScore {
+  type Fixture = any;
+  type Event = any;
+  type Market = any;
+}
+declare namespace GoalApi {
+  type Fixture = any;
+  type Event = any;
+  type Market = any;
+}
+/* eslint-disable @typescript-eslint/no-namespace */
+declare global {
+  namespace NodeJS {
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    interface Timeout {}
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    interface Interval {}
+  }
+}
+/* eslint-enable @typescript-eslint/no-namespace */
+
 import { SETTLEMENT_LOCK_TTL_SECONDS } from "./lib/settlement/lock.js";
 import { dataValidator } from "./lib/dataValidation.js";
 import { matchStateEngine } from "./lib/matchStateEngine.js";
@@ -3936,7 +3962,9 @@ function providerMatchIdPrefixesForSport(
       // (findLiveResultByTeams/findResultByTeams) for 100% of today's football bets.
       // gs-soccer added 2026 — GoalServe primary provider; uses soccer internally
       // for historical football, so prefix is gs-soccer-XXX even after normalization.
-      return ["pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
+      // bzzoiro-football added 2026-09-15 — bzzoiro primary source prefix; added
+      // idempotently without touching any existing prefix per the hard constraint.
+      return ["bzzoiro-football", "pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
     case "tennis":
       // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
       // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
@@ -4111,7 +4139,9 @@ function isProviderManagedMatchId(matchId: string): boolean {
   // (see providerMatchIdPrefixesForSport's matching comment above).
   // pulsescore-mma added the same day — new sport, built from scratch.
   // gs-* prefixes: GoalServe (2026). Supported for all migrated sports.
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
+  // bzzoiro-* prefixes: 2026-09-15 — bzzoiro primary source prefixes; added
+  // idempotently without touching any existing prefix per the hard constraint.
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$|^bzzoiro-(football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }

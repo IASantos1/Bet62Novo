@@ -7810,10 +7810,12 @@ export default function Home({
 
       const freshMatches = normalizedMatches
         // Live matches (startsIn === undefined) always show.
-        // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
+        // Football upcoming: always show even when real odds not yet arrived (primeBzzoiroPrematchPrices is async).
+        // Other sports "Em Breve": show when there are real odds OR computed odds (home > 0 and away > 0).
         .filter(
           (m) =>
             m.startsIn === undefined ||
+            (m.sport ?? "football") === "football" ||
             m.hasRealOdds !== false ||
             (m.odds.home > 0 && m.odds.away > 0),
         )
@@ -10735,10 +10737,11 @@ export default function Home({
       match.isLive && sport === "football" && !!match.markets?.penExtra;
 
     const canShowOdds = matchHasPlayableOdds(match);
+    const isFootballPrematchWaiting = sport === "football" && isEmBreve && !canShowOdds;
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) =>
       e.stopPropagation();
     const oddsRow =
-      canShowOdds || match.isLive ? (
+      canShowOdds || match.isLive || isFootballPrematchWaiting ? (
         <div
           className="flex flex-col gap-1.5 w-full mt-1.5"
           onClick={stopLiveCardOpen}
@@ -10823,12 +10826,21 @@ export default function Home({
             ) : null}
           </div>
           {!isLiveSuspended && !isPenShootout && !match.hasRealOdds && (
-            <div className="flex items-center justify-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              <span className="text-[9px] font-semibold tracking-wide text-zinc-500">
-                ODDS ESTIMADAS — SEM COTAÇÃO AO VIVO
-              </span>
-            </div>
+            isFootballPrematchWaiting ? (
+              <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-[9px] font-bold tracking-wide text-amber-500 uppercase">
+                  Aguarde cotações
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-[9px] font-semibold tracking-wide text-zinc-500">
+                  ODDS ESTIMADAS — SEM COTAÇÃO AO VIVO
+                </span>
+              </div>
+            )
           )}
         </div>
       ) : null;

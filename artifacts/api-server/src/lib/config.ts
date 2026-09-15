@@ -259,19 +259,31 @@ const BZZOIRO_WS_URL =
 //
 // Env override knobs (all 3 are explicit so Railway can flip any single
 // tier without code):
-//   FOOTBALL_DAILY_PROVIDER     = "goalapi" | "propline" | "pulsescore" | "statpal"
-//   FOOTBALL_ODDS_PROVIDER      = "pulsescore" | "propline" | "goalapi" | "statpal"   ← NEW
-//   FOOTBALL_REFERENCE_PROVIDER = "statpal" | "pulsescore" | "goalapi"
-type FootballProvider = "goalapi" | "propline" | "pulsescore" | "statpal";
+//   FOOTBALL_DAILY_PROVIDER     = "bzzoiro" | "goalapi" | "propline" | "pulsescore" | "statpal"
+//   FOOTBALL_ODDS_PROVIDER      = "bzzoiro" | "pulsescore" | "propline" | "goalapi" | "statpal"
+//   FOOTBALL_REFERENCE_PROVIDER = "bzzoiro" | "statpal" | "pulsescore" | "goalapi"
+type FootballProvider = "bzzoiro" | "goalapi" | "propline" | "pulsescore" | "statpal";
 const FOOTBALL_DAILY_PROVIDER: FootballProvider =
   (process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() as FootballProvider | undefined) ??
-  (GOAL_API_KEY ? "goalapi" : PROPLINE_API_KEY ? "propline" : "pulsescore");
+  (BZZOIRO_API_KEY
+    ? "bzzoiro"
+    : GOAL_API_KEY
+      ? "goalapi"
+      : PROPLINE_API_KEY
+        ? "propline"
+        : "pulsescore");
 const FOOTBALL_ODDS_PROVIDER: FootballProvider =
   (process.env["FOOTBALL_ODDS_PROVIDER"]?.trim() as FootballProvider | undefined) ??
-  (PULSESCORE_API_KEY ? "pulsescore" : PROPLINE_API_KEY ? "propline" : "goalapi");
+  (BZZOIRO_API_KEY
+    ? "bzzoiro"
+    : PULSESCORE_API_KEY
+      ? "pulsescore"
+      : PROPLINE_API_KEY
+        ? "propline"
+        : "goalapi");
 const FOOTBALL_REFERENCE_PROVIDER: FootballProvider =
   (process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() as FootballProvider | undefined) ??
-  "statpal";
+  (BZZOIRO_API_KEY ? "bzzoiro" : "statpal");
 
 export const CONFIG = {
   SILENTAPI_BASE_URL,
