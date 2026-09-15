@@ -55,6 +55,10 @@ import { goalApi, type GoalApiFixture } from "../services/goalapi/index.js";
 import { getBzzoiroNativeLiveEvents } from "../providers/bzzoiro/ballMatchSync.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getBzzoiroUpcomingEvents } from "../providers/bzzoiro/client.js";
+import {
+  getCachedBzzoiroPrematchPrice,
+  primeBzzoiroPrematchPrices,
+} from "../providers/bzzoiro/prematchPriceCache.js";
 import type { BzzoiroEventFrame } from "../providers/bzzoiro/types.js";
 import {
   getBzzoiroBasketballUpcoming,
@@ -79,6 +83,13 @@ import {
   parseBzzoiroTennisSets,
   isBzzoiroTennisLiveStatus,
 } from "../providers/bzzoiro/tennis.js";
+import {
+  getBzzoiroDartsUpcoming,
+  getBzzoiroDartsLive,
+  getBzzoiroDartsOdds,
+  averageDartsMoneyline,
+  averageDartsTotal,
+} from "../providers/bzzoiro/darts.js";
 import {
   extractGoalApi1x2Odds,
   extractGoalApiOverUnder25,
@@ -7998,6 +8009,13 @@ async function buildFootballUpcomingFromBzzoiro(): Promise<UpcomingMatch[]> {
     for (const part of parts) p[part.type] = part.value;
     const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
 
+    // Real prematch price when the background sweep below has already
+    // priced this fixture; zero/hasRealOdds:false otherwise (never a
+    // fabricated price) — see prematchPriceCache.ts's own header for why
+    // this exists: without it, EVERY bzzoiro football fixture was silently
+    // dropped by the /api/matches/upcoming route's own real-odds filter.
+    const cachedPrice = getCachedBzzoiroPrematchPrice(ev.id);
+
     results.push({
       id: `bzzoiro-football-${ev.id}`,
       home,
@@ -8010,14 +8028,17 @@ async function buildFootballUpcomingFromBzzoiro(): Promise<UpcomingMatch[]> {
       time: `${hh}:${p["minute"] ?? "00"}`,
       date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
       sport: "football",
-      hasRealOdds: false,
-      odds: { home: 0, draw: 0, away: 0 },
+      hasRealOdds: !!cachedPrice,
+      odds: cachedPrice ?? { home: 0, draw: 0, away: 0 },
       markets: zerofillAdvancedMarkets(),
       homeTeamId: String(ev.home_team_id),
       awayTeamId: String(ev.away_team_id),
     });
   }
   results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  // Fire-and-forget: progressively prices a few more fixtures every time
+  // this builder runs, without ever blocking this response on it.
+  primeBzzoiroPrematchPrices(events.map((ev) => ev.id)).catch(() => {});
   return results;
 }
 
@@ -9047,6 +9068,123 @@ async function buildTennisLiveFromBzzoiro(): Promise<LiveMatchState[]> {
         await finalizeStaleLiveMatch(state);
       } catch (err) {
         logger.error({ err, id }, "[bzzoiro] tennis finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+// bzzoiro darts — added 2026-09-15 per the user's explicit instruction to
+// move every sport bzzoiro offers onto bzzoiro. Brand-new sport for
+// BET62 — there is no existing provider to compare against, bzzoiro is
+// the only source. `sport` is a plain string on both UpcomingMatch and
+// LiveMatchState (no fixed union), and the frontend's own live-list sport
+// grouping (home.tsx's SPORT_ORDER) already falls back gracefully for any
+// sport key it doesn't explicitly rank — no frontend change needed to
+// render this.
+const BZZOIRO_DARTS_DISAPPEAR_GRACE_MS = 15_000;
+
+async function buildDartsUpcomingFromBzzoiro(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const dateFrom = new Date().toISOString().slice(0, 10);
+  const dateTo = new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10);
+  const matches = await getBzzoiroDartsUpcoming(dateFrom, dateTo).catch(() => []);
+
+  const results: UpcomingMatch[] = [];
+  for (const m of matches) {
+    if (m.status !== "scheduled") continue;
+    const home = m.player1.name;
+    const away = m.player2.name;
+    if (!home || !away) continue;
+    const kickoff = new Date(m.match_date);
+    if (Number.isNaN(kickoff.getTime())) continue;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Lisbon",
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(kickoff);
+    const p: Record<string, string> = {};
+    for (const part of parts) p[part.type] = part.value;
+    const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+
+    results.push({
+      id: `bzzoiro-darts-${m.id}`,
+      home,
+      away,
+      league: m.tournament.name || "Dardos",
+      country: "Internacional",
+      time: `${hh}:${p["minute"] ?? "00"}`,
+      date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+      sport: "darts",
+      hasRealOdds: false,
+      odds: { home: 1.85, draw: 0, away: 1.85 },
+      markets: zerofillAdvancedMarkets(),
+    });
+  }
+  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return results;
+}
+
+async function buildDartsLiveFromBzzoiro(): Promise<LiveMatchState[]> {
+  if (!CONFIG.BZZOIRO_API_KEY) return [];
+  const matches = await getBzzoiroDartsLive().catch(() => []);
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const m of matches) {
+    const home = m.player1.name;
+    const away = m.player2.name;
+    if (!home || !away || m.player1_sets === null || m.player2_sets === null) continue;
+
+    const id = `bzzoiro-darts-${m.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const oddsResp = await getBzzoiroDartsOdds(m.id).catch(() => null);
+    const moneyline = oddsResp ? averageDartsMoneyline(oddsResp) : null;
+    const total = oddsResp ? averageDartsTotal(oddsResp) : null;
+
+    const baseMarkets = zerofillAdvancedMarkets();
+    if (total) {
+      baseMarkets.totalGoals.over25 = total.over;
+      baseMarkets.totalGoals.under25 = total.under;
+    }
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: m.tournament.name || "Dardos",
+      country: "Internacional",
+      sport: "darts",
+      homeScore: m.player1_sets,
+      awayScore: m.player2_sets,
+      minute: 0,
+      status: "Ao vivo",
+      hasRealOdds: !!moneyline,
+      odds: moneyline ? { home: moneyline.home, draw: 0, away: moneyline.away } : { home: 1.85, draw: 0, away: 1.85 },
+      markets: baseMarkets,
+      events: existing?.events ?? [],
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("bzzoiro-darts-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > BZZOIRO_DARTS_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[bzzoiro] darts finalizeStaleLiveMatch failed");
       }
       liveMatchState.delete(id);
     }
@@ -10473,6 +10611,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const cricketLive = sportWithFallback("cricket", cricketLiveRaw);
   const boxingLive: LiveMatchState[] = [];
   const formula1Live: LiveMatchState[] = [];
+  let dartsLiveRaw: LiveMatchState[] = [];
+  try {
+    if (CONFIG.BZZOIRO_API_KEY) dartsLiveRaw = await buildDartsLiveFromBzzoiro();
+  } catch (err) {
+    logger.error({ err }, "[bzzoiro] darts live failed this tick");
+  }
+  const dartsLive = sportWithFallback("darts", dartsLiveRaw);
 
   // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
   // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
@@ -10491,6 +10636,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ...cricketLive,
     ...boxingLive,
     ...formula1Live,
+    ...dartsLive,
   ]);
 
   const liveIds = new Set(livePart.map((m) => String(m.id)));
@@ -11313,6 +11459,7 @@ type UpcomingTopCache = {
   volleyball: UpcomingMatch[];
   baseball: UpcomingMatch[];
   mma: UpcomingMatch[];
+  darts: UpcomingMatch[];
   boxing: UpcomingMatch[];
   cricket: UpcomingMatch[];
   handball: UpcomingMatch[];
@@ -11435,35 +11582,76 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
 }
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
-  // GOAL API restored 2026-09-09 for football.
+  // CRITICAL FIX 2026-09-15: this cache (not _allUpcomingCache/
+  // rebuildUpcomingCache) is what actually backs the real
+  // GET /api/matches/upcoming route the frontend's sports tab reads from
+  // (see that route's own comment distinguishing it from the legacy
+  // GET / handler). It never got a bzzoiro candidate when GOAL API was
+  // switched off (PR #478), so football prematch listings on the live
+  // site went silently empty. Same chooseUpcomingProvider quality gate
+  // rebuildUpcomingCache already uses, for consistency between the two
+  // caches.
   let football: UpcomingMatch[] = [];
-  if (CONFIG.GOAL_API_KEY) {
-    try {
-      football = await buildFootballUpcomingFromGoalApi();
-    } catch (err) {
-      logger.error({ err }, "[refreshUpcomingTop] football GOAL API fetch failed");
+  try {
+    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (CONFIG.GOAL_API_KEY) {
+      candidates.push({ provider: "goalapi", matches: await buildFootballUpcomingFromGoalApi() });
     }
+    if (CONFIG.BZZOIRO_API_KEY) {
+      candidates.push({ provider: "bzzoiro", matches: await buildFootballUpcomingFromBzzoiro() });
+    }
+    football = chooseUpcomingProvider("football", candidates);
+  } catch (err) {
+    logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
-  const tennis: UpcomingMatch[] = [];
+  let tennis: UpcomingMatch[] = [];
+  try {
+    const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (CONFIG.TENNIS_API_KEY) {
+      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
+    }
+    if (CONFIG.BZZOIRO_API_KEY) {
+      tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisUpcomingFromBzzoiro() });
+    }
+    tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+  } catch (err) {
+    logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
+  }
   // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
   // (football and tennis excluded from PropLine's scope — separate
-  // dedicated providers planned for each later).
+  // dedicated providers planned for each later). bzzoiro added 2026-09-15
+  // as an additional candidate for basketball/hockey (see basketball.ts/
+  // hockey.ts's own headers) — not yet a hard cut of PropLine.
   let basketball: UpcomingMatch[] = [];
   let hockey: UpcomingMatch[] = [];
   let volleyball: UpcomingMatch[] = [];
   let mma: UpcomingMatch[] = [];
   let baseball: UpcomingMatch[] = [];
+  try {
+    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildBasketballUpcomingFromPropLine() });
+    }
+    if (CONFIG.BZZOIRO_API_KEY) {
+      candidates.push({ provider: "bzzoiro", matches: await buildBasketballUpcomingFromBzzoiro() });
+    }
+    basketball = chooseUpcomingProvider("basketball", candidates);
+  } catch (err) {
+    logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
+  }
+  try {
+    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (CONFIG.PROPLINE_API_KEY) {
+      candidates.push({ provider: "propline", matches: await buildHockeyUpcomingFromPropLine() });
+    }
+    if (CONFIG.BZZOIRO_API_KEY) {
+      candidates.push({ provider: "bzzoiro", matches: await buildHockeyUpcomingFromBzzoiro() });
+    }
+    hockey = chooseUpcomingProvider("hockey", candidates);
+  } catch (err) {
+    logger.error({ err }, "[refreshUpcomingTop] hockey fetch failed");
+  }
   if (CONFIG.PROPLINE_API_KEY) {
-    try {
-      basketball = await buildBasketballUpcomingFromPropLine();
-    } catch (err) {
-      logger.error({ err }, "[refreshUpcomingTop] basketball PropLine fetch failed");
-    }
-    try {
-      hockey = await buildHockeyUpcomingFromPropLine();
-    } catch (err) {
-      logger.error({ err }, "[refreshUpcomingTop] hockey PropLine fetch failed");
-    }
     try {
       volleyball = await buildVolleyballUpcomingFromPropLine();
     } catch (err) {
@@ -11480,8 +11668,18 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       logger.error({ err }, "[refreshUpcomingTop] baseball PropLine fetch failed");
     }
   }
+  let darts: UpcomingMatch[] = [];
+  if (CONFIG.BZZOIRO_API_KEY) {
+    try {
+      darts = await buildDartsUpcomingFromBzzoiro();
+    } catch (err) {
+      logger.error({ err }, "[refreshUpcomingTop] darts bzzoiro fetch failed");
+    }
+  }
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma]);
+  rememberUpcomingEligibility([
+    ...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma, ...darts,
+  ]);
   upcomingTopCache = {
     football,
     tennis,
@@ -11490,6 +11688,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     volleyball,
     baseball,
     mma,
+    darts,
     boxing: [],
     cricket: [],
     handball: [],
@@ -11543,6 +11742,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
               volleyball: [],
               baseball: [],
               mma: [],
+              darts: [],
               boxing: [],
               cricket: [],
               handball: [],
@@ -11559,6 +11759,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
   else if (sport === "mma") matches = cache.mma;
+  else if (sport === "darts") matches = cache.darts;
   else if (sport === "boxing") matches = cache.boxing;
   else if (sport === "cricket") matches = cache.cricket;
   else if (sport === "handball") matches = cache.handball;
@@ -11572,6 +11773,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.volleyball,
       ...cache.baseball,
       ...cache.mma,
+      ...cache.darts,
       ...cache.boxing,
       ...cache.cricket,
       ...cache.handball,
