@@ -50,7 +50,15 @@ import {
 import { pulseScore } from "../providers/pulsescore/client.js";
 import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getBzzoiroBallSyncStatus, getBzzoiroSubscriptionDetails } from "../providers/bzzoiro/ballMatchSync.js";
-import { getBzzoiroCoverageRaw, getBzzoiroEventStatsRaw, getBzzoiroUpcomingEvents } from "../providers/bzzoiro/client.js";
+import {
+  getBzzoiroCoverageRaw,
+  getBzzoiroEventStatsRaw,
+  getBzzoiroUpcomingEvents,
+  getBzzoiroEventOddsSummary,
+  getBzzoiroOddsFeed,
+  getBzzoiroEventIncidentsRaw,
+} from "../providers/bzzoiro/client.js";
+import { goalApi } from "../services/goalapi/index.js";
 import { getBzzoiroLastFrame } from "../providers/bzzoiro/websocketClient.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
@@ -2754,6 +2762,65 @@ router.get("/bzzoiro-capabilities-probe", adminMiddleware, async (req: AdminRequ
     result.lastOddsFrame = getBzzoiroLastFrame("odds", eventId) ?? null;
     result.lastActionFrame = getBzzoiroLastFrame("action", eventId) ?? null;
     result.lastEventFrame = getBzzoiroLastFrame("event", eventId) ?? null;
+
+    // Added 2026-09-14 per explicit user instruction to move settlement
+    // (score/goals/cards deciding real-money bet outcomes) onto bzzoiro
+    // too — currently GOAL API's job. This is the highest-risk swap in the
+    // whole migration, so before any normalizer or wiring exists, compare
+    // bzzoiro's real /incidents/ against GOAL API's own live events for
+    // the SAME matched fixture, side by side, in one probe call.
+    try {
+      result.incidents = await getBzzoiroEventIncidentsRaw(eventId);
+    } catch (err) {
+      result.incidentsError = err instanceof Error ? err.message : String(err);
+    }
+    const matchedSub = subs.find((s) => s.bzzoiroEventId === eventId);
+    if (matchedSub) {
+      const goalApiState = liveMatchState.get(matchedSub.liveMatchId);
+      result.goalApiComparison = goalApiState
+        ? {
+            liveMatchId: matchedSub.liveMatchId,
+            homeScore: goalApiState.homeScore,
+            awayScore: goalApiState.awayScore,
+            minute: goalApiState.minute,
+            events: goalApiState.events,
+          }
+        : null;
+      // Added 2026-09-14: LiveMatchState.events above is BET62's OWN
+      // already-processed cache — an empty array there could mean "GOAL
+      // API really has nothing" OR "our own events pipeline dropped it
+      // for this match" (unrelated to bzzoiro). Fetching GOAL API's raw
+      // /fixtures/:id/events directly, bypassing our cache entirely, is
+      // the only way to tell those apart before trusting (or distrusting)
+      // a bzzoiro incident that our own cache doesn't corroborate.
+      const rawGoalApiId = matchedSub.liveMatchId.replace(/^goalapi-football-/, "");
+      try {
+        result.goalApiRawEvents = await goalApi.getFixtureEvents(rawGoalApiId);
+      } catch (err) {
+        result.goalApiRawEventsError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    // Added 2026-09-14 straight from the user's own pasted bzzoiro docs —
+    // this endpoint is documented to keep answering during play
+    // (update_reason: "match is in play", ~15min cadence), which would be
+    // a completely independent odds path from the currently-broken
+    // WebSocket subscription. Unconfirmed until this probe runs against a
+    // real live eventId — never trust the doc shape alone for money.
+    try {
+      result.restOddsSummary = await getBzzoiroEventOddsSummary(eventId);
+    } catch (err) {
+      result.restOddsSummaryError = err instanceof Error ? err.message : String(err);
+    }
+    // asian_handicap/double_chance/draw_no_bet/total_corners are only
+    // reachable here — none are in the fixed 11-key summary above.
+    for (const market of ["asian_handicap", "double_chance", "draw_no_bet", "total_corners"] as const) {
+      try {
+        result[`restOddsFeed_${market}`] = await getBzzoiroOddsFeed(eventId, market);
+      } catch (err) {
+        result[`restOddsFeed_${market}Error`] = err instanceof Error ? err.message : String(err);
+      }
+    }
   } else {
     result.note = "Nenhum jogo bzzoiro subscrito agora — informe ?eventId=<id> manualmente ou aguarde um jogo casado.";
   }
@@ -2774,7 +2841,7 @@ router.get("/bzzoiro-upcoming-probe", adminMiddleware, async (req: AdminRequest,
 
   try {
     const events = await getBzzoiroUpcomingEvents(dateFrom, dateTo);
-    res.json({
+    const result: Record<string, unknown> = {
       dateFrom,
       dateTo,
       count: events.length,
@@ -2786,7 +2853,31 @@ router.get("/bzzoiro-upcoming-probe", adminMiddleware, async (req: AdminRequest,
         league_id: e.league_id,
         has_xg: e.has_xg,
       })),
-    });
+    };
+
+    // Added 2026-09-14 per the user's own pasted docs: BET62 has never
+    // sourced a prematch odds price from bzzoiro (only fixture metadata via
+    // getBzzoiroUpcomingEvents above) — probing the first real upcoming
+    // fixture's /odds/ + /odds/?market=... here, on the same call, confirms
+    // whether real prices actually exist for a genuinely-not-started match
+    // before any normalizer gets built on the assumption that they do.
+    const firstUpcoming = events[0];
+    if (firstUpcoming) {
+      result.oddsProbeEventId = firstUpcoming.id;
+      result.oddsProbeFixture = `${firstUpcoming.home_team} vs ${firstUpcoming.away_team}`;
+      try {
+        result.restOddsSummary = await getBzzoiroEventOddsSummary(firstUpcoming.id);
+      } catch (err) {
+        result.restOddsSummaryError = err instanceof Error ? err.message : String(err);
+      }
+      try {
+        result.restOddsFeed_asian_handicap = await getBzzoiroOddsFeed(firstUpcoming.id, "asian_handicap");
+      } catch (err) {
+        result.restOddsFeed_asian_handicapError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: "Erro ao consultar bzzoiro", detail: err instanceof Error ? err.message : String(err) });
   }

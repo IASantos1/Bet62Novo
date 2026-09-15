@@ -22,6 +22,7 @@ import {
 import { matchGoalApiFixtureToBzzoiro, debugBestCandidateBzzoiro } from "../../matching/bzzoiroMatchEngine.js";
 import type { GoalApiFixtureRef } from "../../matching/footballMatchEngine.js";
 import { getBzzoiroLiveEvents } from "./client.js";
+import type { BzzoiroEvent } from "./types.js";
 import {
   startBzzoiroWebSocket,
   subscribeBzzoiroEvent,
@@ -36,10 +37,30 @@ import { buildBzzoiroMarkets } from "./oddsNormalizer.js";
 const PROVIDER = "bzzoiro";
 const SYNC_INTERVAL_MS = 20_000;
 
-// bzzoiro event_id -> "goalapi-football-<id>" liveMatchId, refreshed every
-// sync round. This is the routing table the WS handler below uses to know
-// which LiveMatchState entry a given event_id's livedata frame belongs to.
+// bzzoiro event_id -> liveMatchId ("goalapi-football-<id>" for a fixture
+// GOAL API also tracks, "bzzoiro-football-<id>" for one bzzoiro alone
+// discovered — see nativeLiveEvents below), refreshed every sync round.
+// This is the routing table the WS handler below uses to know which
+// LiveMatchState entry a given event_id's livedata/odds/event frame
+// belongs to.
 let currentSubscriptions = new Map<number, string>();
+
+// Added 2026-09-14 on explicit user instruction: bzzoiro becomes BET62's
+// own football discovery source, not just an odds/ball-position add-on
+// bolted onto GOAL API's fixture list. Every currently-live bzzoiro event
+// NOT already matched to a GOAL API fixture gets its own native
+// "bzzoiro-football-<id>" entry here — matches.ts's buildFootballLiveFromBzzoiro
+// reads this to build real LiveMatchState rows for them (score/minute from
+// the WS `event` frame, odds/ball position from the same handleOdds/
+// handleLiveData handlers below, unchanged).
+const nativeLiveEvents = new Map<number, BzzoiroEvent>();
+
+/** Currently-live bzzoiro events with no GOAL API counterpart — read by
+ * matches.ts's buildFootballLiveFromBzzoiro() to build native LiveMatchState
+ * rows. Refreshed every refreshSubscriptions() round (20s). */
+export function getBzzoiroNativeLiveEvents(): BzzoiroEvent[] {
+  return [...nativeLiveEvents.values()];
+}
 
 const NEAR_MISS_SAMPLE_CAP = 8;
 
@@ -136,8 +157,39 @@ async function refreshSubscriptions(): Promise<number> {
   for (const fx of matched) {
     const eventId = Number(fx.otherProviderMatchId);
     if (!Number.isFinite(eventId)) continue;
-    nextSubscriptions.set(eventId, `goalapi-football-${fx.goalApiProviderMatchId}`);
+    const liveMatchId = `goalapi-football-${fx.goalApiProviderMatchId}`;
+    // Real bug found 2026-09-14 via getBzzoiroOddsFrameOutcomeCounts() in
+    // production: 312 of 316 real odds frames were dropped with
+    // noLiveMatchState — getMatchedLiveFootballFixtures() reads the DB's
+    // matchesTable.status flag, which canonicalMatchCatalog.ts's own
+    // header already flags as "not yet a source of truth for anything":
+    // it's only ever written TO "live" (whenever GOAL API's poll still
+    // sees the fixture) and never written back off it once GOAL API stops
+    // returning it, so it accumulates a permanent backlog of long-finished
+    // matches nothing ever expires. Cross-checking against the real
+    // in-memory liveMatchState (GOAL API's own live poll, always accurate)
+    // before subscribing avoids wasting a shard slot — and therefore ever
+    // seeing a real odds price — on a match that isn't live anymore.
+    if (!liveMatchState.has(liveMatchId)) continue;
+    nextSubscriptions.set(eventId, liveMatchId);
   }
+
+  // Native discovery (added 2026-09-14 on explicit user instruction):
+  // bzzoiro is now BET62's own football discovery source, not just an
+  // odds/ball-position add-on bolted onto GOAL API's fixture list. Every
+  // currently-live bzzoiro event NOT already matched to a GOAL API
+  // fixture above gets its own "bzzoiro-football-<id>" entry — see
+  // matches.ts's buildFootballLiveFromBzzoiro, which builds the actual
+  // LiveMatchState rows for these from getBzzoiroNativeLiveEvents() below.
+  const nextNativeEvents = new Map<number, BzzoiroEvent>();
+  const liveBzzoiroEvents = await getBzzoiroLiveEvents();
+  for (const ev of liveBzzoiroEvents) {
+    if (ev.status !== "inprogress") continue;
+    if (nextSubscriptions.has(ev.id)) continue; // already matched to a GOAL API fixture above
+    nextNativeEvents.set(ev.id, ev);
+    nextSubscriptions.set(ev.id, `bzzoiro-football-${ev.id}`);
+  }
+
   for (const eventId of currentSubscriptions.keys()) {
     if (!nextSubscriptions.has(eventId)) unsubscribeBzzoiroEvent(eventId);
   }
@@ -145,6 +197,8 @@ async function refreshSubscriptions(): Promise<number> {
     if (!currentSubscriptions.has(eventId)) subscribeBzzoiroEvent(eventId);
   }
   currentSubscriptions = nextSubscriptions;
+  nativeLiveEvents.clear();
+  for (const [id, ev] of nextNativeEvents) nativeLiveEvents.set(id, ev);
   return currentSubscriptions.size;
 }
 
@@ -167,6 +221,28 @@ function handleLiveData(frame: BzzoiroLiveDataFrame): void {
   broadcastMatchDelta(liveMatchId, { _ballPosition: ballPosition });
 }
 
+// Diagnostic added 2026-09-14: after the subscribed-snapshot fix (every
+// subscribe now carries an "odds" snapshot, confirmed real — 228
+// subscriptions produced exactly 228 captured "odds" frames in
+// production), "with real odds" stayed stuck at the same 4 matches. That
+// could mean bzzoiro's real coverage of THIS specific pool of live
+// matches (skewed toward lower South American divisions per GOAL API's
+// own coverage) is simply sparse — or it could mean frames are being
+// dropped somewhere in this function for an unrelated reason. Counting
+// exactly where each odds frame exits this function answers that without
+// guessing, same rule this session has followed throughout.
+const oddsFrameOutcomeCounts = {
+  noSubscriptionMapping: 0,
+  noLiveMatchState: 0,
+  noRealPriceYet: 0,
+  priced: 0,
+};
+
+/** Investigation-only — see oddsFrameOutcomeCounts's header. */
+export function getBzzoiroOddsFrameOutcomeCounts(): typeof oddsFrameOutcomeCounts {
+  return { ...oddsFrameOutcomeCounts };
+}
+
 // Real odds pricing (2026-09-14) — bzzoiro's "odds" WS frame is now
 // BET62's primary football price source (see matches.ts's
 // hasRealPriceSource). Same "never partially priced" rule
@@ -175,13 +251,23 @@ function handleLiveData(frame: BzzoiroLiveDataFrame): void {
 // only when the value genuinely changed, not on every tick.
 function handleOdds(frame: BzzoiroOddsFrame): void {
   const liveMatchId = currentSubscriptions.get(frame.event_id);
-  if (!liveMatchId) return;
+  if (!liveMatchId) {
+    oddsFrameOutcomeCounts.noSubscriptionMapping++;
+    return;
+  }
   const existing = liveMatchState.get(liveMatchId);
-  if (!existing) return;
+  if (!existing) {
+    oddsFrameOutcomeCounts.noLiveMatchState++;
+    return;
+  }
 
   const mw = frame.odds.match_winner;
   const all1x2LegsReal = mw && Number.isFinite(mw.home) && mw.home > 1 && Number.isFinite(mw.draw) && mw.draw > 1 && Number.isFinite(mw.away) && mw.away > 1;
-  if (!all1x2LegsReal) return;
+  if (!all1x2LegsReal) {
+    oddsFrameOutcomeCounts.noRealPriceYet++;
+    return;
+  }
+  oddsFrameOutcomeCounts.priced++;
 
   const { odds, markets } = buildBzzoiroMarkets(frame);
   const oddsChanged = JSON.stringify(odds) !== JSON.stringify(existing.odds);
@@ -234,10 +320,15 @@ export function startBzzoiroBallSync(): void {
   }, SYNC_INTERVAL_MS);
 }
 
-export function getBzzoiroBallSyncStatus(): { ws: ReturnType<typeof getBzzoiroWsStatus>; subscribedMatches: number } {
+export function getBzzoiroBallSyncStatus(): {
+  ws: ReturnType<typeof getBzzoiroWsStatus>;
+  subscribedMatches: number;
+  oddsFrameOutcomes: ReturnType<typeof getBzzoiroOddsFrameOutcomeCounts>;
+} {
   return {
     ws: getBzzoiroWsStatus(),
     subscribedMatches: currentSubscriptions.size,
+    oddsFrameOutcomes: getBzzoiroOddsFrameOutcomeCounts(),
   };
 }
 
