@@ -10,9 +10,32 @@
 // original bzzoiro prematch cache shipped with.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import type { ProplineEvent } from "./index.js";
+import { propline, type ProplineEvent } from "./index.js";
 import { extractProplineH2HOdds } from "./common.js";
-import { proplineFetchAllUpcomingOdds, proplineFindEventByName, proplineAllActiveSports } from "./football.js";
+import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
+
+/** Fetches one soccer_* league's odds directly via the PropLine client —
+ * NOT via football.ts's proplineFetchAllUpcomingOdds, which round-trips
+ * the key through resolveProplineSportKey. Real bug found 2026-09-18:
+ * resolveProplineSportKey only trusts an already-canonical key (like
+ * "soccer_epl") as-is when it's literally listed in
+ * CONFIG.PROPLINE_ENABLED_SPORTS — with that env var unset (empty array,
+ * the common case), every soccer_* key failed to resolve and
+ * proplineFetchAllUpcomingOdds silently returned [] for every league,
+ * every time, so the odds pool was always empty and nothing was ever
+ * priced regardless of GOAL_API_KEY/PROPLINE_API_KEY being correct and
+ * real matches genuinely existing. basketball.ts/hockey.ts never hit this
+ * because they always called propline.getOdds() directly with their own
+ * hardcoded sport keys — same fix applied here. */
+async function fetchSoccerLeagueOdds(sportKey: string): Promise<ProplineEvent[]> {
+  if (!CONFIG.PROPLINE_API_KEY) return [];
+  try {
+    const events = await propline.getOdds(sportKey, { markets: ["h2h"], oddsFormat: "decimal" });
+    return Array.isArray(events) ? events : [];
+  } catch {
+    return [];
+  }
+}
 
 type CachedFootballOdds = {
   home: number;
@@ -108,7 +131,7 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
 
   const pool: ProplineEvent[] = [];
   for (const key of sportKeys) {
-    const events = await proplineFetchAllUpcomingOdds(key);
+    const events = await fetchSoccerLeagueOdds(key);
     pool.push(...events);
   }
   if (pool.length === 0) return;

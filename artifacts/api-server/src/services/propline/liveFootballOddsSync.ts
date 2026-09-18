@@ -10,9 +10,9 @@
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { liveMatchState, broadcastMatchDelta, type LiveMatchState } from "../../routes/matches.js";
-import type { ProplineEvent } from "./index.js";
+import { propline, type ProplineEvent } from "./index.js";
 import { extractProplineH2HOdds } from "./common.js";
-import { proplineFetchAllUpcomingOdds, proplineFindEventByName, proplineAllActiveSports } from "./football.js";
+import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 
 /** proplineAllActiveSports() (not CONFIG.PROPLINE_ENABLED_SPORTS directly) —
  * see prematchFootballOddsCache.ts's own comment on this same function for
@@ -20,6 +20,23 @@ import { proplineFetchAllUpcomingOdds, proplineFindEventByName, proplineAllActiv
  * zero soccer keys here, so live football odds were never fetched either). */
 function configuredSoccerSportKeys(): string[] {
   return [...new Set(proplineAllActiveSports().filter((k) => k.startsWith("soccer_")))];
+}
+
+/** Fetches one soccer_* league's odds directly via the PropLine client —
+ * see prematchFootballOddsCache.ts's fetchSoccerLeagueOdds for the real bug
+ * this avoids (football.ts's proplineFetchAllUpcomingOdds round-trips the
+ * key through resolveProplineSportKey, which silently rejects an
+ * already-canonical soccer_* key whenever PROPLINE_ENABLED_SPORTS is
+ * unset — the same failure mode basketball.ts/hockey.ts never hit because
+ * they always call propline.getOdds() directly). */
+async function fetchSoccerLeagueOdds(sportKey: string): Promise<ProplineEvent[]> {
+  if (!CONFIG.PROPLINE_API_KEY) return [];
+  try {
+    const events = await propline.getOdds(sportKey, { markets: ["h2h"], oddsFormat: "decimal" });
+    return Array.isArray(events) ? events : [];
+  } catch {
+    return [];
+  }
 }
 
 let inFlight: Promise<void> | null = null;
@@ -49,7 +66,7 @@ async function runSync(): Promise<void> {
 
   const pool: ProplineEvent[] = [];
   for (const key of sportKeys) {
-    pool.push(...(await proplineFetchAllUpcomingOdds(key)));
+    pool.push(...(await fetchSoccerLeagueOdds(key)));
   }
   if (pool.length === 0) return;
 
