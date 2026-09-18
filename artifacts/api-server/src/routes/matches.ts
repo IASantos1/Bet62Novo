@@ -29,6 +29,16 @@ import {
   proplineFetchBasketballPeriodOddsAllLeagues,
 } from "../services/propline/basketball.js";
 import {
+  extractProplineTennisOdds,
+  proplineFetchTennisOdds,
+  proplineFetchTennisLive,
+} from "../services/propline/tennis.js";
+import {
+  extractProplineDartsOdds,
+  proplineFetchDartsOdds,
+  proplineFetchDartsLive,
+} from "../services/propline/darts.js";
+import {
   PROPLINE_BASEBALL_LEAGUE_TITLES,
   extractProplineBaseballOdds,
   proplineFetchBaseballOddsAllLeagues,
@@ -9234,6 +9244,213 @@ async function buildDartsLiveFromBzzoiro(): Promise<LiveMatchState[]> {
   return results;
 }
 
+const PROPLINE_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Tennis prematch from PropLine (2026-09-18, alongside the existing
+ * api-tennis.com builder — see chooseUpcomingProvider's quality gate,
+ * which picks whichever real source has more/better fixtures each round,
+ * same as football's GOAL API/PropLine/bzzoiro candidates). Real moneyline
+ * via extractProplineTennisOdds wherever a bookmaker priced it; honest gap
+ * (hasRealOdds:false, zerofilled markets) otherwise — never a fabricated
+ * price. */
+async function buildTennisUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const events = await proplineFetchTennisOdds();
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    if (ev.live) continue;
+    const home = ev.home_team;
+    const away = ev.away_team;
+    if (!home || !away) continue;
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const resultOdds = extractProplineTennisOdds(ev.bookmakers, home, away);
+    const { date, time } = proplineEventDateTime(ev.commence_time);
+    results.push({
+      id: `propline-tennis-${ev.id}`,
+      home,
+      away,
+      league: ev.sport_title ?? "Tênis",
+      country: "Internacional",
+      time,
+      date,
+      sport: "tennis",
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+      markets: zerofillAdvancedMarkets(),
+    });
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+async function buildTennisLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const [scores, oddsEvents] = await Promise.all([proplineFetchTennisLive(), proplineFetchTennisOdds()]);
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const sc of scores) {
+    const home = sc.home_team;
+    const away = sc.away_team;
+    if (!home || !away) continue;
+    const score = extractProplineScore(sc);
+    if (!score) continue;
+
+    const id = `propline-tennis-${sc.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+    const resultOdds = oddsEv ? extractProplineTennisOdds(oddsEv.bookmakers, home, away) : null;
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: sc.sport_title ?? "Tênis",
+      country: "Internacional",
+      sport: "tennis",
+      homeScore: score.home,
+      awayScore: score.away,
+      minute: 0,
+      status: score.status || "Ao vivo",
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+      markets: zerofillAdvancedMarkets(),
+      events: existing?.events ?? [],
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-tennis-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_TENNIS_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] tennis finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
+const PROPLINE_DARTS_DISAPPEAR_GRACE_MS = 15_000;
+
+/** Darts prematch from PropLine (2026-09-18) — replaces bzzoiro as this
+ * sport's source (see config.ts's bzzoiro removal plan). Real moneyline via
+ * extractProplineDartsOdds; honest gap (hasRealOdds:false, zerofilled
+ * markets) when no bookmaker has priced it yet — never a fabricated price
+ * (unlike the bzzoiro darts builder this replaces, which defaulted to a
+ * hardcoded 1.85/1.85 when unpriced). */
+async function buildDartsUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
+  const events = await proplineFetchDartsOdds();
+  const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    if (ev.live) continue;
+    const home = ev.home_team;
+    const away = ev.away_team;
+    if (!home || !away) continue;
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const resultOdds = extractProplineDartsOdds(ev.bookmakers, home, away);
+    const { date, time } = proplineEventDateTime(ev.commence_time);
+    results.push({
+      id: `propline-darts-${ev.id}`,
+      home,
+      away,
+      league: ev.sport_title ?? "Dardos",
+      country: "Internacional",
+      time,
+      date,
+      sport: "darts",
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+      markets: zerofillAdvancedMarkets(),
+    });
+  }
+  const deduped = dedupeProplineFixtures(results);
+  deduped.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return deduped;
+}
+
+async function buildDartsLiveFromPropLine(): Promise<LiveMatchState[]> {
+  const [scores, oddsEvents] = await Promise.all([proplineFetchDartsLive(), proplineFetchDartsOdds()]);
+  const currentIds = new Set<string>();
+  const results: LiveMatchState[] = [];
+
+  for (const sc of scores) {
+    const home = sc.home_team;
+    const away = sc.away_team;
+    if (!home || !away) continue;
+    const score = extractProplineScore(sc);
+    if (!score) continue;
+
+    const id = `propline-darts-${sc.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
+
+    const oddsEv = oddsEvents.find((e) => e.id === sc.id);
+    const resultOdds = oddsEv ? extractProplineDartsOdds(oddsEv.bookmakers, home, away) : null;
+
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: sc.sport_title ?? "Dardos",
+      country: "Internacional",
+      sport: "darts",
+      homeScore: score.home,
+      awayScore: score.away,
+      minute: 0,
+      status: score.status || "Ao vivo",
+      hasRealOdds: !!resultOdds,
+      odds: resultOdds ?? { home: 0, draw: 0, away: 0 },
+      markets: zerofillAdvancedMarkets(),
+      events: existing?.events ?? [],
+      _lastSeenAt: Date.now(),
+    };
+    liveMatchState.set(id, state);
+    results.push(state);
+  }
+
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("propline-darts-")) continue;
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > PROPLINE_DARTS_DISAPPEAR_GRACE_MS) {
+      try {
+        await finalizeStaleLiveMatch(state);
+      } catch (err) {
+        logger.error({ err, id }, "[propline] darts finalizeStaleLiveMatch failed");
+      }
+      liveMatchState.delete(id);
+    }
+  }
+
+  return results;
+}
+
 const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
 
 /** Basketball prematch from PropLine — NBA/WNBA/NCAAB, real moneyline via
@@ -10427,8 +10644,8 @@ async function rebuildUpcomingCache(): Promise<void> {
       if (CONFIG.TENNIS_API_KEY) {
         tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
       }
-      if (CONFIG.BZZOIRO_API_KEY) {
-        tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisUpcomingFromBzzoiro() });
+      if (CONFIG.PROPLINE_API_KEY) {
+        tennisCandidates.push({ provider: "propline", matches: await buildTennisUpcomingFromPropLine() });
       }
       tennis = chooseUpcomingProvider("tennis", tennisCandidates);
     } catch (err) {
@@ -10438,14 +10655,14 @@ async function rebuildUpcomingCache(): Promise<void> {
     // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
     // (football and tennis excluded from PropLine's scope per user decision
     // — each gets its own separate, dedicated provider later).
+    // bzzoiro candidate removed 2026-09-18 (being retired — see config.ts's
+    // BZZOIRO_* removal plan): PropLine is basketball/hockey's sole real
+    // source again, same as before bzzoiro was added alongside it.
     let basketball: UpcomingMatch[] = [];
     try {
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
       if (CONFIG.PROPLINE_API_KEY) {
         candidates.push({ provider: "propline", matches: await buildBasketballUpcomingFromPropLine() });
-      }
-      if (CONFIG.BZZOIRO_API_KEY) {
-        candidates.push({ provider: "bzzoiro", matches: await buildBasketballUpcomingFromBzzoiro() });
       }
       basketball = chooseUpcomingProvider("basketball", candidates);
       _lastGoodBasketballUpcoming = basketball;
@@ -10458,9 +10675,6 @@ async function rebuildUpcomingCache(): Promise<void> {
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
       if (CONFIG.PROPLINE_API_KEY) {
         candidates.push({ provider: "propline", matches: await buildHockeyUpcomingFromPropLine() });
-      }
-      if (CONFIG.BZZOIRO_API_KEY) {
-        candidates.push({ provider: "bzzoiro", matches: await buildHockeyUpcomingFromBzzoiro() });
       }
       hockey = chooseUpcomingProvider("hockey", candidates);
       _lastGoodHockeyUpcoming = hockey;
@@ -10560,9 +10774,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     if (CONFIG.PROPLINE_API_KEY) {
       candidates.push({ provider: "propline", matches: await buildBasketballLiveFromPropLine() });
     }
-    if (CONFIG.BZZOIRO_API_KEY) {
-      candidates.push({ provider: "bzzoiro", matches: await buildBasketballLiveFromBzzoiro() });
-    }
     basketballLiveRaw = chooseLiveProvider("basketball", candidates);
   } catch (err) {
     logger.error({ err }, "[tri-fallback] basketball live failed this tick");
@@ -10573,9 +10784,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
     if (CONFIG.PROPLINE_API_KEY) {
       candidates.push({ provider: "propline", matches: await buildHockeyLiveFromPropLine() });
-    }
-    if (CONFIG.BZZOIRO_API_KEY) {
-      candidates.push({ provider: "bzzoiro", matches: await buildHockeyLiveFromBzzoiro() });
     }
     hockeyLiveRaw = chooseLiveProvider("hockey", candidates);
   } catch (err) {
@@ -10610,8 +10818,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     if (CONFIG.TENNIS_API_KEY) {
       tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
     }
-    if (CONFIG.BZZOIRO_API_KEY) {
-      tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisLiveFromBzzoiro() });
+    if (CONFIG.PROPLINE_API_KEY) {
+      tennisCandidates.push({ provider: "propline", matches: await buildTennisLiveFromPropLine() });
     }
     tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
   } catch (err) {
@@ -10654,9 +10862,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const formula1Live: LiveMatchState[] = [];
   let dartsLiveRaw: LiveMatchState[] = [];
   try {
-    if (CONFIG.BZZOIRO_API_KEY) dartsLiveRaw = await buildDartsLiveFromBzzoiro();
+    if (CONFIG.PROPLINE_API_KEY) dartsLiveRaw = await buildDartsLiveFromPropLine();
   } catch (err) {
-    logger.error({ err }, "[bzzoiro] darts live failed this tick");
+    logger.error({ err }, "[propline] darts live failed this tick");
   }
   const dartsLive = sportWithFallback("darts", dartsLiveRaw);
 
@@ -11651,8 +11859,8 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     if (CONFIG.TENNIS_API_KEY) {
       tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
     }
-    if (CONFIG.BZZOIRO_API_KEY) {
-      tennisCandidates.push({ provider: "bzzoiro", matches: await buildTennisUpcomingFromBzzoiro() });
+    if (CONFIG.PROPLINE_API_KEY) {
+      tennisCandidates.push({ provider: "propline", matches: await buildTennisUpcomingFromPropLine() });
     }
     tennis = chooseUpcomingProvider("tennis", tennisCandidates);
   } catch (err) {
@@ -11660,9 +11868,9 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   }
   // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
   // (football and tennis excluded from PropLine's scope — separate
-  // dedicated providers planned for each later). bzzoiro added 2026-09-15
-  // as an additional candidate for basketball/hockey (see basketball.ts/
-  // hockey.ts's own headers) — not yet a hard cut of PropLine.
+  // dedicated providers planned for each later). bzzoiro candidate for
+  // basketball/hockey removed 2026-09-18 (being retired — see config.ts's
+  // BZZOIRO_* removal plan): PropLine is their sole real source again.
   let basketball: UpcomingMatch[] = [];
   let hockey: UpcomingMatch[] = [];
   let volleyball: UpcomingMatch[] = [];
@@ -11673,9 +11881,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     if (CONFIG.PROPLINE_API_KEY) {
       candidates.push({ provider: "propline", matches: await buildBasketballUpcomingFromPropLine() });
     }
-    if (CONFIG.BZZOIRO_API_KEY) {
-      candidates.push({ provider: "bzzoiro", matches: await buildBasketballUpcomingFromBzzoiro() });
-    }
     basketball = chooseUpcomingProvider("basketball", candidates);
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
@@ -11684,9 +11889,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
     if (CONFIG.PROPLINE_API_KEY) {
       candidates.push({ provider: "propline", matches: await buildHockeyUpcomingFromPropLine() });
-    }
-    if (CONFIG.BZZOIRO_API_KEY) {
-      candidates.push({ provider: "bzzoiro", matches: await buildHockeyUpcomingFromBzzoiro() });
     }
     hockey = chooseUpcomingProvider("hockey", candidates);
   } catch (err) {
@@ -11710,11 +11912,11 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     }
   }
   let darts: UpcomingMatch[] = [];
-  if (CONFIG.BZZOIRO_API_KEY) {
+  if (CONFIG.PROPLINE_API_KEY) {
     try {
-      darts = await buildDartsUpcomingFromBzzoiro();
+      darts = await buildDartsUpcomingFromPropLine();
     } catch (err) {
-      logger.error({ err }, "[refreshUpcomingTop] darts bzzoiro fetch failed");
+      logger.error({ err }, "[refreshUpcomingTop] darts PropLine fetch failed");
     }
   }
   rememberUpcomingFootballEligibility(football);
