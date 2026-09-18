@@ -202,26 +202,46 @@ export function buildGoalApiFootballGoalEvents(
  * countGoalApiRedCards uses (that shape has never actually been observed —
  * see this project's own liveMatchEngine.ts comment). Cards here means
  * yellow + red combined, matching what "cardsTotal" already means
- * elsewhere in this codebase (e.g. buildFootballLiveFromSportMonks). */
+ * elsewhere in this codebase (e.g. buildFootballLiveFromSportMonks).
+ *
+ * cornersHome/cornersAway/cardsHome/cardsAway (added 2026-09-18) keep the
+ * SAME rows' real per-team home/away split instead of discarding it —
+ * needed to settle PropLine's real corners_spread/team_cards markets
+ * (comparing/bucketing one team's count, not the combined total these
+ * fields were originally built for), confirmed real 2026-09-09's row
+ * shape already had this split, it just went unused until now. */
 export function extractGoalApiCornersCardsTotals(
   stats: GoalApiFixtureStatistics | null | undefined,
-): { cornersTotal?: number; cardsTotal?: number } {
+): {
+  cornersTotal?: number;
+  cardsTotal?: number;
+  cornersHome?: number;
+  cornersAway?: number;
+  cardsHome?: number;
+  cardsAway?: number;
+} {
   const rows = stats?.match?.fullTime ?? [];
-  const sumRow = (type: string): number | undefined => {
+  const splitRow = (type: string): { home: number; away: number } | undefined => {
     const row = rows.find((r) => r.type === type);
     if (!row) return undefined;
     const home = Number.parseInt(row.home, 10);
     const away = Number.parseInt(row.away, 10);
     if (!Number.isFinite(home) || !Number.isFinite(away)) return undefined;
-    return home + away;
+    return { home, away };
   };
-  const corners = sumRow("Corners");
-  const yellow = sumRow("Yellow Cards");
-  const red = sumRow("Red Cards");
-  const cards = yellow != null || red != null ? (yellow ?? 0) + (red ?? 0) : undefined;
+  const cornersSplit = splitRow("Corners");
+  const yellowSplit = splitRow("Yellow Cards");
+  const redSplit = splitRow("Red Cards");
+  const cardsHome =
+    yellowSplit != null || redSplit != null ? (yellowSplit?.home ?? 0) + (redSplit?.home ?? 0) : undefined;
+  const cardsAway =
+    yellowSplit != null || redSplit != null ? (yellowSplit?.away ?? 0) + (redSplit?.away ?? 0) : undefined;
   return {
-    ...(corners != null ? { cornersTotal: corners } : {}),
-    ...(cards != null ? { cardsTotal: cards } : {}),
+    ...(cornersSplit != null ? { cornersTotal: cornersSplit.home + cornersSplit.away } : {}),
+    ...(cardsHome != null && cardsAway != null ? { cardsTotal: cardsHome + cardsAway } : {}),
+    ...(cornersSplit != null ? { cornersHome: cornersSplit.home, cornersAway: cornersSplit.away } : {}),
+    ...(cardsHome != null ? { cardsHome } : {}),
+    ...(cardsAway != null ? { cardsAway } : {}),
   };
 }
 
