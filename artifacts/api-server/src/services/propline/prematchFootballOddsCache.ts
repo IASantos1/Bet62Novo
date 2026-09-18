@@ -13,6 +13,7 @@
 // wrong key wrongly concluded BTTS didn't exist for soccer at all).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
+import { goalApi } from "../goalapi/index.js";
 import { propline, type ProplineEvent } from "./index.js";
 import {
   extractProplineH2HOdds,
@@ -27,6 +28,7 @@ import {
   extractProplineTotalCorners,
   extractProplineTotalCards,
   extractProplineTeamCorners,
+  extractProplineGoalscorerMatchedToRoster,
   type ProplineTotalGoals,
   type ProplineTotalCorners,
   type ProplineTotalCards,
@@ -46,7 +48,41 @@ const FOOTBALL_MARKET_KEYS = [
   "team_corners",
   "total_cards",
   "european_handicap",
+  "anytime_goal_scorer",
+  "first_goal_scorer",
 ];
+
+/** GOAL API's real lineup for a fixture (starting XI + substitutes) — the
+ * player-identity source of truth for goalscorer markets. Real bug found
+ * 2026-09-18: PropLine and GOAL API spell the same real player differently
+ * often enough to matter (confirmed live: "Alejandro Maciel" vs "Alejandro
+ * Ramon Maciel", "Facundo Mansilla" vs "Zahir Facundo Mansilla" — neither
+ * pair is even a plain substring of the other), and settlement.ts's
+ * player-market grading is an exact match against GOAL API's own live
+ * goal-event names with no fuzzy fallback — so goalscorer markets are
+ * built from GOAL API's roster (see
+ * extractProplineGoalscorerMatchedToRoster), only using PropLine for the
+ * price. Lineups aren't posted until close to kickoff (`hasLineups` stays
+ * false until then) — an empty return here just means the goalscorer
+ * markets stay unset for now, same "real data patches in when it exists"
+ * convention as everywhere else, not an error. */
+async function fetchGoalApiRosterNames(fixtureId: string): Promise<string[]> {
+  if (!CONFIG.GOAL_API_KEY) return [];
+  try {
+    const lineups = await goalApi.getFixtureLineups(fixtureId);
+    if (!lineups?.hasLineups) return [];
+    const names: string[] = [];
+    for (const side of [lineups.home, lineups.away]) {
+      if (!side) continue;
+      for (const entry of [...(side.startingLineups ?? []), ...(side.substitutes ?? [])]) {
+        if (entry.lineupPlayer) names.push(entry.lineupPlayer);
+      }
+    }
+    return names;
+  } catch {
+    return [];
+  }
+}
 
 /** Fetches one soccer_* league's odds directly via the PropLine client —
  * NOT via football.ts's proplineFetchAllUpcomingOdds, which round-trips
@@ -92,6 +128,8 @@ type CachedFootballOdds = {
   totalCards: ProplineTotalCards | null;
   homeCorners: { line: number; over: number; under: number } | null;
   awayCorners: { line: number; over: number; under: number } | null;
+  anytimeGoalscorer: Array<{ player: string; odds: number }> | null;
+  firstGoalscorer: Array<{ player: string; odds: number }> | null;
   fetchedAt: number;
 };
 
@@ -196,6 +234,7 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
     const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
     const teamCorners = extractProplineTeamCorners(ev.bookmakers, ev.home_team, ev.away_team);
+    const rosterNames = await fetchGoalApiRosterNames(fx.providerMatchId);
     cache.set(fx.providerMatchId, {
       ...odds,
       proplineEventId: ev.id,
@@ -211,6 +250,8 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       totalCards: extractProplineTotalCards(ev.bookmakers),
       homeCorners: teamCorners.home,
       awayCorners: teamCorners.away,
+      anytimeGoalscorer: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames),
+      firstGoalscorer: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames),
       fetchedAt: Date.now(),
     });
     priced++;

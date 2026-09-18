@@ -7956,6 +7956,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         }
         if (prematchPrice.homeCorners) markets.homeCorners = prematchPrice.homeCorners;
         if (prematchPrice.awayCorners) markets.awayCorners = prematchPrice.awayCorners;
+        if (prematchPrice.anytimeGoalscorer) markets.anytimeGoalscorer = prematchPrice.anytimeGoalscorer;
+        if (prematchPrice.firstGoalscorer) markets.firstGoalscorer = prematchPrice.firstGoalscorer;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 

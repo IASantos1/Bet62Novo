@@ -602,6 +602,84 @@ export function extractProplineEuropeanHandicap(
   };
 }
 
+function normalizePersonName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Real bug found 2026-09-18: PropLine and GOAL API spell the SAME real
+ * player differently often enough to matter — confirmed live in
+ * production (Central Córdoba vs Defensa y Justicia, 2026-09-18): GOAL
+ * API's own lineup has "Alejandro Maciel" and "Facundo Mansilla" where
+ * PropLine's roster has "Alejandro Ramon Maciel" and "Zahir Facundo
+ * Mansilla" — neither is even a plain substring of the other, so a naive
+ * exact-or-substring check misses both. settlement.ts's player-market
+ * grading (parseSelectionPlayerMarket) is an EXACT match against GOAL
+ * API's own live goal-event names with no fuzzy fallback, so
+ * extractProplineGoalscorerMatchedToRoster below never uses PropLine's own
+ * spelling as the player identity — only GOAL API's, matched here via last
+ * name (exact) plus at least one more shared name token, which correctly
+ * resolves both real cases above without needing an exact full-name match. */
+function isFuzzyPersonNameMatch(rosterName: string, proplineName: string): boolean {
+  if (!rosterName || !proplineName) return false;
+  if (rosterName === proplineName) return true;
+  const rParts = rosterName.split(" ").filter(Boolean);
+  const pParts = proplineName.split(" ").filter(Boolean);
+  if (rParts.length === 0 || pParts.length === 0) return false;
+  const rLast = rParts[rParts.length - 1];
+  const pLast = pParts[pParts.length - 1];
+  if (rLast !== pLast) return false;
+  if (rParts.length === 1 || pParts.length === 1) return true;
+  const pSet = new Set(pParts);
+  return rParts.slice(0, -1).some((part) => pSet.has(part));
+}
+
+/** Anytime/First Goalscorer, matched against GOAL API's own real lineup —
+ * never PropLine's own player-name spelling (see isFuzzyPersonNameMatch's
+ * comment for the real, confirmed-in-production reason). `rosterNames` is
+ * GOAL API's real lineup (starting XI + substitutes) for this exact
+ * fixture; a PropLine outcome that doesn't confidently match any of them
+ * is dropped rather than guessed. Never averaged across bookmakers (unlike
+ * every other market here) — the richest single bookmaker's outcome list
+ * wins, since player-prop coverage/pricing varies too much book to book to
+ * average meaningfully. Returns null when lineups aren't posted yet
+ * (`rosterNames` empty) or PropLine has no real roster for this market. */
+export function extractProplineGoalscorerMatchedToRoster(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  marketKey: "anytime_goal_scorer" | "first_goal_scorer",
+  rosterNames: string[],
+): Array<{ player: string; odds: number }> | null {
+  if (!bookmakers || bookmakers.length === 0 || rosterNames.length === 0) return null;
+  let bestOutcomes: ProplineBookmaker["markets"][number]["outcomes"] | null = null;
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === marketKey);
+    if (market && market.outcomes.length > (bestOutcomes?.length ?? 0)) {
+      bestOutcomes = market.outcomes;
+    }
+  }
+  if (!bestOutcomes) return null;
+  const rosterNormalized = rosterNames.map((r) => ({ raw: r, norm: normalizePersonName(r) }));
+  const result: Array<{ player: string; odds: number }> = [];
+  const seen = new Set<string>();
+  for (const o of bestOutcomes) {
+    if (marketKey === "anytime_goal_scorer" && (o.name || "").toLowerCase() !== "yes") continue;
+    const raw = (o.description || o.name || "").trim();
+    if (!raw || raw.toLowerCase() === "no goalscorer") continue;
+    const cleaned = raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    const proplineNorm = normalizePersonName(cleaned);
+    const match = rosterNormalized.find((r) => isFuzzyPersonNameMatch(r.norm, proplineNorm));
+    if (!match || seen.has(match.raw)) continue;
+    seen.add(match.raw);
+    result.push({ player: match.raw, odds: proplineNormalizeOddsPrice(o.price) });
+  }
+  return result.length > 0 ? result : null;
+}
+
 /** Extracts {home, away, status} from a ProplineScore entry defensively —
  * the real /scores payload shape wasn't re-confirmed against a live sample
  * for this restoration (no API key available in this environment), so this
