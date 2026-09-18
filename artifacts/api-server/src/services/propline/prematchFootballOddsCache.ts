@@ -29,6 +29,8 @@ import {
   extractProplineTotalCards,
   extractProplineTeamCorners,
   extractProplineGoalscorerMatchedToRoster,
+  extractProplineWinToNil,
+  extractProplineFirstTeamToScore,
   type ProplineTotalGoals,
   type ProplineTotalCorners,
   type ProplineTotalCards,
@@ -50,6 +52,8 @@ const FOOTBALL_MARKET_KEYS = [
   "european_handicap",
   "anytime_goal_scorer",
   "first_goal_scorer",
+  "to_win_without_conceding",
+  "first_team_to_score",
 ];
 
 /** GOAL API's real lineup for a fixture (starting XI + substitutes) — the
@@ -163,6 +167,8 @@ type CachedFootballOdds = {
   awayCorners: { line: number; over: number; under: number } | null;
   anytimeGoalscorer: Array<{ player: string; odds: number }> | null;
   firstGoalscorer: Array<{ player: string; odds: number }> | null;
+  winToNil: { home: number; away: number } | null;
+  firstGoal: { home: number; noGoal: number; away: number } | null;
   fetchedAt: number;
 };
 
@@ -294,6 +300,8 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       awayCorners: teamCorners.away,
       anytimeGoalscorer: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames),
       firstGoalscorer: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames),
+      winToNil: extractProplineWinToNil(ev.bookmakers, ev.home_team, ev.away_team),
+      firstGoal: extractProplineFirstTeamToScore(ev.bookmakers, ev.home_team, ev.away_team),
       fetchedAt: Date.now(),
     });
     priced++;

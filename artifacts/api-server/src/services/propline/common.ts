@@ -680,6 +680,70 @@ export function extractProplineGoalscorerMatchedToRoster(
   return result.length > 0 ? result : null;
 }
 
+/** Win To Nil, averaged across every bookmaker — confirmed real 2026-09-18
+ * (market key `to_win_without_conceding`, outcomes named by team only, no
+ * draw/third outcome). Maps directly onto the existing `winToNil` field —
+ * settlement.ts's wtn-h/wtn-a already grade this straight off the final
+ * score (`home > away && away === 0`), no extra data needed, so this is
+ * safe to bet on the moment it's priced. */
+export function extractProplineWinToNil(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { home: number; away: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizeTeamName(home);
+  const awayNorm = normalizeTeamName(away);
+  const homePrices: number[] = [];
+  const awayPrices: number[] = [];
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "to_win_without_conceding");
+    if (!market) continue;
+    for (const o of market.outcomes) {
+      const outcomeNorm = normalizeTeamName(o.name || "");
+      const price = proplineNormalizeOddsPrice(o.price);
+      if (isFuzzyMatch(outcomeNorm, homeNorm, 0.22)) homePrices.push(price);
+      else if (isFuzzyMatch(outcomeNorm, awayNorm, 0.22)) awayPrices.push(price);
+    }
+  }
+  if (homePrices.length === 0 || awayPrices.length === 0) return null;
+  return { home: average(homePrices), away: average(awayPrices) };
+}
+
+/** First Team To Score, averaged across every bookmaker — confirmed real
+ * 2026-09-18 (market key `first_team_to_score`, 3 outcomes: home team,
+ * away team, "Neither"). Maps directly onto the existing `firstGoal`
+ * field. Real settlement gap fixed alongside this (2026-09-18):
+ * fg-home/fg-away/fg-none reads extra.firstGoal, which was declared
+ * everywhere but never actually SET for GOAL API football — a bet here
+ * would have sat pending forever without routes/matches.ts's live builder
+ * now deriving it from footballGoalLog's first real goal event. */
+export function extractProplineFirstTeamToScore(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { home: number; noGoal: number; away: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizeTeamName(home);
+  const awayNorm = normalizeTeamName(away);
+  const homePrices: number[] = [];
+  const awayPrices: number[] = [];
+  const noGoalPrices: number[] = [];
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "first_team_to_score");
+    if (!market) continue;
+    for (const o of market.outcomes) {
+      const outcomeNorm = normalizeTeamName(o.name || "");
+      const price = proplineNormalizeOddsPrice(o.price);
+      if (outcomeNorm === "neither" || outcomeNorm === "none") noGoalPrices.push(price);
+      else if (isFuzzyMatch(outcomeNorm, homeNorm, 0.22)) homePrices.push(price);
+      else if (isFuzzyMatch(outcomeNorm, awayNorm, 0.22)) awayPrices.push(price);
+    }
+  }
+  if (homePrices.length === 0 || awayPrices.length === 0 || noGoalPrices.length === 0) return null;
+  return { home: average(homePrices), noGoal: average(noGoalPrices), away: average(awayPrices) };
+}
+
 /** Extracts {home, away, status} from a ProplineScore entry defensively —
  * the real /scores payload shape wasn't re-confirmed against a live sample
  * for this restoration (no API key available in this environment), so this

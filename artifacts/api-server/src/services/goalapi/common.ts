@@ -179,7 +179,7 @@ export function buildGoalApiEvents(
  * are optional in the settlement type) is the honest gap, not a guess. */
 export function buildGoalApiFootballGoalEvents(
   events: GoalApiMatchEvent[] | null | undefined,
-): Array<{ minute: number; playerName?: string; assistName?: string }> {
+): Array<{ minute: number; team: "home" | "away"; playerName?: string; assistName?: string }> {
   return (events ?? [])
     .filter((e) => e.type === "GOAL")
     .map((e) => {
@@ -188,6 +188,7 @@ export function buildGoalApiFootballGoalEvents(
       const assistName = (team === "home" ? e.homeAssist : e.awayAssist) ?? undefined;
       return {
         minute: e.timeNum ?? parseGoalApiEventMinute(e.time),
+        team,
         ...(playerName ? { playerName } : {}),
         ...(assistName ? { assistName } : {}),
       };

@@ -665,9 +665,19 @@ export type LiveMatchState = {
     // Live stats — polled from /match/{id}/statistics (background, ~90s TTL)
     cornersTotal?: number; // football: total corners in match so far
     cardsTotal?: number; // football: total cards (yellow+red) in match so far
+    // Real "home" | "away" | "none" — fg-home/fg-away/fg-none settlement
+    // (settlement.ts) reads this off the persisted extras. Computed from
+    // footballGoalLog's first (lowest-minute) entry — added 2026-09-18
+    // alongside PropLine's real first_team_to_score market: this field was
+    // declared and read by settlement everywhere already, just never once
+    // set for GOAL API football, so a first_team_to_score bet would have
+    // sat "pending" forever with no way to ever grade.
+    firstGoal?: "home" | "away" | "none";
     // Per-team football stats
     cornersHome?: number;
     cornersAway?: number;
+    cardsHome?: number; // football: yellow+red cards for the home team so far
+    cardsAway?: number; // football: yellow+red cards for the away team so far
     possessionHome?: number;
     possessionAway?: number;
     shotsTotalHome?: number;
@@ -711,7 +721,7 @@ export type LiveMatchState = {
     // goal/assist props. Re-derived fresh from the full events list each
     // tick (that endpoint returns the whole match history, not a delta), so
     // this is never accumulated/merged across ticks.
-    footballGoalLog?: Array<{ minute: number; playerName?: string; assistName?: string }>;
+    footballGoalLog?: Array<{ minute: number; team: "home" | "away"; playerName?: string; assistName?: string }>;
   };
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
@@ -7981,6 +7991,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         if (prematchPrice.awayCorners) markets.awayCorners = prematchPrice.awayCorners;
         if (prematchPrice.anytimeGoalscorer) markets.anytimeGoalscorer = prematchPrice.anytimeGoalscorer;
         if (prematchPrice.firstGoalscorer) markets.firstGoalscorer = prematchPrice.firstGoalscorer;
+        if (prematchPrice.winToNil) markets.winToNil = prematchPrice.winToNil;
+        if (prematchPrice.firstGoal) markets.firstGoal = prematchPrice.firstGoal;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 
@@ -8149,6 +8161,10 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
     let cornersTotal = existing?._liveExtra?.cornersTotal;
     let cardsTotal = existing?._liveExtra?.cardsTotal;
+    let cornersHome = existing?._liveExtra?.cornersHome;
+    let cornersAway = existing?._liveExtra?.cornersAway;
+    let cardsHome = existing?._liveExtra?.cardsHome;
+    let cardsAway = existing?._liveExtra?.cardsAway;
     try {
       const stats = await goalApi.getFixtureStatistics(fx.id);
       const built = buildGoalApiMatchStats(stats);
@@ -8156,6 +8172,10 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       const totals = extractGoalApiCornersCardsTotals(stats);
       if (totals.cornersTotal != null) cornersTotal = totals.cornersTotal;
       if (totals.cardsTotal != null) cardsTotal = totals.cardsTotal;
+      if (totals.cornersHome != null) cornersHome = totals.cornersHome;
+      if (totals.cornersAway != null) cornersAway = totals.cornersAway;
+      if (totals.cardsHome != null) cardsHome = totals.cardsHome;
+      if (totals.cardsAway != null) cardsAway = totals.cardsAway;
     } catch {
       /* keep previous stats/totals if unavailable this tick */
     }
@@ -8346,7 +8366,20 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
         ...existing?._liveExtra,
         ...(cornersTotal != null ? { cornersTotal } : {}),
         ...(cardsTotal != null ? { cardsTotal } : {}),
+        ...(cornersHome != null ? { cornersHome } : {}),
+        ...(cornersAway != null ? { cornersAway } : {}),
+        ...(cardsHome != null ? { cardsHome } : {}),
+        ...(cardsAway != null ? { cardsAway } : {}),
         ...(footballGoalLog ? { footballGoalLog } : {}),
+        // Real first-team-to-score result — the lowest-minute entry in
+        // footballGoalLog already carries its own scoring team (added
+        // 2026-09-18 alongside this same field). "none" only while the
+        // match is still scoreless; once a real goal lands this becomes
+        // final and stays that way (goals only ever get added, never
+        // removed, so the first entry's team never changes again).
+        ...(footballGoalLog
+          ? { firstGoal: footballGoalLog.length > 0 ? footballGoalLog[0]!.team : "none" }
+          : {}),
       },
       redCardsHome,
       redCardsAway,
