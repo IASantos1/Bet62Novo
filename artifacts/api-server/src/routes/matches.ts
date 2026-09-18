@@ -7936,22 +7936,24 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       seen.delete(key);
 
       const prematchPrice = getPrematchPropLineFootballOdds(fx.id);
-      // Synthetic Poisson baseline (same makeOddsFromTeams/
-      // makeAdvancedMarketsFromTeams the live football builder already uses
-      // for its own baseOdds/baseMarkets, a few hundred lines up) — added
-      // 2026-09-18: this route previously started from a pure
-      // zerofillAdvancedMarkets() baseline, so a fixture with no real
-      // PropLine price showed a completely empty market board, while the
-      // same match immediately started showing dozens of markets the
-      // moment it went live (which always used this synthetic model).
-      // Real PropLine data below still overrides every field it prices —
-      // same "real data patches the synthetic baseline" convention this
-      // file already documents elsewhere.
-      let resultOdds: { home: number; draw: number; away: number } = makeOddsFromTeams(home, away);
+      // Reverted 2026-09-18 (same day) — a prior version of this function
+      // seeded resultOdds/markets from makeOddsFromTeams/
+      // makeAdvancedMarketsFromTeams (the same synthetic Poisson model the
+      // live football builder uses for its own baseline) so a fixture with
+      // no real PropLine price would still show a full market board
+      // instead of an empty one. Reverted per explicit user instruction:
+      // routes/bets.ts has no hasRealOdds gate at bet-acceptance time, so
+      // that synthetic board was fully bettable with real money at
+      // entirely fabricated prices — directly against the "never show a
+      // fabricated price" principle this whole GOAL API + PropLine
+      // migration exists to uphold for football specifically. Back to
+      // zerofillAdvancedMarkets(): a fixture PropLine hasn't priced shows
+      // an honest empty board, not an invented one.
+      let resultOdds: { home: number; draw: number; away: number } = { home: 0, draw: 0, away: 0 };
       let hasRealOdds = false;
       let priceSource: "propline" | undefined;
       let proplineEventId: string | undefined;
-      const markets = makeAdvancedMarketsFromTeams(home, away);
+      const markets = zerofillAdvancedMarkets();
 
       if (prematchPrice) {
         resultOdds = { home: prematchPrice.home, draw: prematchPrice.draw, away: prematchPrice.away };
