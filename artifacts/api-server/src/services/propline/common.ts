@@ -101,6 +101,124 @@ export function extractProplineH2HOdds(
   };
 }
 
+/** Soccer's standard Over/Under lines — the only ones AdvancedMarkets.totalGoals
+ * has slots for. PropLine's real `totals` market (confirmed 2026-09-18,
+ * markets=totals against real EPL/LaLiga/etc events) carries a `point` per
+ * outcome (e.g. 2.5) set independently by each bookmaker — this only keeps
+ * a bookmaker's quote when its point lands on one of these seven lines
+ * (within float rounding), rather than forcing every odd line into a
+ * nearest-neighbor bucket. */
+const TOTAL_GOALS_LINES: Array<[number, string]> = [
+  [0.5, "05"],
+  [1.5, "15"],
+  [2.5, "25"],
+  [3.5, "35"],
+  [4.5, "45"],
+  [5.5, "55"],
+  [6.5, "65"],
+];
+
+export type ProplineTotalGoals = Partial<{
+  over05: number; under05: number;
+  over15: number; under15: number;
+  over25: number; under25: number;
+  over35: number; under35: number;
+  over45: number; under45: number;
+  over55: number; under55: number;
+  over65: number; under65: number;
+}>;
+
+/** Over/Under (total goals), averaged per line across every bookmaker that
+ * quoted that exact line — same "average across all real quotes" policy as
+ * extractProplineH2HOdds. Confirmed real market key `totals`, outcomes
+ * named "Over"/"Under" with a numeric `point` (2026-09-18). Returns null
+ * (never a fabricated line) when no bookmaker priced any of the seven
+ * standard lines. */
+export function extractProplineTotalGoals(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+): ProplineTotalGoals | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const byLine = new Map<string, { over: number[]; under: number[] }>();
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "totals");
+    if (!market) continue;
+    for (const o of market.outcomes) {
+      if (o.point == null) continue;
+      const line = TOTAL_GOALS_LINES.find(([value]) => Math.abs(value - o.point!) < 0.01);
+      if (!line) continue;
+      const suffix = line[1];
+      const bucket = byLine.get(suffix) ?? { over: [], under: [] };
+      const name = (o.name || "").toLowerCase();
+      const price = proplineNormalizeOddsPrice(o.price);
+      if (name === "over") bucket.over.push(price);
+      else if (name === "under") bucket.under.push(price);
+      byLine.set(suffix, bucket);
+    }
+  }
+  const result: Record<string, number> = {};
+  for (const [suffix, bucket] of byLine) {
+    if (bucket.over.length === 0 || bucket.under.length === 0) continue;
+    result[`over${suffix}`] = average(bucket.over);
+    result[`under${suffix}`] = average(bucket.under);
+  }
+  return Object.keys(result).length > 0 ? (result as ProplineTotalGoals) : null;
+}
+
+/** Asian handicap, averaged across every bookmaker quoting the SAME line
+ * (mixing a -0.25 line with a -0.75 line into one average would misprice
+ * both) — the most-quoted line wins, same "real coverage decides" approach
+ * matchFixtureRef matching already uses elsewhere. Confirmed real market
+ * key `spreads`, outcomes named by team with a numeric `point`
+ * (2026-09-18, e.g. Tottenham -0.25 / Aston Villa +0.25). Team-name
+ * matching reuses isFuzzyMatch (same normalization tolerance as h2h) since
+ * a bookmaker's outcome name doesn't always match the fixture's full team
+ * name exactly. Returns null when no bookmaker priced this market. */
+export function extractProplineAsianHandicap(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { line: number; home: number; away: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizeTeamName(home);
+  const awayNorm = normalizeTeamName(away);
+  const byLine = new Map<number, { home: number[]; away: number[] }>();
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "spreads");
+    if (!market) continue;
+    let homePoint: number | null = null;
+    let homePrice: number | null = null;
+    let awayPrice: number | null = null;
+    for (const o of market.outcomes) {
+      if (o.point == null) continue;
+      const outcomeNorm = normalizeTeamName(o.name || "");
+      if (isFuzzyMatch(outcomeNorm, homeNorm, 0.22)) {
+        homePoint = o.point;
+        homePrice = o.price;
+      } else if (isFuzzyMatch(outcomeNorm, awayNorm, 0.22)) {
+        awayPrice = o.price;
+      }
+    }
+    if (homePoint == null || homePrice == null || awayPrice == null) continue;
+    const bucket = byLine.get(homePoint) ?? { home: [], away: [] };
+    bucket.home.push(proplineNormalizeOddsPrice(homePrice));
+    bucket.away.push(proplineNormalizeOddsPrice(awayPrice));
+    byLine.set(homePoint, bucket);
+  }
+  let bestLine: number | null = null;
+  let bestCount = -1;
+  for (const [line, bucket] of byLine) {
+    const count = bucket.home.length + bucket.away.length;
+    if (count > bestCount) {
+      bestLine = line;
+      bestCount = count;
+    }
+  }
+  if (bestLine == null) return null;
+  const bucket = byLine.get(bestLine);
+  if (!bucket || bucket.home.length === 0 || bucket.away.length === 0) return null;
+  return { line: bestLine, home: average(bucket.home), away: average(bucket.away) };
+}
+
 /** Extracts {home, away, status} from a ProplineScore entry defensively —
  * the real /scores payload shape wasn't re-confirmed against a live sample
  * for this restoration (no API key available in this environment), so this

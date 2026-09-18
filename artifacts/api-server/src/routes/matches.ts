@@ -7923,12 +7923,15 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       let hasRealOdds = false;
       let priceSource: "propline" | undefined;
       let proplineEventId: string | undefined;
+      const markets = zerofillAdvancedMarkets();
 
       if (prematchPrice) {
         resultOdds = { home: prematchPrice.home, draw: prematchPrice.draw, away: prematchPrice.away };
         hasRealOdds = true;
         priceSource = "propline";
         proplineEventId = prematchPrice.proplineEventId;
+        if (prematchPrice.totalGoals) Object.assign(markets.totalGoals, prematchPrice.totalGoals);
+        if (prematchPrice.asianHandicap) markets.asianHandicap = prematchPrice.asianHandicap;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 
@@ -7943,7 +7946,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         sport: "football",
         hasRealOdds,
         odds: resultOdds,
-        markets: zerofillAdvancedMarkets(),
+        markets,
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,

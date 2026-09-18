@@ -1,17 +1,22 @@
-// Real-price cache for football prematch moneyline (1X2) via PropLine —
-// added 2026-09-18 as part of moving football odds off GOAL API (deactivated
+// Real-price cache for football prematch odds via PropLine — added
+// 2026-09-18 as part of moving football odds off GOAL API (deactivated
 // odds/live-odds, kept only for fixtures/events/stats) onto PropLine.
 // GOAL API fixtures are looked up here by team name against PropLine's
 // soccer events, same "progressively warm, never block the response"
-// pattern the old bzzoiro/PulseScore prematch caches used. Markets beyond
-// the moneyline (totals/BTTS/double chance — PropLine's `bookmakers` array
-// already carries these per event) are a deliberate fast-follow, not built
-// here — same "real fixture discovery only for now" honest-gap pattern the
-// original bzzoiro prematch cache shipped with.
+// pattern the old bzzoiro/PulseScore prematch caches used. Moneyline
+// (1X2), Over/Under totals, and Asian handicap are all real PropLine
+// markets on the same event (confirmed 2026-09-18 — `totals`/`spreads`
+// keys, not guessed); BTTS is not (0 occurrences across every soccer
+// bookmaker checked), so it stays out.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { propline, type ProplineEvent } from "./index.js";
-import { extractProplineH2HOdds } from "./common.js";
+import {
+  extractProplineH2HOdds,
+  extractProplineTotalGoals,
+  extractProplineAsianHandicap,
+  type ProplineTotalGoals,
+} from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 
 /** Fetches one soccer_* league's odds directly via the PropLine client —
@@ -30,7 +35,7 @@ import { proplineFindEventByName, proplineAllActiveSports } from "./football.js"
 async function fetchSoccerLeagueOdds(sportKey: string): Promise<ProplineEvent[]> {
   if (!CONFIG.PROPLINE_API_KEY) return [];
   try {
-    const events = await propline.getOdds(sportKey, { markets: ["h2h"], oddsFormat: "decimal" });
+    const events = await propline.getOdds(sportKey, { markets: ["h2h", "totals", "spreads"], oddsFormat: "decimal" });
     return Array.isArray(events) ? events : [];
   } catch {
     return [];
@@ -42,19 +47,33 @@ type CachedFootballOdds = {
   draw: number;
   away: number;
   proplineEventId: string;
+  totalGoals: ProplineTotalGoals | null;
+  asianHandicap: { line: number; home: number; away: number } | null;
   fetchedAt: number;
 };
 
 const cache = new Map<string, CachedFootballOdds>();
 const PRICE_TTL_MS = 30 * 60 * 1000;
 
-export function getPrematchPropLineFootballOdds(
-  goalApiFixtureId: string,
-): { home: number; draw: number; away: number; proplineEventId: string } | null {
+export function getPrematchPropLineFootballOdds(goalApiFixtureId: string): {
+  home: number;
+  draw: number;
+  away: number;
+  proplineEventId: string;
+  totalGoals: ProplineTotalGoals | null;
+  asianHandicap: { line: number; home: number; away: number } | null;
+} | null {
   const entry = cache.get(goalApiFixtureId);
   if (!entry) return null;
   if (Date.now() - entry.fetchedAt > PRICE_TTL_MS) return null;
-  return { home: entry.home, draw: entry.draw, away: entry.away, proplineEventId: entry.proplineEventId };
+  return {
+    home: entry.home,
+    draw: entry.draw,
+    away: entry.away,
+    proplineEventId: entry.proplineEventId,
+    totalGoals: entry.totalGoals,
+    asianHandicap: entry.asianHandicap,
+  };
 }
 
 /** Debug-only snapshot for GET /api/admin/propline-football-status — added
@@ -144,7 +163,15 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
     matched++;
     const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
-    cache.set(fx.providerMatchId, { ...odds, proplineEventId: ev.id, fetchedAt: Date.now() });
+    const totalGoals = extractProplineTotalGoals(ev.bookmakers);
+    const asianHandicap = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+    cache.set(fx.providerMatchId, {
+      ...odds,
+      proplineEventId: ev.id,
+      totalGoals,
+      asianHandicap,
+      fetchedAt: Date.now(),
+    });
     priced++;
   }
   logger.info(
