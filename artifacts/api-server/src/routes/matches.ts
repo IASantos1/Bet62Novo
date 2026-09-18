@@ -7926,11 +7926,22 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       seen.delete(key);
 
       const prematchPrice = getPrematchPropLineFootballOdds(fx.id);
-      let resultOdds: { home: number; draw: number; away: number } = { home: 0, draw: 0, away: 0 };
+      // Synthetic Poisson baseline (same makeOddsFromTeams/
+      // makeAdvancedMarketsFromTeams the live football builder already uses
+      // for its own baseOdds/baseMarkets, a few hundred lines up) — added
+      // 2026-09-18: this route previously started from a pure
+      // zerofillAdvancedMarkets() baseline, so a fixture with no real
+      // PropLine price showed a completely empty market board, while the
+      // same match immediately started showing dozens of markets the
+      // moment it went live (which always used this synthetic model).
+      // Real PropLine data below still overrides every field it prices —
+      // same "real data patches the synthetic baseline" convention this
+      // file already documents elsewhere.
+      let resultOdds: { home: number; draw: number; away: number } = makeOddsFromTeams(home, away);
       let hasRealOdds = false;
       let priceSource: "propline" | undefined;
       let proplineEventId: string | undefined;
-      const markets = zerofillAdvancedMarkets();
+      const markets = makeAdvancedMarketsFromTeams(home, away);
 
       if (prematchPrice) {
         resultOdds = { home: prematchPrice.home, draw: prematchPrice.draw, away: prematchPrice.away };
