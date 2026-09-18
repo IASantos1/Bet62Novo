@@ -537,6 +537,71 @@ export function extractProplineTeamCorners(
   return { home: pickBest(homeByPoint), away: pickBest(awayByPoint) };
 }
 
+/** European Handicap, averaged across every bookmaker quoting the SAME
+ * line — confirmed real 2026-09-18 (market key `european_handicap`,
+ * 3 outcomes named by team + "Draw", sharing one `point` per bookmaker,
+ * e.g. Tottenham -332 / Draw 495 / Aston Villa 775, all at point=1).
+ * Genuinely different from extractProplineAsianHandicap/`spreads`: this is
+ * a real 3-way result market on the handicap-adjusted score (the draw
+ * outcome pays its own real price), not a 2-way line with a push on an
+ * exact-margin tie — so it needs its own field/settlement, not reuse of
+ * the existing 2-way `handicap`/`asianHandicap` ones. Sign convention:
+ * `point` is subtracted from the home score before comparing (so a
+ * positive point — the common case, the away side's head start — makes
+ * the home side need to win by MORE than `point` to cover; a negative
+ * point flips that, same generalization spreads/asianHandicap already
+ * use for signed lines). */
+export function extractProplineEuropeanHandicap(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { line: number; home: number; draw: number; away: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizeTeamName(home);
+  const awayNorm = normalizeTeamName(away);
+  const byLine = new Map<number, { home: number[]; draw: number[]; away: number[] }>();
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "european_handicap");
+    if (!market) continue;
+    const byPoint = new Map<number, { home: number | null; draw: number | null; away: number | null }>();
+    for (const o of market.outcomes) {
+      if (o.point == null) continue;
+      const entry = byPoint.get(o.point) ?? { home: null, draw: null, away: null };
+      const outcomeNorm = normalizeTeamName(o.name || "");
+      if (outcomeNorm === "draw") entry.draw = o.price;
+      else if (isFuzzyMatch(outcomeNorm, homeNorm, 0.22)) entry.home = o.price;
+      else if (isFuzzyMatch(outcomeNorm, awayNorm, 0.22)) entry.away = o.price;
+      byPoint.set(o.point, entry);
+    }
+    for (const [point, entry] of byPoint) {
+      if (entry.home == null || entry.draw == null || entry.away == null) continue;
+      const bucket = byLine.get(point) ?? { home: [], draw: [], away: [] };
+      bucket.home.push(proplineNormalizeOddsPrice(entry.home));
+      bucket.draw.push(proplineNormalizeOddsPrice(entry.draw));
+      bucket.away.push(proplineNormalizeOddsPrice(entry.away));
+      byLine.set(point, bucket);
+    }
+  }
+  let bestLine: number | null = null;
+  let bestCount = -1;
+  for (const [line, bucket] of byLine) {
+    const count = bucket.home.length + bucket.draw.length + bucket.away.length;
+    if (count > bestCount) {
+      bestLine = line;
+      bestCount = count;
+    }
+  }
+  if (bestLine == null) return null;
+  const bucket = byLine.get(bestLine);
+  if (!bucket || bucket.home.length === 0 || bucket.draw.length === 0 || bucket.away.length === 0) return null;
+  return {
+    line: bestLine,
+    home: average(bucket.home),
+    draw: average(bucket.draw),
+    away: average(bucket.away),
+  };
+}
+
 /** Extracts {home, away, status} from a ProplineScore entry defensively —
  * the real /scores payload shape wasn't re-confirmed against a live sample
  * for this restoration (no API key available in this environment), so this

@@ -18,6 +18,7 @@ import {
   extractProplineH2HOdds,
   extractProplineTotalGoals,
   extractProplineAsianHandicap,
+  extractProplineEuropeanHandicap,
   extractProplineBothTeamsToScore,
   extractProplineDrawNoBet,
   extractProplineDoubleChance,
@@ -44,6 +45,7 @@ const FOOTBALL_MARKET_KEYS = [
   "total_corners",
   "team_corners",
   "total_cards",
+  "european_handicap",
 ];
 
 /** Fetches one soccer_* league's odds directly via the PropLine client —
@@ -76,6 +78,7 @@ type CachedFootballOdds = {
   proplineEventId: string;
   totalGoals: ProplineTotalGoals | null;
   asianHandicap: { line: number; home: number; away: number } | null;
+  europeanHandicap: { line: number; home: number; draw: number; away: number } | null;
   bothTeamsToScore: { yes: number; no: number } | null;
   drawNoBet: { home: number; away: number } | null;
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number } | null;
@@ -198,6 +201,7 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       proplineEventId: ev.id,
       totalGoals: extractProplineTotalGoals(ev.bookmakers),
       asianHandicap: extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team),
+      europeanHandicap: extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team),
       bothTeamsToScore: extractProplineBothTeamsToScore(ev.bookmakers),
       drawNoBet: extractProplineDrawNoBet(ev.bookmakers, ev.home_team, ev.away_team),
       doubleChance: extractProplineDoubleChance(ev.bookmakers, ev.home_team, ev.away_team),

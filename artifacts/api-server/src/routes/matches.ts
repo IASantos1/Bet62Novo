@@ -147,6 +147,13 @@ type AdvancedMarkets = {
   // Extended football markets
   drawNoBet?: { home: number; away: number };
   asianHandicap?: { line: number; home: number; away: number };
+  // European Handicap — a real 3-way result market on the handicap-adjusted
+  // score (the draw outcome pays its own price, unlike `handicap` below
+  // which voids/pushes on an exact-margin tie). See
+  // services/propline/common.ts's extractProplineEuropeanHandicap for the
+  // real PropLine shape this comes from and the sign convention `line`
+  // uses.
+  europeanHandicap?: { line: number; home: number; draw: number; away: number };
   asianTotals?: {
     o05: number;
     u05: number;
@@ -7932,6 +7939,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         proplineEventId = prematchPrice.proplineEventId;
         if (prematchPrice.totalGoals) Object.assign(markets.totalGoals, prematchPrice.totalGoals);
         if (prematchPrice.asianHandicap) markets.asianHandicap = prematchPrice.asianHandicap;
+        if (prematchPrice.europeanHandicap) markets.europeanHandicap = prematchPrice.europeanHandicap;
         if (prematchPrice.bothTeamsToScore) markets.bothTeamsScore = prematchPrice.bothTeamsToScore;
         if (prematchPrice.doubleChance) markets.doubleChance = prematchPrice.doubleChance;
         if (prematchPrice.drawNoBet) markets.drawNoBet = prematchPrice.drawNoBet;

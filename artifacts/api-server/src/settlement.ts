@@ -695,6 +695,24 @@ function settleAsianSideHandicapOutcome(
   return mergeAsianLegOutcomes(outcomes);
 }
 
+/** European Handicap — a real 3-way result market on the handicap-adjusted
+ * score, unlike settleAsianSideHandicapOutcome above: an exact-margin tie
+ * is a real, payable "draw" outcome here, never a void/push (see
+ * services/propline/common.ts's extractProplineEuropeanHandicap for the
+ * real PropLine market this grades and its sign convention — `line` is
+ * subtracted from the home score before comparing). */
+function settleEuropeanHandicapOutcome(
+  home: number,
+  away: number,
+  side: "home" | "draw" | "away",
+  line: number,
+): SettlementOutcome {
+  const adjustedHome = home - line;
+  if (adjustedHome === away) return side === "draw" ? "won" : "lost";
+  if (adjustedHome > away) return side === "home" ? "won" : "lost";
+  return side === "away" ? "won" : "lost";
+}
+
 function settlementOutcomeMultiplier(
   outcome: SettlementOutcome,
   odd: number | undefined,
@@ -2568,6 +2586,13 @@ export function scoreOutcomeForSel(
     const line = readSelectionMarketLine(sel);
     if (line == null || !Number.isFinite(line)) return null;
     return settleAsianSideHandicapOutcome(home, away, side, line);
+  }
+  // ── European handicap (3-way — draw pays its own price, never voids) ──────
+  else if (s === "eh-home" || s === "eh-draw" || s === "eh-away") {
+    const side = s.endsWith("home") ? "home" : s.endsWith("draw") ? "draw" : "away";
+    const line = readSelectionMarketLine(sel);
+    if (line == null || !Number.isFinite(line)) return null;
+    return settleEuropeanHandicapOutcome(home, away, side, line);
   }
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {

@@ -3637,6 +3637,15 @@ type AdvancedMarkets = {
   // Extended football markets
   drawNoBet?: { home: number; away: number };
   asianHandicap?: { line: number; home: number; away: number };
+  // Genuinely different market from `handicap` above despite the same
+  // Portuguese name shown there ("Handicap Europeu") — that one is a 2-way
+  // push-based market (voids on an exact-margin tie). This is a real 3-way
+  // result market on the handicap-adjusted score where the draw pays its
+  // own real price, never voids — labelled "Handicap Europeu (3 vias)" in
+  // the UI to avoid confusion with the existing one. sel keys eh-home/
+  // eh-draw/eh-away; each button's label must carry the same signed `line`
+  // value (settlement reads it back via parseSignedSelectionLabelLine).
+  europeanHandicap?: { line: number; home: number; draw: number; away: number };
   asianTotals?: {
     o05: number;
     u05: number;
@@ -12496,6 +12505,11 @@ export default function Home({
       f["asiatico:ah-home"] = m.asianHandicap.home;
       f["asiatico:ah-away"] = m.asianHandicap.away;
     }
+    if (m.europeanHandicap) {
+      f["hcapeu:eh-home"] = m.europeanHandicap.home;
+      f["hcapeu:eh-draw"] = m.europeanHandicap.draw;
+      f["hcapeu:eh-away"] = m.europeanHandicap.away;
+    }
     if (m.asianTotals) {
       f["asiatico:at-o05"] = m.asianTotals.o05;
       f["asiatico:at-u05"] = m.asianTotals.u05;
@@ -13187,6 +13201,7 @@ export default function Home({
                       const hasAsiatico =
                         (Number(mk?.drawNoBet?.home ?? 0) > 1.01) ||
                         (Number(mk?.asianHandicap?.home ?? 0) > 1.01) ||
+                        (Number(mk?.europeanHandicap?.home ?? 0) > 1.01) ||
                         Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasAsiatico) baseTabs.push({ key: "asiatico", label: "Asiático" });
                       const hasBetBuilder = hasResult || hasDupla || hasGols || hasHandicap || has1Tempo || hasEspeciais;
@@ -16273,6 +16288,39 @@ export default function Home({
                           />
                         </MarketGroup>
                       )}
+                    {/* Real 3-way handicap market — the draw pays its own
+                        price and never voids, unlike the Asian handicap
+                        above. Each button's label carries the same signed
+                        line so settlement can read it back. */}
+                    {!isLateGame &&
+                      m.europeanHandicap &&
+                      m.europeanHandicap.home > 0 && (
+                        <MarketGroup
+                          title={`Handicap Europeu (3 vias) — Linha ${m.europeanHandicap.line >= 0 ? "+" : ""}${m.europeanHandicap.line}`}
+                        >
+                          <MarketOddsBtn
+                            match={match}
+                            sel="eh-home"
+                            odd={m.europeanHandicap.home}
+                            market="hcapeu"
+                            label={`${match.home} (${m.europeanHandicap.line >= 0 ? "+" : ""}${m.europeanHandicap.line})`}
+                          />
+                          <MarketOddsBtn
+                            match={match}
+                            sel="eh-draw"
+                            odd={m.europeanHandicap.draw}
+                            market="hcapeu"
+                            label={`Empate (${m.europeanHandicap.line >= 0 ? "+" : ""}${m.europeanHandicap.line})`}
+                          />
+                          <MarketOddsBtn
+                            match={match}
+                            sel="eh-away"
+                            odd={m.europeanHandicap.away}
+                            market="hcapeu"
+                            label={`${match.away} (${m.europeanHandicap.line >= 0 ? "+" : ""}${m.europeanHandicap.line})`}
+                          />
+                        </MarketGroup>
+                      )}
                     {!isLateGame && m.asianTotals && m.asianTotals.o225 > 0 && (
                       <>
                         <MarketGroup title="Total Asiático — 0.5">
@@ -16357,7 +16405,7 @@ export default function Home({
                         </MarketGroup>
                       </>
                     )}
-                    {!m.drawNoBet && !m.asianHandicap && !m.asianTotals && (
+                    {!m.drawNoBet && !m.asianHandicap && !m.europeanHandicap && !m.asianTotals && (
                       <div className="text-center text-zinc-600 py-6 text-sm">
                         Mercado não disponível para esta partida.
                       </div>
@@ -18507,6 +18555,7 @@ export default function Home({
     quartos: "Por Quarto",
     especiais: "Especiais",
     asianHandicap: "Handicap Asiático",
+    hcapeu: "Handicap Europeu (3 vias)",
     correctScore: "Resultado Exacto",
     corners: "Cantos",
     cards: "Cartões",
