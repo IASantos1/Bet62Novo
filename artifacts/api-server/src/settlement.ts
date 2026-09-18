@@ -813,6 +813,10 @@ function scoreOutcomeForSelLastResort(
     status?: string;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     firstGoal?: "home" | "away" | "none";
     extras?: unknown;
     finishedAt?: number;
@@ -1211,6 +1215,10 @@ function describePendingSettlementReason(
     status?: string;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     firstGoal?: "home" | "away" | "none";
     extras?: unknown;
     finishedAt?: number;
@@ -1335,6 +1343,10 @@ export function resolveLiveSelectionSettlement(
     away: number;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     htScore?: [number, number] | null;
     status?: string;
     extras?: unknown;
@@ -1358,6 +1370,10 @@ export function resolveLiveSelectionSettlement(
         status: score.status,
         cornersTotal: score.cornersTotal,
         cardsTotal: score.cardsTotal,
+        cornersHome: score.cornersHome,
+        cornersAway: score.cornersAway,
+        cardsHome: score.cardsHome,
+        cardsAway: score.cardsAway,
         extras: score.extras,
       },
     ),
@@ -1369,6 +1385,10 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
   away: number;
   cornersTotal?: number;
   cardsTotal?: number;
+  cornersHome?: number;
+  cornersAway?: number;
+  cardsHome?: number;
+  cardsAway?: number;
   htScore?: [number, number] | null;
   status?: string;
   extras?: unknown;
@@ -1391,6 +1411,10 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
     away: awayScore,
     cornersTotal: liveExtra?.cornersTotal,
     cardsTotal: liveExtra?.cardsTotal,
+    cornersHome: liveExtra?.cornersHome,
+    cornersAway: liveExtra?.cornersAway,
+    cardsHome: liveExtra?.cardsHome,
+    cardsAway: liveExtra?.cardsAway,
     htScore:
       liveExtra?.htScore ??
       (derivedHt ? [derivedHt.htHome, derivedHt.htAway] : null),
@@ -1421,6 +1445,10 @@ export function resolveSelectionSettlement(
     status?: string;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     firstGoal?: "home" | "away" | "none";
     extras?: unknown;
     finishedAt?: number;
@@ -2390,6 +2418,10 @@ export function scoreOutcomeForSel(
     status?: string;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     firstGoal?: "home" | "away" | "none";
     extras?: unknown;
     finishedAt?: number;
@@ -4367,6 +4399,10 @@ function liveDefinitiveOutcomeForSel(
     away: number;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     htScore?: [number, number] | null;
     status?: string;
     tennisSets?: Array<[number, number]>;
@@ -5394,6 +5430,10 @@ export async function autoSettlePendingBets(opts?: {
                 status: (r as any).status,
                 cornersTotal: r.cornersTotal,
                 cardsTotal: r.cardsTotal,
+                cornersHome: r.cornersHome,
+                cornersAway: r.cornersAway,
+                cardsHome: r.cardsHome,
+                cardsAway: r.cardsAway,
                 firstGoal: r.firstGoal,
                 extras: r.extras,
                 finishedAt: r.finishedAt,
@@ -5545,6 +5585,10 @@ export async function autoSettlePendingBets(opts?: {
               status: (r as any).status,
               cornersTotal: r.cornersTotal,
               cardsTotal: r.cardsTotal,
+              cornersHome: r.cornersHome,
+              cornersAway: r.cornersAway,
+              cardsHome: r.cardsHome,
+              cardsAway: r.cardsAway,
               firstGoal: r.firstGoal,
               extras: r.extras,
               finishedAt: r.finishedAt,
@@ -5721,6 +5765,10 @@ export async function regradeSettledBetsForMatch(
             status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
+            cornersHome: result.cornersHome,
+            cornersAway: result.cornersAway,
+            cardsHome: result.cardsHome,
+            cardsAway: result.cardsAway,
             firstGoal: result.firstGoal,
             extras: result.extras,
             finishedAt: result.finishedAt,
@@ -5942,6 +5990,10 @@ async function hydrateSettledBetSelections(): Promise<void> {
             status: (r as any).status,
             cornersTotal: r.cornersTotal,
             cardsTotal: r.cardsTotal,
+            cornersHome: r.cornersHome,
+            cornersAway: r.cornersAway,
+            cardsHome: r.cardsHome,
+            cardsAway: r.cardsAway,
             firstGoal: r.firstGoal,
             extras: r.extras,
             finishedAt: r.finishedAt,

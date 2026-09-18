@@ -5914,6 +5914,10 @@ export const finishedMatchResults = new Map<
     status?: string; // match status (e.g. "FT", "Postponed", "Cancelled")
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     firstGoal?: "home" | "away" | "none";
     extras?: unknown;
     finishedAt: number; // ms
@@ -6192,6 +6196,21 @@ export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<voi
       : {}),
     ...(state.sport === "football" && typeof state._liveExtra?.cardsTotal === "number"
       ? { cardsTotal: state._liveExtra.cardsTotal }
+      : {}),
+    ...(state.sport === "football" && typeof state._liveExtra?.cornersHome === "number"
+      ? { cornersHome: state._liveExtra.cornersHome }
+      : {}),
+    ...(state.sport === "football" && typeof state._liveExtra?.cornersAway === "number"
+      ? { cornersAway: state._liveExtra.cornersAway }
+      : {}),
+    ...(state.sport === "football" && typeof state._liveExtra?.cardsHome === "number"
+      ? { cardsHome: state._liveExtra.cardsHome }
+      : {}),
+    ...(state.sport === "football" && typeof state._liveExtra?.cardsAway === "number"
+      ? { cardsAway: state._liveExtra.cardsAway }
+      : {}),
+    ...(state.sport === "football" && state._liveExtra?.firstGoal
+      ? { firstGoal: state._liveExtra.firstGoal }
       : {}),
     status: looksLikeNeverTracked ? "abandoned" : "finished",
     homeTeam: state.home,
