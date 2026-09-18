@@ -9,6 +9,10 @@ export type FinishedSettlementCase = {
     status?: string;
     cornersTotal?: number;
     cardsTotal?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    cardsHome?: number;
+    cardsAway?: number;
     firstGoal?: "home" | "away" | "none";
     extras?: unknown;
     finishedAt?: number;

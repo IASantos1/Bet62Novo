@@ -1236,6 +1236,10 @@ function describePendingSettlementReason(
 
   if (/^[ou]c\d+$/.test(s) && extra?.cornersTotal == null)
     return "missing_corners_total";
+  if (/^[ou]hc\d+(?:\.\d+)?$/.test(s) && extra?.cornersHome == null)
+    return "missing_corners_home";
+  if (/^[ou]ac\d+(?:\.\d+)?$/.test(s) && extra?.cornersAway == null)
+    return "missing_corners_away";
   if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal == null)
     return "missing_cards_total";
   if (
@@ -2491,6 +2495,22 @@ export function scoreOutcomeForSel(
     else
       winning =
         s[0] === "o" ? extra.cornersTotal > line : extra.cornersTotal < line;
+  }
+  // ── Home/away team corners O/U (requires per-team stats split) ────────────
+  else if (/^[ou]hc\d+(?:\.\d+)?$/.test(s)) {
+    if (extra?.cornersHome == null) return null;
+    const line = decodeCompactLine(s.slice(3));
+    if (!Number.isFinite(line)) return null;
+    if (extra.cornersHome === line) voided = true;
+    else
+      winning = s[0] === "o" ? extra.cornersHome > line : extra.cornersHome < line;
+  } else if (/^[ou]ac\d+(?:\.\d+)?$/.test(s)) {
+    if (extra?.cornersAway == null) return null;
+    const line = decodeCompactLine(s.slice(3));
+    if (!Number.isFinite(line)) return null;
+    if (extra.cornersAway === line) voided = true;
+    else
+      winning = s[0] === "o" ? extra.cornersAway > line : extra.cornersAway < line;
   }
   // ── Cards O/U (requires stats) ────────────────────────────────────────────
   else if (/^[ou]card\d+$/.test(s)) {
