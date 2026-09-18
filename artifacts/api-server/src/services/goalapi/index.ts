@@ -1,9 +1,16 @@
 // GOAL API (api.goal-api.com) — dedicated football data provider. REST auth
 // is `Authorization: Bearer <key>` (not an X-API-Key header or apiKey query
 // param like PropLine). Every successful response is shaped
-// `{ success: true, data, pagination? }`; this client unwraps `data` and
-// discards `pagination` (none of our call sites page through more than one
-// screen of fixtures/odds today — add pagination support if that changes).
+// `{ success: true, data, pagination? }`. Most call sites (rawGet/cachedGet)
+// unwrap `data` and discard `pagination` — fine for single-fixture/by-id
+// lookups, but real bug found 2026-09-18: /fixtures/date/:date defaults to
+// `limit=50` and a single busy worldwide date can carry 1000+ fixtures
+// (1489 confirmed real for one date) across hundreds of leagues in no
+// priority order — reading only page 1 silently dropped entire top leagues,
+// including the English Premier League itself, whenever it happened to
+// sort past the first 50. rawGetAllPages/cachedGetAllPages below page
+// through every offset (100 is the API's real max `limit`, confirmed —
+// 200+ is rejected with HTTP 400) until `pagination.hasMore` is false.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { kvCache } from "../cache/kvCache.js";
@@ -523,11 +530,11 @@ export class GoalApiClient {
     return url.toString();
   }
 
-  private async rawGet<T>(
+  private async rawGetEnvelope<T>(
     path: string,
     params?: Record<string, string | number | undefined>,
     timeoutMs = 8_000,
-  ): Promise<T> {
+  ): Promise<{ data: T; pagination?: { total: number; limit: number; offset: number; hasMore: boolean } }> {
     try {
       const url = this.buildUrl(path, params);
       const resp = await fetch(url, {
@@ -543,16 +550,53 @@ export class GoalApiClient {
         }
         throw new Error(`[goal-api] HTTP ${resp.status} on ${path}${body ? ` — ${body.slice(0, 300)}` : ""}`);
       }
-      const json = (await resp.json()) as { success: boolean; data: T; message?: string };
+      const json = (await resp.json()) as {
+        success: boolean;
+        data: T;
+        pagination?: { total: number; limit: number; offset: number; hasMore: boolean };
+        message?: string;
+      };
       if (!json.success) {
         throw new Error(`[goal-api] success:false on ${path}${json.message ? ` — ${json.message}` : ""}`);
       }
       recordGoalApiRestSuccess();
-      return json.data;
+      return { data: json.data, pagination: json.pagination };
     } catch (err) {
       recordGoalApiRestFailure(err);
       throw err;
     }
+  }
+
+  private async rawGet<T>(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+    timeoutMs = 8_000,
+  ): Promise<T> {
+    const { data } = await this.rawGetEnvelope<T>(path, params, timeoutMs);
+    return data;
+  }
+
+  /** Pages through every offset of a list endpoint until `pagination.hasMore`
+   * is false, concatenating `data` — see this file's header comment for the
+   * real bug this fixes. `limit: 100` is the API's confirmed real max (a
+   * 200+ limit is rejected with HTTP 400); `maxPages: 30` (3000 fixtures) is
+   * a safety net against a runaway loop if `hasMore` ever misbehaves, well
+   * above the worst real single-date total seen so far (1489). */
+  private async rawGetAllPages<T>(
+    path: string,
+    baseParams?: Record<string, string | number | undefined>,
+    maxPages = 30,
+  ): Promise<T[]> {
+    const limit = 100;
+    const results: T[] = [];
+    let offset = 0;
+    for (let page = 0; page < maxPages; page++) {
+      const { data, pagination } = await this.rawGetEnvelope<T[]>(path, { ...baseParams, limit, offset });
+      if (Array.isArray(data)) results.push(...data);
+      if (!pagination?.hasMore) break;
+      offset += limit;
+    }
+    return results;
   }
 
   private async cachedGet<T>(
@@ -574,6 +618,25 @@ export class GoalApiClient {
     return data;
   }
 
+  private async cachedGetAllPages<T>(
+    path: string,
+    baseParams: Record<string, string | number | undefined> | undefined,
+    ttlSeconds: number,
+  ): Promise<T[]> {
+    const cacheKey = `goalapi:${path}:allpages:${JSON.stringify(baseParams ?? {})}`;
+    const cached = await kvCache.get(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as T[];
+      } catch {
+        /* fall through */
+      }
+    }
+    const data = await this.rawGetAllPages<T>(path, baseParams);
+    kvCache.set(cacheKey, JSON.stringify(data), ttlSeconds).catch(() => {});
+    return data;
+  }
+
   // ── Fixtures ───────────────────────────────────────────────────────────────
 
   getFixtures(params?: { leagueId?: string; date?: string }): Promise<GoalApiFixture[]> {
@@ -581,12 +644,14 @@ export class GoalApiClient {
   }
 
   getLiveFixtures(): Promise<GoalApiFixture[]> {
-    // Not cached beyond a very short TTL — this is the live feed.
-    return this.cachedGet<GoalApiFixture[]>("/fixtures/live", undefined, GOAL_API_TTL.LIVE);
+    // Not cached beyond a very short TTL — this is the live feed. Paginated
+    // like getFixturesByDate below — worldwide live fixtures can exceed one
+    // page during busy hours too.
+    return this.cachedGetAllPages<GoalApiFixture>("/fixtures/live", undefined, GOAL_API_TTL.LIVE);
   }
 
   getFixturesByDate(date: string): Promise<GoalApiFixture[]> {
-    return this.cachedGet<GoalApiFixture[]>(`/fixtures/date/${encodeURIComponent(date)}`, undefined, GOAL_API_TTL.FIXTURES);
+    return this.cachedGetAllPages<GoalApiFixture>(`/fixtures/date/${encodeURIComponent(date)}`, undefined, GOAL_API_TTL.FIXTURES);
   }
 
   getFixtureById(id: string): Promise<GoalApiFixture> {
