@@ -10,10 +10,12 @@ import { proplineAllActiveSports } from "../services/propline/football.js";
 import { startGoalApiWebSocket, syncGoalApiSubscriptions } from "../services/goalapi/websocketClient.js";
 import { startApiTennisWebSocket } from "../services/apitennis/websocketClient.js";
 import { applyGoalApiWebhookEvent, liveMatchState } from "../routes/matches.js";
-import { runPulseScoreShadowMatchSync, triggerPrematchPulseScoreSync } from "../providers/pulsescore/shadowMatchSync.js";
+import { runPulseScoreShadowMatchSync } from "../providers/pulsescore/shadowMatchSync.js";
 import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClient.js";
 import { startBzzoiroBallSync } from "../providers/bzzoiro/ballMatchSync.js";
 import { goalApi } from "../services/goalapi/index.js";
+import { triggerPrematchPropLineFootballSync } from "../services/propline/prematchFootballOddsCache.js";
+import { runPropLineLiveFootballOddsSync } from "../services/propline/liveFootballOddsSync.js";
 
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
@@ -162,6 +164,18 @@ server.listen(port, () => {
     setInterval(() => runPulseScoreShadowMatchSync(), 15_000);
   }
 
+  // PropLine — real live football moneyline source as of 2026-09-18 (GOAL
+  // API's own live-odds endpoint stays deactivated, see
+  // services/goalapi/oddsEngine.ts's header). Same cadence rationale as the
+  // PulseScore block above: PropLine's own client isn't rate-limited on our
+  // side today, but polling faster than every few seconds would just
+  // re-apply the same fetched data more often for no benefit. Inert until
+  // PROPLINE_API_KEY is set.
+  if (CONFIG.PROPLINE_API_KEY) {
+    void runPropLineLiveFootballOddsSync();
+    setInterval(() => void runPropLineLiveFootballOddsSync(), 15_000);
+  }
+
   // PulseScore WebSocket — confirmed real via the docs the user pasted
   // 2026-09-10: the PRO plan (this account's) includes 1 concurrent
   // connection. Treated purely as a wake-up signal (see
@@ -182,14 +196,13 @@ server.listen(port, () => {
     startBzzoiroBallSync();
   }
 
-  // PulseScore Fase 2 — PRÉ-JOGO (upcoming 8 dias): mesma arquitetura híbrida
-  // do Fase 1 mas cadência mais longa (3 min vs 15s do live) — prematch não
-  // se move tão rápido e 80 páginas de PulseScore por rodada custam ~80s com
-  // o 1req/s throttle. Executa 1x no startup e depois a cada 3 min, mesmo
-  // sem tráfego de usuários, garantindo que todos os jogos de hoje já estão
-  // com odds reais no Map cache quando o primeiro usuário abrir a home.
-  // Requer ambas as chaves (GOAL_API fixtures + PULSESCORE_API odds).
-  if (CONFIG.PULSESCORE_API_KEY && CONFIG.GOAL_API_KEY) {
+  // PropLine — PRÉ-JOGO (upcoming 8 dias), moved off PulseScore 2026-09-18:
+  // executa 1x no startup e depois a cada 3 min, mesmo sem tráfego de
+  // usuários, garantindo que todos os jogos de hoje já estão com odds reais
+  // no Map cache quando o primeiro usuário abrir a home — mesmo racional da
+  // Fase 2 original da PulseScore, mesma cadência. Requer ambas as chaves
+  // (GOAL_API fixtures + PROPLINE_API odds).
+  if (CONFIG.PROPLINE_API_KEY && CONFIG.GOAL_API_KEY) {
     async function runPrematchCron(): Promise<void> {
       const today = new Date();
       const dates = Array.from({ length: 8 }, (_, i) => {
@@ -229,9 +242,11 @@ server.listen(port, () => {
       }
       logger.info(
         { count: refs.length },
-        "[pulsescore-prematch-cron] disparando sync de referências upcoming",
+        "[propline-prematch-cron] disparando sync de referências upcoming",
       );
-      void triggerPrematchPulseScoreSync(refs);
+      void triggerPrematchPropLineFootballSync(
+        refs.map((r) => ({ providerMatchId: r.providerMatchId, home: r.home, away: r.away })),
+      );
     }
     void runPrematchCron();
     setInterval(() => void runPrematchCron(), 3 * 60 * 1000);

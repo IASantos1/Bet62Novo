@@ -116,9 +116,9 @@ import {
 import { countGoalApiRedCards } from "../services/goalapi/liveMatchEngine.js";
 import { shouldAcceptOddsUpdate } from "../services/goalapi/oddsEngine.js";
 import {
-  getPrematchPulsePrice,
-  triggerPrematchPulseScoreSync,
-} from "../providers/pulsescore/shadowMatchSync.js";
+  getPrematchPropLineFootballOdds,
+  triggerPrematchPropLineFootballSync,
+} from "../services/propline/prematchFootballOddsCache.js";
 import {
   apiTennis,
   type ApiTennisMatch,
@@ -596,25 +596,30 @@ export type LiveMatchState = {
   _pendingScoreHome?: number;
   _pendingScoreAway?: number;
   // Set once a live football fixture's odds/markets are being driven by a
-  // real price instead of GOAL API's synthetic Poisson fallback (written by
-  // shadowMatchSync.ts's runOddsComparisonPhase for "pulsescore", or
-  // bzzoiro/ballMatchSync.ts's odds handler for "bzzoiro"). Two things key
-  // off it via hasRealPriceSource() below: the drift-engine setInterval loop
-  // skips any state with a real source set (never overwrites a real price
-  // with a synthetic one), and buildLivePayload's visibility filter requires
-  // one before a football/GOAL-API fixture is shown as bettable — per the
-  // user's explicit decisions (2026-09-10 for PulseScore, 2026-09-14 for
-  // bzzoiro becoming the primary source): a fixture with no real price yet
-  // simply doesn't appear for betting rather than showing a fabricated one.
-  // GOAL API remains the source of score/events/stats regardless, pending
-  // task #105's settlement-data validation.
-  _priceSource?: "pulsescore" | "bzzoiro";
+  // real price instead of GOAL API's synthetic Poisson fallback — written
+  // by prematchFootballOddsCache.ts/live PropLine odds lookup for
+  // "propline" (the real source since 2026-09-18, football odds moved off
+  // GOAL API), shadowMatchSync.ts's runOddsComparisonPhase for "pulsescore"
+  // (dormant, PulseScore is deactivated), or bzzoiro/ballMatchSync.ts's odds
+  // handler for "bzzoiro" (being retired, see config.ts's BZZOIRO_* removal
+  // plan). Two things key off it via hasRealPriceSource() below: the
+  // drift-engine setInterval loop skips any state with a real source set
+  // (never overwrites a real price with a synthetic one), and
+  // buildLivePayload's visibility filter requires one before a football/
+  // GOAL-API fixture is shown as bettable — a fixture with no real price
+  // yet simply doesn't appear for betting rather than showing a fabricated
+  // one. GOAL API remains the source of score/events/stats regardless.
+  _priceSource?: "pulsescore" | "bzzoiro" | "propline";
   // Traceability: the raw PulseScore event id behind this fixture's real
   // markets (set alongside _priceSource by shadowMatchSync.ts) — lets
   // GET /api/admin/pulsescore-market-dump re-fetch the exact upstream
   // bet365 event to compare its raw market list against what actually got
   // extracted, for diagnosing sparse/missing markets.
   _pulseScoreEventId?: string;
+  // Same traceability idea as _pulseScoreEventId, for the PropLine event
+  // backing this fixture's real moneyline (set alongside _priceSource by
+  // prematchFootballOddsCache.ts / the live PropLine odds lookup).
+  _proplineEventId?: string;
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
   // BET62 Fase 0 (2026-09-10) — monotonic counter, bumped only when
@@ -813,10 +818,13 @@ export type UpcomingMatch = {
    *  display/diagnostic flag now — per the user's 2026-09-11 decision
    *  (routes/bets.ts), a bet is accepted on whichever price is shown,
    *  real or synthetic; this no longer gates acceptance. */
-  _priceSource?: "pulsescore" | "bzzoiro";
+  _priceSource?: "pulsescore" | "bzzoiro" | "propline";
   /** Traceability: the raw PulseScore event id used for this fixture's
    *  real markets (matches getPrematchPulsePrice + canonical DB mapping). */
   _pulseScoreEventId?: string;
+  /** Same traceability idea, for the PropLine event backing this fixture's
+   *  real moneyline (matches getPrematchPropLineFootballOdds). */
+  _proplineEventId?: string;
 };
 
 /** Any provider that has priced a fixture with a REAL number, as opposed to
@@ -824,8 +832,8 @@ export type UpcomingMatch = {
  * for the full write/read contract. Centralized so "which sources count as
  * real" is a single fact, not three separately-maintained string
  * comparisons across the drift loop, visibility filter, and rebuild logic. */
-function hasRealPriceSource(source: "pulsescore" | "bzzoiro" | undefined): boolean {
-  return source === "pulsescore" || source === "bzzoiro";
+function hasRealPriceSource(source: "pulsescore" | "bzzoiro" | "propline" | undefined): boolean {
+  return source === "pulsescore" || source === "bzzoiro" || source === "propline";
 }
 
 type ProviderQualitySnapshot = {
@@ -7931,7 +7939,9 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       });
     }
   }
-  void triggerPrematchPulseScoreSync(prematchRefs);
+  void triggerPrematchPropLineFootballSync(
+    prematchRefs.map((r) => ({ providerMatchId: r.providerMatchId, home: r.home, away: r.away })),
+  );
 
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
@@ -7944,19 +7954,17 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
       if (!seen.has(key)) continue;
       seen.delete(key);
 
-      const prematchPrice = getPrematchPulsePrice(fx.id);
+      const prematchPrice = getPrematchPropLineFootballOdds(fx.id);
       let resultOdds: { home: number; draw: number; away: number } = { home: 0, draw: 0, away: 0 };
-      let finalMarkets: AdvancedMarkets | null = null;
       let hasRealOdds = false;
-      let priceSource: "pulsescore" | undefined;
-      let pulseScoreEventId: string | undefined;
+      let priceSource: "propline" | undefined;
+      let proplineEventId: string | undefined;
 
-      if (prematchPrice && prematchPrice.odds) {
-        resultOdds = prematchPrice.odds;
-        finalMarkets = prematchPrice.markets;
+      if (prematchPrice) {
+        resultOdds = { home: prematchPrice.home, draw: prematchPrice.draw, away: prematchPrice.away };
         hasRealOdds = true;
-        priceSource = "pulsescore";
-        pulseScoreEventId = prematchPrice.pulseScoreEventId;
+        priceSource = "propline";
+        proplineEventId = prematchPrice.proplineEventId;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 
@@ -7971,7 +7979,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         sport: "football",
         hasRealOdds,
         odds: resultOdds,
-        markets: finalMarkets ?? zerofillAdvancedMarkets(),
+        markets: zerofillAdvancedMarkets(),
         isPriorityLeague: true,
         homeLogoUrl: fx.homeTeam?.badge,
         awayLogoUrl: fx.awayTeam?.badge,
@@ -7981,7 +7989,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         stadium: fx.matchStadium ?? undefined,
         referee: fx.matchReferee ?? undefined,
         _priceSource: priceSource,
-        _pulseScoreEventId: pulseScoreEventId,
+        _proplineEventId: proplineEventId,
       });
     }
   }

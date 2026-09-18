@@ -20,15 +20,61 @@ function proplineNormalizeOddsPrice(price: number): number {
   return price;
 }
 
-/** Preference/positional-fallback H2H (moneyline) extraction validated
- * against real PropLine responses earlier this session: tries a curated
- * bookmaker order first, matches outcomes by team name, and falls back to
- * outcome POSITION only when PropLine's own documented ordering guarantee
- * applies (home, away, then draw when threeWay) and the count matches
- * exactly. Returns null (never a fabricated price) when no h2h market is
- * found for any bookmaker. Every price is run through
- * proplineNormalizeOddsPrice before being returned (see its own comment —
- * requesting oddsFormat: "decimal" doesn't guarantee a decimal response). */
+/** Extracts one bookmaker's h2h (moneyline) prices — matches outcomes by
+ * team name, falling back to outcome POSITION only when PropLine's own
+ * documented ordering guarantee applies (home, away, then draw when
+ * threeWay) and the count matches exactly. Returns null when this
+ * particular bookmaker didn't price the market (a different bookmaker may
+ * still have it — see extractProplineH2HOdds, which calls this once per
+ * bookmaker). */
+function extractH2HFromBookmaker(
+  bm: ProplineBookmaker,
+  home: string,
+  away: string,
+  threeWay: boolean,
+): { home: number; draw: number | null; away: number } | null {
+  const market = bm.markets.find((m) => m.key === "h2h");
+  if (!market) return null;
+  let homePrice: number | null = null;
+  let awayPrice: number | null = null;
+  let drawPrice: number | null = null;
+  for (const o of market.outcomes) {
+    const name = (o.name || "").toLowerCase();
+    if (name === "draw") drawPrice = o.price;
+    else if (name === home.toLowerCase() || o.name === home) homePrice = o.price;
+    else if (name === away.toLowerCase() || o.name === away) awayPrice = o.price;
+  }
+  const expectedCount = threeWay ? 3 : 2;
+  if (
+    (homePrice == null || awayPrice == null || (threeWay && drawPrice == null)) &&
+    market.outcomes.length === expectedCount
+  ) {
+    const [h, a, d] = market.outcomes;
+    if (h && a) {
+      homePrice ??= h.price;
+      awayPrice ??= a.price;
+      if (threeWay && d) drawPrice ??= d.price;
+    }
+  }
+  if (homePrice == null || awayPrice == null) return null;
+  if (threeWay && drawPrice == null) return null;
+  return { home: homePrice, draw: drawPrice, away: awayPrice };
+}
+
+function average(values: number[]): number {
+  return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100;
+}
+
+/** H2H (moneyline) extraction, averaged across every bookmaker that priced
+ * the market — same "average across all real quotes" approach bzzoiro's
+ * oddsNormalizer.ts used, adopted here 2026-09-18 in place of the previous
+ * "first bookmaker from a curated preference order" behavior (a single
+ * bookmaker's price is one opinion, not BET62's line). Every price is run
+ * through proplineNormalizeOddsPrice before being averaged (see its own
+ * comment — requesting oddsFormat: "decimal" doesn't guarantee a decimal
+ * response, so a stray American price must be converted before it's mixed
+ * into an average with real decimal ones). Returns null (never a
+ * fabricated price) when no bookmaker priced this market at all. */
 export function extractProplineH2HOdds(
   bookmakers: ProplineBookmaker[] | null | undefined,
   home: string,
@@ -36,45 +82,23 @@ export function extractProplineH2HOdds(
   threeWay: boolean,
 ): { home: number; draw: number; away: number } | null {
   if (!bookmakers || bookmakers.length === 0) return null;
-  const preferredOrder = ["pinnacle", "bovada", "betmgm", "kalshi", "betonlineag", "lowvig", "draftkings", "fanduel"];
-  const ordered = [...bookmakers].sort((a, b) => {
-    const ai = preferredOrder.indexOf(a.key);
-    const bi = preferredOrder.indexOf(b.key);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-  for (const bm of ordered) {
-    const market = bm.markets.find((m) => m.key === "h2h");
-    if (!market) continue;
-    let homePrice: number | null = null;
-    let awayPrice: number | null = null;
-    let drawPrice: number | null = null;
-    for (const o of market.outcomes) {
-      const name = (o.name || "").toLowerCase();
-      if (name === "draw") drawPrice = o.price;
-      else if (name === home.toLowerCase() || o.name === home) homePrice = o.price;
-      else if (name === away.toLowerCase() || o.name === away) awayPrice = o.price;
-    }
-    const expectedCount = threeWay ? 3 : 2;
-    if (
-      (homePrice == null || awayPrice == null || (threeWay && drawPrice == null)) &&
-      market.outcomes.length === expectedCount
-    ) {
-      const [h, a, d] = market.outcomes;
-      if (h && a) {
-        homePrice ??= h.price;
-        awayPrice ??= a.price;
-        if (threeWay && d) drawPrice ??= d.price;
-      }
-    }
-    if (homePrice == null || awayPrice == null) continue;
-    if (threeWay && drawPrice == null) continue;
-    return {
-      home: proplineNormalizeOddsPrice(homePrice),
-      draw: threeWay && drawPrice != null ? proplineNormalizeOddsPrice(drawPrice) : 0,
-      away: proplineNormalizeOddsPrice(awayPrice),
-    };
+  const homePrices: number[] = [];
+  const awayPrices: number[] = [];
+  const drawPrices: number[] = [];
+  for (const bm of bookmakers) {
+    const prices = extractH2HFromBookmaker(bm, home, away, threeWay);
+    if (!prices) continue;
+    homePrices.push(proplineNormalizeOddsPrice(prices.home));
+    awayPrices.push(proplineNormalizeOddsPrice(prices.away));
+    if (threeWay && prices.draw != null) drawPrices.push(proplineNormalizeOddsPrice(prices.draw));
   }
-  return null;
+  if (homePrices.length === 0 || awayPrices.length === 0) return null;
+  if (threeWay && drawPrices.length === 0) return null;
+  return {
+    home: average(homePrices),
+    draw: threeWay ? average(drawPrices) : 0,
+    away: average(awayPrices),
+  };
 }
 
 /** Extracts {home, away, status} from a ProplineScore entry defensively —
