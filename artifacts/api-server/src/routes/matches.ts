@@ -206,7 +206,14 @@ type AdvancedMarkets = {
   // better than fixed shared slots.
   homeCorners?: { line: number; over: number; under: number };
   awayCorners?: { line: number; over: number; under: number };
+  // Corners handicap (Asian-style spread on corner count) — real PropLine
+  // market `corners_spread`, same shape as `asianHandicap` above.
+  cornersHandicap?: { line: number; home: number; away: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
+  // Per-team cards over/under — real PropLine market `team_cards`, same
+  // shape/rationale as homeCorners/awayCorners above.
+  homeCards?: { line: number; over: number; under: number };
+  awayCards?: { line: number; over: number; under: number };
   // Sport-specific extras
   _spread?: number;
   _total?: number;
@@ -8012,6 +8019,9 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         if (prematchPrice.firstGoalscorer) markets.firstGoalscorer = prematchPrice.firstGoalscorer;
         if (prematchPrice.winToNil) markets.winToNil = prematchPrice.winToNil;
         if (prematchPrice.firstGoal) markets.firstGoal = prematchPrice.firstGoal;
+        if (prematchPrice.cornersHandicap) markets.cornersHandicap = prematchPrice.cornersHandicap;
+        if (prematchPrice.homeCards) markets.homeCards = prematchPrice.homeCards;
+        if (prematchPrice.awayCards) markets.awayCards = prematchPrice.awayCards;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 

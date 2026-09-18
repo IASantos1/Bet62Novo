@@ -31,6 +31,8 @@ import {
   extractProplineGoalscorerMatchedToRoster,
   extractProplineWinToNil,
   extractProplineFirstTeamToScore,
+  extractProplineCornersHandicap,
+  extractProplineTeamCards,
   type ProplineTotalGoals,
   type ProplineTotalCorners,
   type ProplineTotalCards,
@@ -54,6 +56,8 @@ const FOOTBALL_MARKET_KEYS = [
   "first_goal_scorer",
   "to_win_without_conceding",
   "first_team_to_score",
+  "corners_spread",
+  "team_cards",
 ];
 
 /** GOAL API's real lineup for a fixture (starting XI + substitutes) — the
@@ -169,6 +173,9 @@ type CachedFootballOdds = {
   firstGoalscorer: Array<{ player: string; odds: number }> | null;
   winToNil: { home: number; away: number } | null;
   firstGoal: { home: number; noGoal: number; away: number } | null;
+  cornersHandicap: { line: number; home: number; away: number } | null;
+  homeCards: { line: number; over: number; under: number } | null;
+  awayCards: { line: number; over: number; under: number } | null;
   fetchedAt: number;
 };
 
@@ -279,6 +286,7 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
     const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
     const teamCorners = extractProplineTeamCorners(ev.bookmakers, ev.home_team, ev.away_team);
+    const teamCards = extractProplineTeamCards(ev.bookmakers, ev.home_team, ev.away_team);
     let rosterNames = await fetchGoalApiRosterNames(fx.providerMatchId);
     if (rosterNames.length === 0) {
       rosterNames = await fetchGoalApiSquadNames(fx.homeTeamId, fx.awayTeamId);
@@ -302,6 +310,9 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       firstGoalscorer: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames),
       winToNil: extractProplineWinToNil(ev.bookmakers, ev.home_team, ev.away_team),
       firstGoal: extractProplineFirstTeamToScore(ev.bookmakers, ev.home_team, ev.away_team),
+      cornersHandicap: extractProplineCornersHandicap(ev.bookmakers, ev.home_team, ev.away_team),
+      homeCards: teamCards.home,
+      awayCards: teamCards.away,
       fetchedAt: Date.now(),
     });
     priced++;

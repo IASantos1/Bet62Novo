@@ -1240,8 +1240,15 @@ function describePendingSettlementReason(
     return "missing_corners_home";
   if (/^[ou]ac\d+(?:\.\d+)?$/.test(s) && extra?.cornersAway == null)
     return "missing_corners_away";
+  if ((s === "corh-home" || s === "corh-away") &&
+    (extra?.cornersHome == null || extra?.cornersAway == null))
+    return "missing_corners_split";
   if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal == null)
     return "missing_cards_total";
+  if (/^[ou]hcards\d+(?:\.\d+)?$/.test(s) && extra?.cardsHome == null)
+    return "missing_cards_home";
+  if (/^[ou]acards\d+(?:\.\d+)?$/.test(s) && extra?.cardsAway == null)
+    return "missing_cards_away";
   if (
     (/^1hcard-[ou]\d+$/.test(s) ||
       /^2hcard-[ou]\d+$/.test(s) ||
@@ -2512,6 +2519,20 @@ export function scoreOutcomeForSel(
     else
       winning = s[0] === "o" ? extra.cornersAway > line : extra.cornersAway < line;
   }
+  // ── Home/away team cards O/U (requires per-team stats split) ──────────────
+  else if (/^[ou]hcards\d+(?:\.\d+)?$/.test(s)) {
+    if (extra?.cardsHome == null) return null;
+    const line = decodeCompactLine(s.slice(7));
+    if (!Number.isFinite(line)) return null;
+    if (extra.cardsHome === line) voided = true;
+    else winning = s[0] === "o" ? extra.cardsHome > line : extra.cardsHome < line;
+  } else if (/^[ou]acards\d+(?:\.\d+)?$/.test(s)) {
+    if (extra?.cardsAway == null) return null;
+    const line = decodeCompactLine(s.slice(7));
+    if (!Number.isFinite(line)) return null;
+    if (extra.cardsAway === line) voided = true;
+    else winning = s[0] === "o" ? extra.cardsAway > line : extra.cardsAway < line;
+  }
   // ── Cards O/U (requires stats) ────────────────────────────────────────────
   else if (/^[ou]card\d+$/.test(s)) {
     // Fall back to counting individual card events when no aggregate
@@ -2645,6 +2666,14 @@ export function scoreOutcomeForSel(
     const line = readSelectionMarketLine(sel);
     if (line == null || !Number.isFinite(line)) return null;
     return settleEuropeanHandicapOutcome(home, away, side, line);
+  }
+  // ── Corners handicap (Asian-style spread on corner count, requires stats) ─
+  else if (s === "corh-home" || s === "corh-away") {
+    if (extra?.cornersHome == null || extra?.cornersAway == null) return null;
+    const side = s.endsWith("home") ? "home" : "away";
+    const line = readSelectionMarketLine(sel);
+    if (line == null || !Number.isFinite(line)) return null;
+    return settleAsianSideHandicapOutcome(extra.cornersHome, extra.cornersAway, side, line);
   }
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
