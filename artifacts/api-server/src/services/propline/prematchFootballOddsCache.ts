@@ -3,11 +3,14 @@
 // odds/live-odds, kept only for fixtures/events/stats) onto PropLine.
 // GOAL API fixtures are looked up here by team name against PropLine's
 // soccer events, same "progressively warm, never block the response"
-// pattern the old bzzoiro/PulseScore prematch caches used. Moneyline
-// (1X2), Over/Under totals, and Asian handicap are all real PropLine
-// markets on the same event (confirmed 2026-09-18 — `totals`/`spreads`
-// keys, not guessed); BTTS is not (0 occurrences across every soccer
-// bookmaker checked), so it stays out.
+// pattern the old bzzoiro/PulseScore prematch caches used.
+//
+// Every market key below was confirmed real 2026-09-18 via PropLine's own
+// GET /sports/{sport}/events/{id}/markets (never guessed from the vendor's
+// prose docs, which list markets this API doesn't actually expose under
+// the names/keys they use — e.g. the docs never mention that BTTS's real
+// key is `both_teams_to_score`, not `btts`; an earlier check against the
+// wrong key wrongly concluded BTTS didn't exist for soccer at all).
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { propline, type ProplineEvent } from "./index.js";
@@ -15,9 +18,33 @@ import {
   extractProplineH2HOdds,
   extractProplineTotalGoals,
   extractProplineAsianHandicap,
+  extractProplineBothTeamsToScore,
+  extractProplineDrawNoBet,
+  extractProplineDoubleChance,
+  extractProplineHalfTimeFullTime,
+  extractProplineCorrectScore,
+  extractProplineTotalCorners,
+  extractProplineTotalCards,
+  extractProplineTeamCorners,
   type ProplineTotalGoals,
+  type ProplineTotalCorners,
+  type ProplineTotalCards,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
+
+const FOOTBALL_MARKET_KEYS = [
+  "h2h",
+  "totals",
+  "spreads",
+  "both_teams_to_score",
+  "draw_no_bet",
+  "double_chance",
+  "half_time_full_time",
+  "correct_score",
+  "total_corners",
+  "team_corners",
+  "total_cards",
+];
 
 /** Fetches one soccer_* league's odds directly via the PropLine client —
  * NOT via football.ts's proplineFetchAllUpcomingOdds, which round-trips
@@ -35,7 +62,7 @@ import { proplineFindEventByName, proplineAllActiveSports } from "./football.js"
 async function fetchSoccerLeagueOdds(sportKey: string): Promise<ProplineEvent[]> {
   if (!CONFIG.PROPLINE_API_KEY) return [];
   try {
-    const events = await propline.getOdds(sportKey, { markets: ["h2h", "totals", "spreads"], oddsFormat: "decimal" });
+    const events = await propline.getOdds(sportKey, { markets: FOOTBALL_MARKET_KEYS, oddsFormat: "decimal" });
     return Array.isArray(events) ? events : [];
   } catch {
     return [];
@@ -49,31 +76,33 @@ type CachedFootballOdds = {
   proplineEventId: string;
   totalGoals: ProplineTotalGoals | null;
   asianHandicap: { line: number; home: number; away: number } | null;
+  bothTeamsToScore: { yes: number; no: number } | null;
+  drawNoBet: { home: number; away: number } | null;
+  doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number } | null;
+  htft: {
+    hh: number; hd: number; ha: number;
+    dh: number; dd: number; da: number;
+    ah: number; ad: number; aa: number;
+  } | null;
+  correctScore: Record<string, number> | null;
+  totalCorners: ProplineTotalCorners | null;
+  totalCards: ProplineTotalCards | null;
+  homeCorners: { line: number; over: number; under: number } | null;
+  awayCorners: { line: number; over: number; under: number } | null;
   fetchedAt: number;
 };
 
 const cache = new Map<string, CachedFootballOdds>();
 const PRICE_TTL_MS = 30 * 60 * 1000;
 
-export function getPrematchPropLineFootballOdds(goalApiFixtureId: string): {
-  home: number;
-  draw: number;
-  away: number;
-  proplineEventId: string;
-  totalGoals: ProplineTotalGoals | null;
-  asianHandicap: { line: number; home: number; away: number } | null;
-} | null {
+export function getPrematchPropLineFootballOdds(
+  goalApiFixtureId: string,
+): Omit<CachedFootballOdds, "fetchedAt"> | null {
   const entry = cache.get(goalApiFixtureId);
   if (!entry) return null;
   if (Date.now() - entry.fetchedAt > PRICE_TTL_MS) return null;
-  return {
-    home: entry.home,
-    draw: entry.draw,
-    away: entry.away,
-    proplineEventId: entry.proplineEventId,
-    totalGoals: entry.totalGoals,
-    asianHandicap: entry.asianHandicap,
-  };
+  const { fetchedAt: _fetchedAt, ...rest } = entry;
+  return rest;
 }
 
 /** Debug-only snapshot for GET /api/admin/propline-football-status — added
@@ -163,13 +192,21 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
     matched++;
     const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
-    const totalGoals = extractProplineTotalGoals(ev.bookmakers);
-    const asianHandicap = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+    const teamCorners = extractProplineTeamCorners(ev.bookmakers, ev.home_team, ev.away_team);
     cache.set(fx.providerMatchId, {
       ...odds,
       proplineEventId: ev.id,
-      totalGoals,
-      asianHandicap,
+      totalGoals: extractProplineTotalGoals(ev.bookmakers),
+      asianHandicap: extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team),
+      bothTeamsToScore: extractProplineBothTeamsToScore(ev.bookmakers),
+      drawNoBet: extractProplineDrawNoBet(ev.bookmakers, ev.home_team, ev.away_team),
+      doubleChance: extractProplineDoubleChance(ev.bookmakers, ev.home_team, ev.away_team),
+      htft: extractProplineHalfTimeFullTime(ev.bookmakers, ev.home_team, ev.away_team),
+      correctScore: extractProplineCorrectScore(ev.bookmakers),
+      totalCorners: extractProplineTotalCorners(ev.bookmakers),
+      totalCards: extractProplineTotalCards(ev.bookmakers),
+      homeCorners: teamCorners.home,
+      awayCorners: teamCorners.away,
       fetchedAt: Date.now(),
     });
     priced++;

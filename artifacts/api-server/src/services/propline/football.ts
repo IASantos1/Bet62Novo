@@ -110,6 +110,15 @@ export function proplineAllActiveSports(): string[] {
     "soccer_germany_bundesliga",
     "soccer_france_ligue_one",
     "soccer_usa_mls",
+    // Added 2026-09-18 per explicit user request — confirmed real via a
+    // production API call (soccer_portugal_primeira_liga: 9 real upcoming
+    // events; soccer_argentina_primera_division: 31 real upcoming events,
+    // both under this exact key even though PropLine's own /sports listing
+    // shows the shorter "soccer_argentina_primera" as its canonical
+    // key/title — this one works too, so it's kept as confirmed rather than
+    // switched on a guess).
+    "soccer_portugal_primeira_liga",
+    "soccer_argentina_primera_division",
     "tennis",
     "mma_ufc",
   ];

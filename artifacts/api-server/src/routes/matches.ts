@@ -7932,6 +7932,22 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         proplineEventId = prematchPrice.proplineEventId;
         if (prematchPrice.totalGoals) Object.assign(markets.totalGoals, prematchPrice.totalGoals);
         if (prematchPrice.asianHandicap) markets.asianHandicap = prematchPrice.asianHandicap;
+        if (prematchPrice.bothTeamsToScore) markets.bothTeamsScore = prematchPrice.bothTeamsToScore;
+        if (prematchPrice.doubleChance) markets.doubleChance = prematchPrice.doubleChance;
+        if (prematchPrice.drawNoBet) markets.drawNoBet = prematchPrice.drawNoBet;
+        if (prematchPrice.htft) markets.htft = prematchPrice.htft;
+        if (prematchPrice.correctScore) Object.assign(markets.correctScore, prematchPrice.correctScore);
+        if (prematchPrice.totalCorners) {
+          Object.assign(
+            (markets.corners ??= { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }),
+            prematchPrice.totalCorners,
+          );
+        }
+        if (prematchPrice.totalCards) {
+          Object.assign((markets.cards ??= { o35: 0, u35: 0, o45: 0, u45: 0 }), prematchPrice.totalCards);
+        }
+        if (prematchPrice.homeCorners) markets.homeCorners = prematchPrice.homeCorners;
+        if (prematchPrice.awayCorners) markets.awayCorners = prematchPrice.awayCorners;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 
