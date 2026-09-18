@@ -38,6 +38,11 @@ import {
   resolveProplineSportKey,
   proplineAllActiveSports,
 } from "../services/propline/football.js";
+import {
+  getPropLineFootballCacheDebug,
+  triggerPrematchPropLineFootballSync,
+} from "../services/propline/prematchFootballOddsCache.js";
+import { goalApi } from "../services/goalapi/index.js";
 import { getGoalApiProviderHealth } from "../health/providerHealth.js";
 import { getPulseScoreHealth } from "../providers/pulsescore/health.js";
 import {
@@ -2694,6 +2699,54 @@ router.get("/pulsescore-status", adminMiddleware, async (_req: AdminRequest, res
     pulseScore: getPulseScoreHealth(),
     shadowSync: getPulseScoreShadowSyncStatus(),
     prematchSync: getPulseScorePrematchStatus(),
+  });
+});
+
+// PropLine football prematch price cache — real-time debug view, added
+// 2026-09-18 while chasing a production report of empty football pré-jogo/
+// ao vivo despite GOAL_API_KEY/PROPLINE_API_KEY both confirmed valid and a
+// confirmed real team-name match (New England Revolution vs Orlando City,
+// soccer_usa_mls) via manual REST probes. This surfaces the actual live
+// in-memory cache state (never visible from outside the process otherwise)
+// and, with ?trigger=1, forces + awaits one real sync round-trip so the
+// response itself carries the attempted/matched/priced counts instead of
+// needing to catch the async log line at the right moment.
+router.get("/propline-football-status", adminMiddleware, async (req: AdminRequest, res) => {
+  const debug = getPropLineFootballCacheDebug();
+  let triggerResult: unknown = null;
+  if (req.query["trigger"] === "1") {
+    try {
+      const today = new Date();
+      const dates = Array.from({ length: 8 }, (_, i) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+      const perDay = await Promise.all(dates.map((date) => goalApi.getFixturesByDate(date).catch(() => [])));
+      const refs: { providerMatchId: string; home: string; away: string }[] = [];
+      const seen = new Set<string>();
+      for (const fixtures of perDay) {
+        for (const fx of fixtures as any[]) {
+          if (fx.matchStatus !== "SCHEDULED" && fx.matchStatus !== "NS") continue;
+          const home = fx.homeTeam?.name;
+          const away = fx.awayTeam?.name;
+          if (!home || !away) continue;
+          const key = `${home}|${away}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          refs.push({ providerMatchId: String(fx.id), home, away });
+        }
+      }
+      await triggerPrematchPropLineFootballSync(refs);
+      triggerResult = { refsAttempted: refs.length };
+    } catch (err) {
+      triggerResult = { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  res.json({
+    cache: getPropLineFootballCacheDebug(),
+    triggerResult,
+    cacheBeforeTrigger: req.query["trigger"] === "1" ? debug : undefined,
   });
 });
 

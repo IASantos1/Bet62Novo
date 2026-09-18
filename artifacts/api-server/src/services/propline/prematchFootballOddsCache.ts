@@ -34,6 +34,27 @@ export function getPrematchPropLineFootballOdds(
   return { home: entry.home, draw: entry.draw, away: entry.away, proplineEventId: entry.proplineEventId };
 }
 
+/** Debug-only snapshot for GET /api/admin/propline-football-status — added
+ * 2026-09-18 while chasing a real production report of empty football
+ * pré-jogo/ao vivo despite confirmed-valid keys and confirmed real team-name
+ * matches. Lets us see the actual live cache state instead of guessing from
+ * log timing. */
+export function getPropLineFootballCacheDebug(): {
+  size: number;
+  entries: Array<{ goalApiFixtureId: string; odds: { home: number; draw: number; away: number }; proplineEventId: string; ageMs: number }>;
+} {
+  const now = Date.now();
+  return {
+    size: cache.size,
+    entries: [...cache.entries()].map(([id, e]) => ({
+      goalApiFixtureId: id,
+      odds: { home: e.home, draw: e.draw, away: e.away },
+      proplineEventId: e.proplineEventId,
+      ageMs: now - e.fetchedAt,
+    })),
+  };
+}
+
 export type PrematchFootballFixtureRef = { providerMatchId: string; home: string; away: string };
 
 /** Every soccer_* sport key currently active — PropLine has no single "all
