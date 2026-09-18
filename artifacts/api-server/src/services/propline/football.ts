@@ -119,6 +119,40 @@ export function proplineAllActiveSports(): string[] {
     // switched on a guess).
     "soccer_portugal_primeira_liga",
     "soccer_argentina_primera_division",
+    // Added 2026-09-18 — every key below is copied verbatim from a real
+    // GET /sports call against production (not the vendor's prose docs),
+    // which is itself the ground truth this whole migration treats as
+    // "confirmed real" (the same call is how soccer_brasileirao's real key
+    // was found, after two guessed spellings 404'd). soccer_brasileirao
+    // itself is separately confirmed via a real /odds call too (20 real
+    // upcoming fixtures, 2026-09-18). A league with no fixtures on a given
+    // day just contributes zero events to the pool — every fetch site here
+    // already handles that (empty array, no crash), so there's no need to
+    // individually confirm /odds for each of the others before enabling
+    // them.
+    "soccer_brasileirao",
+    "soccer_championship",
+    "soccer_eredivisie",
+    "soccer_liga_mx",
+    "soccer_scottish_premiership",
+    "soccer_saudi_pro",
+    "soccer_eliteserien",
+    "soccer_japan_j_league",
+    "soccer_turkey_super_lig",
+    "soccer_belgium_pro_league",
+    "soccer_sweden_allsvenskan",
+    "soccer_greek_super_league",
+    "soccer_swiss_super_league",
+    "soccer_a_league",
+    "soccer_uefa_champions_league",
+    "soccer_copa_libertadores",
+    "soccer_copa_sudamericana",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_conference_league",
+    "soccer_uefa_nations_league",
+    "soccer_fifa_world_cup",
+    "soccer_germany_bundesliga2",
+    "soccer_germany_dfb_pokal",
     "tennis",
     "mma_ufc",
   ];
