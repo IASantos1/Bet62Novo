@@ -66,7 +66,7 @@ const FOOTBALL_MARKET_KEYS = [
  * false until then) — an empty return here just means the goalscorer
  * markets stay unset for now, same "real data patches in when it exists"
  * convention as everywhere else, not an error. */
-async function fetchGoalApiRosterNames(fixtureId: string): Promise<string[]> {
+export async function fetchGoalApiRosterNames(fixtureId: string): Promise<string[]> {
   if (!CONFIG.GOAL_API_KEY) return [];
   try {
     const lineups = await goalApi.getFixtureLineups(fixtureId);
