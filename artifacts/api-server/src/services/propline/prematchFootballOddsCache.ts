@@ -84,6 +84,39 @@ export async function fetchGoalApiRosterNames(fixtureId: string): Promise<string
   }
 }
 
+/** Squad fallback for fetchGoalApiRosterNames — added 2026-09-18 per
+ * explicit user request, after finding GET /players?teamId=:id (confirmed
+ * real: `teamId` is the actual filter param, `team_id`/`team` are silently
+ * ignored and return the full 431k-player global list instead — tested all
+ * three before picking this one). A team's full squad is available on GOAL
+ * API long before its lineup for a specific fixture is posted, so this
+ * widens goalscorer coverage to fixtures further from kickoff. Traded off
+ * against real quality loss: squad names here are often more abbreviated
+ * than a real lineup's (`lineupPlayer`) — e.g. "A. Abada" vs a lineup's
+ * full "Alejandro Maciel" — which can only ever REDUCE match confidence
+ * against PropLine's fuller names, never fabricate one, so this is only
+ * used when fetchGoalApiRosterNames found no posted lineup at all (never
+ * as a preference over it). Also includes anyone benched/injured (no
+ * "starting XI" concept for a squad list), which is fine — a player who
+ * doesn't actually play just never has a real goal event to match against,
+ * same as any other unpriced-in-practice case this file already accepts. */
+export async function fetchGoalApiSquadNames(homeTeamId?: string, awayTeamId?: string): Promise<string[]> {
+  if (!CONFIG.GOAL_API_KEY) return [];
+  const names: string[] = [];
+  for (const teamId of [homeTeamId, awayTeamId]) {
+    if (!teamId) continue;
+    try {
+      const players = await goalApi.getPlayersByTeam(teamId);
+      for (const p of players) {
+        if (p.name) names.push(p.name);
+      }
+    } catch {
+      /* one side failing shouldn't drop the other */
+    }
+  }
+  return names;
+}
+
 /** Fetches one soccer_* league's odds directly via the PropLine client —
  * NOT via football.ts's proplineFetchAllUpcomingOdds, which round-trips
  * the key through resolveProplineSportKey. Real bug found 2026-09-18:
@@ -167,7 +200,13 @@ export function getPropLineFootballCacheDebug(): {
   };
 }
 
-export type PrematchFootballFixtureRef = { providerMatchId: string; home: string; away: string };
+export type PrematchFootballFixtureRef = {
+  providerMatchId: string;
+  home: string;
+  away: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+};
 
 /** Every soccer_* sport key currently active — PropLine has no single "all
  * soccer" key, only one per league (see football.ts's PROPLINE_SOCCER_LEAGUES),
@@ -234,7 +273,10 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
     const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
     const teamCorners = extractProplineTeamCorners(ev.bookmakers, ev.home_team, ev.away_team);
-    const rosterNames = await fetchGoalApiRosterNames(fx.providerMatchId);
+    let rosterNames = await fetchGoalApiRosterNames(fx.providerMatchId);
+    if (rosterNames.length === 0) {
+      rosterNames = await fetchGoalApiSquadNames(fx.homeTeamId, fx.awayTeamId);
+    }
     cache.set(fx.providerMatchId, {
       ...odds,
       proplineEventId: ev.id,

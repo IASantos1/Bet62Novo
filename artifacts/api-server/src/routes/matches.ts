@@ -7879,6 +7879,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
     away: string;
     leagueName: string;
     kickoffUtc: Date | null;
+    homeTeamId?: string;
+    awayTeamId?: string;
   }[] = [];
   for (const fixtures of perDay) {
     for (const fx of fixtures) {
@@ -7907,11 +7909,19 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         away,
         leagueName: fx.leagueName ?? "",
         kickoffUtc: kickoffUtcDate,
+        homeTeamId: fx.homeTeam?.id,
+        awayTeamId: fx.awayTeam?.id,
       });
     }
   }
   void triggerPrematchPropLineFootballSync(
-    prematchRefs.map((r) => ({ providerMatchId: r.providerMatchId, home: r.home, away: r.away })),
+    prematchRefs.map((r) => ({
+      providerMatchId: r.providerMatchId,
+      home: r.home,
+      away: r.away,
+      homeTeamId: r.homeTeamId,
+      awayTeamId: r.awayTeamId,
+    })),
   );
 
   for (const fixtures of perDay) {

@@ -817,6 +817,19 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiPlayerStatistics>(`/players/${encodeURIComponent(id)}/statistics`, undefined, GOAL_API_TTL.STATISTICS);
   }
 
+  /** /players?teamId=:id — confirmed real 2026-09-18: `teamId` is the real
+   * filter param (`team_id`/`team` are silently ignored and return the
+   * full 431k-player global list instead — confirmed by testing all
+   * three). Used as a squad-roster fallback for goalscorer markets on
+   * fixtures whose real starting lineup (getFixtureLineups) isn't posted
+   * yet — a team's full squad is available far earlier than that. Paginated
+   * like getFixturesByDate/getLiveFixtures (a real squad can exceed one
+   * page — confirmed 63 players for one real team already, more than the
+   * default 50-per-page limit). */
+  getPlayersByTeam(teamId: string): Promise<GoalApiPlayer[]> {
+    return this.cachedGetAllPages<GoalApiPlayer>("/players", { teamId }, GOAL_API_TTL.FIXTURES);
+  }
+
   // ── WebSocket connection token ───────────────────────────────────────────
 
   /** POST /ws/token — exchanges the API key for a short-lived (60s),
@@ -862,6 +875,7 @@ export const goalApi = {
   getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),
   getFixtureLineups: (id: string) => getGoalApiClient().getFixtureLineups(id),
+  getPlayersByTeam: (teamId: string) => getGoalApiClient().getPlayersByTeam(teamId),
   getLeagueTopScorers: (leagueId: string) => getGoalApiClient().getLeagueTopScorers(leagueId),
   getLeagueStandings: (leagueId: string) => getGoalApiClient().getLeagueStandings(leagueId),
   getLeagueStandingsZones: (leagueId: string) => getGoalApiClient().getLeagueStandingsZones(leagueId),

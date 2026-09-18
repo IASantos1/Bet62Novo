@@ -34,7 +34,7 @@ import {
   extractProplineGoalscorerMatchedToRoster,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
-import { fetchGoalApiRosterNames } from "./prematchFootballOddsCache.js";
+import { fetchGoalApiRosterNames, fetchGoalApiSquadNames } from "./prematchFootballOddsCache.js";
 
 /** proplineAllActiveSports() (not CONFIG.PROPLINE_ENABLED_SPORTS directly) —
  * see prematchFootballOddsCache.ts's own comment on this same function for
@@ -104,7 +104,10 @@ async function runSync(): Promise<void> {
 
     const europeanHandicap = extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team);
     const goalApiFixtureId = state.id.replace(/^goalapi-football-/, "");
-    const rosterNames = await fetchGoalApiRosterNames(goalApiFixtureId);
+    let rosterNames = await fetchGoalApiRosterNames(goalApiFixtureId);
+    if (rosterNames.length === 0) {
+      rosterNames = await fetchGoalApiSquadNames(state.homeTeamId, state.awayTeamId);
+    }
     const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames);
     const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
 
