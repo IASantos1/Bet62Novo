@@ -97,6 +97,8 @@ import {
   goalApiKickoffDateTime,
   buildGoalApiMatchStats,
   buildGoalApiEvents,
+  buildGoalApiFootballGoalEvents,
+  extractGoalApiCornersCardsTotals,
   buildGoalApiCommentary,
   buildGoalApiConfrontos,
   buildGoalApiLineups,
@@ -727,6 +729,13 @@ export type LiveMatchState = {
     // Football goal minute tracking (scored across refreshes)
     homeGoalMinutes?: number[]; // minutes when home team scored
     awayGoalMinutes?: number[]; // minutes when away team scored
+    // Football goal log with player/assist — from GOAL API's /fixtures/:id/events
+    // (homeScorer/awayScorer/homeAssist/awayAssist, confirmed real 2026-09-09).
+    // Read by settlement.ts's getFootballGoalEventsFromExtras for player
+    // goal/assist props. Re-derived fresh from the full events list each
+    // tick (that endpoint returns the whole match history, not a delta), so
+    // this is never accumulated/merged across ticks.
+    footballGoalLog?: Array<{ minute: number; playerName?: string; assistName?: string }>;
   };
   /** Formula 1 only — race winner + podium odds per driver */
   f1Extra?: F1ExtraData;
@@ -6159,6 +6168,13 @@ export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<voi
                   htScore: [htScore[0], htScore[1]] as [number, number],
                 }
               : {}),
+            // Read by settlement.ts's getFootballGoalEventsFromExtras for
+            // player goal/assist props — see buildGoalApiFootballGoalEvents
+            // (services/goalapi/common.ts). No other provider populates
+            // this today, only GOAL API's live builder.
+            ...(state._liveExtra?.footballGoalLog && state._liveExtra.footballGoalLog.length > 0
+              ? { goals: state._liveExtra.footballGoalLog }
+              : {}),
           },
         }
       : {};
@@ -8161,23 +8177,30 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     let redCardsHome = existing?.redCardsHome ?? 0;
     let redCardsAway = existing?.redCardsAway ?? 0;
     let matchEvents: LiveMatchState["events"] = existing?.events ?? [];
+    let footballGoalLog = existing?._liveExtra?.footballGoalLog;
     try {
       const events = await goalApi.getFixtureEvents(fx.id);
       redCardsHome = countGoalApiRedCards(events, "home");
       redCardsAway = countGoalApiRedCards(events, "away");
       const substitutions = await goalApi.getFixtureSubstitutions(fx.id).catch(() => []);
       matchEvents = buildGoalApiEvents(events, substitutions);
+      footballGoalLog = buildGoalApiFootballGoalEvents(events);
     } catch {
-      /* keep previous counts/events if the events call fails this tick */
+      /* keep previous counts/events/goal log if the events call fails this tick */
     }
 
     let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
+    let cornersTotal = existing?._liveExtra?.cornersTotal;
+    let cardsTotal = existing?._liveExtra?.cardsTotal;
     try {
       const stats = await goalApi.getFixtureStatistics(fx.id);
       const built = buildGoalApiMatchStats(stats);
       if (built.length > 0) matchStats = built;
+      const totals = extractGoalApiCornersCardsTotals(stats);
+      if (totals.cornersTotal != null) cornersTotal = totals.cornersTotal;
+      if (totals.cardsTotal != null) cardsTotal = totals.cardsTotal;
     } catch {
-      /* keep previous stats if unavailable this tick */
+      /* keep previous stats/totals if unavailable this tick */
     }
 
     let commentary: LiveMatchState["_commentary"] = existing?._commentary;
@@ -8358,6 +8381,16 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
       matchStats,
       _commentary: commentary,
       _ballPosition: existing?._ballPosition,
+      // Settlement-critical fields (cantos/cartões O/U + gol de jogador) —
+      // see buildGoalApiFootballGoalEvents/extractGoalApiCornersCardsTotals
+      // above; finalizeStaleLiveMatch reads these off _liveExtra into the
+      // persisted match_results row.
+      _liveExtra: {
+        ...existing?._liveExtra,
+        ...(cornersTotal != null ? { cornersTotal } : {}),
+        ...(cardsTotal != null ? { cardsTotal } : {}),
+        ...(footballGoalLog ? { footballGoalLog } : {}),
+      },
       redCardsHome,
       redCardsAway,
       _providerReferenceOdds: providerReferenceOdds,

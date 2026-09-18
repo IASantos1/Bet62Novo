@@ -131,16 +131,12 @@ const PROPLINE_DEFAULT_BOOKMAKERS = (
 // concurrent match subscriptions) — defaults to 0 (FREE) so the WebSocket
 // Data Collector stays inert until this is raised, with no code change
 // needed when upgrading plans.
-// Deactivated 2026-09-14 on explicit, repeated user instruction: bzzoiro
-// is now the sole primary data source for football (fixture discovery,
-// odds, stats, ball position, and — once buildFootballLiveFromBzzoiro's
-// persistence/finalize fix landed — settlement via finalizeStaleLiveMatch
-// on real bzzoiro scores). Forced to "" here rather than deleting the
-// integration outright, same reversible kill-switch pattern already used
-// for PULSESCORE_API_KEY above: every GOAL API call site already gates on
-// `if (CONFIG.GOAL_API_KEY)`, so this one line turns all of them off
-// regardless of whether the real key is still set in Railway.
-const GOAL_API_KEY = "";
+// Reactivated 2026-09-18 on explicit user instruction, reversing the
+// 2026-09-14 bzzoiro cutover: GOAL API is football's data source again
+// (fixtures/live/events/stats/lineups/H2H/standings) — odds now come from
+// PropLine instead (see services/propline/football.ts), not from GOAL API's
+// own /odds or /live-odds endpoints.
+const GOAL_API_KEY = process.env["GOAL_API_KEY"] ?? "";
 const GOAL_API_BASE_URL =
   process.env["GOAL_API_BASE_URL"]?.trim() || "https://api.goal-api.com/v1";
 const GOAL_API_WS_URL =

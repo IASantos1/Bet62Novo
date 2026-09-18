@@ -170,6 +170,61 @@ export function buildGoalApiEvents(
   return [...fromEvents, ...fromSubs].sort((a, b) => a.minute - b.minute);
 }
 
+/** Goal log with player/assist for settlement's player goal/assist props
+ * (settlement.ts's getFootballGoalEventsFromExtras) — only "GOAL" events,
+ * since homeScorer/awayScorer/homeAssist/awayAssist are the confirmed-real
+ * fields (raw response pasted 2026-09-09). Deliberately narrower than
+ * buildGoalApiEvents: no ownGoal/extraMinute/VAR-cancelled flag, because no
+ * real response has ever shown those — leaving them undefined (both fields
+ * are optional in the settlement type) is the honest gap, not a guess. */
+export function buildGoalApiFootballGoalEvents(
+  events: GoalApiMatchEvent[] | null | undefined,
+): Array<{ minute: number; playerName?: string; assistName?: string }> {
+  return (events ?? [])
+    .filter((e) => e.type === "GOAL")
+    .map((e) => {
+      const team: "home" | "away" = e.homeScorer ? "home" : "away";
+      const playerName = (team === "home" ? e.homeScorer : e.awayScorer) ?? undefined;
+      const assistName = (team === "home" ? e.homeAssist : e.awayAssist) ?? undefined;
+      return {
+        minute: e.timeNum ?? parseGoalApiEventMinute(e.time),
+        ...(playerName ? { playerName } : {}),
+        ...(assistName ? { assistName } : {}),
+      };
+    })
+    .sort((a, b) => a.minute - b.minute);
+}
+
+/** Corners/cards match totals for settlement's O/U corners/cards markets
+ * (settlement.ts reads top-level cornersTotal/cardsTotal) — summed from the
+ * same confirmed-real match.fullTime rows buildGoalApiMatchStats already
+ * reads (raw response pasted 2026-09-09), not the per-event "card" type
+ * countGoalApiRedCards uses (that shape has never actually been observed —
+ * see this project's own liveMatchEngine.ts comment). Cards here means
+ * yellow + red combined, matching what "cardsTotal" already means
+ * elsewhere in this codebase (e.g. buildFootballLiveFromSportMonks). */
+export function extractGoalApiCornersCardsTotals(
+  stats: GoalApiFixtureStatistics | null | undefined,
+): { cornersTotal?: number; cardsTotal?: number } {
+  const rows = stats?.match?.fullTime ?? [];
+  const sumRow = (type: string): number | undefined => {
+    const row = rows.find((r) => r.type === type);
+    if (!row) return undefined;
+    const home = Number.parseInt(row.home, 10);
+    const away = Number.parseInt(row.away, 10);
+    if (!Number.isFinite(home) || !Number.isFinite(away)) return undefined;
+    return home + away;
+  };
+  const corners = sumRow("Corners");
+  const yellow = sumRow("Yellow Cards");
+  const red = sumRow("Red Cards");
+  const cards = yellow != null || red != null ? (yellow ?? 0) + (red ?? 0) : undefined;
+  return {
+    ...(corners != null ? { cornersTotal: corners } : {}),
+    ...(cards != null ? { cardsTotal: cards } : {}),
+  };
+}
+
 /** Picks the first bookmaker entry that actually has a 1x2 price — GOAL
  * API's odds array is one entry per bookmaker, unlike PropLine's
  * per-bookmaker-markets-array-on-one-event shape. Returns null (never a
