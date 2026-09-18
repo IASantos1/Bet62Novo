@@ -12,10 +12,14 @@ import { logger } from "../../lib/logger.js";
 import { liveMatchState, broadcastMatchDelta, type LiveMatchState } from "../../routes/matches.js";
 import type { ProplineEvent } from "./index.js";
 import { extractProplineH2HOdds } from "./common.js";
-import { proplineFetchAllUpcomingOdds, proplineFindEventByName } from "./football.js";
+import { proplineFetchAllUpcomingOdds, proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 
+/** proplineAllActiveSports() (not CONFIG.PROPLINE_ENABLED_SPORTS directly) —
+ * see prematchFootballOddsCache.ts's own comment on this same function for
+ * the real bug this avoids (an unset PROPLINE_ENABLED_SPORTS env var meant
+ * zero soccer keys here, so live football odds were never fetched either). */
 function configuredSoccerSportKeys(): string[] {
-  return [...new Set(CONFIG.PROPLINE_ENABLED_SPORTS.filter((k) => k.startsWith("soccer_")))];
+  return [...new Set(proplineAllActiveSports().filter((k) => k.startsWith("soccer_")))];
 }
 
 let inFlight: Promise<void> | null = null;

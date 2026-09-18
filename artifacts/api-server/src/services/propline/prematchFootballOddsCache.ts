@@ -12,7 +12,7 @@ import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import type { ProplineEvent } from "./index.js";
 import { extractProplineH2HOdds } from "./common.js";
-import { proplineFetchAllUpcomingOdds, proplineFindEventByName } from "./football.js";
+import { proplineFetchAllUpcomingOdds, proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 
 type CachedFootballOdds = {
   home: number;
@@ -36,11 +36,21 @@ export function getPrematchPropLineFootballOdds(
 
 export type PrematchFootballFixtureRef = { providerMatchId: string; home: string; away: string };
 
-/** Every configured soccer_* sport key — PropLine has no single "all
+/** Every soccer_* sport key currently active — PropLine has no single "all
  * soccer" key, only one per league (see football.ts's PROPLINE_SOCCER_LEAGUES),
- * so this pools every enabled one before matching by team name. */
+ * so this pools every active one before matching by team name.
+ * proplineAllActiveSports() (not CONFIG.PROPLINE_ENABLED_SPORTS directly)
+ * on purpose — bug found 2026-09-18: reading the raw env-parsed array meant
+ * an operator who never explicitly set PROPLINE_ENABLED_SPORTS with soccer_
+ * entries got an empty list here, so football was NEVER priced regardless
+ * of GOAL_API_KEY/PROPLINE_API_KEY being correct — every football fixture
+ * silently stayed invisible (the same "empty football" failure mode this
+ * whole migration was meant to fix). proplineAllActiveSports() falls back
+ * to a real default league list (soccer_epl, soccer_spain_la_liga, ...)
+ * when the env var is unset, same as every other PropLine sport already
+ * does. */
 function configuredSoccerSportKeys(): string[] {
-  return [...new Set(CONFIG.PROPLINE_ENABLED_SPORTS.filter((k) => k.startsWith("soccer_")))];
+  return [...new Set(proplineAllActiveSports().filter((k) => k.startsWith("soccer_")))];
 }
 
 let inFlight: Promise<void> | null = null;
