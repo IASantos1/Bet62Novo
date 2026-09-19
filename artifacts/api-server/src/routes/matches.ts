@@ -9309,7 +9309,7 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
  * cached /odds by event id. Basketball IS in PropLine's confirmed
  * near-real-time sport list, so this is built with the same confidence as
  * pré-jogo. */
-async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[]> {
+export async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[]> {
   const perLeague = await proplineFetchBasketballLiveAllLeagues();
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
@@ -9478,7 +9478,7 @@ async function buildBaseballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
  * /odds by event id. Baseball IS in PropLine's confirmed near-real-time
  * sport list, so this is built with the same confidence as pré-jogo,
  * mirroring buildBasketballLiveFromPropLine exactly. */
-async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]> {
+export async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]> {
   const perLeague = await proplineFetchBaseballLiveAllLeagues();
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];
@@ -9650,7 +9650,7 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
 
 /** Hockey (NHL) live from PropLine — NHL IS in PropLine's confirmed
  * near-real-time sport list, same confidence as pré-jogo. */
-async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
+export async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
   const perLeague = await proplineFetchHockeyLiveAllLeagues();
   const currentIds = new Set<string>();
   const results: LiveMatchState[] = [];

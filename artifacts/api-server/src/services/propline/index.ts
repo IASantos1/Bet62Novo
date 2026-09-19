@@ -303,6 +303,63 @@ export class ProplineClient {
     return (await resp.json()) as T;
   }
 
+  /** POST/DELETE counterpart to rawGet — used only by the webhook lifecycle
+   * methods below (createWebsocketWebhook/deleteWebhook/listWebhooks). No
+   * caching, no retry (webhook management is a rare, one-shot startup
+   * operation, not a hot polling path). */
+  private async rawWrite<T = unknown>(
+    method: "POST" | "DELETE",
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const url = this.buildUrl(path);
+    const resp = await fetch(url, {
+      method,
+      signal: AbortSignal.timeout(10_000),
+      headers: { ...this.headers(), ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    this.updateUsageFromResponse(resp);
+    if (!resp.ok) {
+      let detail: string;
+      try {
+        detail = await resp.text();
+      } catch {
+        detail = "";
+      }
+      throw new Error(`[propline] HTTP ${resp.status} on ${method} ${path}${detail ? ` — ${detail.slice(0, 300)}` : ""}`);
+    }
+    if (resp.status === 204) return undefined as T;
+    return (await resp.json()) as T;
+  }
+
+  // ── WebSocket webhooks (confirmed real 2026-09-19 — see the tennis/multi-
+  // sport real-time plan) ─────────────────────────────────────────────────
+
+  /** POST /webhooks with transport='websocket'. Real bug confirmed against
+   * the official `propline` npm SDK (v0.52.0): its own createWebhook()
+   * never serializes `transport` at all, so it always creates an 'http'
+   * subscription regardless of what's passed — this hand-rolls the raw
+   * request instead of depending on that SDK (never added as a project
+   * dependency for exactly this reason). The server also rejects `url`
+   * outright when transport='websocket' (confirmed via a real 400: "takes
+   * no url — connect to /v1/stream instead"), so it's never sent here.
+   * filterSportKey is left unset on purpose — the account's 5-concurrent-
+   * connection cap can't afford one connection per league, so a single
+   * unfiltered subscription covers every sport and callers demux by the
+   * event's own `sport_key` (see websocketClient.ts). */
+  async createWebsocketWebhook(): Promise<{ id: number; [k: string]: unknown }> {
+    return this.rawWrite("POST", "/webhooks", { transport: "websocket" });
+  }
+
+  async listWebhooks(): Promise<Array<{ id: number; transport?: string; filter_sport_key?: string | null; [k: string]: unknown }>> {
+    return this.rawGet("/webhooks");
+  }
+
+  async deleteWebhook(id: number): Promise<void> {
+    await this.rawWrite("DELETE", `/webhooks/${id}`);
+  }
+
   async rawGetWithRetry<T = unknown>(
     path: string,
     opts?: {

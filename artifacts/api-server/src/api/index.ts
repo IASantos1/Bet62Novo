@@ -16,6 +16,7 @@ import { goalApi } from "../services/goalapi/index.js";
 import { triggerPrematchPropLineFootballSync } from "../services/propline/prematchFootballOddsCache.js";
 import { runPropLineLiveFootballOddsSync } from "../services/propline/liveFootballOddsSync.js";
 import { runPropLineLiveTennisOddsSync } from "../services/propline/liveTennisOddsSync.js";
+import { startPropLineWebSocket } from "../services/propline/websocketClient.js";
 
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
@@ -183,6 +184,17 @@ server.listen(port, () => {
   if (CONFIG.PROPLINE_API_KEY) {
     void runPropLineLiveTennisOddsSync();
     setInterval(() => void runPropLineLiveTennisOddsSync(), 15_000);
+  }
+
+  // PropLine — real WebSocket (confirmed 2026-09-19, wss://ws.prop-line.com)
+  // wakes the football/tennis/basketball/hockey/baseball syncs above the
+  // moment a real line movement happens, instead of waiting up to 15s for
+  // the next poll tick — see websocketClient.ts's header. The 15s polls
+  // above are NOT removed: they're the fallback this degrades to if the
+  // socket is down, same "wake-up signal, never a hard dependency" pattern
+  // already used for GOAL API/api-tennis's own WS clients.
+  if (CONFIG.PROPLINE_API_KEY) {
+    void startPropLineWebSocket();
   }
 
   // PulseScore WebSocket — confirmed real via the docs the user pasted

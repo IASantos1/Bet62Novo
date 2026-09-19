@@ -109,6 +109,13 @@ const PROPLINE_BASE_URL =
   process.env["PROPLINE_BASE_URL"]?.trim() || "https://api.prop-line.com";
 const PROPLINE_API_VERSION =
   process.env["PROPLINE_API_VERSION"]?.trim() || "v1";
+// Real WebSocket confirmed 2026-09-19 (wss://ws.prop-line.com/v1/stream,
+// gated behind the Streaming Lite plan or above — this account's Streaming
+// plan already includes it, 5 concurrent connections). Auth happens over
+// an in-band `{type:"auth", api_key, webhook_id, since_seq}` message after
+// connecting, not a URL query param, so this is just the WS origin.
+const PROPLINE_WS_URL =
+  process.env["PROPLINE_WS_URL"]?.trim() || "wss://ws.prop-line.com";
 const PROPLINE_ENABLED_SPORTS = (
   process.env["PROPLINE_ENABLED_SPORTS"]?.trim() || ""
 )
@@ -270,6 +277,7 @@ export const CONFIG = {
   PROPLINE_API_KEY,
   PROPLINE_BASE_URL,
   PROPLINE_API_VERSION,
+  PROPLINE_WS_URL,
   PROPLINE_ENABLED_SPORTS,
   PROPLINE_DEFAULT_BOOKMAKERS,
   GOAL_API_KEY,
