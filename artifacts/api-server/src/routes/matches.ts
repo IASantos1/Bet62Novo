@@ -20,7 +20,13 @@ import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
-import { extractProplineScore, proplineEventDateTime, dedupeProplineFixtures } from "../services/propline/common.js";
+import {
+  extractProplineScore,
+  proplineEventDateTime,
+  dedupeProplineFixtures,
+  extractProplineAsianHandicap,
+  extractProplineTotalPoints,
+} from "../services/propline/common.js";
 import {
   PROPLINE_BASKETBALL_LEAGUE_TITLES,
   extractProplineBasketballOdds,
@@ -9246,6 +9252,21 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
 
+      // Real spread/total (confirmed 2026-09-19 — same "spreads"/"totals"
+      // the-odds-api-compatible keys already used for football/tennis).
+      // Reuses handicap/totalGoals' over25/under25 slot, same convention the
+      // removed synthetic model used, so no frontend change is needed.
+      const spread = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+      if (spread) {
+        markets.handicap.homeMinusOne = spread.home;
+        markets.handicap.awayPlusOne = spread.away;
+      }
+      const total = extractProplineTotalPoints(ev.bookmakers);
+      if (total) {
+        markets.totalGoals.over25 = total.over;
+        markets.totalGoals.under25 = total.under;
+      }
+
       // Real 1st-quarter/1st-half markets from PropLine's ?period= filter —
       // most events won't have one, so this quietly no-ops rather than
       // requiring it. Everything else basketballExtra used to fabricate
@@ -9312,6 +9333,18 @@ async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[]> {
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractProplineBasketballOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = zerofillAdvancedMarkets();
+      if (oddsEv) {
+        const spread = extractProplineAsianHandicap(oddsEv.bookmakers, home, away);
+        if (spread) {
+          baseMarkets.handicap.homeMinusOne = spread.home;
+          baseMarkets.handicap.awayPlusOne = spread.away;
+        }
+        const total = extractProplineTotalPoints(oddsEv.bookmakers);
+        if (total) {
+          baseMarkets.totalGoals.over25 = total.over;
+          baseMarkets.totalGoals.under25 = total.under;
+        }
+      }
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
         ? { ...existing.marketSuspension }
@@ -9409,6 +9442,18 @@ async function buildBaseballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
 
+      // Real run-line/total (confirmed 2026-09-19).
+      const spread = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+      if (spread) {
+        markets.handicap.homeMinusOne = spread.home;
+        markets.handicap.awayPlusOne = spread.away;
+      }
+      const total = extractProplineTotalPoints(ev.bookmakers);
+      if (total) {
+        markets.totalGoals.over25 = total.over;
+        markets.totalGoals.under25 = total.under;
+      }
+
       results.push({
         id: `propline-baseball-${ev.id}`,
         home,
@@ -9457,6 +9502,18 @@ async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]> {
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractProplineBaseballOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = zerofillAdvancedMarkets();
+      if (oddsEv) {
+        const spread = extractProplineAsianHandicap(oddsEv.bookmakers, home, away);
+        if (spread) {
+          baseMarkets.handicap.homeMinusOne = spread.home;
+          baseMarkets.handicap.awayPlusOne = spread.away;
+        }
+        const total = extractProplineTotalPoints(oddsEv.bookmakers);
+        if (total) {
+          baseMarkets.totalGoals.over25 = total.over;
+          baseMarkets.totalGoals.under25 = total.under;
+        }
+      }
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
         ? { ...existing.marketSuspension }
@@ -9551,6 +9608,18 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
 
+      // Real spread/total (confirmed 2026-09-19).
+      const spread = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+      if (spread) {
+        markets.handicap.homeMinusOne = spread.home;
+        markets.handicap.awayPlusOne = spread.away;
+      }
+      const total = extractProplineTotalPoints(ev.bookmakers);
+      if (total) {
+        markets.totalGoals.over25 = total.over;
+        markets.totalGoals.under25 = total.under;
+      }
+
       // Real 1st-period market from PropLine's ?period=p1 filter, overriding
       // the synthetic halfTime field (this app's slot for hockey's period-1
       // 3-way result) when a bookmaker actually prices it — most events
@@ -9604,6 +9673,18 @@ async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractProplineHockeyOdds(oddsEv.bookmakers, home, away) : null;
       const baseMarkets = zerofillAdvancedMarkets();
+      if (oddsEv) {
+        const spread = extractProplineAsianHandicap(oddsEv.bookmakers, home, away);
+        if (spread) {
+          baseMarkets.handicap.homeMinusOne = spread.home;
+          baseMarkets.handicap.awayPlusOne = spread.away;
+        }
+        const total = extractProplineTotalPoints(oddsEv.bookmakers);
+        if (total) {
+          baseMarkets.totalGoals.over25 = total.over;
+          baseMarkets.totalGoals.under25 = total.under;
+        }
+      }
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
         ? { ...existing.marketSuspension }

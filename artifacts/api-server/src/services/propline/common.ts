@@ -1217,6 +1217,18 @@ export function extractProplineTennisTotalTiebreaks(
   return extractSingleLineOverUnder(bookmakers, "total_tiebreaks");
 }
 
+/** Total points/goals/runs in the match ("totals" key — same key and
+ * shape as extractProplineTennisTotalGames, confirmed real 2026-09-19 for
+ * basketball_nba/hockey_nhl/baseball_mlb via a direct call). Generic name
+ * since this is shared across every non-tennis sport that just needs a
+ * single main total line, unlike football's multi-bucket
+ * extractProplineTotalGoals. */
+export function extractProplineTotalPoints(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+): { line: number; over: number; under: number } | null {
+  return extractSingleLineOverUnder(bookmakers, "totals");
+}
+
 /** Player aces prop ("player_aces" key — confirmed real, Over/Under with
  * the player's name in `description`, same shape as football's team_corners/
  * team_cards). Settleable off api-tennis's own statistics[] "Aces"

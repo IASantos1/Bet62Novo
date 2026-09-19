@@ -25,7 +25,7 @@ export async function proplineFetchBasketballOddsAllLeagues(): Promise<ProplineB
   return Promise.all(
     PROPLINE_BASKETBALL_SPORT_KEYS.map(async (sportKey) => ({
       sportKey,
-      events: await propline.getOdds(sportKey, { markets: ["h2h"], oddsFormat: "decimal" }).catch(() => []),
+      events: await propline.getOdds(sportKey, { markets: ["h2h", "spreads", "totals"], oddsFormat: "decimal" }).catch(() => []),
     })),
   );
 }
