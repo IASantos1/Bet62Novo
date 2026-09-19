@@ -3716,6 +3716,11 @@ type AdvancedMarkets = {
   goalOrAssist?: Array<{ player: string; odds: number }>;
   // Player Assists (1+) — real PropLine market `player_assists`. sel key prefix `pa:{player}`.
   playerAssists?: Array<{ player: string; odds: number }>;
+  // 2+ Assists (player) — real PropLine market `player_2plus_assists`. sel key prefix `2a:{player}`.
+  playerTwoPlusAssists?: Array<{ player: string; odds: number }>;
+  // H2H Early Payout — real PropLine market `h2h_early_payout`, same shape
+  // as the plain 1X2 (sel keys h2hep-home/h2hep-draw/h2hep-away).
+  h2hEarlyPayout?: { home: number; draw: number; away: number };
   // Second half result market (who wins just the 2nd half)
   secondHalf?: { home: number; draw: number; away: number };
   // Football extra-time markets
@@ -13219,7 +13224,7 @@ export default function Home({
                         (!!mk?.correctScore && Object.values(mk.correctScore).some((v) => (Number(v) ?? 0) > 1.01)) ||
                         (mk?.winningMargin?.home1 ?? 0) > 1.01;
                       if (hasPlacar) baseTabs.push({ key: "placar", label: "Placar Exato" });
-                      const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length || !!mk?.twoPlusGoals?.length || !!mk?.goalOrAssist?.length || !!mk?.playerAssists?.length;
+                      const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length || !!mk?.twoPlusGoals?.length || !!mk?.goalOrAssist?.length || !!mk?.playerAssists?.length || !!mk?.playerTwoPlusAssists?.length;
                       if (hasMarcadores) baseTabs.push({ key: "marcadores", label: "Marcadores" });
                       const hasEscanteios =
                         Object.values(mk?.corners ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
@@ -13887,6 +13892,40 @@ export default function Home({
                     </MarketGroup>
                   );
                 })()}
+
+              {/* ── FUTEBOL: RESULTADO COM PAGAMENTO ANTECIPADO ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "resultado" || modalTab === "todos") &&
+                m &&
+                m.h2hEarlyPayout &&
+                m.h2hEarlyPayout.home > 0 && (
+                  <MarketGroup title="Resultado — Pagamento Antecipado">
+                    <MarketOddsBtn
+                      match={match}
+                      sel="h2hep-home"
+                      odd={m.h2hEarlyPayout.home}
+                      market="result"
+                      label={match.home}
+                    />
+                    <MarketOddsBtn
+                      match={match}
+                      sel="h2hep-draw"
+                      odd={m.h2hEarlyPayout.draw}
+                      market="result"
+                      label="Empate"
+                    />
+                    <MarketOddsBtn
+                      match={match}
+                      sel="h2hep-away"
+                      odd={m.h2hEarlyPayout.away}
+                      market="result"
+                      label={match.away}
+                    />
+                  </MarketGroup>
+                )}
 
               {/* ── FUTEBOL: DUPLA CHANCE ── */}
               {isFootball &&
@@ -16220,6 +16259,41 @@ export default function Home({
                   </div>
                 )}
 
+              {/* ── FUTEBOL: 2+ ASSISTÊNCIAS ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "marcadores" || modalTab === "todos") &&
+                m &&
+                m.playerTwoPlusAssists &&
+                m.playerTwoPlusAssists.length > 0 && (
+                  <div>
+                    <MarketAccordionSection
+                      title="2+ Assistências"
+                      defaultOpen={false}
+                      count={m.playerTwoPlusAssists.length}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione o jogador que der 2 ou mais assistências na partida.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.playerTwoPlusAssists.map(({ player, odds }) => (
+                          <MarketOddsBtn
+                            key={player}
+                            match={match}
+                            sel={`2a:${player}`}
+                            odd={odds}
+                            market="marcadores"
+                            label={player}
+                            suspKey="playerTwoPlusAssists"
+                          />
+                        ))}
+                      </div>
+                    </MarketAccordionSection>
+                  </div>
+                )}
+
               {isFootball &&
                 !showET &&
                 !showPen &&
@@ -16231,7 +16305,8 @@ export default function Home({
                 (!m.lastGoalscorer || m.lastGoalscorer.length === 0) &&
                 (!m.twoPlusGoals || m.twoPlusGoals.length === 0) &&
                 (!m.goalOrAssist || m.goalOrAssist.length === 0) &&
-                (!m.playerAssists || m.playerAssists.length === 0) && (
+                (!m.playerAssists || m.playerAssists.length === 0) &&
+                (!m.playerTwoPlusAssists || m.playerTwoPlusAssists.length === 0) && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
