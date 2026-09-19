@@ -1643,18 +1643,20 @@ function normalizeCompactFootballSelectionKey(
 }
 
 function parseSelectionPlayerMarket(selection: string): {
-  market: "goal" | "assist" | "card";
+  market: "goal" | "assist" | "card" | "goal2plus" | "goalOrAssist";
   period: "any" | "1h" | "2h";
   scope: "any" | "first" | "last";
   playerName: string;
 } | null {
   const raw = String(selection ?? "").trim();
   if (!raw) return null;
-  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc|fg1h|fg2h|fg|lg1h|lg2h|lg):(.+)$/i);
+  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc|fg1h|fg2h|fg|lg1h|lg2h|lg|2g|ga):(.+)$/i);
   if (!match) return null;
   const key = match[1]!.toLowerCase();
   const playerName = match[2]!.trim();
   if (!playerName) return null;
+  if (key === "2g") return { market: "goal2plus", period: "any", scope: "any", playerName };
+  if (key === "ga") return { market: "goalOrAssist", period: "any", scope: "any", playerName };
   if (key === "pa") return { market: "assist", period: "any", scope: "any", playerName };
   if (key === "pg") return { market: "goal", period: "any", scope: "any", playerName };
   if (key === "pg1h") return { market: "goal", period: "1h", scope: "any", playerName };
@@ -2602,6 +2604,17 @@ export function scoreOutcomeForSel(
           const assistName = normalizeParticipantName(goal.assistName ?? "");
           return !!assistName && assistName === wantedName;
         });
+      } else if (playerSelection.market === "goal2plus") {
+        const goalCount = filtered.filter(
+          (goal) => normalizeParticipantName(goal.playerName ?? "") === wantedName,
+        ).length;
+        winning = goalCount >= 2;
+      } else if (playerSelection.market === "goalOrAssist") {
+        winning = filtered.some((goal) => {
+          const playerName = normalizeParticipantName(goal.playerName ?? "");
+          const assistName = normalizeParticipantName(goal.assistName ?? "");
+          return playerName === wantedName || (!!assistName && assistName === wantedName);
+        });
       } else {
         const mapped = filtered.map((goal) =>
           normalizeParticipantName(goal.playerName ?? ""),
@@ -2627,6 +2640,20 @@ export function scoreOutcomeForSel(
   else if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
     if (!extra?.firstGoal) return null;
     winning = s === `fg-${extra.firstGoal}`;
+  }
+  // ── Winning margin (final score buckets — real PropLine market
+  // `winning_margin`, see services/propline/common.ts's
+  // extractProplineWinningMargin) ────────────────────────────────────────
+  else if (/^wm-(h[1-3]|h4p|a[1-3]|a4p|draw|nogoal)$/.test(s)) {
+    const diff = home - away;
+    if (diff === 0) {
+      winning = home === 0 && away === 0 ? s === "wm-nogoal" : s === "wm-draw";
+    } else {
+      const margin = Math.min(Math.abs(diff), 4);
+      const side = diff > 0 ? "h" : "a";
+      const bucket = margin >= 4 ? `${side}4p` : `${side}${margin}`;
+      winning = s === `wm-${bucket}`;
+    }
   }
   // ── Set winners (tennis/volleyball — requires per-period scores) ──────────
   else if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {

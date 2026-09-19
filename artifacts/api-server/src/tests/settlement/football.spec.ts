@@ -187,6 +187,79 @@ const footballCases: FinishedSettlementCase[] = [
     expected: "won",
   },
   {
+    name: "football winning margin home by 2 is settled as won",
+    selection: makeSelection("wm-h2"),
+    ft: { home: 3, away: 1 },
+    expected: "won",
+  },
+  {
+    name: "football winning margin away by 4+ is settled as won",
+    selection: makeSelection("wm-a4p"),
+    ft: { home: 0, away: 5 },
+    expected: "won",
+  },
+  {
+    name: "football winning margin scoring draw is settled as won",
+    selection: makeSelection("wm-draw"),
+    ft: { home: 2, away: 2 },
+    expected: "won",
+  },
+  {
+    name: "football winning margin no goal is settled as won",
+    selection: makeSelection("wm-nogoal"),
+    ft: { home: 0, away: 0 },
+    expected: "won",
+  },
+  {
+    name: "football winning margin no goal is settled as lost on a scoring draw",
+    selection: makeSelection("wm-nogoal"),
+    ft: { home: 1, away: 1 },
+    expected: "lost",
+  },
+  {
+    name: "football player 2+ goals market is settled as won",
+    selection: makeSelection("2g:John Doe"),
+    ft: { home: 3, away: 0 },
+    extra: {
+      extras: {
+        football: {
+          goals: [
+            { minute: 12, playerName: "John Doe" },
+            { minute: 40, playerName: "John Doe" },
+            { minute: 60, playerName: "Someone Else" },
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "football player 2+ goals market is settled as lost on a single goal",
+    selection: makeSelection("2g:John Doe"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        football: {
+          goals: [{ minute: 12, playerName: "John Doe" }],
+        },
+      },
+    },
+    expected: "lost",
+  },
+  {
+    name: "football player goal or assist market is settled as won on an assist",
+    selection: makeSelection("ga:John Doe"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        football: {
+          goals: [{ minute: 12, playerName: "Finisher", assistName: "John Doe" }],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
     name: "football player goal market is settled as won",
     selection: makeSelection("pg:John Doe"),
     ft: { home: 2, away: 0 },

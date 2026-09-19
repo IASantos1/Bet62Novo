@@ -33,9 +33,11 @@ import {
   extractProplineFirstTeamToScore,
   extractProplineCornersHandicap,
   extractProplineTeamCards,
+  extractProplineWinningMargin,
   type ProplineTotalGoals,
   type ProplineTotalCorners,
   type ProplineTotalCards,
+  type ProplineWinningMargin,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 
@@ -58,6 +60,9 @@ export const FOOTBALL_MARKET_KEYS = [
   "first_team_to_score",
   "corners_spread",
   "team_cards",
+  "winning_margin",
+  "2plus_goals",
+  "goal_or_assist",
 ];
 
 /** GOAL API's real lineup for a fixture (starting XI + substitutes) — the
@@ -176,6 +181,9 @@ type CachedFootballOdds = {
   cornersHandicap: { line: number; home: number; away: number } | null;
   homeCards: { line: number; over: number; under: number } | null;
   awayCards: { line: number; over: number; under: number } | null;
+  winningMargin: ProplineWinningMargin | null;
+  twoPlusGoals: Array<{ player: string; odds: number }> | null;
+  goalOrAssist: Array<{ player: string; odds: number }> | null;
   fetchedAt: number;
 };
 
@@ -313,6 +321,9 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       cornersHandicap: extractProplineCornersHandicap(ev.bookmakers, ev.home_team, ev.away_team),
       homeCards: teamCards.home,
       awayCards: teamCards.away,
+      winningMargin: extractProplineWinningMargin(ev.bookmakers, ev.home_team, ev.away_team),
+      twoPlusGoals: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames),
+      goalOrAssist: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames),
       fetchedAt: Date.now(),
     });
     priced++;

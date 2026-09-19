@@ -762,7 +762,7 @@ function isFuzzyPersonNameMatch(rosterName: string, proplineName: string): boole
  * (`rosterNames` empty) or PropLine has no real roster for this market. */
 export function extractProplineGoalscorerMatchedToRoster(
   bookmakers: ProplineBookmaker[] | null | undefined,
-  marketKey: "anytime_goal_scorer" | "first_goal_scorer",
+  marketKey: "anytime_goal_scorer" | "first_goal_scorer" | "2plus_goals" | "goal_or_assist",
   rosterNames: string[],
 ): Array<{ player: string; odds: number }> | null {
   if (!bookmakers || bookmakers.length === 0 || rosterNames.length === 0) return null;
@@ -956,4 +956,89 @@ export function dedupeProplineFixtures<
     }
   }
   return kept;
+}
+
+export type ProplineWinningMargin = {
+  home1: number;
+  home2: number;
+  home3: number;
+  home4plus: number;
+  away1: number;
+  away2: number;
+  away3: number;
+  away4plus: number;
+  drawScoring: number;
+  noGoal: number;
+};
+
+/** Winning Margin, averaged across every bookmaker quoting each bucket —
+ * confirmed real 2026-09-18 (market key `winning_margin`, ten named-bucket
+ * outcomes: "{Team} By 1/2/3/4+" per side, "Any Score Draw (0:0 Excluded)"
+ * and "No Goal" for a 0-0). No `point` field — the bucket identity lives
+ * entirely in the outcome name, so this parses "{Team} By N" via regex and
+ * fuzzy-matches the team fragment against home/away (reusing
+ * normalizeTeamName/isFuzzyMatch, same policy as every other team-name
+ * match in this file) rather than relying on exact string equality with
+ * ev.home_team/away_team, since the bucket label could plausibly use a
+ * shorter/longer team name than the event's own field. */
+export function extractProplineWinningMargin(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): ProplineWinningMargin | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizeTeamName(home);
+  const awayNorm = normalizeTeamName(away);
+  const buckets: Record<keyof ProplineWinningMargin, number[]> = {
+    home1: [], home2: [], home3: [], home4plus: [],
+    away1: [], away2: [], away3: [], away4plus: [],
+    drawScoring: [], noGoal: [],
+  };
+  const byMarginRegex = /^(.+?)\s+By\s+(\d+|4\+)$/i;
+  let found = false;
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "winning_margin");
+    if (!market) continue;
+    for (const o of market.outcomes) {
+      const name = (o.name || "").trim();
+      const price = proplineNormalizeOddsPrice(o.price);
+      if (/^no goal$/i.test(name)) {
+        buckets.noGoal.push(price);
+        found = true;
+        continue;
+      }
+      if (/any score draw/i.test(name)) {
+        buckets.drawScoring.push(price);
+        found = true;
+        continue;
+      }
+      const m = name.match(byMarginRegex);
+      if (!m) continue;
+      const teamLabel = normalizeTeamName(m[1]!);
+      const marginToken = m[2]!;
+      const isHome = isFuzzyMatch(teamLabel, homeNorm, 0.22);
+      const isAway = !isHome && isFuzzyMatch(teamLabel, awayNorm, 0.22);
+      if (!isHome && !isAway) continue;
+      const side = isHome ? "home" : "away";
+      const suffix = marginToken === "4+" ? "4plus" : marginToken;
+      const key = `${side}${suffix}` as keyof ProplineWinningMargin;
+      if (!(key in buckets)) continue;
+      buckets[key].push(price);
+      found = true;
+    }
+  }
+  if (!found) return null;
+  const avgOrZero = (values: number[]) => (values.length > 0 ? average(values) : 0);
+  return {
+    home1: avgOrZero(buckets.home1),
+    home2: avgOrZero(buckets.home2),
+    home3: avgOrZero(buckets.home3),
+    home4plus: avgOrZero(buckets.home4plus),
+    away1: avgOrZero(buckets.away1),
+    away2: avgOrZero(buckets.away2),
+    away3: avgOrZero(buckets.away3),
+    away4plus: avgOrZero(buckets.away4plus),
+    drawScoring: avgOrZero(buckets.drawScoring),
+    noGoal: avgOrZero(buckets.noGoal),
+  };
 }

@@ -214,6 +214,28 @@ export type AdvancedMarkets = {
   // shape/rationale as homeCorners/awayCorners above.
   homeCards?: { line: number; over: number; under: number };
   awayCards?: { line: number; over: number; under: number };
+  // Winning Margin — real PropLine market `winning_margin`, ten named
+  // buckets (home/away By 1/2/3/4+, a scoring draw, and a 0-0 "no goal").
+  // See services/propline/common.ts's extractProplineWinningMargin for the
+  // parsing/matching rationale.
+  winningMargin?: {
+    home1: number;
+    home2: number;
+    home3: number;
+    home4plus: number;
+    away1: number;
+    away2: number;
+    away3: number;
+    away4plus: number;
+    drawScoring: number;
+    noGoal: number;
+  };
+  // 2+ Goals (player) — real PropLine market `2plus_goals`, same shape as
+  // anytimeGoalscorer. sel key prefix `2g:{player}`.
+  twoPlusGoals?: Array<{ player: string; odds: number }>;
+  // Goal or Assist (player) — real PropLine market `goal_or_assist`, same
+  // shape as anytimeGoalscorer. sel key prefix `ga:{player}`.
+  goalOrAssist?: Array<{ player: string; odds: number }>;
   // Sport-specific extras
   _spread?: number;
   _total?: number;
@@ -8022,6 +8044,9 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         if (prematchPrice.cornersHandicap) markets.cornersHandicap = prematchPrice.cornersHandicap;
         if (prematchPrice.homeCards) markets.homeCards = prematchPrice.homeCards;
         if (prematchPrice.awayCards) markets.awayCards = prematchPrice.awayCards;
+        if (prematchPrice.winningMargin) markets.winningMargin = prematchPrice.winningMargin;
+        if (prematchPrice.twoPlusGoals) markets.twoPlusGoals = prematchPrice.twoPlusGoals;
+        if (prematchPrice.goalOrAssist) markets.goalOrAssist = prematchPrice.goalOrAssist;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 

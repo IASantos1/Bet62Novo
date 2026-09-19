@@ -48,6 +48,7 @@ import {
   extractProplineWinToNil,
   extractProplineFirstTeamToScore,
   extractProplineGoalscorerMatchedToRoster,
+  extractProplineWinningMargin,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 import {
@@ -190,6 +191,18 @@ async function runSync(): Promise<void> {
       ...(() => {
         const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
         return firstGoalscorer ? { firstGoalscorer } : {};
+      })(),
+      ...(() => {
+        const winningMargin = extractProplineWinningMargin(ev.bookmakers, ev.home_team, ev.away_team);
+        return winningMargin ? { winningMargin } : {};
+      })(),
+      ...(() => {
+        const twoPlusGoals = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames);
+        return twoPlusGoals ? { twoPlusGoals } : {};
+      })(),
+      ...(() => {
+        const goalOrAssist = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames);
+        return goalOrAssist ? { goalOrAssist } : {};
       })(),
     };
 
