@@ -117,7 +117,7 @@ const router: IRouter = Router();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AdvancedMarkets = {
+export type AdvancedMarkets = {
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore: { yes: number; no: number };
   totalGoals: {
@@ -437,7 +437,7 @@ type AdvancedMarkets = {
   }>;
 };
 
-function zerofillAdvancedMarkets(): AdvancedMarkets {
+export function zerofillAdvancedMarkets(): AdvancedMarkets {
   const totalGoals = {
     over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
     over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
@@ -8141,8 +8141,16 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     const id = `goalapi-football-${fx.id}`;
     currentIds.add(id);
     const existing = liveMatchState.get(id);
-    const baseOdds = makeOddsFromTeams(home, away);
-    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    // Honest-empty baseline, not a synthetic Poisson seed — removed
+    // 2026-09-19 per explicit instruction: live football must show ONLY
+    // real PropLine prices, never a fabricated placeholder while waiting
+    // for one. Mirrors buildFootballUpcomingFromGoalApi's own prematch
+    // baseline (zerofillAdvancedMarkets()/{home:0,draw:0,away:0}), and pairs
+    // with the drift engine being fully retired below (see the removed
+    // Background Market Drift Engine setInterval) — there is no longer any
+    // synthetic model to seed or drift from for football.
+    const baseOdds = { home: 0, draw: 0, away: 0 };
+    const baseMarkets = zerofillAdvancedMarkets();
 
     // Debounced score-decrease guard (user-reported 2026-09-11, same
     // provider-poll-glitch pattern as the minute/priceSource bugs fixed
@@ -14512,89 +14520,20 @@ router.get(
   },
 );
 
-// ─── Background Market Drift Engine ─────────────────────────────────────────
-// Runs every 1–2s independently of provider API polls so the frontend sees
-// smooth per-tier odds movement even between data-fetch cycles.
-// Tier 1 markets (Over/Under, Handicap) drift on this cadence.
-// Tier 2 markets (HT/FT, Correct Score) drift on this cadence at a much smaller rate.
-// Tier 3 markets (Corners, Cards) drift on this cadence at a very gentle rate.
-const LIVE_BROADCAST_INTERVAL_MS = Math.min(
-  2000,
-  Math.max(1000, CONFIG.LIVE_UPDATE_INTERVAL),
-);
-setInterval(() => {
-  const now = Date.now();
-  let anyChange = false;
-  for (const [id, state] of liveMatchState.entries()) {
-    if (state.sport !== "football") continue;
-    // A real price (PulseScore or PropLine) is never touched by the
-    // synthetic Poisson drift model — shadowMatchSync.ts's
-    // runOddsComparisonPhase and liveFootballOddsSync.ts's PropLine sync
-    // are the only writers of odds/markets for these fixtures. Suspension
-    // (goal/red-card delay) is computed independently in
-    // buildFootballLiveFromGoalApi off GOAL API's own event feed and still
-    // applies regardless of price source — skipping the drift loop here
-    // doesn't affect that.
-    if (hasRealPriceSource(state._priceSource)) continue;
-    const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
-    if (skip.includes(state.status)) continue;
-    if (state.marketSuspension) {
-      const coreKeys = ["result", "totalGoals", "handicap"];
-      const allCoresSuspended = coreKeys.every((k) => {
-        const ts = state.marketSuspension?.[k];
-        return ts !== undefined && ts > now;
-      });
-      if (allCoresSuspended) continue;
-    }
-    const updated = applyTieredMarketDrift(state, now);
-    // applyTieredMarketDrift always returns a new object (due to _driftPhase /
-    // _marketNextUpdate advancing), so reference equality is never a useful
-    // change detector here. Instead compare the value-carrying fields that
-    // clients actually care about.
-    //
-    // When a market is NOT due for update, applyTieredMarketDrift returns the
-    // SAME reference for that field (e.g. `updated.odds === state.odds`), so
-    // reference equality on the individual fields correctly tells us whether
-    // anything meaningful actually changed.
-    const oddsChanged = updated.odds !== state.odds;
-    const marketsChanged =
-      updated.markets.totalGoals !== state.markets.totalGoals ||
-      updated.markets.handicap !== state.markets.handicap ||
-      updated.markets.doubleChance !== state.markets.doubleChance ||
-      updated.markets.drawNoBet !== state.markets.drawNoBet ||
-      updated.markets.bothTeamsScore !== state.markets.bothTeamsScore ||
-      updated.markets.halfTime !== state.markets.halfTime ||
-      updated.markets.htft !== state.markets.htft ||
-      updated.markets.correctScore !== state.markets.correctScore ||
-      updated.markets.htCorrectScore !== state.markets.htCorrectScore ||
-      updated.markets.h2CorrectScore !== state.markets.h2CorrectScore ||
-      updated.markets.corners !== state.markets.corners ||
-      updated.markets.cards !== state.markets.cards ||
-      updated.markets.teamGoals !== state.markets.teamGoals;
-
-    if (oddsChanged || marketsChanged) {
-      updated.marketVersion = (state.marketVersion ?? 0) + 1;
-    }
-
-    // Always advance state so _driftPhase / _marketNextUpdate are current
-    liveMatchState.set(id, updated);
-
-    if (oddsChanged || marketsChanged) {
-      broadcastMatchDelta(id, {
-        odds: updated.odds,
-        markets: updated.markets,
-        marketVersion: updated.marketVersion,
-        _marketNextUpdate: updated._marketNextUpdate,
-      });
-      anyChange = true;
-    }
-  }
-  if (anyChange) {
-    broadcastLive().catch(() => {
-      /* ignore */
-    });
-  }
-}, LIVE_BROADCAST_INTERVAL_MS);
+// ─── Background Market Drift Engine — RETIRED 2026-09-19 ───────────────────
+// This setInterval used to run calculateLiveFootballMarkets/
+// applyTieredMarketDrift every 1-2s to synthesize a Poisson-model price for
+// every live football market not yet real-priced by PropLine. Removed per
+// explicit instruction: live football must show ONLY real PropLine odds,
+// never a fabricated placeholder — the same "honest empty gap" principle
+// buildFootballUpcomingFromGoalApi's prematch baseline already follows (see
+// its own revert comment). buildFootballLiveFromGoalApi now seeds every live
+// match with zerofillAdvancedMarkets()/{home:0,draw:0,away:0} instead of a
+// synthetic anchor, and liveFootballOddsSync.ts's runPropLineLiveFootballOddsSync
+// is the sole writer of live football odds/markets going forward — a market
+// PropLine hasn't priced simply stays at its zero/empty baseline rather than
+// drifting a fake number. calculateLiveFootballMarkets/applyTieredMarketDrift
+// are left in place, unused, in case this needs revisiting.
 
 // ─── Confrontos (H2H Real Data) ───────────────────────────────────────────────
 

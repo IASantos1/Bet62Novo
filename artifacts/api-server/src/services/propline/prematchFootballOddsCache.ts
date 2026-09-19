@@ -39,7 +39,7 @@ import {
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 
-const FOOTBALL_MARKET_KEYS = [
+export const FOOTBALL_MARKET_KEYS = [
   "h2h",
   "totals",
   "spreads",

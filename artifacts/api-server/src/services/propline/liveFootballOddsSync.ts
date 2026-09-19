@@ -1,40 +1,60 @@
-// Live football moneyline sync via PropLine — added 2026-09-18 alongside
+// Live football odds sync via PropLine — added 2026-09-18 alongside
 // prematchFootballOddsCache.ts as part of moving football odds off GOAL API
 // (its own live-odds endpoint is deactivated — see oddsEngine.ts's header)
 // onto PropLine. Mirrors the write pattern PulseScore's shadowMatchSync.ts
 // runOddsComparisonPhase used: match the already-live GOAL API fixture to a
-// PropLine event by team name, average its bookmakers' h2h price, and write
-// straight into routes/matches.ts's shared liveMatchState — the same Map
-// routes/bets.ts reads for bet acceptance.
+// PropLine event by team name, average its bookmakers' price for every real
+// market, and write straight into routes/matches.ts's shared liveMatchState
+// — the same Map routes/bets.ts reads for bet acceptance.
 //
-// europeanHandicap/anytimeGoalscorer/firstGoalscorer (added 2026-09-18,
-// same day as prematchFootballOddsCache.ts's real-market build-out) are
-// deliberately the ONLY extra markets this file writes beyond the
-// moneyline — routes/matches.ts's live drift engine (the due()-scheduled
-// oscillators, a few hundred lines into buildFootballLiveFromGoalApi's
-// polling logic) reads and rewrites state.markets.totalGoals/handicap/
-// htft/correctScore/corners/cards/etc on its own schedule as part of the
-// synthetic Poisson model every live match gets seeded with; writing a
-// real PropLine price into any of those same fields here would just get
-// silently overwritten by the very next drift tick — the exact "market
-// wiped every ~1-2s" bug already found and fixed once for `odds` itself
-// (via hasRealOdds/_priceSource). europeanHandicap/anytimeGoalscorer/
-// firstGoalscorer are brand new fields the drift engine has never heard of
-// and never touches, so they're safe to set here directly. Wiring the
-// rest of the real markets (totals/BTTS/handicap/htft/etc) into live too
-// needs the drift engine taught to leave real-priced fields alone first —
-// out of scope for this pass.
+// Extended 2026-09-19 to cover every market prematchFootballOddsCache.ts
+// already extracts (totals/spreads/BTTS/draw-no-bet/double-chance/HT-FT/
+// correct-score/corners/cards/win-to-nil/first-team-to-score/corners
+// handicap/team cards), not just moneyline + european handicap +
+// goalscorers — this is now the SOLE source of live football odds/markets.
+// routes/matches.ts's old drift engine (the Poisson-model setInterval that
+// used to fabricate every market not yet real-priced) has been retired
+// entirely per explicit instruction: live football must show ONLY real
+// PropLine prices, never a synthetic placeholder. buildFootballLiveFromGoalApi
+// now seeds every live match with an honest-empty baseline
+// (zerofillAdvancedMarkets()/{home:0,draw:0,away:0}) instead of a synthetic
+// anchor, so a market this sync hasn't priced yet simply stays at that zero/
+// empty baseline rather than showing a fabricated number.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
-import { liveMatchState, broadcastMatchDelta, type LiveMatchState } from "../../routes/matches.js";
+import {
+  liveMatchState,
+  broadcastMatchDelta,
+  zerofillAdvancedMarkets,
+  type LiveMatchState,
+  type AdvancedMarkets,
+} from "../../routes/matches.js";
 import { propline, type ProplineEvent } from "./index.js";
 import {
   extractProplineH2HOdds,
+  extractProplineTotalGoals,
+  extractProplineAsianHandicap,
   extractProplineEuropeanHandicap,
+  extractProplineBothTeamsToScore,
+  extractProplineDrawNoBet,
+  extractProplineDoubleChance,
+  extractProplineHalfTimeFullTime,
+  extractProplineCorrectScore,
+  extractProplineTotalCorners,
+  extractProplineTotalCards,
+  extractProplineTeamCorners,
+  extractProplineTeamCards,
+  extractProplineCornersHandicap,
+  extractProplineWinToNil,
+  extractProplineFirstTeamToScore,
   extractProplineGoalscorerMatchedToRoster,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
-import { fetchGoalApiRosterNames, fetchGoalApiSquadNames } from "./prematchFootballOddsCache.js";
+import {
+  fetchGoalApiRosterNames,
+  fetchGoalApiSquadNames,
+  FOOTBALL_MARKET_KEYS,
+} from "./prematchFootballOddsCache.js";
 
 /** proplineAllActiveSports() (not CONFIG.PROPLINE_ENABLED_SPORTS directly) —
  * see prematchFootballOddsCache.ts's own comment on this same function for
@@ -55,7 +75,7 @@ async function fetchSoccerLeagueOdds(sportKey: string): Promise<ProplineEvent[]>
   if (!CONFIG.PROPLINE_API_KEY) return [];
   try {
     const events = await propline.getOdds(sportKey, {
-      markets: ["h2h", "european_handicap", "anytime_goal_scorer", "first_goal_scorer"],
+      markets: FOOTBALL_MARKET_KEYS,
       oddsFormat: "decimal",
     });
     return Array.isArray(events) ? events : [];
@@ -102,20 +122,80 @@ async function runSync(): Promise<void> {
     const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
 
-    const europeanHandicap = extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team);
     const goalApiFixtureId = state.id.replace(/^goalapi-football-/, "");
     let rosterNames = await fetchGoalApiRosterNames(goalApiFixtureId);
     if (rosterNames.length === 0) {
       rosterNames = await fetchGoalApiSquadNames(state.homeTeamId, state.awayTeamId);
     }
-    const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames);
-    const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
+    const teamCorners = extractProplineTeamCorners(ev.bookmakers, ev.home_team, ev.away_team);
+    const teamCards = extractProplineTeamCards(ev.bookmakers, ev.home_team, ev.away_team);
+    const totalGoals = extractProplineTotalGoals(ev.bookmakers);
+    const correctScore = extractProplineCorrectScore(ev.bookmakers);
+    const totalCorners = extractProplineTotalCorners(ev.bookmakers);
+    const totalCards = extractProplineTotalCards(ev.bookmakers);
 
+    const marketsPatch: Partial<AdvancedMarkets> = {
+      ...(totalGoals ? { totalGoals: { ...state.markets.totalGoals, ...totalGoals } } : {}),
+      ...(() => {
+        const asianHandicap = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+        return asianHandicap ? { asianHandicap } : {};
+      })(),
+      ...(() => {
+        const europeanHandicap = extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+        return europeanHandicap ? { europeanHandicap } : {};
+      })(),
+      ...(() => {
+        const bothTeamsToScore = extractProplineBothTeamsToScore(ev.bookmakers);
+        return bothTeamsToScore ? { bothTeamsScore: bothTeamsToScore } : {};
+      })(),
+      ...(() => {
+        const doubleChance = extractProplineDoubleChance(ev.bookmakers, ev.home_team, ev.away_team);
+        return doubleChance ? { doubleChance } : {};
+      })(),
+      ...(() => {
+        const drawNoBet = extractProplineDrawNoBet(ev.bookmakers, ev.home_team, ev.away_team);
+        return drawNoBet ? { drawNoBet } : {};
+      })(),
+      ...(() => {
+        const htft = extractProplineHalfTimeFullTime(ev.bookmakers, ev.home_team, ev.away_team);
+        return htft ? { htft } : {};
+      })(),
+      ...(correctScore ? { correctScore: { ...state.markets.correctScore, ...correctScore } } : {}),
+      ...(totalCorners
+        ? { corners: { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0, ...state.markets.corners, ...totalCorners } }
+        : {}),
+      ...(totalCards
+        ? { cards: { o35: 0, u35: 0, o45: 0, u45: 0, ...state.markets.cards, ...totalCards } }
+        : {}),
+      ...(teamCorners.home ? { homeCorners: teamCorners.home } : {}),
+      ...(teamCorners.away ? { awayCorners: teamCorners.away } : {}),
+      ...(teamCards.home ? { homeCards: teamCards.home } : {}),
+      ...(teamCards.away ? { awayCards: teamCards.away } : {}),
+      ...(() => {
+        const cornersHandicap = extractProplineCornersHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+        return cornersHandicap ? { cornersHandicap } : {};
+      })(),
+      ...(() => {
+        const winToNil = extractProplineWinToNil(ev.bookmakers, ev.home_team, ev.away_team);
+        return winToNil ? { winToNil } : {};
+      })(),
+      ...(() => {
+        const firstGoal = extractProplineFirstTeamToScore(ev.bookmakers, ev.home_team, ev.away_team);
+        return firstGoal ? { firstGoal } : {};
+      })(),
+      ...(() => {
+        const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames);
+        return anytimeGoalscorer ? { anytimeGoalscorer } : {};
+      })(),
+      ...(() => {
+        const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
+        return firstGoalscorer ? { firstGoalscorer } : {};
+      })(),
+    };
+
+    const updatedMarkets: AdvancedMarkets = { ...state.markets, ...marketsPatch };
     const oddsChanged = JSON.stringify(odds) !== JSON.stringify(state.odds);
-    const marketsChanged =
-      JSON.stringify(europeanHandicap) !== JSON.stringify(state.markets.europeanHandicap ?? null) ||
-      JSON.stringify(anytimeGoalscorer) !== JSON.stringify(state.markets.anytimeGoalscorer ?? null) ||
-      JSON.stringify(firstGoalscorer) !== JSON.stringify(state.markets.firstGoalscorer ?? null);
+    const marketsChanged = JSON.stringify(updatedMarkets) !== JSON.stringify(state.markets);
     const versionBumped = oddsChanged || marketsChanged || state._priceSource !== "propline";
     const updated: LiveMatchState = {
       ...state,
@@ -123,12 +203,7 @@ async function runSync(): Promise<void> {
       hasRealOdds: true,
       _priceSource: "propline",
       _proplineEventId: ev.id,
-      markets: {
-        ...state.markets,
-        ...(europeanHandicap ? { europeanHandicap } : {}),
-        ...(anytimeGoalscorer ? { anytimeGoalscorer } : {}),
-        ...(firstGoalscorer ? { firstGoalscorer } : {}),
-      },
+      markets: updatedMarkets,
       marketVersion: versionBumped ? (state.marketVersion ?? 0) + 1 : state.marketVersion,
     };
     liveMatchState.set(state.id, updated);
