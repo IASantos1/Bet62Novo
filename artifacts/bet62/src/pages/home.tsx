@@ -3687,7 +3687,15 @@ type AdvancedMarkets = {
   };
   homeCorners?: { line: number; over: number; under: number };
   awayCorners?: { line: number; over: number; under: number };
+  // Corners handicap (Asian-style spread on corner count) — real PropLine
+  // market `corners_spread`, same shape/settlement as asianHandicap above.
+  // sel keys corh-home/corh-away; label must carry the signed line.
+  cornersHandicap?: { line: number; home: number; away: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
+  // Per-team cards over/under — real PropLine market `team_cards`, same
+  // shape/rationale as homeCorners/awayCorners above.
+  homeCards?: { line: number; over: number; under: number };
+  awayCards?: { line: number; over: number; under: number };
   // Second half result market (who wins just the 2nd half)
   secondHalf?: { home: number; draw: number; away: number };
   // Football extra-time markets
@@ -13194,9 +13202,13 @@ export default function Home({
                       const hasEscanteios =
                         Object.values(mk?.corners ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
                         (mk?.homeCorners?.over ?? 0) > 1.01 ||
-                        (mk?.awayCorners?.over ?? 0) > 1.01;
+                        (mk?.awayCorners?.over ?? 0) > 1.01 ||
+                        (mk?.cornersHandicap?.home ?? 0) > 1.01;
                       if (hasEscanteios) baseTabs.push({ key: "escanteios", label: "Escanteios" });
-                      const hasCartoes = Object.values(mk?.cards ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01);
+                      const hasCartoes =
+                        Object.values(mk?.cards ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
+                        (mk?.homeCards?.over ?? 0) > 1.01 ||
+                        (mk?.awayCards?.over ?? 0) > 1.01;
                       if (hasCartoes) baseTabs.push({ key: "cartoes", label: "Cartões" });
                       const hasAsiatico =
                         (Number(mk?.drawNoBet?.home ?? 0) > 1.01) ||
@@ -16184,6 +16196,35 @@ export default function Home({
                   </div>
                 )}
 
+              {/* ── FUTEBOL: HANDICAP DE ESCANTEIOS ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "escanteios" || modalTab === "todos") &&
+                m &&
+                m.cornersHandicap &&
+                m.cornersHandicap.home > 0 && (
+                  <MarketGroup
+                    title={`Handicap de Escanteios — Linha ${m.cornersHandicap.line > 0 ? "+" : ""}${m.cornersHandicap.line}`}
+                  >
+                    <MarketOddsBtn
+                      match={match}
+                      sel="corh-home"
+                      odd={m.cornersHandicap.home}
+                      market="escanteios"
+                      label={`${match.home} ${m.cornersHandicap.line > 0 ? "+" : ""}${m.cornersHandicap.line}`}
+                    />
+                    <MarketOddsBtn
+                      match={match}
+                      sel="corh-away"
+                      odd={m.cornersHandicap.away}
+                      market="escanteios"
+                      label={`${match.away} ${m.cornersHandicap.line > 0 ? `-${m.cornersHandicap.line}` : `+${Math.abs(m.cornersHandicap.line)}`}`}
+                    />
+                  </MarketGroup>
+                )}
+
               {/* ── FUTEBOL: CARTÕES ── */}
               {isFootball &&
                 !showET &&
@@ -16233,9 +16274,59 @@ export default function Home({
                 !isLateGame &&
                 modalTab === "cartoes" &&
                 m &&
-                !m.cards && (
+                !m.cards &&
+                !m.homeCards &&
+                !m.awayCards && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
+                  </div>
+                )}
+
+              {/* ── FUTEBOL: CARTÕES POR EQUIPA ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "cartoes" || modalTab === "todos") &&
+                m &&
+                (m.homeCards || m.awayCards) && (
+                  <div>
+                    {m.homeCards && (
+                      <MarketGroup title={`Cartões — ${match.home} — ${m.homeCards.line}`}>
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`ohcards${m.homeCards.line}`}
+                          odd={m.homeCards.over}
+                          market="cartoes"
+                          label={`Acima de ${m.homeCards.line}`}
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`uhcards${m.homeCards.line}`}
+                          odd={m.homeCards.under}
+                          market="cartoes"
+                          label={`Abaixo de ${m.homeCards.line}`}
+                        />
+                      </MarketGroup>
+                    )}
+                    {m.awayCards && (
+                      <MarketGroup title={`Cartões — ${match.away} — ${m.awayCards.line}`}>
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`oacards${m.awayCards.line}`}
+                          odd={m.awayCards.over}
+                          market="cartoes"
+                          label={`Acima de ${m.awayCards.line}`}
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`uacards${m.awayCards.line}`}
+                          odd={m.awayCards.under}
+                          market="cartoes"
+                          label={`Abaixo de ${m.awayCards.line}`}
+                        />
+                      </MarketGroup>
+                    )}
                   </div>
                 )}
 
