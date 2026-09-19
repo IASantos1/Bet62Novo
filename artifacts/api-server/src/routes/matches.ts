@@ -9200,6 +9200,22 @@ const PROPLINE_BASKETBALL_DISAPPEAR_GRACE_MS = 15_000;
 /** Basketball prematch from PropLine — NBA/WNBA/NCAAB, real moneyline via
  * extractProplineBasketballOdds wherever a bookmaker prices it; falls back
  * to the synthetic model otherwise (hasRealOdds:false). */
+/** Honest-empty basketballExtra baseline — same principle as
+ * zerofillTennisExtra(): every per-quarter/team-total field zeroed until a
+ * real PropLine market prices it, rather than the Poisson-model synthetic
+ * grid makeBasketballMarketsFromTeams used to always fill unconditionally
+ * (2026-09-19 revert, same fix already applied to football/tennis). */
+function zerofillBasketballExtra(): NonNullable<AdvancedMarkets["basketballExtra"]> {
+  return {
+    q1: { home: 0, away: 0 },
+    q2: { home: 0, away: 0 },
+    q3: { home: 0, away: 0 },
+    q4: { home: 0, away: 0 },
+    teamTotalHome: { line: 0, over: 0, under: 0 },
+    teamTotalAway: { line: 0, over: 0, under: 0 },
+  };
+}
+
 async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
   const [perLeague, q1PerLeague, h1PerLeague] = await Promise.all([
     proplineFetchBasketballOddsAllLeagues(),
@@ -9226,22 +9242,25 @@ async function buildBasketballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       seen.add(key);
 
       const resultOdds = extractProplineBasketballOdds(ev.bookmakers, ev.home_team, ev.away_team);
-      const markets = makeBasketballMarketsFromTeams(home, away);
-      const odds = resultOdds ?? { ...makeBasketballMoneylineFromTeams(home, away), draw: 0 };
+      const markets = zerofillAdvancedMarkets();
+      const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
 
-      // Real 1st-quarter/1st-half markets from PropLine's ?period= filter,
-      // overriding basketballExtra's synthetic q1 (and populating firstHalf,
-      // which has no synthetic fallback) when a bookmaker actually prices
-      // that event's segment — most events won't have one, so this quietly
-      // no-ops rather than requiring it.
+      // Real 1st-quarter/1st-half markets from PropLine's ?period= filter —
+      // most events won't have one, so this quietly no-ops rather than
+      // requiring it. Everything else basketballExtra used to fabricate
+      // (q2/q3/q4, team totals, anyQuarter, nextPoint, ...) stays absent
+      // until a real source exists for it (2026-09-19 — same "never show a
+      // fabricated price" fix already applied to football/tennis).
       const q1Ev = q1Events.find((e) => e.id === ev.id);
       const q1Odds = q1Ev ? extractProplineBasketballOdds(q1Ev.bookmakers, ev.home_team, ev.away_team) : null;
       const h1Ev = h1Events.find((e) => e.id === ev.id);
       const h1Odds = h1Ev ? extractProplineBasketballOdds(h1Ev.bookmakers, ev.home_team, ev.away_team) : null;
-      if (markets.basketballExtra && (q1Odds || h1Odds)) {
-        if (q1Odds) markets.basketballExtra.q1 = { home: q1Odds.home, away: q1Odds.away };
-        if (h1Odds) markets.basketballExtra.firstHalf = { home: h1Odds.home, away: h1Odds.away };
+      if (q1Odds || h1Odds) {
+        const basketballExtra = zerofillBasketballExtra();
+        if (q1Odds) basketballExtra.q1 = { home: q1Odds.home, away: q1Odds.away };
+        if (h1Odds) basketballExtra.firstHalf = { home: h1Odds.home, away: h1Odds.away };
+        markets.basketballExtra = basketballExtra;
       }
 
       results.push({
@@ -9292,7 +9311,7 @@ async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[]> {
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractProplineBasketballOdds(oddsEv.bookmakers, home, away) : null;
-      const baseMarkets = makeBasketballMarketsFromTeams(home, away);
+      const baseMarkets = zerofillAdvancedMarkets();
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
         ? { ...existing.marketSuspension }
@@ -9386,8 +9405,8 @@ async function buildBaseballUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       seen.add(key);
 
       const resultOdds = extractProplineBaseballOdds(ev.bookmakers, ev.home_team, ev.away_team);
-      const markets = makeMLBMarketsFromTeams(home, away, resultOdds?.home, resultOdds?.away);
-      const odds = resultOdds ?? { ...makeMLBMoneylineFromTeams(home, away), draw: 0 };
+      const markets = zerofillAdvancedMarkets();
+      const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
 
       results.push({
@@ -9437,7 +9456,7 @@ async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]> {
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractProplineBaseballOdds(oddsEv.bookmakers, home, away) : null;
-      const baseMarkets = makeMLBMarketsFromTeams(home, away, resultOdds?.home, resultOdds?.away);
+      const baseMarkets = zerofillAdvancedMarkets();
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
         ? { ...existing.marketSuspension }
@@ -9528,8 +9547,8 @@ async function buildHockeyUpcomingFromPropLine(): Promise<UpcomingMatch[]> {
       seen.add(key);
 
       const resultOdds = extractProplineHockeyOdds(ev.bookmakers, ev.home_team, ev.away_team);
-      const markets = makeHockeyMarketsFromTeams(home, away);
-      const odds = resultOdds ?? makeHockeyMoneylineFromTeams(home, away);
+      const markets = zerofillAdvancedMarkets();
+      const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
       const { date, time } = proplineEventDateTime(ev.commence_time);
 
       // Real 1st-period market from PropLine's ?period=p1 filter, overriding
@@ -9584,7 +9603,7 @@ async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
       const resultOdds = oddsEv ? extractProplineHockeyOdds(oddsEv.bookmakers, home, away) : null;
-      const baseMarkets = makeHockeyMarketsFromTeams(home, away);
+      const baseMarkets = zerofillAdvancedMarkets();
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
         ? { ...existing.marketSuspension }
