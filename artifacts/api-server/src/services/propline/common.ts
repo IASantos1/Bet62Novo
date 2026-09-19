@@ -762,7 +762,7 @@ function isFuzzyPersonNameMatch(rosterName: string, proplineName: string): boole
  * (`rosterNames` empty) or PropLine has no real roster for this market. */
 export function extractProplineGoalscorerMatchedToRoster(
   bookmakers: ProplineBookmaker[] | null | undefined,
-  marketKey: "anytime_goal_scorer" | "first_goal_scorer" | "2plus_goals" | "goal_or_assist",
+  marketKey: "anytime_goal_scorer" | "first_goal_scorer" | "2plus_goals" | "goal_or_assist" | "player_assists",
   rosterNames: string[],
 ): Array<{ player: string; odds: number }> | null {
   if (!bookmakers || bookmakers.length === 0 || rosterNames.length === 0) return null;
@@ -779,6 +779,12 @@ export function extractProplineGoalscorerMatchedToRoster(
   const seen = new Set<string>();
   for (const o of bestOutcomes) {
     if (marketKey === "anytime_goal_scorer" && (o.name || "").toLowerCase() !== "yes") continue;
+    // player_assists is shaped like team_corners/team_cards (Over/Under +
+    // point=0.5), not a bare player-name outcome — the player identity
+    // lives entirely in `description`, and only "Over" (1+ assist) is a
+    // real "will assist" bet; "Under" is its own separate (thin, not
+    // built) market and must not be silently matched to the same player.
+    if (marketKey === "player_assists" && (o.name || "").toLowerCase() !== "over") continue;
     const raw = (o.description || o.name || "").trim();
     if (!raw || raw.toLowerCase() === "no goalscorer") continue;
     const cleaned = raw.replace(/\s*\([^)]*\)\s*$/, "").trim();

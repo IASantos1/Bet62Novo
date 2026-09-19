@@ -63,6 +63,7 @@ export const FOOTBALL_MARKET_KEYS = [
   "winning_margin",
   "2plus_goals",
   "goal_or_assist",
+  "player_assists",
 ];
 
 /** GOAL API's real lineup for a fixture (starting XI + substitutes) — the
@@ -184,6 +185,7 @@ type CachedFootballOdds = {
   winningMargin: ProplineWinningMargin | null;
   twoPlusGoals: Array<{ player: string; odds: number }> | null;
   goalOrAssist: Array<{ player: string; odds: number }> | null;
+  playerAssists: Array<{ player: string; odds: number }> | null;
   fetchedAt: number;
 };
 
@@ -324,6 +326,7 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       winningMargin: extractProplineWinningMargin(ev.bookmakers, ev.home_team, ev.away_team),
       twoPlusGoals: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames),
       goalOrAssist: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames),
+      playerAssists: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_assists", rosterNames),
       fetchedAt: Date.now(),
     });
     priced++;

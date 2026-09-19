@@ -204,6 +204,10 @@ async function runSync(): Promise<void> {
         const goalOrAssist = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames);
         return goalOrAssist ? { goalOrAssist } : {};
       })(),
+      ...(() => {
+        const playerAssists = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_assists", rosterNames);
+        return playerAssists ? { playerAssists } : {};
+      })(),
     };
 
     const updatedMarkets: AdvancedMarkets = { ...state.markets, ...marketsPatch };

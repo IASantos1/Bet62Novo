@@ -236,6 +236,14 @@ export type AdvancedMarkets = {
   // Goal or Assist (player) — real PropLine market `goal_or_assist`, same
   // shape as anytimeGoalscorer. sel key prefix `ga:{player}`.
   goalOrAssist?: Array<{ player: string; odds: number }>;
+  // Player Assists (1+) — real PropLine market `player_assists`, shaped
+  // like team_corners/team_cards (Over/Under + point=0.5, player in
+  // `description`) but only "Over" is a real bettable market — see
+  // extractProplineGoalscorerMatchedToRoster's own comment. sel key
+  // prefix `pa:{player}`, settled by the existing assist grading (reads
+  // real assistName off goal events, matched to the same GOAL API roster
+  // spelling this odds list already uses).
+  playerAssists?: Array<{ player: string; odds: number }>;
   // Sport-specific extras
   _spread?: number;
   _total?: number;
@@ -8047,6 +8055,7 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         if (prematchPrice.winningMargin) markets.winningMargin = prematchPrice.winningMargin;
         if (prematchPrice.twoPlusGoals) markets.twoPlusGoals = prematchPrice.twoPlusGoals;
         if (prematchPrice.goalOrAssist) markets.goalOrAssist = prematchPrice.goalOrAssist;
+        if (prematchPrice.playerAssists) markets.playerAssists = prematchPrice.playerAssists;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 
