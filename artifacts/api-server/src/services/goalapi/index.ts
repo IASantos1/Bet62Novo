@@ -481,7 +481,16 @@ export type GoalApiH2HResult = {
 
 const GOAL_API_TTL = {
   FIXTURES: 60,
-  LIVE: 10,
+  // Was 10s — same real bug class as PropLine's/api-tennis's own LIVE tier
+  // (see their cache.ts / apitennis/index.ts comments, 2026-09-19): the
+  // tri-fallback live builder (buildLivePayload, routes/matches.ts) reruns
+  // every ~750-900ms regardless of this value, but /fixtures/live and
+  // /fixtures/:id (score/minute/status) were still only ever refreshed
+  // from GOAL API once per 10s underneath it. User-reported score arriving
+  // up to ~30s late across every sport, required ≤1-2s. 2s bounds that
+  // while still collapsing the tri-fallback loop's repeat calls within any
+  // 2s window into one upstream request.
+  LIVE: 2,
   ODDS: 120,
   PREDICTIONS: 300,
   STATISTICS: 30,

@@ -218,7 +218,16 @@ export type ApiTennisDraw = {
 
 const API_TENNIS_TTL = {
   FIXTURES: 60,
-  LIVE: 10,
+  // Was 10s. Same real bug as PropLine's own LIVE tier (see its cache.ts
+  // comment, 2026-09-19): buildTennisLiveFromApiTennis reruns every
+  // ~750-900ms via the tri-fallback live loop, but get_livescore/
+  // get_live_odds were still only ever refreshed from api-tennis once per
+  // 10s underneath it — user-reported point score arriving ~30s late,
+  // required ≤1-2s. api-tennis's own WebSocket (websocketClient.ts) is
+  // still preferred over this REST value whenever it has seen the match;
+  // this TTL only bounds how stale the REST fallback (a match the socket
+  // hasn't reported yet, or a disconnected socket) can be.
+  LIVE: 2,
   ODDS: 60,
   REFERENCE: 3600, // events/tournaments/standings/players change rarely
 };
