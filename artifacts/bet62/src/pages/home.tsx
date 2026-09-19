@@ -10084,6 +10084,14 @@ export default function Home({
       label = "🎯 PENÁLTI";
     } else if (rawReason.includes("CHANCE")) {
       label = "GRANDE CHANCE";
+    } else if (rawReason.includes("MATCH POINT")) {
+      label = "🎾 MATCH POINT!";
+    } else if (rawReason.includes("SET POINT")) {
+      label = "🎾 SET POINT!";
+    } else if (rawReason.includes("BREAK POINT")) {
+      label = "🎾 BREAK POINT!";
+    } else if (rawReason.includes("FIM DE SET")) {
+      label = "🎾 FIM DE SET!";
     }
     return (
       <button
