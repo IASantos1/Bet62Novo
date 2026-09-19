@@ -18176,6 +18176,52 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
+                    {/* Aces — jogador da casa (real PropLine player_aces market) */}
+                    {((m as any).tennisExtra as any).homeAces?.over > 0 && (
+                      <MarketGroup
+                        title={`Aces — ${match.home} — O/U ${((m as any).tennisExtra as any).homeAces.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`tacesh-o-${((m as any).tennisExtra as any).homeAces.line}`}
+                          odd={((m as any).tennisExtra as any).homeAces.over}
+                          market="especiais"
+                          label={`Mais de ${((m as any).tennisExtra as any).homeAces.line}`}
+                          suspKey="homeAces"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`tacesh-u-${((m as any).tennisExtra as any).homeAces.line}`}
+                          odd={((m as any).tennisExtra as any).homeAces.under}
+                          market="especiais"
+                          label={`Menos de ${((m as any).tennisExtra as any).homeAces.line}`}
+                          suspKey="homeAces"
+                        />
+                      </MarketGroup>
+                    )}
+                    {/* Aces — jogador visitante (real PropLine player_aces market) */}
+                    {((m as any).tennisExtra as any).awayAces?.over > 0 && (
+                      <MarketGroup
+                        title={`Aces — ${match.away} — O/U ${((m as any).tennisExtra as any).awayAces.line}`}
+                      >
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`tacesa-o-${((m as any).tennisExtra as any).awayAces.line}`}
+                          odd={((m as any).tennisExtra as any).awayAces.over}
+                          market="especiais"
+                          label={`Mais de ${((m as any).tennisExtra as any).awayAces.line}`}
+                          suspKey="awayAces"
+                        />
+                        <MarketOddsBtn
+                          match={match}
+                          sel={`tacesa-u-${((m as any).tennisExtra as any).awayAces.line}`}
+                          odd={((m as any).tennisExtra as any).awayAces.under}
+                          market="especiais"
+                          label={`Menos de ${((m as any).tennisExtra as any).awayAces.line}`}
+                          suspKey="awayAces"
+                        />
+                      </MarketGroup>
+                    )}
                     {/* Highest Scoring Set Total */}
                     {((m as any).tennisExtra as any).highestSetTotal?.over > 0 && (
                       <MarketGroup
