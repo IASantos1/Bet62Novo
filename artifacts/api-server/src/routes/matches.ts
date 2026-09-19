@@ -8617,48 +8617,30 @@ const API_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
 // feed, so a status-based check is required in addition to it, not instead.
 const API_TENNIS_TERMINAL_STATUSES = new Set(["finished", "retired", "walkover", "walk over", "w/o", "wo", "cancelled"]);
 
-/** Deterministic pseudo-random baseline win probability for a pair of
- * players with no real odds yet — same seededRng/hashStr utilities every
- * other synthetic generator in this file already uses (e.g.
- * makeMmaMoneylineFromTeams), kept within a competitive 35-65% band rather
- * than ever showing a coin-flip 50/50 for every unpriced match. */
-function apiTennisSyntheticP(home: string, away: string): number {
-  const rng = seededRng(`apitennis:${home}:${away}`);
-  return mc(0.5 + (rng(1) - 0.5) * 0.6, 0.35, 0.65);
-}
-
-/** Tennis has no draw and none of football's goal-based markets — same
- * "zeroed generic fields + sport-specific extension" pattern as
- * makeMmaMarketsFromTeams. tennisExtra itself (~30 fields) comes from
- * computeTennisExtras, which already existed but had no caller until this
- * provider. */
-function makeTennisMarketsFromPlayers(home: string, away: string, p?: number): AdvancedMarkets {
-  const tennisExtra = computeTennisExtras(p ?? apiTennisSyntheticP(home, away));
+/** Honest-empty tennisExtra baseline — same principle as
+ * zerofillAdvancedMarkets(): every field zeroed until a real provider
+ * (api-tennis's get_live_odds, or PropLine) prices it. Replaces the old
+ * computeTennisExtras Poisson-ish synthetic baseline (2026-09-19 revert,
+ * same fix football already got twice this session) — a market must never
+ * display a fabricated price just because no real one exists yet. */
+function zerofillTennisExtra(): NonNullable<AdvancedMarkets["tennisExtra"]> {
   return {
-    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-    bothTeamsScore: { yes: 0, no: 0 },
-    totalGoals: {
-      over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0,
-      over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0,
-      over65: 0, under65: 0,
-    },
-    handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
-    halfTime: { home: 0, draw: 0, away: 0 },
-    firstGoal: { home: 0, noGoal: 0, away: 0 },
-    tennisExtra,
+    firstSet: { home: 0, away: 0 },
+    set2: { home: 0, away: 0 },
+    set3: { home: 0, away: 0 },
+    exactSets: { h20: 0, h21: 0, a02: 0, a12: 0 },
+    setHandicap: { line: 0, home: 0, away: 0 },
+    totalGames: { line: 0, over: 0, under: 0 },
+    totalGamesLines: [],
+    set1Games: { line: 0, over: 0, under: 0 },
+    gameHandicap: { line: 0, home: 0, away: 0 },
   };
-}
-
-function makeTennisMoneylineFromP(p: number): { home: number; draw: number; away: number } {
-  const [home, away] = probsToDecimalOdds([p, 1 - p], 1.06);
-  return { home: home!, draw: 0, away: away! };
 }
 
 /** Tennis prematch from api-tennis.com — real moneyline via
  * extractApiTennisMoneyline (get_odds's "Home/Away" group) wherever a
- * bookmaker has priced the match; synthetic Poisson-ish baseline
- * (computeTennisExtras) otherwise, same "real data patches synthetic"
- * convention every other provider in this file follows. */
+ * bookmaker has priced the match; honest gap (hasRealOdds:false, zerofilled
+ * markets) otherwise — never a fabricated price. */
 async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
   if (!CONFIG.TENNIS_API_KEY) return [];
   const today = new Date();
@@ -8699,15 +8681,8 @@ async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
     const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
     if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
 
-    // De-vig the real price into a probability so computeTennisExtras'
-    // whole market grid (set betting, exact sets, total games, ...) stays
-    // internally consistent with the real moneyline instead of only the
-    // headline home/away price reflecting reality.
-    const p = resultOdds
-      ? mc(1 / resultOdds.home / (1 / resultOdds.home + 1 / resultOdds.away), 0.02, 0.98)
-      : apiTennisSyntheticP(home, away);
-    const markets = makeTennisMarketsFromPlayers(home, away, p);
-    const odds = resultOdds ?? makeTennisMoneylineFromP(p);
+    const markets = zerofillAdvancedMarkets();
+    const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
 
     results.push({
       id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
@@ -8839,13 +8814,13 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
     }
 
-    const syntheticP = apiTennisSyntheticP(home, away);
-    const baseOdds = makeTennisMoneylineFromP(syntheticP);
-    const baseMarkets = makeTennisMarketsFromPlayers(home, away, syntheticP);
-    // Patch the synthetic tennisExtra with real per-market data wherever
-    // get_live_odds has it this tick — same "real data patches synthetic"
-    // convention every other provider in this file follows. Fields with no
-    // real value this tick keep the synthetic estimate untouched.
+    const baseOdds = { home: 0, draw: 0, away: 0 };
+    const baseMarkets = zerofillAdvancedMarkets();
+    baseMarkets.tennisExtra = zerofillTennisExtra();
+    // Patch the honest-empty tennisExtra with real per-market data wherever
+    // get_live_odds has it this tick — never fabricate a value for a field
+    // that has none this tick, it just stays zeroed (hidden by the
+    // frontend) until a real price arrives.
     if (realLiveMarkets.set1) Object.assign(baseMarkets.tennisExtra.firstSet, realLiveMarkets.set1);
     if (realLiveMarkets.set2) Object.assign(baseMarkets.tennisExtra.set2, realLiveMarkets.set2);
     if (realLiveMarkets.set3) Object.assign(baseMarkets.tennisExtra.set3, realLiveMarkets.set3);

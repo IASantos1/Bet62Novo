@@ -154,16 +154,12 @@ const GOAL_API_MAX_ODDS_DELTA_PCT = Number(process.env["GOAL_API_MAX_ODDS_DELTA_
 // pointbypoint/scores/statistics inline (no separate per-match calls
 // needed). A real inbound WebSocket (confirmed 2026-09-09) pushes live
 // event + point-by-point updates using the SAME APIkey.
-// Deactivated 2026-09-18 on explicit user instruction: tennis is PropLine
-// only now (see services/propline/tennis.ts) — this was kept as a second
-// real candidate alongside PropLine after the bzzoiro reversal, but the
-// user asked for a single clean source instead. Forced to "" here rather
-// than deleting the integration outright, same reversible kill-switch
-// pattern already used for GOAL_API_KEY/PULSESCORE_API_KEY above: every
-// api-tennis call site already gates on `if (CONFIG.TENNIS_API_KEY)`, so
-// this one line turns all of them off regardless of whether the real key
-// is still set in Railway.
-const TENNIS_API_KEY = "";
+// Reactivated 2026-09-19 on explicit user instruction, reversing the
+// 2026-09-18 deactivation: api-tennis is tennis's match-state authority
+// again (fixtures/live score/sets/server/H2H/rankings/statistics) — odds
+// come from PropLine instead (see services/propline/tennis.ts), mirroring
+// the GOAL_API_KEY/PropLine split football already uses.
+const TENNIS_API_KEY = process.env["TENNIS_API_KEY"] ?? "";
 const TENNIS_API_BASE_URL =
   process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";
 const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss.api-tennis.com/live";
