@@ -13872,6 +13872,7 @@ export default function Home({
                         odd={match.odds.home}
                         market="result"
                         label={match.home}
+                        suspKey={isTennis ? "result" : undefined}
                       />
                       {!isTennis && match.odds.draw > 0 && (
                         <MarketOddsBtn
@@ -13888,6 +13889,7 @@ export default function Home({
                         odd={match.odds.away}
                         market="result"
                         label={match.away}
+                        suspKey={isTennis ? "result" : undefined}
                       />
                     </MarketGroup>
                   );

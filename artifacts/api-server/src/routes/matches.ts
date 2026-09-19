@@ -116,6 +116,8 @@ import {
   buildApiTennisMatchStats,
   extractApiTennisAces,
 } from "../services/apitennis/common.js";
+import { detectTennisIncidents } from "../services/apitennis/incidentEngine.js";
+import { computeTennisMarketSuspension } from "../markets/tennisSuspensionEngine.js";
 
 
 const router: IRouter = Router();
@@ -8827,10 +8829,42 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     currentIds.add(id);
 
     const sets = buildApiTennisSets(liveFx.scores);
-    const homeScore = sets.filter(([h, a]) => h > a).length;
-    const awayScore = sets.filter(([h, a]) => a > h).length;
+    // Real bug found 2026-09-19 while building the incident engine: a bare
+    // h>a/a>h comparison over EVERY entry in `sets` (including the last,
+    // still-in-progress one — buildApiTennisSets's own convention) credited
+    // whichever side merely led the current set (e.g. 5-4) with having
+    // already WON it, showing "1-0 sets" mid-set instead of "0-0" until it
+    // actually finished. Only count entries that meet real tennis
+    // set-completion rules (>=6 games with a 2-game margin, or a 7-6/6-7
+    // tiebreak, or an extended advantage set past 7).
+    const finishedSetsForScore = sets.filter(([h, a]) => {
+      const max = Math.max(h, a);
+      const diff = Math.abs(h - a);
+      if (max < 6) return false;
+      if (max === 6) return diff >= 2;
+      if (max === 7) return diff === 1 || diff === 2;
+      return true; // 8-6, 9-7, ... — already decided
+    });
+    const homeScore = finishedSetsForScore.filter(([h, a]) => h > a).length;
+    const awayScore = finishedSetsForScore.filter(([h, a]) => a > h).length;
     const currentPoints = parseApiTennisGameResult(liveFx.event_game_result);
     const serving = parseApiTennisServer(liveFx.event_serve);
+
+    // Fase 5/6 (2026-09-19) — incidents derived purely from these
+    // poll-to-poll deltas, never from pointbypoint (confirmed dormant, see
+    // incidentEngine.ts's header). Suspension is the only consumer; nothing
+    // here touches settlement.
+    const tennisIncidents = detectTennisIncidents(
+      existing?._liveExtra ? { sets: existing._liveExtra.sets ?? [], currentPoints: existing._liveExtra.currentPoints, serving: existing._liveExtra.serving } : undefined,
+      { sets, currentPoints, serving },
+    );
+    const { marketSuspension: tennisMarketSuspension, suspensionReason: tennisSuspensionReason } =
+      computeTennisMarketSuspension({
+        now: Date.now(),
+        existingSuspension: existing?.marketSuspension,
+        existingReason: existing?._suspensionReason,
+        incidents: tennisIncidents,
+      });
 
     let liveOddsRef: ApiTennisLiveOddsEntry[] | undefined = existing?._apiTennisLiveOddsRef;
     const liveOddsEntry = bulkLiveOdds[fx.event_key];
@@ -8912,6 +8946,8 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
       _baseOdds: resultOdds ?? baseOdds,
       _baseMarkets: baseMarkets,
       _apiTennisLiveOddsRef: liveOddsRef,
+      marketSuspension: tennisMarketSuspension,
+      _suspensionReason: tennisSuspensionReason,
       events: existing?.events ?? [],
       matchStats,
       _liveExtra: {
