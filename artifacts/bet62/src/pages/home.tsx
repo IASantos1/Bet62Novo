@@ -3696,6 +3696,24 @@ type AdvancedMarkets = {
   // shape/rationale as homeCorners/awayCorners above.
   homeCards?: { line: number; over: number; under: number };
   awayCards?: { line: number; over: number; under: number };
+  // Winning Margin — real PropLine market `winning_margin`, ten named
+  // buckets. sel keys wm-h1/h2/h3/h4p, wm-a1/a2/a3/a4p, wm-draw, wm-nogoal.
+  winningMargin?: {
+    home1: number;
+    home2: number;
+    home3: number;
+    home4plus: number;
+    away1: number;
+    away2: number;
+    away3: number;
+    away4plus: number;
+    drawScoring: number;
+    noGoal: number;
+  };
+  // 2+ Goals (player) — real PropLine market `2plus_goals`. sel key prefix `2g:{player}`.
+  twoPlusGoals?: Array<{ player: string; odds: number }>;
+  // Goal or Assist (player) — real PropLine market `goal_or_assist`. sel key prefix `ga:{player}`.
+  goalOrAssist?: Array<{ player: string; odds: number }>;
   // Second half result market (who wins just the 2nd half)
   secondHalf?: { home: number; draw: number; away: number };
   // Football extra-time markets
@@ -13195,9 +13213,11 @@ export default function Home({
                       if (has2Tempo) baseTabs.push({ key: "2tempo", label: "2º Tempo" });
                       const hasHtft = Object.values((mk?.htft ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasHtft) baseTabs.push({ key: "htft", label: "HT/FT" });
-                      const hasPlacar = !!mk?.correctScore && Object.values(mk.correctScore).some((v) => (Number(v) ?? 0) > 1.01);
+                      const hasPlacar =
+                        (!!mk?.correctScore && Object.values(mk.correctScore).some((v) => (Number(v) ?? 0) > 1.01)) ||
+                        (mk?.winningMargin?.home1 ?? 0) > 1.01;
                       if (hasPlacar) baseTabs.push({ key: "placar", label: "Placar Exato" });
-                      const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length;
+                      const hasMarcadores = !!mk?.anytimeGoalscorer?.length || !!mk?.firstGoalscorer?.length || !!mk?.lastGoalscorer?.length || !!mk?.twoPlusGoals?.length || !!mk?.goalOrAssist?.length;
                       if (hasMarcadores) baseTabs.push({ key: "marcadores", label: "Marcadores" });
                       const hasEscanteios =
                         Object.values(mk?.corners ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
@@ -15928,9 +15948,63 @@ export default function Home({
                 !isLateGame &&
                 modalTab === "placar" &&
                 m &&
-                !m.correctScore && (
+                !m.correctScore &&
+                !m.winningMargin && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
+                  </div>
+                )}
+
+              {/* ── FUTEBOL: MARGEM DE VITÓRIA ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "placar" || modalTab === "todos") &&
+                m &&
+                m.winningMargin && (
+                  <div>
+                    <MarketAccordionSection
+                      title="Margem de Vitória"
+                      defaultOpen={false}
+                      count={10}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione por quantos golos a partida termina.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.winningMargin.home1 > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-h1" odd={m.winningMargin.home1} market="placar" label={`${match.home} por 1`} />
+                        )}
+                        {m.winningMargin.home2 > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-h2" odd={m.winningMargin.home2} market="placar" label={`${match.home} por 2`} />
+                        )}
+                        {m.winningMargin.home3 > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-h3" odd={m.winningMargin.home3} market="placar" label={`${match.home} por 3`} />
+                        )}
+                        {m.winningMargin.home4plus > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-h4p" odd={m.winningMargin.home4plus} market="placar" label={`${match.home} por 4+`} />
+                        )}
+                        {m.winningMargin.away1 > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-a1" odd={m.winningMargin.away1} market="placar" label={`${match.away} por 1`} />
+                        )}
+                        {m.winningMargin.away2 > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-a2" odd={m.winningMargin.away2} market="placar" label={`${match.away} por 2`} />
+                        )}
+                        {m.winningMargin.away3 > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-a3" odd={m.winningMargin.away3} market="placar" label={`${match.away} por 3`} />
+                        )}
+                        {m.winningMargin.away4plus > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-a4p" odd={m.winningMargin.away4plus} market="placar" label={`${match.away} por 4+`} />
+                        )}
+                        {m.winningMargin.drawScoring > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-draw" odd={m.winningMargin.drawScoring} market="placar" label="Empate com golos" />
+                        )}
+                        {m.winningMargin.noGoal > 0 && (
+                          <MarketOddsBtn match={match} sel="wm-nogoal" odd={m.winningMargin.noGoal} market="placar" label="0-0" />
+                        )}
+                      </div>
+                    </MarketAccordionSection>
                   </div>
                 )}
 
@@ -16039,6 +16113,76 @@ export default function Home({
                   </div>
                 )}
 
+              {/* ── FUTEBOL: 2+ GOLOS ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "marcadores" || modalTab === "todos") &&
+                m &&
+                m.twoPlusGoals &&
+                m.twoPlusGoals.length > 0 && (
+                  <div>
+                    <MarketAccordionSection
+                      title="2+ Golos"
+                      defaultOpen={false}
+                      count={m.twoPlusGoals.length}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione o jogador que marcar 2 ou mais golos na partida.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.twoPlusGoals.map(({ player, odds }) => (
+                          <MarketOddsBtn
+                            key={player}
+                            match={match}
+                            sel={`2g:${player}`}
+                            odd={odds}
+                            market="marcadores"
+                            label={player}
+                            suspKey="twoPlusGoals"
+                          />
+                        ))}
+                      </div>
+                    </MarketAccordionSection>
+                  </div>
+                )}
+
+              {/* ── FUTEBOL: GOLO OU ASSISTÊNCIA ── */}
+              {isFootball &&
+                !showET &&
+                !showPen &&
+                !isLateGame &&
+                (modalTab === "marcadores" || modalTab === "todos") &&
+                m &&
+                m.goalOrAssist &&
+                m.goalOrAssist.length > 0 && (
+                  <div>
+                    <MarketAccordionSection
+                      title="Golo ou Assistência"
+                      defaultOpen={false}
+                      count={m.goalOrAssist.length}
+                    >
+                      <p className="text-xs text-zinc-500 mb-3">
+                        Selecione o jogador que marcar OU der uma assistência na partida.
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {m.goalOrAssist.map(({ player, odds }) => (
+                          <MarketOddsBtn
+                            key={player}
+                            match={match}
+                            sel={`ga:${player}`}
+                            odd={odds}
+                            market="marcadores"
+                            label={player}
+                            suspKey="goalOrAssist"
+                          />
+                        ))}
+                      </div>
+                    </MarketAccordionSection>
+                  </div>
+                )}
+
               {isFootball &&
                 !showET &&
                 !showPen &&
@@ -16047,7 +16191,9 @@ export default function Home({
                 m &&
                 (!m.anytimeGoalscorer || m.anytimeGoalscorer.length === 0) &&
                 (!m.firstGoalscorer || m.firstGoalscorer.length === 0) &&
-                (!m.lastGoalscorer || m.lastGoalscorer.length === 0) && (
+                (!m.lastGoalscorer || m.lastGoalscorer.length === 0) &&
+                (!m.twoPlusGoals || m.twoPlusGoals.length === 0) &&
+                (!m.goalOrAssist || m.goalOrAssist.length === 0) && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
