@@ -14800,7 +14800,7 @@ export default function Home({
               {isBasketball &&
                 (modalTab === "spread" || modalTab === "todos") &&
                 m &&
-                m.handicap.homeMinusOne > 0 && (
+                (m.handicap?.homeMinusOne ?? 0) > 0 && (
                   <div>
                     {m._spread !== undefined && (
                       <MarketGroup
@@ -14829,7 +14829,7 @@ export default function Home({
               {isBasketball &&
                 modalTab === "spread" &&
                 m &&
-                m.handicap.homeMinusOne === 0 && (
+                (m.handicap?.homeMinusOne ?? 0) === 0 && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
@@ -15271,8 +15271,8 @@ export default function Home({
                 (modalTab === "handicap" || modalTab === "todos") &&
                 m &&
                 (isTennis
-                  ? hasTennisHandicapMarkets || m.handicap.homeMinusOne > 0
-                  : m.handicap.homeMinusOne > 0) && (
+                  ? hasTennisHandicapMarkets || (m.handicap?.homeMinusOne ?? 0) > 0
+                  : (m.handicap?.homeMinusOne ?? 0) > 0) && (
                   <div>
                     {isFootball ? (
                       <>
@@ -15445,8 +15445,8 @@ export default function Home({
                 modalTab === "handicap" &&
                 m &&
                 (isTennis
-                  ? !hasTennisHandicapMarkets && m.handicap.homeMinusOne === 0
-                  : m.handicap.homeMinusOne === 0) && (
+                  ? !hasTennisHandicapMarkets && (m.handicap?.homeMinusOne ?? 0) === 0
+                  : (m.handicap?.homeMinusOne ?? 0) === 0) && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
