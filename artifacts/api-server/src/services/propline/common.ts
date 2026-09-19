@@ -758,7 +758,7 @@ export function extractProplineEuropeanHandicap(
   };
 }
 
-function normalizePersonName(name: string): string {
+export function normalizePersonName(name: string): string {
   return String(name ?? "")
     .toLowerCase()
     .normalize("NFD")
@@ -781,7 +781,7 @@ function normalizePersonName(name: string): string {
  * spelling as the player identity — only GOAL API's, matched here via last
  * name (exact) plus at least one more shared name token, which correctly
  * resolves both real cases above without needing an exact full-name match. */
-function isFuzzyPersonNameMatch(rosterName: string, proplineName: string): boolean {
+export function isFuzzyPersonNameMatch(rosterName: string, proplineName: string): boolean {
   if (!rosterName || !proplineName) return false;
   if (rosterName === proplineName) return true;
   const rParts = rosterName.split(" ").filter(Boolean);
@@ -1092,4 +1092,188 @@ export function extractProplineWinningMargin(
     drawScoring: avgOrZero(buckets.drawScoring),
     noGoal: avgOrZero(buckets.noGoal),
   };
+}
+
+// ─── Tennis market extraction (2026-09-19, real keys confirmed via a direct
+// PropLine call, never the vendor's prose docs — see the tennis plan's Fase
+// 0) ─────────────────────────────────────────────────────────────────────
+// Tennis outcomes are named by PLAYER, not team, so these reuse
+// normalizePersonName/isFuzzyPersonNameMatch (already used for football's
+// goalscorer markets) rather than normalizeTeamName/isFuzzyMatch.
+
+/** Game handicap ("spreads" key — confirmed real, outcomes named by player
+ * with a `point` like -6/+6, i.e. total games in the match, not sets).
+ * Same "pick the line with the most bookmaker coverage" approach as
+ * extractProplineAsianHandicap. */
+export function extractProplineTennisSpread(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { line: number; home: number; away: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizePersonName(home);
+  const awayNorm = normalizePersonName(away);
+  const byLine = new Map<number, { home: number[]; away: number[] }>();
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "spreads");
+    if (!market) continue;
+    let homePoint: number | null = null;
+    let homePrice: number | null = null;
+    let awayPrice: number | null = null;
+    for (const o of market.outcomes) {
+      if (o.point == null) continue;
+      const outcomeNorm = normalizePersonName(o.description || o.name || "");
+      if (isFuzzyPersonNameMatch(outcomeNorm, homeNorm) || isFuzzyPersonNameMatch(homeNorm, outcomeNorm)) {
+        homePoint = o.point;
+        homePrice = o.price;
+      } else if (isFuzzyPersonNameMatch(outcomeNorm, awayNorm) || isFuzzyPersonNameMatch(awayNorm, outcomeNorm)) {
+        awayPrice = o.price;
+      }
+    }
+    if (homePoint == null || homePrice == null || awayPrice == null) continue;
+    const bucket = byLine.get(homePoint) ?? { home: [], away: [] };
+    bucket.home.push(proplineNormalizeOddsPrice(homePrice));
+    bucket.away.push(proplineNormalizeOddsPrice(awayPrice));
+    byLine.set(homePoint, bucket);
+  }
+  let bestLine: number | null = null;
+  let bestCount = -1;
+  for (const [line, bucket] of byLine) {
+    const count = bucket.home.length + bucket.away.length;
+    if (count > bestCount) {
+      bestLine = line;
+      bestCount = count;
+    }
+  }
+  if (bestLine == null) return null;
+  const bucket = byLine.get(bestLine);
+  if (!bucket || bucket.home.length === 0 || bucket.away.length === 0) return null;
+  return { line: bestLine, home: average(bucket.home), away: average(bucket.away) };
+}
+
+/** Shared single-line Over/Under extractor for a plain "Over"/"Under"
+ * market with no team/player distinction (total games, total sets, total
+ * tiebreaks) — picks the line with the most bookmaker coverage, same
+ * approach as the handicap extractors above. */
+function extractSingleLineOverUnder(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  marketKey: string,
+): { line: number; over: number; under: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const byLine = new Map<number, { over: number[]; under: number[] }>();
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === marketKey);
+    if (!market) continue;
+    for (const o of market.outcomes) {
+      if (o.point == null) continue;
+      const name = (o.name || "").toLowerCase();
+      if (name !== "over" && name !== "under") continue;
+      const bucket = byLine.get(o.point) ?? { over: [], under: [] };
+      const price = proplineNormalizeOddsPrice(o.price);
+      if (name === "over") bucket.over.push(price);
+      else bucket.under.push(price);
+      byLine.set(o.point, bucket);
+    }
+  }
+  let bestLine: number | null = null;
+  let bestCount = -1;
+  for (const [line, bucket] of byLine) {
+    const count = bucket.over.length + bucket.under.length;
+    if (count > bestCount) {
+      bestLine = line;
+      bestCount = count;
+    }
+  }
+  if (bestLine == null) return null;
+  const bucket = byLine.get(bestLine);
+  if (!bucket || bucket.over.length === 0 || bucket.under.length === 0) return null;
+  return { line: bestLine, over: average(bucket.over), under: average(bucket.under) };
+}
+
+/** Total games in the match ("totals" key — confirmed real, plain
+ * Over/Under with no player/team split). */
+export function extractProplineTennisTotalGames(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+): { line: number; over: number; under: number } | null {
+  return extractSingleLineOverUnder(bookmakers, "totals");
+}
+
+/** Total sets in the match ("total_sets" key — confirmed real). */
+export function extractProplineTennisTotalSets(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+): { line: number; over: number; under: number } | null {
+  return extractSingleLineOverUnder(bookmakers, "total_sets");
+}
+
+/** Total tiebreaks in the match ("total_tiebreaks" key — confirmed real).
+ * PropLine prices this per player (outcome `description` names one of the
+ * two players), but a tiebreak is a shared match event both players are in
+ * — whichever player's line has the most coverage is used as the match
+ * total, never split or averaged across the two players' listings since
+ * they describe the same real count. */
+export function extractProplineTennisTotalTiebreaks(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+): { line: number; over: number; under: number } | null {
+  return extractSingleLineOverUnder(bookmakers, "total_tiebreaks");
+}
+
+/** Player aces prop ("player_aces" key — confirmed real, Over/Under with
+ * the player's name in `description`, same shape as football's team_corners/
+ * team_cards). Settleable off api-tennis's own statistics[] "Aces"
+ * stat_name (confirmed real 2026-09-19), a plain per-player integer. */
+export function extractProplineTennisPlayerAces(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { home: { line: number; over: number; under: number } | null; away: { line: number; over: number; under: number } | null } {
+  const result: {
+    home: { line: number; over: number; under: number } | null;
+    away: { line: number; over: number; under: number } | null;
+  } = { home: null, away: null };
+  if (!bookmakers || bookmakers.length === 0) return result;
+  const homeNorm = normalizePersonName(home);
+  const awayNorm = normalizePersonName(away);
+  const homeByLine = new Map<number, { over: number[]; under: number[] }>();
+  const awayByLine = new Map<number, { over: number[]; under: number[] }>();
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "player_aces");
+    if (!market) continue;
+    for (const o of market.outcomes) {
+      if (o.point == null) continue;
+      const name = (o.name || "").toLowerCase();
+      if (name !== "over" && name !== "under") continue;
+      const outcomeNorm = normalizePersonName(o.description || "");
+      if (!outcomeNorm) continue;
+      const price = proplineNormalizeOddsPrice(o.price);
+      let target: Map<number, { over: number[]; under: number[] }> | null = null;
+      if (isFuzzyPersonNameMatch(outcomeNorm, homeNorm) || isFuzzyPersonNameMatch(homeNorm, outcomeNorm)) {
+        target = homeByLine;
+      } else if (isFuzzyPersonNameMatch(outcomeNorm, awayNorm) || isFuzzyPersonNameMatch(awayNorm, outcomeNorm)) {
+        target = awayByLine;
+      }
+      if (!target) continue;
+      const bucket = target.get(o.point) ?? { over: [], under: [] };
+      if (name === "over") bucket.over.push(price);
+      else bucket.under.push(price);
+      target.set(o.point, bucket);
+    }
+  }
+  const pickBest = (byLine: Map<number, { over: number[]; under: number[] }>) => {
+    let bestLine: number | null = null;
+    let bestCount = -1;
+    for (const [line, bucket] of byLine) {
+      const count = bucket.over.length + bucket.under.length;
+      if (count > bestCount) {
+        bestLine = line;
+        bestCount = count;
+      }
+    }
+    if (bestLine == null) return null;
+    const bucket = byLine.get(bestLine);
+    if (!bucket || bucket.over.length === 0 || bucket.under.length === 0) return null;
+    return { line: bestLine, over: average(bucket.over), under: average(bucket.under) };
+  };
+  result.home = pickBest(homeByLine);
+  result.away = pickBest(awayByLine);
+  return result;
 }

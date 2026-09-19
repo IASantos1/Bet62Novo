@@ -719,6 +719,104 @@ const tennisCases: FinishedSettlementCase[] = [
     },
     expected: null,
   },
+  {
+    name: "tennis total tiebreaks over 0.5 is settled as won when a set went 7-6",
+    selection: makeSelection("ttb-o-0.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [7, 6],
+            [6, 3],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis total tiebreaks under 0.5 is settled as won with no tiebreak sets",
+    selection: makeSelection("ttb-u-0.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [6, 4],
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis total tiebreaks stays pending until the match is decided",
+    selection: makeSelection("ttb-o-0.5"),
+    ft: { home: 1, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [4, 6],
+          ],
+        },
+      },
+    },
+    expected: null,
+  },
+  {
+    name: "tennis home player aces over 2.5 is settled as won",
+    selection: makeSelection("tacesh-o-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [6, 4],
+          ],
+          aces: [4, 1],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis away player aces under 2.5 is settled as lost",
+    selection: makeSelection("tacesa-u-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [6, 4],
+          ],
+          aces: [4, 3],
+        },
+      },
+    },
+    expected: "lost",
+  },
+  {
+    name: "tennis player aces stays pending when api-tennis never reported a real count",
+    selection: makeSelection("tacesh-o-2.5"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [6, 4],
+          ],
+        },
+      },
+    },
+    expected: null,
+  },
 ];
 
 for (const tc of tennisCases) {

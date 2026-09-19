@@ -320,6 +320,30 @@ export function buildApiTennisMatchStats(
     .filter((g) => g.rows.some((r) => r.home !== "-" || r.away !== "-"));
 }
 
+/** Real per-player ace count for the match ("Aces" stat_name, confirmed
+ * real via a production call 2026-09-19 — see the tennis plan's Fase 0),
+ * used to settle the PropLine player_aces market. Returns null when this
+ * tick's statistics[] hasn't reported it yet for either player (never a
+ * fabricated 0 — settlement waits for the real value). */
+export function extractApiTennisAces(
+  statistics: ApiTennisMatch["statistics"] | null | undefined,
+  homePlayerKey: string,
+  awayPlayerKey: string,
+): [number, number] | null {
+  if (!statistics || statistics.length === 0) return null;
+  let home: number | null = null;
+  let away: number | null = null;
+  for (const s of statistics) {
+    if (s.stat_period !== "match" || s.stat_name !== "Aces") continue;
+    const value = Number(s.stat_value);
+    if (!Number.isFinite(value)) continue;
+    if (String(s.player_key) === String(homePlayerKey)) home = value;
+    else if (String(s.player_key) === String(awayPlayerKey)) away = value;
+  }
+  if (home == null || away == null) return null;
+  return [home, away];
+}
+
 export function extractApiTennisLiveMarkets(
   rows: ApiTennisLiveOddsEntry[] | null | undefined,
 ): ApiTennisRealLiveMarkets {

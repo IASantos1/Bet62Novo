@@ -1308,10 +1308,14 @@ function describePendingSettlementReason(
         /^ses-/.test(s) ||
         /^sc[123]-/.test(s) ||
         /^oe[12]?-(odd|even)$/.test(s) ||
-        /^sm2-(11|12|21|22)$/.test(s)) &&
+        /^sm2-(11|12|21|22)$/.test(s) ||
+        /^ttb-([ou])-/.test(s)) &&
       sets.length === 0
     )
       return "missing_tennis_set_breakdown";
+    if (/^(tacesh|tacesa)-([ou])-/.test(s) && !getTennisAcesFromExtras(extra?.extras)) {
+      return "missing_tennis_aces";
+    }
   }
   if (sport === "basketball") {
     const periods = getBasketballQuartersFromExtras(extra?.extras);
@@ -2259,6 +2263,25 @@ function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
   return sets;
 }
 
+/** Real per-player ace count for the match, captured from api-tennis's own
+ * statistics[] "Aces" stat_name (extractApiTennisAces, confirmed real
+ * 2026-09-19 — see the tennis plan's Fase 0) and persisted at finalization
+ * as extras.tennis.aces. Returns null when this match never got a real
+ * count (e.g. api-tennis's statistics[] stayed empty) — settlement waits
+ * rather than guessing zero. */
+function getTennisAcesFromExtras(extras: unknown): [number, number] | null {
+  if (!extras || typeof extras !== "object") return null;
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["tennis"];
+  if (!nested || typeof nested !== "object") return null;
+  const aces = (nested as Record<string, unknown>)["aces"];
+  if (!Array.isArray(aces) || aces.length < 2) return null;
+  const home = Number(aces[0]);
+  const away = Number(aces[1]);
+  if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+  return [home, away];
+}
+
 function volleyballSetFinished(setScore: [number, number]): boolean {
   if (!setScore || !Array.isArray(setScore) || setScore.length !== 2) return false;
   const [homePoints, awayPoints] = setScore;
@@ -3020,6 +3043,40 @@ export function scoreOutcomeForSel(
     if (totalSets === null) return null;
     if (totalSets === line) voided = true;
     else winning = dir === "o" ? totalSets > line : totalSets < line;
+  }
+  // ── Total tiebreaks O/U (real PropLine market key `total_tiebreaks`,
+  // confirmed 2026-09-19) — a tiebreak happened in a set iff its final score
+  // is 7-6/6-7 (tennis's only way to reach 7 games without a 2-game-clear
+  // margin, same rule tb-yes/no above already relies on). Resolves only
+  // once the match is fully over (any remaining set could still add a
+  // tiebreak), same as tb-'s full-match "No" case. ──────────────────────────
+  else if (/^ttb-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^ttb-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const dir = m[1]!;
+    const line = Number(m[2]);
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras).filter(tennisSetFinished);
+    const tiebreakCount = sets.filter(([h, a]) => (h === 7 && a === 6) || (h === 6 && a === 7)).length;
+    if (tiebreakCount === line) voided = true;
+    else winning = dir === "o" ? tiebreakCount > line : tiebreakCount < line;
+  }
+  // ── Player aces O/U, by side (real PropLine market key `player_aces`,
+  // confirmed 2026-09-19) — settled off api-tennis's own statistics[] "Aces"
+  // stat_name (extractApiTennisAces), never a fabricated count. `tacesh`
+  // is the home player, `tacesa` the away player — no player-name matching
+  // needed since api-tennis already resolves the stat to home/away
+  // directly (unlike football's goalscorer markets, which need roster
+  // matching because PropLine and GOAL API spell names differently). ───────
+  else if (/^(tacesh|tacesa)-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^(tacesh|tacesa)-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const side = m[1] === "tacesh" ? 0 : 1;
+    const dir = m[2]!;
+    const line = Number(m[3]);
+    const aces = getTennisAcesFromExtras(extra?.extras);
+    if (!aces) return null;
+    const count = aces[side]!;
+    if (count === line) voided = true;
+    else winning = dir === "o" ? count > line : count < line;
   }
   // ── Par/Ímpar — Total de Games ────────────────────────────────────────────
   else if (s === "oe-odd" || s === "oe-even") {

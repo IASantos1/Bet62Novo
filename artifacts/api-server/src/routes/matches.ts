@@ -92,6 +92,10 @@ import {
   triggerPrematchPropLineFootballSync,
 } from "../services/propline/prematchFootballOddsCache.js";
 import {
+  getPrematchPropLineTennisOdds,
+  triggerPrematchPropLineTennisSync,
+} from "../services/propline/prematchTennisOddsCache.js";
+import {
   apiTennis,
   type ApiTennisMatch,
   type ApiTennisStanding,
@@ -110,6 +114,7 @@ import {
   buildApiTennisConfrontos,
   buildApiTennisPlayerProfile,
   buildApiTennisMatchStats,
+  extractApiTennisAces,
 } from "../services/apitennis/common.js";
 
 
@@ -339,6 +344,11 @@ export type AdvancedMarkets = {
     straightSetsWinner?: { yes: number; no: number };
     goTheDistance?: { yes: number; no: number };
     finalSetTieBreakOrExtra?: { yes: number; no: number };
+    // Real PropLine data (2026-09-19, player_aces market key) — per-player
+    // aces prop, settled off api-tennis's own statistics[] "Aces" stat_name
+    // (confirmed real via a production call, see the tennis plan's Fase 0).
+    homeAces?: { line: number; over: number; under: number };
+    awayAces?: { line: number; over: number; under: number };
   };
   // Hockey extended markets
   hockeyExtra?: {
@@ -672,6 +682,7 @@ export type LiveMatchState = {
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
     pointByPoint?: ApiTennisPointByPointGame[]; // tennis: per-game point log, from the WS push (get_fixtures/livescore also carry it, usually empty by the time REST is polled)
+    tennisAces?: [number, number]; // tennis: real [home,away] ace count from api-tennis's statistics[] "Aces" stat_name, for settling player_aces
     currentPts?: [number, number]; // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>; // volleyball: completed set scores [[25,18],[22,25]]
     // PropLine volleyball only: cumulative match-wide points at the moment
@@ -6271,7 +6282,12 @@ export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<voi
         ? { baseball: { innings: state._liveExtra.innings } }
         : {}),
       ...(state.sport === "tennis" && state._liveExtra?.sets
-        ? { tennis: { sets: state._liveExtra.sets } }
+        ? {
+            tennis: {
+              sets: state._liveExtra.sets,
+              ...(state._liveExtra.tennisAces ? { aces: state._liveExtra.tennisAces } : {}),
+            },
+          }
         : {}),
       ...(state.sport === "volleyball" && state._liveExtra?.sets
         ? {
@@ -8668,6 +8684,7 @@ async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
 
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
+  const seenPlayers: Array<{ id: string; home: string; away: string }> = [];
   for (const fx of fixtures) {
     if (fx.event_live === "1") continue; // live matches come from buildTennisLiveFromApiTennis
     const home = fx.event_first_player;
@@ -8681,11 +8698,31 @@ async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
     const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
     if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
 
+    const id = `${API_TENNIS_ID_PREFIX}${fx.event_key}`;
+    seenPlayers.push({ id, home, away });
+
+    // PropLine real odds (spread/total games/total sets/total tiebreaks/
+    // player aces) patched on top of api-tennis's own moneyline — see
+    // prematchTennisOddsCache.ts. Cache is warmed by the
+    // triggerPrematchPropLineTennisSync call below on every previous
+    // rebuild, so this is normally already populated by the time it's read.
+    const proplinePrice = getPrematchPropLineTennisOdds(id);
     const markets = zerofillAdvancedMarkets();
+    if (proplinePrice) {
+      if (!resultOdds) resultOdds = { home: proplinePrice.home, draw: 0, away: proplinePrice.away };
+      const tennisExtra = zerofillTennisExtra();
+      if (proplinePrice.spread) tennisExtra.gameHandicap = proplinePrice.spread;
+      if (proplinePrice.totalGames) tennisExtra.totalGames = proplinePrice.totalGames;
+      if (proplinePrice.totalSets) tennisExtra.totalSets = proplinePrice.totalSets;
+      if (proplinePrice.totalTiebreaks) tennisExtra.totalTieBreaks = proplinePrice.totalTiebreaks;
+      if (proplinePrice.homeAces) tennisExtra.homeAces = proplinePrice.homeAces;
+      if (proplinePrice.awayAces) tennisExtra.awayAces = proplinePrice.awayAces;
+      markets.tennisExtra = tennisExtra;
+    }
     const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
 
     results.push({
-      id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
+      id,
       home,
       away,
       league: fx.tournament_name || fx.event_type_type || "Tênis",
@@ -8700,6 +8737,7 @@ async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
       awayLogoUrl: fx.event_second_player_logo ?? undefined,
     });
   }
+  void triggerPrematchPropLineTennisSync(seenPlayers.map((p) => ({ providerMatchId: p.id, home: p.home, away: p.away })));
   results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   return results;
 }
@@ -8840,9 +8878,12 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
     // array (aces, double faults, % first-serve points won, etc.) was
     // never mapped onto the shared V2StatsGroup shape the frontend reads.
     let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
+    let tennisAces = existing?._liveExtra?.tennisAces;
     if (liveFx.statistics && liveFx.statistics.length > 0) {
       const built = buildApiTennisMatchStats(liveFx.statistics, fx.first_player_key, fx.second_player_key);
       if (built.length > 0) matchStats = built;
+      const aces = extractApiTennisAces(liveFx.statistics, fx.first_player_key, fx.second_player_key);
+      if (aces) tennisAces = aces;
     }
 
     const state: LiveMatchState = {
@@ -8879,6 +8920,7 @@ async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
         currentPoints,
         serving,
         pointByPoint: liveFx.pointbypoint?.length ? liveFx.pointbypoint : existing?._liveExtra?.pointByPoint,
+        tennisAces,
       },
       homeLogoUrl: liveFx.event_first_player_logo ?? existing?.homeLogoUrl,
       awayLogoUrl: liveFx.event_second_player_logo ?? existing?.awayLogoUrl,
@@ -10017,14 +10059,17 @@ async function rebuildUpcomingCache(): Promise<void> {
       football = _lastGoodFootballUpcoming;
     }
     // api-tennis.com restored 2026-09-09 for tennis — first real tennis
-    // provider this platform has ever had.
+    // provider this platform has ever had. Reworked 2026-09-19: api-tennis
+    // is now the sole match-state/odds source (PropLine is layered into its
+    // own builder — see prematchTennisOddsCache.ts — rather than competing
+    // whole-match), so buildTennisUpcomingFromPropLine only runs as a
+    // fallback when api-tennis itself is unavailable, never alongside it.
     let tennis: UpcomingMatch[] = [];
     try {
       const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
       if (CONFIG.TENNIS_API_KEY) {
         tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
-      }
-      if (CONFIG.PROPLINE_API_KEY) {
+      } else if (CONFIG.PROPLINE_API_KEY) {
         tennisCandidates.push({ provider: "propline", matches: await buildTennisUpcomingFromPropLine() });
       }
       tennis = chooseUpcomingProvider("tennis", tennisCandidates);
@@ -10181,11 +10226,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
   let tennisLiveRaw: LiveMatchState[] = [];
   try {
+    // api-tennis is the sole live source now (see the upcoming-tennis
+    // comment above) — PropLine only steps in whole-match if api-tennis is
+    // unavailable, never competing with it tick-by-tick.
     const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
     if (CONFIG.TENNIS_API_KEY) {
       tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
-    }
-    if (CONFIG.PROPLINE_API_KEY) {
+    } else if (CONFIG.PROPLINE_API_KEY) {
       tennisCandidates.push({ provider: "propline", matches: await buildTennisLiveFromPropLine() });
     }
     tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
@@ -11220,8 +11267,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
     if (CONFIG.TENNIS_API_KEY) {
       tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
-    }
-    if (CONFIG.PROPLINE_API_KEY) {
+    } else if (CONFIG.PROPLINE_API_KEY) {
       tennisCandidates.push({ provider: "propline", matches: await buildTennisUpcomingFromPropLine() });
     }
     tennis = chooseUpcomingProvider("tennis", tennisCandidates);

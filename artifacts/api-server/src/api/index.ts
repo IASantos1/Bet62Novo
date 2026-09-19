@@ -15,6 +15,7 @@ import { startPulseScoreWebSocket } from "../providers/pulsescore/websocketClien
 import { goalApi } from "../services/goalapi/index.js";
 import { triggerPrematchPropLineFootballSync } from "../services/propline/prematchFootballOddsCache.js";
 import { runPropLineLiveFootballOddsSync } from "../services/propline/liveFootballOddsSync.js";
+import { runPropLineLiveTennisOddsSync } from "../services/propline/liveTennisOddsSync.js";
 
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
@@ -173,6 +174,15 @@ server.listen(port, () => {
   if (CONFIG.PROPLINE_API_KEY) {
     void runPropLineLiveFootballOddsSync();
     setInterval(() => void runPropLineLiveFootballOddsSync(), 15_000);
+  }
+
+  // PropLine — live tennis odds (total sets/tiebreaks/player aces on top of
+  // api-tennis's own real moneyline/game-handicap/total-games) — see
+  // liveTennisOddsSync.ts's header for why those three fields are left to
+  // api-tennis alone. Same cadence as football's block above.
+  if (CONFIG.PROPLINE_API_KEY) {
+    void runPropLineLiveTennisOddsSync();
+    setInterval(() => void runPropLineLiveTennisOddsSync(), 15_000);
   }
 
   // PulseScore WebSocket — confirmed real via the docs the user pasted
