@@ -1,14 +1,27 @@
 // Live tennis odds sync via PropLine — added 2026-09-19 as part of the
 // tennis architecture rework. api-tennis.com stays the sole match-state
-// source (score/sets/server/statistics) and already supplies real
-// moneyline/set-betting/game-handicap/total-games prices via its own
-// get_live_odds (confirmed real 2026-09-11) — this file adds the markets
-// api-tennis does NOT price at all: total sets, total tiebreaks, and
-// per-player aces (confirmed real PropLine keys, see the tennis plan's
-// Fase 0). Deliberately does NOT touch moneyline/gameHandicap/totalGames —
-// two real providers pricing the same field would just flicker between two
-// different (both real) numbers depending on which sync last ran, with no
-// actual benefit over api-tennis's already-working values for those.
+// source (score/sets/server/statistics). Originally this file only added
+// the markets api-tennis does NOT price at all (total sets, total
+// tiebreaks, per-player aces) and deliberately left moneyline/gameHandicap/
+// totalGames to api-tennis's own get_live_odds, reasoning that two real
+// providers pricing the same field would just flicker between two
+// different (both real) numbers with no benefit.
+//
+// Revised 2026-09-19 (user-reported: tennis score/odds not updating within
+// the required 1-2s, explicit "no polling, pure websocket" instruction).
+// api-tennis's get_live_odds is a plain REST call cached 10s
+// (API_TENNIS_TTL.LIVE in services/apitennis/index.ts) — every tick of the
+// sub-second broadcast loop was still reading up to 10-second-stale odds
+// underneath it, and api-tennis has no WebSocket for odds at all (only for
+// match/score state). PropLine's real WebSocket (websocketClient.ts)
+// already wakes this exact sync on every real odds change, debounced to at
+// most 2s — the only actually-real-time (non-polling) odds path tennis
+// has. So moneyline/gameHandicap/totalGames now come from here too,
+// overwriting api-tennis's REST value once PropLine has priced the match;
+// api-tennis's get_live_odds remains only as the fallback baseline for the
+// brief window before PropLine's WS has fired for a given match (set in
+// buildTennisLiveFromApiTennis), never the live source of truth once this
+// sync has run.
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -18,6 +31,9 @@ import {
 } from "../../routes/matches.js";
 import { propline, type ProplineEvent } from "./index.js";
 import {
+  extractProplineH2HOdds,
+  extractProplineTennisSpread,
+  extractProplineTennisTotalGames,
   extractProplineTennisTotalSets,
   extractProplineTennisTotalTiebreaks,
   extractProplineTennisPlayerAces,
@@ -72,22 +88,33 @@ async function runSync(): Promise<void> {
 
     // Same real staleness fix as liveFootballOddsSync.ts (2026-09-19).
     const freshBookmakers = filterFreshBookmakers(ev.bookmakers);
+    const moneyline = extractProplineH2HOdds(freshBookmakers, ev.home_team, ev.away_team, false);
+    const gameHandicap = extractProplineTennisSpread(freshBookmakers, ev.home_team, ev.away_team);
+    const totalGames = extractProplineTennisTotalGames(freshBookmakers);
     const totalSets = extractProplineTennisTotalSets(freshBookmakers);
     const totalTiebreaks = extractProplineTennisTotalTiebreaks(freshBookmakers);
     const aces = extractProplineTennisPlayerAces(freshBookmakers, ev.home_team, ev.away_team);
-    if (!totalSets && !totalTiebreaks && !aces.home && !aces.away) continue;
+    if (!moneyline && !gameHandicap && !totalGames && !totalSets && !totalTiebreaks && !aces.home && !aces.away) {
+      continue;
+    }
 
     const tennisExtra = { ...state.markets.tennisExtra };
+    if (gameHandicap) tennisExtra.gameHandicap = gameHandicap;
+    if (totalGames) tennisExtra.totalGames = totalGames;
     if (totalSets) tennisExtra.totalSets = totalSets;
     if (totalTiebreaks) tennisExtra.totalTieBreaks = totalTiebreaks;
     if (aces.home) tennisExtra.homeAces = aces.home;
     if (aces.away) tennisExtra.awayAces = aces.away;
 
     const updatedMarkets = { ...state.markets, tennisExtra };
+    const updatedOdds = moneyline ? { home: moneyline.home, draw: 0, away: moneyline.away } : state.odds;
+    const oddsChanged = JSON.stringify(updatedOdds) !== JSON.stringify(state.odds);
     const marketsChanged = JSON.stringify(updatedMarkets) !== JSON.stringify(state.markets);
-    if (!marketsChanged) continue;
+    if (!oddsChanged && !marketsChanged) continue;
     const updated: LiveMatchState = {
       ...state,
+      odds: updatedOdds,
+      hasRealOdds: state.hasRealOdds || Boolean(moneyline),
       markets: updatedMarkets,
       marketVersion: (state.marketVersion ?? 0) + 1,
     };
