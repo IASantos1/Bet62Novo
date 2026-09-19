@@ -21,6 +21,7 @@ import {
   extractProplineTennisTotalSets,
   extractProplineTennisTotalTiebreaks,
   extractProplineTennisPlayerAces,
+  filterFreshBookmakers,
 } from "./common.js";
 import { TENNIS_MARKET_KEYS, proplineFindTennisEventByPlayers } from "./prematchTennisOddsCache.js";
 
@@ -69,9 +70,11 @@ async function runSync(): Promise<void> {
     const ev = proplineFindTennisEventByPlayers(pool, state.home, state.away);
     if (!ev) continue;
 
-    const totalSets = extractProplineTennisTotalSets(ev.bookmakers);
-    const totalTiebreaks = extractProplineTennisTotalTiebreaks(ev.bookmakers);
-    const aces = extractProplineTennisPlayerAces(ev.bookmakers, ev.home_team, ev.away_team);
+    // Same real staleness fix as liveFootballOddsSync.ts (2026-09-19).
+    const freshBookmakers = filterFreshBookmakers(ev.bookmakers);
+    const totalSets = extractProplineTennisTotalSets(freshBookmakers);
+    const totalTiebreaks = extractProplineTennisTotalTiebreaks(freshBookmakers);
+    const aces = extractProplineTennisPlayerAces(freshBookmakers, ev.home_team, ev.away_team);
     if (!totalSets && !totalTiebreaks && !aces.home && !aces.away) continue;
 
     const tennisExtra = { ...state.markets.tennisExtra };

@@ -50,6 +50,7 @@ import {
   extractProplineGoalscorerMatchedToRoster,
   extractProplineWinningMargin,
   extractProplineH2HEarlyPayout,
+  filterFreshBookmakers,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 import {
@@ -121,7 +122,13 @@ async function runSync(): Promise<void> {
   for (const state of liveFootball) {
     const ev = proplineFindEventByName(pool, { home: state.home, away: state.away });
     if (!ev) continue;
-    const odds = extractProplineH2HOdds(ev.bookmakers, ev.home_team, ev.away_team, true);
+    // Real bug fixed 2026-09-19 (user-reported: a team up 2-0 at 68' still
+    // priced near a coinflip) — a book that hasn't repriced since well
+    // before the live event it's supposedly quoting was being averaged in
+    // like any fresh price. Every extraction call below reads from this
+    // filtered copy, never the raw ev.bookmakers.
+    const freshBookmakers = filterFreshBookmakers(ev.bookmakers);
+    const odds = extractProplineH2HOdds(freshBookmakers, ev.home_team, ev.away_team, true);
     if (!odds) continue;
 
     const goalApiFixtureId = state.id.replace(/^goalapi-football-/, "");
@@ -129,30 +136,30 @@ async function runSync(): Promise<void> {
     if (rosterNames.length === 0) {
       rosterNames = await fetchGoalApiSquadNames(state.homeTeamId, state.awayTeamId);
     }
-    const teamCorners = extractProplineTeamCorners(ev.bookmakers, ev.home_team, ev.away_team);
-    const teamCards = extractProplineTeamCards(ev.bookmakers, ev.home_team, ev.away_team);
-    const totalGoals = extractProplineTotalGoals(ev.bookmakers);
-    const correctScore = extractProplineCorrectScore(ev.bookmakers);
-    const totalCorners = extractProplineTotalCorners(ev.bookmakers);
-    const totalCards = extractProplineTotalCards(ev.bookmakers);
+    const teamCorners = extractProplineTeamCorners(freshBookmakers, ev.home_team, ev.away_team);
+    const teamCards = extractProplineTeamCards(freshBookmakers, ev.home_team, ev.away_team);
+    const totalGoals = extractProplineTotalGoals(freshBookmakers);
+    const correctScore = extractProplineCorrectScore(freshBookmakers);
+    const totalCorners = extractProplineTotalCorners(freshBookmakers);
+    const totalCards = extractProplineTotalCards(freshBookmakers);
 
-    const asianHandicap = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
-    const europeanHandicap = extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team);
-    const bothTeamsToScore = extractProplineBothTeamsToScore(ev.bookmakers);
-    const doubleChance = extractProplineDoubleChance(ev.bookmakers, ev.home_team, ev.away_team);
-    const drawNoBet = extractProplineDrawNoBet(ev.bookmakers, ev.home_team, ev.away_team);
-    const htft = extractProplineHalfTimeFullTime(ev.bookmakers, ev.home_team, ev.away_team);
-    const cornersHandicap = extractProplineCornersHandicap(ev.bookmakers, ev.home_team, ev.away_team);
-    const winToNil = extractProplineWinToNil(ev.bookmakers, ev.home_team, ev.away_team);
-    const firstGoal = extractProplineFirstTeamToScore(ev.bookmakers, ev.home_team, ev.away_team);
-    const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames);
-    const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
-    const winningMargin = extractProplineWinningMargin(ev.bookmakers, ev.home_team, ev.away_team);
-    const twoPlusGoals = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames);
-    const goalOrAssist = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames);
-    const playerAssists = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_assists", rosterNames);
-    const playerTwoPlusAssists = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_2plus_assists", rosterNames);
-    const h2hEarlyPayout = extractProplineH2HEarlyPayout(ev.bookmakers, ev.home_team, ev.away_team);
+    const asianHandicap = extractProplineAsianHandicap(freshBookmakers, ev.home_team, ev.away_team);
+    const europeanHandicap = extractProplineEuropeanHandicap(freshBookmakers, ev.home_team, ev.away_team);
+    const bothTeamsToScore = extractProplineBothTeamsToScore(freshBookmakers);
+    const doubleChance = extractProplineDoubleChance(freshBookmakers, ev.home_team, ev.away_team);
+    const drawNoBet = extractProplineDrawNoBet(freshBookmakers, ev.home_team, ev.away_team);
+    const htft = extractProplineHalfTimeFullTime(freshBookmakers, ev.home_team, ev.away_team);
+    const cornersHandicap = extractProplineCornersHandicap(freshBookmakers, ev.home_team, ev.away_team);
+    const winToNil = extractProplineWinToNil(freshBookmakers, ev.home_team, ev.away_team);
+    const firstGoal = extractProplineFirstTeamToScore(freshBookmakers, ev.home_team, ev.away_team);
+    const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(freshBookmakers, "anytime_goal_scorer", rosterNames);
+    const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(freshBookmakers, "first_goal_scorer", rosterNames);
+    const winningMargin = extractProplineWinningMargin(freshBookmakers, ev.home_team, ev.away_team);
+    const twoPlusGoals = extractProplineGoalscorerMatchedToRoster(freshBookmakers, "2plus_goals", rosterNames);
+    const goalOrAssist = extractProplineGoalscorerMatchedToRoster(freshBookmakers, "goal_or_assist", rosterNames);
+    const playerAssists = extractProplineGoalscorerMatchedToRoster(freshBookmakers, "player_assists", rosterNames);
+    const playerTwoPlusAssists = extractProplineGoalscorerMatchedToRoster(freshBookmakers, "player_2plus_assists", rosterNames);
+    const h2hEarlyPayout = extractProplineH2HEarlyPayout(freshBookmakers, ev.home_team, ev.away_team);
 
     const marketsPatch: Partial<AdvancedMarkets> = {};
     if (totalGoals) marketsPatch.totalGoals = { ...state.markets.totalGoals, ...totalGoals };

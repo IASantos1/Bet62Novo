@@ -26,6 +26,7 @@ import {
   dedupeProplineFixtures,
   extractProplineAsianHandicap,
   extractProplineTotalPoints,
+  filterFreshBookmakers,
 } from "../services/propline/common.js";
 import {
   PROPLINE_BASKETBALL_LEAGUE_TITLES,
@@ -9331,15 +9332,18 @@ export async function buildBasketballLiveFromPropLine(): Promise<LiveMatchState[
       const existing = liveMatchState.get(id);
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
-      const resultOdds = oddsEv ? extractProplineBasketballOdds(oddsEv.bookmakers, home, away) : null;
+      // Real staleness fix (2026-09-19, same as liveFootballOddsSync.ts) —
+      // never average in a bookmaker price older than 5 minutes.
+      const freshOddsBookmakers = oddsEv ? filterFreshBookmakers(oddsEv.bookmakers) : [];
+      const resultOdds = oddsEv ? extractProplineBasketballOdds(freshOddsBookmakers, home, away) : null;
       const baseMarkets = zerofillAdvancedMarkets();
       if (oddsEv) {
-        const spread = extractProplineAsianHandicap(oddsEv.bookmakers, home, away);
+        const spread = extractProplineAsianHandicap(freshOddsBookmakers, home, away);
         if (spread) {
           baseMarkets.handicap.homeMinusOne = spread.home;
           baseMarkets.handicap.awayPlusOne = spread.away;
         }
-        const total = extractProplineTotalPoints(oddsEv.bookmakers);
+        const total = extractProplineTotalPoints(freshOddsBookmakers);
         if (total) {
           baseMarkets.totalGoals.over25 = total.over;
           baseMarkets.totalGoals.under25 = total.under;
@@ -9500,15 +9504,16 @@ export async function buildBaseballLiveFromPropLine(): Promise<LiveMatchState[]>
       const existing = liveMatchState.get(id);
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
-      const resultOdds = oddsEv ? extractProplineBaseballOdds(oddsEv.bookmakers, home, away) : null;
+      const freshOddsBookmakers = oddsEv ? filterFreshBookmakers(oddsEv.bookmakers) : [];
+      const resultOdds = oddsEv ? extractProplineBaseballOdds(freshOddsBookmakers, home, away) : null;
       const baseMarkets = zerofillAdvancedMarkets();
       if (oddsEv) {
-        const spread = extractProplineAsianHandicap(oddsEv.bookmakers, home, away);
+        const spread = extractProplineAsianHandicap(freshOddsBookmakers, home, away);
         if (spread) {
           baseMarkets.handicap.homeMinusOne = spread.home;
           baseMarkets.handicap.awayPlusOne = spread.away;
         }
-        const total = extractProplineTotalPoints(oddsEv.bookmakers);
+        const total = extractProplineTotalPoints(freshOddsBookmakers);
         if (total) {
           baseMarkets.totalGoals.over25 = total.over;
           baseMarkets.totalGoals.under25 = total.under;
@@ -9671,15 +9676,16 @@ export async function buildHockeyLiveFromPropLine(): Promise<LiveMatchState[]> {
       const existing = liveMatchState.get(id);
 
       const oddsEv = oddsEvents.find((e) => e.id === sc.id);
-      const resultOdds = oddsEv ? extractProplineHockeyOdds(oddsEv.bookmakers, home, away) : null;
+      const freshOddsBookmakers = oddsEv ? filterFreshBookmakers(oddsEv.bookmakers) : [];
+      const resultOdds = oddsEv ? extractProplineHockeyOdds(freshOddsBookmakers, home, away) : null;
       const baseMarkets = zerofillAdvancedMarkets();
       if (oddsEv) {
-        const spread = extractProplineAsianHandicap(oddsEv.bookmakers, home, away);
+        const spread = extractProplineAsianHandicap(freshOddsBookmakers, home, away);
         if (spread) {
           baseMarkets.handicap.homeMinusOne = spread.home;
           baseMarkets.handicap.awayPlusOne = spread.away;
         }
-        const total = extractProplineTotalPoints(oddsEv.bookmakers);
+        const total = extractProplineTotalPoints(freshOddsBookmakers);
         if (total) {
           baseMarkets.totalGoals.over25 = total.over;
           baseMarkets.totalGoals.under25 = total.under;

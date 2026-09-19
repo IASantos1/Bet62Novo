@@ -20,6 +20,60 @@ function proplineNormalizeOddsPrice(price: number): number {
   return price;
 }
 
+/** How old a single outcome's own price can be before it's excluded from
+ * every extraction function below — real bug reported 2026-09-19: a team
+ * up 2-0 at 68' was still priced at ~1.70 to win, a line only a book that
+ * hasn't repriced since well before the 2nd goal would show. PropLine's own
+ * outcome shape carries real per-price freshness (last_change_at/
+ * book_updated_at/recorded_at), but nothing in this file had ever read any
+ * of them — every extractor blindly averaged whatever price was attached
+ * to an outcome regardless of how long ago it was actually set. 5 minutes
+ * mirrors suspensionEngine.ts's FOOTBALL_ODDS_FEED_STALE_MS — generous
+ * enough that a genuinely quiet market (no reason to move) isn't wrongly
+ * dropped, but long enough after any goal/point/game that a book still
+ * showing its pre-event price is clearly behind. */
+const STALE_OUTCOME_MAX_AGE_MS = 5 * 60_000;
+
+/** Real per-outcome timestamp, in that preference order (whichever the
+ * response actually populates first — never assume only one is ever set).
+ * Returns null when none parse, so callers can tell "genuinely unknown
+ * age" apart from "known and fresh" — an outcome with no timestamp at all
+ * is kept, never guessed stale, matching this file's "never fabricate,
+ * only ever narrow from real data" rule. */
+function outcomeAgeMs(o: { last_change_at?: string; book_updated_at?: string | null; recorded_at?: string }): number | null {
+  const raw = o.last_change_at ?? o.book_updated_at ?? o.recorded_at;
+  if (!raw) return null;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return null;
+  return Date.now() - t;
+}
+
+/** Drops any outcome whose own price is older than maxAgeMs, then prunes
+ * markets/bookmakers left with nothing — applied ONCE where `ev.bookmakers`
+ * is read (live football sync, live/prematch caches for every sport), so
+ * every extraction function below automatically only ever sees fresh
+ * prices without each one needing its own staleness check. */
+export function filterFreshBookmakers(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  maxAgeMs: number = STALE_OUTCOME_MAX_AGE_MS,
+): ProplineBookmaker[] {
+  if (!bookmakers || bookmakers.length === 0) return [];
+  const result: ProplineBookmaker[] = [];
+  for (const bm of bookmakers) {
+    const markets = bm.markets
+      .map((m) => ({
+        ...m,
+        outcomes: m.outcomes.filter((o) => {
+          const age = outcomeAgeMs(o);
+          return age == null || age <= maxAgeMs;
+        }),
+      }))
+      .filter((m) => m.outcomes.length > 0);
+    if (markets.length > 0) result.push({ ...bm, markets });
+  }
+  return result;
+}
+
 /** Extracts one bookmaker's h2h (moneyline) prices — matches outcomes by
  * team name, falling back to outcome POSITION only when PropLine's own
  * documented ordering guarantee applies (home, away, then draw when
