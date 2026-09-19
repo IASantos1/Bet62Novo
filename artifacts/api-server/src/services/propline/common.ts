@@ -61,6 +61,51 @@ function extractH2HFromBookmaker(
   return { home: homePrice, draw: drawPrice, away: awayPrice };
 }
 
+/** H2H Early Payout — confirmed real 2026-09-19 (market key
+ * `h2h_early_payout`, 3-way outcomes named by team + "Tie" instead of
+ * "Draw", e.g. Tottenham -120 / Aston Villa 230 / Tie 225). The "early
+ * payout" is a bookmaker promo condition (pays out early if a team goes
+ * up by 2+ goals) that never changes what the bet actually resolves on —
+ * the final result is still just home/draw/away, so this settles with
+ * the exact same grading as the regular 1X2 market, just under its own
+ * selection-key prefix (h2hep-home/h2hep-draw/h2hep-away) so it can carry
+ * its own (usually worse) price without colliding with the real h2h odds. */
+export function extractProplineH2HEarlyPayout(
+  bookmakers: ProplineBookmaker[] | null | undefined,
+  home: string,
+  away: string,
+): { home: number; draw: number; away: number } | null {
+  if (!bookmakers || bookmakers.length === 0) return null;
+  const homeNorm = normalizeTeamName(home);
+  const awayNorm = normalizeTeamName(away);
+  const homePrices: number[] = [];
+  const awayPrices: number[] = [];
+  const drawPrices: number[] = [];
+  for (const bm of bookmakers) {
+    const market = bm.markets.find((m) => m.key === "h2h_early_payout");
+    if (!market) continue;
+    let homePrice: number | null = null;
+    let awayPrice: number | null = null;
+    let drawPrice: number | null = null;
+    for (const o of market.outcomes) {
+      const name = (o.name || "").toLowerCase();
+      if (name === "tie" || name === "draw") {
+        drawPrice = o.price;
+        continue;
+      }
+      const outcomeNorm = normalizeTeamName(o.name || "");
+      if (isFuzzyMatch(outcomeNorm, homeNorm, 0.22)) homePrice = o.price;
+      else if (isFuzzyMatch(outcomeNorm, awayNorm, 0.22)) awayPrice = o.price;
+    }
+    if (homePrice == null || awayPrice == null || drawPrice == null) continue;
+    homePrices.push(proplineNormalizeOddsPrice(homePrice));
+    awayPrices.push(proplineNormalizeOddsPrice(awayPrice));
+    drawPrices.push(proplineNormalizeOddsPrice(drawPrice));
+  }
+  if (homePrices.length === 0 || awayPrices.length === 0 || drawPrices.length === 0) return null;
+  return { home: average(homePrices), draw: average(drawPrices), away: average(awayPrices) };
+}
+
 function average(values: number[]): number {
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100;
 }
@@ -762,7 +807,7 @@ function isFuzzyPersonNameMatch(rosterName: string, proplineName: string): boole
  * (`rosterNames` empty) or PropLine has no real roster for this market. */
 export function extractProplineGoalscorerMatchedToRoster(
   bookmakers: ProplineBookmaker[] | null | undefined,
-  marketKey: "anytime_goal_scorer" | "first_goal_scorer" | "2plus_goals" | "goal_or_assist" | "player_assists",
+  marketKey: "anytime_goal_scorer" | "first_goal_scorer" | "2plus_goals" | "goal_or_assist" | "player_assists" | "player_2plus_assists",
   rosterNames: string[],
 ): Array<{ player: string; odds: number }> | null {
   if (!bookmakers || bookmakers.length === 0 || rosterNames.length === 0) return null;

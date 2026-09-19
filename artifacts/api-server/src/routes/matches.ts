@@ -244,6 +244,14 @@ export type AdvancedMarkets = {
   // real assistName off goal events, matched to the same GOAL API roster
   // spelling this odds list already uses).
   playerAssists?: Array<{ player: string; odds: number }>;
+  // 2+ Assists (player) — real PropLine market `player_2plus_assists`, same
+  // shape as anytimeGoalscorer. sel key prefix `2a:{player}`.
+  playerTwoPlusAssists?: Array<{ player: string; odds: number }>;
+  // H2H Early Payout — real PropLine market `h2h_early_payout`, same shape
+  // as the plain 1X2 but its own price (a bookmaker promo condition that
+  // never changes the underlying result). sel keys h2hep-home/h2hep-draw/
+  // h2hep-away, settled identically to the plain 1X2.
+  h2hEarlyPayout?: { home: number; draw: number; away: number };
   // Sport-specific extras
   _spread?: number;
   _total?: number;
@@ -8056,6 +8064,8 @@ async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
         if (prematchPrice.twoPlusGoals) markets.twoPlusGoals = prematchPrice.twoPlusGoals;
         if (prematchPrice.goalOrAssist) markets.goalOrAssist = prematchPrice.goalOrAssist;
         if (prematchPrice.playerAssists) markets.playerAssists = prematchPrice.playerAssists;
+        if (prematchPrice.playerTwoPlusAssists) markets.playerTwoPlusAssists = prematchPrice.playerTwoPlusAssists;
+        if (prematchPrice.h2hEarlyPayout) markets.h2hEarlyPayout = prematchPrice.h2hEarlyPayout;
       }
       const { date, time } = goalApiKickoffDateTime(fx);
 

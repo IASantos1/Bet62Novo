@@ -1643,19 +1643,20 @@ function normalizeCompactFootballSelectionKey(
 }
 
 function parseSelectionPlayerMarket(selection: string): {
-  market: "goal" | "assist" | "card" | "goal2plus" | "goalOrAssist";
+  market: "goal" | "assist" | "card" | "goal2plus" | "goalOrAssist" | "assist2plus";
   period: "any" | "1h" | "2h";
   scope: "any" | "first" | "last";
   playerName: string;
 } | null {
   const raw = String(selection ?? "").trim();
   if (!raw) return null;
-  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc|fg1h|fg2h|fg|lg1h|lg2h|lg|2g|ga):(.+)$/i);
+  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc|fg1h|fg2h|fg|lg1h|lg2h|lg|2g|2a|ga):(.+)$/i);
   if (!match) return null;
   const key = match[1]!.toLowerCase();
   const playerName = match[2]!.trim();
   if (!playerName) return null;
   if (key === "2g") return { market: "goal2plus", period: "any", scope: "any", playerName };
+  if (key === "2a") return { market: "assist2plus", period: "any", scope: "any", playerName };
   if (key === "ga") return { market: "goalOrAssist", period: "any", scope: "any", playerName };
   if (key === "pa") return { market: "assist", period: "any", scope: "any", playerName };
   if (key === "pg") return { market: "goal", period: "any", scope: "any", playerName };
@@ -2609,6 +2610,11 @@ export function scoreOutcomeForSel(
           (goal) => normalizeParticipantName(goal.playerName ?? "") === wantedName,
         ).length;
         winning = goalCount >= 2;
+      } else if (playerSelection.market === "assist2plus") {
+        const assistCount = filtered.filter(
+          (goal) => normalizeParticipantName(goal.assistName ?? "") === wantedName,
+        ).length;
+        winning = assistCount >= 2;
       } else if (playerSelection.market === "goalOrAssist") {
         winning = filtered.some((goal) => {
           const playerName = normalizeParticipantName(goal.playerName ?? "");
@@ -3595,6 +3601,12 @@ export function scoreOutcomeForSel(
   else if (s === "home") winning = home > away;
   else if (s === "away") winning = away > home;
   else if (s === "draw") winning = home === away;
+  // ── H2H Early Payout (real PropLine market `h2h_early_payout` — the
+  // "early payout" promo never changes what the bet resolves on, so this
+  // grades identically to the plain 1X2 above) ──────────────────────────────
+  else if (s === "h2hep-home") winning = home > away;
+  else if (s === "h2hep-away") winning = away > home;
+  else if (s === "h2hep-draw") winning = home === away;
   // ── Double Chance ──────────────────────────────────────────────────────────
   else if (s === "homeOrDraw" || s === "dc-hd") winning = home >= away;
   else if (s === "awayOrDraw" || s === "dc-da") winning = away >= home;

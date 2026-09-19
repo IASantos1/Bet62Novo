@@ -34,6 +34,7 @@ import {
   extractProplineCornersHandicap,
   extractProplineTeamCards,
   extractProplineWinningMargin,
+  extractProplineH2HEarlyPayout,
   type ProplineTotalGoals,
   type ProplineTotalCorners,
   type ProplineTotalCards,
@@ -64,6 +65,8 @@ export const FOOTBALL_MARKET_KEYS = [
   "2plus_goals",
   "goal_or_assist",
   "player_assists",
+  "player_2plus_assists",
+  "h2h_early_payout",
 ];
 
 /** GOAL API's real lineup for a fixture (starting XI + substitutes) — the
@@ -186,6 +189,8 @@ type CachedFootballOdds = {
   twoPlusGoals: Array<{ player: string; odds: number }> | null;
   goalOrAssist: Array<{ player: string; odds: number }> | null;
   playerAssists: Array<{ player: string; odds: number }> | null;
+  playerTwoPlusAssists: Array<{ player: string; odds: number }> | null;
+  h2hEarlyPayout: { home: number; draw: number; away: number } | null;
   fetchedAt: number;
 };
 
@@ -327,6 +332,8 @@ async function runSync(fixtures: PrematchFootballFixtureRef[]): Promise<void> {
       twoPlusGoals: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames),
       goalOrAssist: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames),
       playerAssists: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_assists", rosterNames),
+      playerTwoPlusAssists: extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_2plus_assists", rosterNames),
+      h2hEarlyPayout: extractProplineH2HEarlyPayout(ev.bookmakers, ev.home_team, ev.away_team),
       fetchedAt: Date.now(),
     });
     priced++;

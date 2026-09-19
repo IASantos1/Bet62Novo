@@ -260,6 +260,47 @@ const footballCases: FinishedSettlementCase[] = [
     expected: "won",
   },
   {
+    name: "football player 2+ assists market is settled as won",
+    selection: makeSelection("2a:John Doe"),
+    ft: { home: 2, away: 0 },
+    extra: {
+      extras: {
+        football: {
+          goals: [
+            { minute: 12, playerName: "Finisher A", assistName: "John Doe" },
+            { minute: 40, playerName: "Finisher B", assistName: "John Doe" },
+          ],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "football player 2+ assists market is settled as lost on a single assist",
+    selection: makeSelection("2a:John Doe"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        football: {
+          goals: [{ minute: 12, playerName: "Finisher", assistName: "John Doe" }],
+        },
+      },
+    },
+    expected: "lost",
+  },
+  {
+    name: "football h2h early payout home is settled as won",
+    selection: makeSelection("h2hep-home"),
+    ft: { home: 2, away: 1 },
+    expected: "won",
+  },
+  {
+    name: "football h2h early payout draw is settled as won",
+    selection: makeSelection("h2hep-draw"),
+    ft: { home: 1, away: 1 },
+    expected: "won",
+  },
+  {
     name: "football player goal market is settled as won",
     selection: makeSelection("pg:John Doe"),
     ft: { home: 2, away: 0 },

@@ -49,6 +49,7 @@ import {
   extractProplineFirstTeamToScore,
   extractProplineGoalscorerMatchedToRoster,
   extractProplineWinningMargin,
+  extractProplineH2HEarlyPayout,
 } from "./common.js";
 import { proplineFindEventByName, proplineAllActiveSports } from "./football.js";
 import {
@@ -135,80 +136,54 @@ async function runSync(): Promise<void> {
     const totalCorners = extractProplineTotalCorners(ev.bookmakers);
     const totalCards = extractProplineTotalCards(ev.bookmakers);
 
-    const marketsPatch: Partial<AdvancedMarkets> = {
-      ...(totalGoals ? { totalGoals: { ...state.markets.totalGoals, ...totalGoals } } : {}),
-      ...(() => {
-        const asianHandicap = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
-        return asianHandicap ? { asianHandicap } : {};
-      })(),
-      ...(() => {
-        const europeanHandicap = extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team);
-        return europeanHandicap ? { europeanHandicap } : {};
-      })(),
-      ...(() => {
-        const bothTeamsToScore = extractProplineBothTeamsToScore(ev.bookmakers);
-        return bothTeamsToScore ? { bothTeamsScore: bothTeamsToScore } : {};
-      })(),
-      ...(() => {
-        const doubleChance = extractProplineDoubleChance(ev.bookmakers, ev.home_team, ev.away_team);
-        return doubleChance ? { doubleChance } : {};
-      })(),
-      ...(() => {
-        const drawNoBet = extractProplineDrawNoBet(ev.bookmakers, ev.home_team, ev.away_team);
-        return drawNoBet ? { drawNoBet } : {};
-      })(),
-      ...(() => {
-        const htft = extractProplineHalfTimeFullTime(ev.bookmakers, ev.home_team, ev.away_team);
-        return htft ? { htft } : {};
-      })(),
-      ...(correctScore ? { correctScore: { ...state.markets.correctScore, ...correctScore } } : {}),
-      ...(totalCorners
-        ? { corners: { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0, ...state.markets.corners, ...totalCorners } }
-        : {}),
-      ...(totalCards
-        ? { cards: { o35: 0, u35: 0, o45: 0, u45: 0, ...state.markets.cards, ...totalCards } }
-        : {}),
-      ...(teamCorners.home ? { homeCorners: teamCorners.home } : {}),
-      ...(teamCorners.away ? { awayCorners: teamCorners.away } : {}),
-      ...(teamCards.home ? { homeCards: teamCards.home } : {}),
-      ...(teamCards.away ? { awayCards: teamCards.away } : {}),
-      ...(() => {
-        const cornersHandicap = extractProplineCornersHandicap(ev.bookmakers, ev.home_team, ev.away_team);
-        return cornersHandicap ? { cornersHandicap } : {};
-      })(),
-      ...(() => {
-        const winToNil = extractProplineWinToNil(ev.bookmakers, ev.home_team, ev.away_team);
-        return winToNil ? { winToNil } : {};
-      })(),
-      ...(() => {
-        const firstGoal = extractProplineFirstTeamToScore(ev.bookmakers, ev.home_team, ev.away_team);
-        return firstGoal ? { firstGoal } : {};
-      })(),
-      ...(() => {
-        const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames);
-        return anytimeGoalscorer ? { anytimeGoalscorer } : {};
-      })(),
-      ...(() => {
-        const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
-        return firstGoalscorer ? { firstGoalscorer } : {};
-      })(),
-      ...(() => {
-        const winningMargin = extractProplineWinningMargin(ev.bookmakers, ev.home_team, ev.away_team);
-        return winningMargin ? { winningMargin } : {};
-      })(),
-      ...(() => {
-        const twoPlusGoals = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames);
-        return twoPlusGoals ? { twoPlusGoals } : {};
-      })(),
-      ...(() => {
-        const goalOrAssist = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames);
-        return goalOrAssist ? { goalOrAssist } : {};
-      })(),
-      ...(() => {
-        const playerAssists = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_assists", rosterNames);
-        return playerAssists ? { playerAssists } : {};
-      })(),
-    };
+    const asianHandicap = extractProplineAsianHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+    const europeanHandicap = extractProplineEuropeanHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+    const bothTeamsToScore = extractProplineBothTeamsToScore(ev.bookmakers);
+    const doubleChance = extractProplineDoubleChance(ev.bookmakers, ev.home_team, ev.away_team);
+    const drawNoBet = extractProplineDrawNoBet(ev.bookmakers, ev.home_team, ev.away_team);
+    const htft = extractProplineHalfTimeFullTime(ev.bookmakers, ev.home_team, ev.away_team);
+    const cornersHandicap = extractProplineCornersHandicap(ev.bookmakers, ev.home_team, ev.away_team);
+    const winToNil = extractProplineWinToNil(ev.bookmakers, ev.home_team, ev.away_team);
+    const firstGoal = extractProplineFirstTeamToScore(ev.bookmakers, ev.home_team, ev.away_team);
+    const anytimeGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "anytime_goal_scorer", rosterNames);
+    const firstGoalscorer = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "first_goal_scorer", rosterNames);
+    const winningMargin = extractProplineWinningMargin(ev.bookmakers, ev.home_team, ev.away_team);
+    const twoPlusGoals = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "2plus_goals", rosterNames);
+    const goalOrAssist = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "goal_or_assist", rosterNames);
+    const playerAssists = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_assists", rosterNames);
+    const playerTwoPlusAssists = extractProplineGoalscorerMatchedToRoster(ev.bookmakers, "player_2plus_assists", rosterNames);
+    const h2hEarlyPayout = extractProplineH2HEarlyPayout(ev.bookmakers, ev.home_team, ev.away_team);
+
+    const marketsPatch: Partial<AdvancedMarkets> = {};
+    if (totalGoals) marketsPatch.totalGoals = { ...state.markets.totalGoals, ...totalGoals };
+    if (asianHandicap) marketsPatch.asianHandicap = asianHandicap;
+    if (europeanHandicap) marketsPatch.europeanHandicap = europeanHandicap;
+    if (bothTeamsToScore) marketsPatch.bothTeamsScore = bothTeamsToScore;
+    if (doubleChance) marketsPatch.doubleChance = doubleChance;
+    if (drawNoBet) marketsPatch.drawNoBet = drawNoBet;
+    if (htft) marketsPatch.htft = htft;
+    if (correctScore) marketsPatch.correctScore = { ...state.markets.correctScore, ...correctScore };
+    if (totalCorners) {
+      marketsPatch.corners = { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0, ...state.markets.corners, ...totalCorners };
+    }
+    if (totalCards) {
+      marketsPatch.cards = { o35: 0, u35: 0, o45: 0, u45: 0, ...state.markets.cards, ...totalCards };
+    }
+    if (teamCorners.home) marketsPatch.homeCorners = teamCorners.home;
+    if (teamCorners.away) marketsPatch.awayCorners = teamCorners.away;
+    if (teamCards.home) marketsPatch.homeCards = teamCards.home;
+    if (teamCards.away) marketsPatch.awayCards = teamCards.away;
+    if (cornersHandicap) marketsPatch.cornersHandicap = cornersHandicap;
+    if (winToNil) marketsPatch.winToNil = winToNil;
+    if (firstGoal) marketsPatch.firstGoal = firstGoal;
+    if (anytimeGoalscorer) marketsPatch.anytimeGoalscorer = anytimeGoalscorer;
+    if (firstGoalscorer) marketsPatch.firstGoalscorer = firstGoalscorer;
+    if (winningMargin) marketsPatch.winningMargin = winningMargin;
+    if (twoPlusGoals) marketsPatch.twoPlusGoals = twoPlusGoals;
+    if (goalOrAssist) marketsPatch.goalOrAssist = goalOrAssist;
+    if (playerAssists) marketsPatch.playerAssists = playerAssists;
+    if (playerTwoPlusAssists) marketsPatch.playerTwoPlusAssists = playerTwoPlusAssists;
+    if (h2hEarlyPayout) marketsPatch.h2hEarlyPayout = h2hEarlyPayout;
 
     const updatedMarkets: AdvancedMarkets = { ...state.markets, ...marketsPatch };
     const oddsChanged = JSON.stringify(odds) !== JSON.stringify(state.odds);
