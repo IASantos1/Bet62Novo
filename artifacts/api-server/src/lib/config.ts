@@ -1,30 +1,3 @@
-// SilentAPI — third-party casino game aggregator (game launch + wallet
-// callback). Secrets only ever come from the environment, never hardcoded.
-const SILENTAPI_BASE_URL =
-  process.env["SILENTAPI_BASE_URL"]?.trim() || "https://silentapi.org/api";
-const SILENTAPI_AUTH_TOKEN = process.env["SILENTAPI_AUTH_TOKEN"] ?? "";
-const SILENTAPI_CALLBACK_SECRET =
-  process.env["SILENTAPI_CALLBACK_SECRET"] ?? "";
-
-// Palace Casino (Gold Slot Palace) — third-party casino game aggregator,
-// same shape of integration as SilentAPI above (game launch + wallet
-// callback). Intended to replace SilentAPI as the catalog source per the
-// user's plan to install a new system. Base URL confirmed by the user;
-// PALACE_CASINO_API_TOKEN is not set yet — the integration is inert
-// (empty catalog fetch) until it's added in Railway. Launch endpoint and
-// webhook/callback signing scheme are not documented yet either — only
-// wallet (deposit/withdraw-all) and game listing (providers/games) are
-// wired in so far.
-const PALACE_CASINO_BASE_URL =
-  process.env["PALACE_CASINO_BASE_URL"]?.trim() ||
-  "https://agent.goldslotpalase.com/v4";
-const PALACE_CASINO_API_TOKEN = process.env["PALACE_CASINO_API_TOKEN"] ?? "";
-// Shared token Palace Casino sends back in the "Callback-Token" header on
-// every wallet callback (bet/win/cancel/balance/auth) — our auth mechanism
-// for that inbound webhook, configured on their side under Settings.
-const PALACE_CASINO_CALLBACK_TOKEN =
-  process.env["PALACE_CASINO_CALLBACK_TOKEN"] ?? "";
-
 // Optional — powers the admin "AI-assisted casino banner" copy generator
 // (routes/admin.ts POST /casino/banners/ai-generate) only. Falls back to a
 // deterministic template when unset. Kept separate from the AI_AGENTS_*
@@ -80,12 +53,6 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
-  SILENTAPI_BASE_URL,
-  SILENTAPI_AUTH_TOKEN,
-  SILENTAPI_CALLBACK_SECRET,
-  PALACE_CASINO_BASE_URL,
-  PALACE_CASINO_API_TOKEN,
-  PALACE_CASINO_CALLBACK_TOKEN,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
