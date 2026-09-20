@@ -23,15 +23,6 @@ import crypto from "crypto";
 import { CONFIG } from "./lib/config.js";
 import { timingSafeEqualString } from "./lib/security.js";
 import { userIdFromMemberAccount } from "./routes/casino.js";
-import { verifyGoalApiSignature, parseGoalApiWebhookBody } from "./services/goalapi/webhook.js";
-import { applyGoalApiWebhookEvent } from "./routes/matches.js";
-import { recordGoalApiWebhookReceived, recordGoalApiWebhookSignatureFailure } from "./health/providerHealth.js";
-import {
-  verifyPropLineHttpSignature,
-  parsePropLineWebhookBody,
-  recordPropLineWebhookEvents,
-  recordPropLineWebhookSignatureFailure,
-} from "./services/propline/webhook.js";
 
 const app: Express = express();
 
@@ -319,72 +310,10 @@ app.post(
   },
 );
 
-// ── GOAL API webhook MUST be registered before express.json() ──────────────
-// Same raw-body-signature requirement as Stripe/casino above — the
-// signature is an HMAC over the exact bytes the provider sent.
-app.post(
-  "/api/webhooks/goal-api",
-  express.raw({ type: "application/json" }),
-  async (req: Request, res: Response) => {
-    const rawBody = req.body as Buffer;
-    const verification = verifyGoalApiSignature(
-      rawBody,
-      req.headers["x-goal-signature"],
-      CONFIG.GOAL_API_WEBHOOK_SECRET,
-    );
-    if (verification.valid === false) {
-      logger.warn({ reason: verification.reason }, "[goal-api-webhook] signature verification failed");
-      recordGoalApiWebhookSignatureFailure();
-      res.sendStatus(401);
-      return;
-    }
-    const event = parseGoalApiWebhookBody(rawBody);
-    if (!event) {
-      res.sendStatus(400);
-      return;
-    }
-    recordGoalApiWebhookReceived(event.event);
-    // Respond fast (the provider's own docs specify an 8s timeout and
-    // retries on anything but 2xx) — do the actual work after responding.
-    res.sendStatus(200);
-    applyGoalApiWebhookEvent(event).catch((err) => {
-      logger.error({ err, event: event.event }, "[goal-api-webhook] event handling failed");
-    });
-  },
-);
-
-// ── PropLine HTTP webhook MUST be registered before express.json() ─────────
-// Same raw-body-signature requirement as GOAL API/Stripe/casino above.
-// Registered at /hooks/propline (not /api/webhooks/propline) to match the
-// URL already saved on the existing PropLine dashboard subscription — no
-// reason to force a URL change on top of the secret rotation this webhook
-// already needs (see services/propline/webhook.ts's header comment).
-app.post(
-  "/hooks/propline",
-  express.raw({ type: "application/json" }),
-  (req: Request, res: Response) => {
-    const rawBody = req.body as Buffer;
-    const verification = verifyPropLineHttpSignature(
-      rawBody,
-      req.headers["x-propline-timestamp"],
-      req.headers["x-propline-signature"],
-      CONFIG.PROPLINE_HTTP_WEBHOOK_SECRET,
-    );
-    if (verification.valid === false) {
-      logger.warn({ reason: verification.reason }, "[propline-webhook] signature verification failed");
-      recordPropLineWebhookSignatureFailure();
-      res.sendStatus(401);
-      return;
-    }
-    const events = parsePropLineWebhookBody(rawBody);
-    if (!events) {
-      res.sendStatus(400);
-      return;
-    }
-    recordPropLineWebhookEvents(events);
-    res.sendStatus(200);
-  },
-);
+// GOAL API and PropLine webhooks removed 2026-09-20 (user decision, both
+// providers fully removed) — /api/webhooks/goal-api and /hooks/propline no
+// longer exist; the providers themselves are no longer configured to send
+// to them either.
 
 app.use(
   (pinoHttp as any)({

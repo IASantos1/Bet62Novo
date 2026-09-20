@@ -13,7 +13,6 @@ import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
 import predictionsRouter from "./predictions.js";
 import casinoRouter from "./casino.js";
-import testRouter from "./test/index.js";
 
 const router: IRouter = Router();
 
@@ -31,6 +30,5 @@ router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/predictions", predictionsRouter);
 router.use("/casino", casinoRouter);
-router.use("/test", testRouter);
 
 export default router;
