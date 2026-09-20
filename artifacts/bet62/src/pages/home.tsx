@@ -27159,69 +27159,11 @@ export default function Home({
         })()}
       </div>
 
-      {/* ── MOBILE BET SLIP ── collapsed bar + full-screen overlay */}
-
-      {/* 1. Collapsed bar — slides up when bets are added, hidden when full-screen is open */}
-      <AnimatePresence>
-        {bets.length > 0 && !betSlipOpenMobile && (
-          <motion.div
-            key="betslip-bar"
-            initial={{ y: 80, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 80, opacity: 0 }}
-            transition={{ type: "spring", bounce: 0.2, duration: 0.4 }}
-            className="lg:hidden fixed left-0 right-0 z-[55] px-3"
-            style={{
-              bottom: showAppBanner
-                ? "calc(10rem + env(safe-area-inset-bottom, 0px))"
-                // Stacks above the new bottom dock nav (2026-09-20 futurist
-                // redesign, Fase 1) instead of the old 0.75rem, which is now
-                // where the dock itself sits.
-                : "calc(5.25rem + env(safe-area-inset-bottom, 0px))",
-            }}
-            {...makeTap(() => setBetSlipOpenMobile(true))}
-          >
-            <div
-              className="rounded-2xl px-4 py-3.5 flex items-center gap-3 active:scale-[0.98] transition-transform cursor-pointer select-none"
-              style={{
-                background: "linear-gradient(135deg, #dc2626 0%, #991b1b 100%)",
-                boxShadow:
-                  "0 6px 28px rgba(220,38,38,0.5), 0 2px 8px rgba(0,0,0,0.6)",
-              }}
-            >
-              {/* Count badge */}
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center font-black text-sm text-white shrink-0"
-                style={{ background: "rgba(255,255,255,0.18)" }}
-              >
-                {bets.length}
-              </div>
-              {/* Selections info */}
-              <div className="flex-1 min-w-0">
-                <div className="text-white/60 text-[10px] truncate leading-tight">
-                  {bets.map((b) => b.label).join(" · ")}
-                </div>
-                <div className="text-white font-bold text-[13px] leading-snug">
-                  {effectiveBetMode === "multipla"
-                    ? `Múltipla (${bets.length})`
-                    : `Simples (${bets.length})`}
-                </div>
-              </div>
-              {/* Odds badge — amber, like reference */}
-              <div
-                className="rounded-xl px-3 py-2 shrink-0"
-                style={{ background: "#f59e0b" }}
-              >
-                <span className="font-black text-black text-[17px] leading-none tabular-nums">
-                  {totalOdds}
-                </span>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* 2. Full-screen bet slip overlay */}
+      {/* ── MOBILE BET SLIP ── full-screen overlay only. The old collapsed
+          bar (a second "you have selections" pill) was removed 2026-09-20:
+          the bottom dock's own center Boletim button already shows the
+          live selection count and opens this same overlay, so the pill
+          was a redundant second indicator stacked above it. */}
       <AnimatePresence>
         {betSlipOpenMobile && (
           <motion.div
