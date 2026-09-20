@@ -25706,7 +25706,7 @@ export default function Home({
                 <button
                   key={banner.id}
                   onClick={() => handleBannerClick(banner)}
-                  className={`${sizeClass} flex-shrink-0 snap-start relative rounded-xl overflow-hidden border border-zinc-800 hover:border-zinc-700 transition-colors group text-left`}
+                  className={`${sizeClass} flex-shrink-0 snap-start relative rounded-xl overflow-hidden border border-zinc-800 hover:border-violet-500/50 transition-colors group text-left`}
                 >
                   <img
                     src={banner.imageUrl}
@@ -25752,7 +25752,7 @@ export default function Home({
                   title={game.name}
                   aria-label={game.name}
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
-                  className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
+                  className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
                 >
                   {casinoLoadingGame === game.id ? (
                     <RefreshCw className="animate-spin text-zinc-400" size={28} />
@@ -25797,8 +25797,8 @@ export default function Home({
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="mb-4">
-                    <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                      <Activity className="text-red-600" /> Cassino
+                    <h2 className="b62-font-display text-2xl font-extrabold uppercase tracking-tight flex items-center gap-2">
+                      <Dices className="text-violet-400" /> Cassino
                     </h2>
                   </div>
 
@@ -25848,7 +25848,7 @@ export default function Home({
                         </h3>
                         <button
                           onClick={() => setCasinoCategory("Populares")}
-                          className="text-xs font-bold text-red-500 hover:text-red-400 transition-colors"
+                          className="text-xs font-bold text-violet-400 hover:text-violet-300 transition-colors"
                         >
                           Ver Todos
                         </button>
@@ -25876,8 +25876,8 @@ export default function Home({
                           onClick={() => setCasinoCategory(key)}
                           className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
                             casinoCategory === key
-                              ? "bg-red-600 text-white"
-                              : "bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700"
+                              ? "b62-gradient-casino text-white"
+                              : "bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-violet-500/40"
                           }`}
                         >
                           <Icon size={13} />
@@ -25895,7 +25895,7 @@ export default function Home({
                         value={casinoSearch}
                         onChange={(e) => setCasinoSearch(e.target.value)}
                         placeholder="Pesquisar…"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-7 pr-6 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-7 pr-6 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/60 transition-colors"
                       />
                       {casinoSearch && (
                         <button
@@ -26061,17 +26061,20 @@ export default function Home({
 
             {activeTab === "wallet" && auth.user && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-6 flex items-center gap-2">
+                <h2 className="b62-font-display text-2xl font-extrabold uppercase tracking-tight mb-6 flex items-center gap-2">
                   <Wallet className="text-red-600" /> Carteira
                 </h2>
 
                 {/* Balance card */}
-                <div className="bg-gradient-to-br from-zinc-900 to-zinc-800 border border-zinc-700 rounded-2xl p-6 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div
+                  className="b62-glass p-6 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative overflow-hidden"
+                  style={{ backgroundImage: "linear-gradient(135deg, rgba(220,38,38,0.14), rgba(139,92,246,0.10))" }}
+                >
                   <div>
                     <div className="text-xs text-zinc-400 mb-1">
                       Saldo disponível
                     </div>
-                    <div className="text-4xl font-black text-green-400">
+                    <div className="b62-font-display text-4xl font-extrabold text-white">
                       € {parseFloat(auth.user.balance).toFixed(2)}
                     </div>
                     <div className="text-xs text-zinc-500 mt-1">
@@ -26081,13 +26084,13 @@ export default function Home({
                   <div className="flex gap-3">
                     <button
                       onClick={() => setDepositModalOpen(true)}
-                      className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-xl transition-colors text-sm"
+                      className="b62-gradient-cta flex items-center gap-2 text-white font-bold px-5 py-2.5 rounded-xl transition-transform active:scale-[0.98] text-sm"
                     >
                       <Plus size={16} /> Depositar
                     </button>
                     <button
                       onClick={() => setDepositModalOpen(true)}
-                      className="flex items-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
+                      className="flex items-center gap-2 bg-white/[0.06] border border-white/10 hover:bg-white/[0.1] text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
                     >
                       <ChevronUp size={16} /> Levantar
                     </button>
@@ -26230,7 +26233,7 @@ export default function Home({
 
             {activeTab === "mybets" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-5 flex items-center gap-2">
+                <h2 className="b62-font-display text-2xl font-extrabold uppercase tracking-tight mb-5 flex items-center gap-2">
                   <Clock className="text-red-600" /> Minhas Apostas
                 </h2>
 
@@ -28577,7 +28580,7 @@ function PromoCard3D({
                   </span>
                 )}
             </div>
-            <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight tracking-tight drop-shadow-2xl">
+            <h2 className="b62-font-display text-3xl sm:text-4xl font-extrabold text-white leading-tight tracking-tight drop-shadow-2xl">
               {promo.title}
             </h2>
             <h3 className="text-base sm:text-lg font-bold text-white/85 mt-2 tracking-wide">
