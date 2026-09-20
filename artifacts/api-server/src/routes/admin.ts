@@ -56,6 +56,7 @@ import { pulseScore } from "../providers/pulsescore/client.js";
 import { normalizePulseScoreEvent } from "../providers/pulsescore/normalizer.js";
 import { getApiTennisWsStatus } from "../services/apitennis/websocketClient.js";
 import { getPropLineWsStatus } from "../services/propline/websocketClient.js";
+import { getPropLineWebhookStatus } from "../services/propline/webhook.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 
 function escapeCsv(val: unknown): string {
@@ -2766,6 +2767,10 @@ router.get("/apitennis-ws-status", adminMiddleware, async (_req: AdminRequest, r
 
 router.get("/propline-ws-status", adminMiddleware, async (_req: AdminRequest, res) => {
   res.json(getPropLineWsStatus());
+});
+
+router.get("/propline-webhook-events", adminMiddleware, async (_req: AdminRequest, res) => {
+  res.json(getPropLineWebhookStatus());
 });
 
 router.get("/pulsescore-odds-audit", adminMiddleware, async (_req: AdminRequest, res) => {

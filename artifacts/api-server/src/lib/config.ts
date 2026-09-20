@@ -116,6 +116,17 @@ const PROPLINE_API_VERSION =
 // connecting, not a URL query param, so this is just the WS origin.
 const PROPLINE_WS_URL =
   process.env["PROPLINE_WS_URL"]?.trim() || "wss://ws.prop-line.com";
+// HTTP push webhook (line_movement/resolution/steam/market_suspended) —
+// separate from the WS stream above, which only carries raw per-outcome
+// price deltas. steam/market_suspended (sharp-money and other-book
+// suspension signals) only exist on this HTTP path. The secret is
+// returned ONCE, in the createHttpWebhook() response body, at creation
+// time (confirmed real 2026-09-20: GET /webhooks always returns it
+// masked — `secret_is_masked: true` — even for the account's own
+// webhooks, never the plaintext again) — must be captured then and
+// stored here, not re-derivable later.
+const PROPLINE_HTTP_WEBHOOK_SECRET =
+  process.env["PROPLINE_HTTP_WEBHOOK_SECRET"]?.trim() || "";
 const PROPLINE_ENABLED_SPORTS = (
   process.env["PROPLINE_ENABLED_SPORTS"]?.trim() || ""
 )
@@ -278,6 +289,7 @@ export const CONFIG = {
   PROPLINE_BASE_URL,
   PROPLINE_API_VERSION,
   PROPLINE_WS_URL,
+  PROPLINE_HTTP_WEBHOOK_SECRET,
   PROPLINE_ENABLED_SPORTS,
   PROPLINE_DEFAULT_BOOKMAKERS,
   GOAL_API_KEY,

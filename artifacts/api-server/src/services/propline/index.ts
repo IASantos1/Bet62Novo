@@ -352,6 +352,33 @@ export class ProplineClient {
     return this.rawWrite("POST", "/webhooks", { transport: "websocket" });
   }
 
+  // ── HTTP push webhooks (line_movement/resolution/steam/market_suspended) ──
+
+  /** POST /webhooks with transport='http'. Field names are the real
+   * snake_case ones confirmed via a direct GET /webhooks call against a
+   * webhook created through PropLine's own dashboard 2026-09-20 (never the
+   * SDK's camelCase CreateWebhookOptions mapping — the same class of
+   * hand-rolled bypass as createWebsocketWebhook above, since the SDK's
+   * webhookBody() is confirmed buggy for the sibling `transport` field and
+   * was never trusted further than necessary). The response's `secret`
+   * field is the only time the plaintext signing secret is ever returned —
+   * callers must persist it (PROPLINE_HTTP_WEBHOOK_SECRET) immediately. */
+  async createHttpWebhook(options: {
+    url: string;
+    events: string[];
+    filter_sport_key?: string | null;
+    filter_event_id?: number | null;
+    filter_market_key?: string | null;
+    filter_player_name?: string | null;
+    filter_bookmaker_key?: string | null;
+    min_price_change_pct?: number | null;
+    min_steam_score?: number | null;
+    min_books_agreeing?: number | null;
+    batch_max?: number | null;
+  }): Promise<{ id: number; secret: string; [k: string]: unknown }> {
+    return this.rawWrite("POST", "/webhooks", { transport: "http", ...options });
+  }
+
   async listWebhooks(): Promise<Array<{ id: number; transport?: string; filter_sport_key?: string | null; [k: string]: unknown }>> {
     return this.rawGet("/webhooks");
   }

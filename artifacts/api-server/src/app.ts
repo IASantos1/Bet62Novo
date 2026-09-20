@@ -26,6 +26,12 @@ import { userIdFromMemberAccount } from "./routes/casino.js";
 import { verifyGoalApiSignature, parseGoalApiWebhookBody } from "./services/goalapi/webhook.js";
 import { applyGoalApiWebhookEvent } from "./routes/matches.js";
 import { recordGoalApiWebhookReceived, recordGoalApiWebhookSignatureFailure } from "./health/providerHealth.js";
+import {
+  verifyPropLineHttpSignature,
+  parsePropLineWebhookBody,
+  recordPropLineWebhookEvents,
+  recordPropLineWebhookSignatureFailure,
+} from "./services/propline/webhook.js";
 
 const app: Express = express();
 
@@ -344,6 +350,39 @@ app.post(
     applyGoalApiWebhookEvent(event).catch((err) => {
       logger.error({ err, event: event.event }, "[goal-api-webhook] event handling failed");
     });
+  },
+);
+
+// ── PropLine HTTP webhook MUST be registered before express.json() ─────────
+// Same raw-body-signature requirement as GOAL API/Stripe/casino above.
+// Registered at /hooks/propline (not /api/webhooks/propline) to match the
+// URL already saved on the existing PropLine dashboard subscription — no
+// reason to force a URL change on top of the secret rotation this webhook
+// already needs (see services/propline/webhook.ts's header comment).
+app.post(
+  "/hooks/propline",
+  express.raw({ type: "application/json" }),
+  (req: Request, res: Response) => {
+    const rawBody = req.body as Buffer;
+    const verification = verifyPropLineHttpSignature(
+      rawBody,
+      req.headers["x-propline-timestamp"],
+      req.headers["x-propline-signature"],
+      CONFIG.PROPLINE_HTTP_WEBHOOK_SECRET,
+    );
+    if (verification.valid === false) {
+      logger.warn({ reason: verification.reason }, "[propline-webhook] signature verification failed");
+      recordPropLineWebhookSignatureFailure();
+      res.sendStatus(401);
+      return;
+    }
+    const events = parsePropLineWebhookBody(rawBody);
+    if (!events) {
+      res.sendStatus(400);
+      return;
+    }
+    recordPropLineWebhookEvents(events);
+    res.sendStatus(200);
   },
 );
 
