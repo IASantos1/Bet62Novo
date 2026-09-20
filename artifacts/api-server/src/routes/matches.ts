@@ -15,7 +15,7 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import type { Match } from "@mrdoge/node";
+import type { Match, Market } from "@mrdoge/node";
 import { getMrDogeClient } from "../services/mrdoge/client.js";
 import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
@@ -7769,11 +7769,52 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return [];
 }
 
-// Mr. Doge (api.mrdoge.co) — football phase 1 (2026-09-20). Prematch odds
-// are intentionally NOT wired here yet — only the fixture list — pending a
-// real-API rate-limit-safety check on how many concurrent odds.subscribe
-// calls a full day's upcoming fixture set would need; live odds (below) are
-// already wired since that's per-currently-live-match, a much smaller set.
+// Prematch odds.list is a one-shot HTTP/WS call per match, NOT a
+// subscription — it doesn't touch the tier's concurrent-subscription quota
+// — but a full week's global football fixture list can still run into the
+// hundreds, and this runs on every ~60s upcomingTopCache refresh
+// (refreshUpcomingTop). Bounded to the soonest N kickoffs (upcoming lists
+// are always kickoff-sorted downstream anyway, so this is exactly what a
+// bettor sees first) and fetched in small concurrent batches so one
+// refresh cycle never bursts hundreds of requests at once. Raise
+// MRDOGE_PREMATCH_ODDS_MAX once the account's real rate limit is confirmed
+// against production traffic.
+const MRDOGE_PREMATCH_ODDS_MAX = 100;
+const MRDOGE_PREMATCH_ODDS_CONCURRENCY = 5;
+const MRDOGE_SOCCER_BET_TYPES = [
+  "SOCCER_MATCH_RESULT_PRELIVE",
+  "SOCCER_MATCH_RESULT",
+  "SOCCER_UNDER_OVER",
+  "SOCCER_BOTH_TEAMS_TO_SCORE",
+];
+
+async function fetchMrDogePrematchOdds(
+  mrdoge: ReturnType<typeof getMrDogeClient>,
+  matches: Match[],
+  betTypes: string[],
+): Promise<Map<string, Market[]>> {
+  const result = new Map<string, Market[]>();
+  const targets = [...matches]
+    .sort((a, b) => a.startTime.localeCompare(b.startTime))
+    .slice(0, MRDOGE_PREMATCH_ODDS_MAX);
+  for (let i = 0; i < targets.length; i += MRDOGE_PREMATCH_ODDS_CONCURRENCY) {
+    const batch = targets.slice(i, i + MRDOGE_PREMATCH_ODDS_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      batch.map((m) => mrdoge.odds.list({ matchId: m.id, betTypes })),
+    );
+    settled.forEach((r, idx) => {
+      if (r.status === "fulfilled") result.set(batch[idx]!.id, r.value);
+    });
+  }
+  return result;
+}
+
+// Mr. Doge (api.mrdoge.co) — football phase 1 (2026-09-20), phase 2
+// (same day): prematch odds now wired via odds.list (see
+// fetchMrDogePrematchOdds's own comment on the request-volume cap).
+// Matches this doesn't have a real capture kept anywhere the bettor sees
+// them: routes/matches.ts's own /upcoming filter already hides any match
+// without hasRealOdds/a nonzero price, same as every other provider.
 async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
   if (!CONFIG.MRDOGE_API_KEY) return [];
   try {
@@ -7786,8 +7827,15 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       startDate,
       endDate,
     });
+    const oddsByMatchId = await fetchMrDogePrematchOdds(mrdoge, matches, MRDOGE_SOCCER_BET_TYPES);
     return matches.map((m): UpcomingMatch => {
       const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
+      const odds = oddsByMatchId.get(m.id);
+      const moneyline = extractMrDogeSoccerMoneyline(odds);
+      const btts = extractMrDogeSoccerBtts(odds);
+      const markets = zerofillAdvancedMarkets();
+      Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
+      if (btts) markets.bothTeamsScore = btts;
       return {
         id: mrDogeMatchId("football", m),
         home: m.homeTeam.name,
@@ -7797,9 +7845,9 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         date,
         time,
         sport: "football",
-        hasRealOdds: false,
-        odds: { home: 0, draw: 0, away: 0 },
-        markets: zerofillAdvancedMarkets(),
+        hasRealOdds: moneyline != null,
+        odds: moneyline ?? { home: 0, draw: 0, away: 0 },
+        markets,
       };
     });
   } catch (err) {
