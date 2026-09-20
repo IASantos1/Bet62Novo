@@ -10032,8 +10032,8 @@ export default function Home({
         className={`relative ${baseBoxClass} transition-all ${isWCVariant ? "" : "text-xs"} ${
           isSelected
             ? isWCVariant
-              ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30"
-              : "bg-red-600 text-white"
+              ? "border-red-500 bg-gradient-to-br from-red-600/25 to-violet-500/20 shadow-sm shadow-red-900/30"
+              : "b62-gradient-cta text-white"
             : isWCVariant
               ? isDarkTheme
                 ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800"
@@ -19494,47 +19494,49 @@ export default function Home({
       </header>
 
       {/* MOBILE BOTTOM DOCK — replaces the old underline tab strip on
-          mobile (2026-09-20 futurist redesign, Fase 1). Desktop keeps the
-          inline header nav above unchanged for this phase. Only 5 slots
-          fit a dock, so Esportes stays reachable via Início's own sport
-          filters and Promoções/Carteira/Minhas Apostas move under Perfil's
-          menu (Fase 2) — Ao Vivo keeps its own slot since it's the
-          highest-frequency destination and already carries a live badge. */}
+          mobile (2026-09-20 futurist redesign). Desktop keeps the inline
+          header nav above unchanged for this phase. Esportes was dropped
+          to fit 5 slots in Fase 1 and moved under Perfil's menu — user
+          testing on a real device flagged it as effectively missing
+          (buried, not reachable from the main nav), so it's back here as
+          a 6th slot; Promoções/Carteira/Minhas Apostas stay under Perfil
+          since those are lower-frequency than browsing sports. */}
       <div
-        className="lg:hidden fixed left-0 right-0 z-[50] px-4"
+        className="lg:hidden fixed left-0 right-0 z-[50] px-3"
         style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
       >
         <div
-          className="b62-glass flex items-center justify-between px-2.5 py-2 mx-auto max-w-[420px]"
+          className="b62-glass flex items-center justify-between px-1.5 py-2 mx-auto max-w-[420px]"
           style={{ backdropFilter: "blur(20px)", boxShadow: "0 12px 28px rgba(0,0,0,0.5)" }}
         >
           {(
             [
               { id: "home", icon: HomeIcon, label: "Início", badge: false },
+              { id: "sports", icon: Trophy, label: "Esportes", badge: false },
               { id: "live", icon: Activity, label: "Ao Vivo", badge: true },
             ] as const
           ).map((tab) => (
             <button
               key={tab.id}
               {...makeTap(() => selectMainTab(tab.id))}
-              className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-2xl transition-colors ${activeTab === tab.id ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
+              className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === tab.id ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
             >
               <span className="relative">
-                <tab.icon size={18} />
+                <tab.icon size={17} />
                 {tab.badge && (
                   <span className="b62-live-dot absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
                 )}
               </span>
-              <span className="text-[9px] font-semibold">{tab.label}</span>
+              <span className="text-[8.5px] font-semibold">{tab.label}</span>
             </button>
           ))}
           <button
             aria-label="Boletim"
             {...makeTap(() => setBetSlipOpenMobile(true))}
-            className="b62-gradient-cta w-[52px] h-[52px] rounded-full flex items-center justify-center -mt-6 relative shrink-0"
+            className="b62-gradient-cta w-[50px] h-[50px] rounded-full flex items-center justify-center -mt-6 relative shrink-0"
             style={{ boxShadow: "0 6px 18px rgba(220,38,38,0.5), 0 0 0 5px hsl(var(--background))" }}
           >
-            <Ticket size={20} className="text-white" />
+            <Ticket size={19} className="text-white" />
             {bets.length > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-black text-[10px] font-black flex items-center justify-center">
                 {bets.length}
@@ -19543,17 +19545,17 @@ export default function Home({
           </button>
           <button
             {...makeTap(() => selectMainTab("casino"))}
-            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-2xl transition-colors ${activeTab === "casino" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500"}`}
+            className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === "casino" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500"}`}
           >
-            <Dices size={18} />
-            <span className="text-[9px] font-semibold">Casino</span>
+            <Dices size={17} />
+            <span className="text-[8.5px] font-semibold">Casino</span>
           </button>
           <button
             {...makeTap(() => selectMainTab("profile"))}
-            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-2xl transition-colors ${activeTab === "profile" ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
+            className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === "profile" ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
           >
-            <User size={18} />
-            <span className="text-[9px] font-semibold">Perfil</span>
+            <User size={17} />
+            <span className="text-[8.5px] font-semibold">Perfil</span>
           </button>
         </div>
       </div>
@@ -26021,12 +26023,12 @@ export default function Home({
 
             {activeTab === "profile" && auth.user && (
               <div className="max-w-[720px] mx-auto space-y-2 mb-6">
-                {/* Quick-links row (2026-09-20 futurist redesign, Fase 1) —
-                    the mobile bottom dock only has 5 slots, so Esportes,
-                    Carteira, Minhas Apostas and Promoções moved here to
-                    stay reachable on mobile instead of the old tab strip. */}
+                {/* Quick-links row (2026-09-20 futurist redesign) — Esportes
+                    moved back into the dock itself after real-device
+                    testing showed it missing from the main nav; Carteira,
+                    Minhas Apostas and Promoções stay here since the dock
+                    only has room for 6 slots total. */}
                 {[
-                  { id: "sports", icon: Trophy, label: "Esportes" },
                   { id: "wallet", icon: Wallet, label: "Minha Carteira", onSelect: () => void fetchMyBets(true) },
                   { id: "mybets", icon: Clock, label: "Minhas Apostas", onSelect: () => void fetchMyBets(true) },
                   { id: "promos", icon: Gift, label: "Promoções", onSelect: fetchCashback },
