@@ -19,29 +19,6 @@ import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
-import {
-  apiTennis,
-  type ApiTennisMatch,
-  type ApiTennisStanding,
-  type ApiTennisOddsResult,
-  type ApiTennisLiveOddsResult,
-  type ApiTennisLiveOddsEntry,
-  type ApiTennisPointByPointGame,
-} from "../services/apitennis/index.js";
-import { getApiTennisWsMatch } from "../services/apitennis/websocketClient.js";
-import {
-  buildApiTennisSets,
-  parseApiTennisGameResult,
-  parseApiTennisServer,
-  extractApiTennisMoneyline,
-  extractApiTennisLiveMarkets,
-  buildApiTennisConfrontos,
-  buildApiTennisPlayerProfile,
-  buildApiTennisMatchStats,
-  extractApiTennisAces,
-} from "../services/apitennis/common.js";
-import { detectTennisIncidents } from "../services/apitennis/incidentEngine.js";
-import { computeTennisMarketSuspension } from "../markets/tennisSuspensionEngine.js";
 
 
 const router: IRouter = Router();
@@ -524,13 +501,6 @@ export type LiveMatchState = {
   // compare BET62's price against the provider's without ever showing the
   // provider's price directly.
   _providerReferenceOdds?: { over25?: number; under25?: number; bttsYes?: number; bttsNo?: number };
-  // api-tennis.com's get_live_odds raw entries (tennis only) — captured as an
-  // internal benchmark only. Only one odd_name has ever been confirmed real
-  // in the provider's docs ("Set 1 to Break Serve"); none for the headline
-  // match-winner market, so nothing here is ever surfaced as a bettable
-  // price — same "capture but never publish" convention as
-  // _providerReferenceOdds above.
-  _apiTennisLiveOddsRef?: ApiTennisLiveOddsEntry[];
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
   // Whether _baseOdds was anchored to a real provider price on first
@@ -548,25 +518,6 @@ export type LiveMatchState = {
   // Cleared once the pending value is confirmed or superseded.
   _pendingScoreHome?: number;
   _pendingScoreAway?: number;
-  // Set once a live football fixture's odds/markets are being driven by a
-  // real price instead of GOAL API's synthetic Poisson fallback — written
-  // by prematchFootballOddsCache.ts/liveFootballOddsSync.ts for "propline"
-  // (the real source since 2026-09-18, football odds moved off GOAL API),
-  // or shadowMatchSync.ts's runOddsComparisonPhase for "pulsescore"
-  // (dormant, PulseScore is deactivated). Two things key off it via
-  // hasRealPriceSource() below: the drift-engine setInterval loop skips any
-  // state with a real source set (never overwrites a real price with a
-  // synthetic one), and buildLivePayload's visibility filter requires one
-  // before a football fixture is shown as bettable — a fixture with no
-  // real price yet simply doesn't appear for betting rather than showing a
-  // fabricated one.
-  _priceSource?: "pulsescore";
-  // Traceability: the raw PulseScore event id behind this fixture's real
-  // markets (set alongside _priceSource by shadowMatchSync.ts) — lets
-  // GET /api/admin/pulsescore-market-dump re-fetch the exact upstream
-  // bet365 event to compare its raw market list against what actually got
-  // extracted, for diagnosing sparse/missing markets.
-  _pulseScoreEventId?: string;
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
   // BET62 Fase 0 (2026-09-10) — monotonic counter, bumped only when
@@ -602,7 +553,6 @@ export type LiveMatchState = {
     sets?: Array<[number, number]>; // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
-    pointByPoint?: ApiTennisPointByPointGame[]; // tennis: per-game point log, from the WS push (get_fixtures/livescore also carry it, usually empty by the time REST is polled)
     tennisAces?: [number, number]; // tennis: real [home,away] ace count from api-tennis's statistics[] "Aces" stat_name, for settling player_aces
     currentPts?: [number, number]; // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>; // volleyball: completed set scores [[25,18],[22,25]]
@@ -765,27 +715,7 @@ export type UpcomingMatch = {
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
-  /** PulseScore-only: when this upcoming fixture's odds/markets have been
-   *  replaced with real PulseScore upstream data. `undefined` / absent
-   *  means fixture is still showing the synthetic anchor odds (Poisson +
-   *  goalApi.getFixtureOdds 1X2/O.2.5/BTTS legacy values). Purely a
-   *  display/diagnostic flag now — per the user's 2026-09-11 decision
-   *  (routes/bets.ts), a bet is accepted on whichever price is shown,
-   *  real or synthetic; this no longer gates acceptance. */
-  _priceSource?: "pulsescore";
-  /** Traceability: the raw PulseScore event id used for this fixture's
-   *  real markets (matches getPrematchPulsePrice + canonical DB mapping). */
-  _pulseScoreEventId?: string;
 };
-
-/** Any provider that has priced a fixture with a REAL number, as opposed to
- * a synthetic fallback — see _priceSource's own comment for the full
- * write/read contract. Centralized so "which sources count as real" is a
- * single fact, not a separately-maintained string comparison across the
- * drift loop, visibility filter, and rebuild logic. */
-function hasRealPriceSource(source: "pulsescore" | undefined): boolean {
-  return source === "pulsescore";
-}
 
 type ProviderQualitySnapshot = {
   provider: string;
@@ -5826,38 +5756,6 @@ const v2FootballOddsCache = new Map<
 >();
 const V2_FOOTBALL_ODDS_TTL = 30 * 60_000;
 
-// Tennis daily results (d-1 = yesterday) — longer TTL (yesterday won't change)
-type TennisDailyResult = {
-  id: string;
-  home: string;
-  away: string;
-  sets: Array<[number, number]>;
-  homeWon: boolean;
-  status: string; // "Finished" | "Retired" | "Walkover"
-  tournament: string;
-  date: string;
-  time: string;
-};
-let tennisResultsCache: TennisDailyResult[] | null = null;
-let tennisResultsFetchedAt = 0;
-const TENNIS_RESULTS_CACHE_TTL = 60 * 60 * 1000; // 1h — yesterday's results won't change
-
-// Tennis tournament list (ATP + WTA) — active tournaments today
-type TournamentRaw = {
-  id: string;
-  name: string;
-  category: string;
-  surface: string;
-  location: string;
-  date_start: string;
-  date_end: string;
-  prize_money: string;
-};
-type ActiveTournament = TournamentRaw & { tour: "atp" | "wta" };
-let tourListCache: ActiveTournament[] | null = null;
-let tourListFetchedAt = 0;
-const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
-
 // Live state: stable odds across refreshes
 //
 // Football's automatic settlement trigger (buildFootballLiveFromPulseScore's
@@ -7851,357 +7749,6 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return [];
 }
 
-// ── Tennis (api-tennis.com) — first real tennis provider this platform has
-// ever had; every prior attempt (PulseScore, SportMonks) was removed. ──────
-
-const API_TENNIS_ID_PREFIX = "apitennis-tennis-";
-const API_TENNIS_DISAPPEAR_GRACE_MS = 15_000;
-
-// event_status values that mean the match is actually over — confirmed real
-// terminal values ("Finished") plus the early-termination ones the frontend
-// already special-cases (retired/walkover). api-tennis.com's get_livescore()
-// can keep returning a match under this status for a while after it ends
-// (reported 2026-09-09: a finished doubles match still showing "ao vivo"
-// with pre-match-looking odds) — the disappearance-only GC below never even
-// starts its grace-period countdown for a match that's still present in the
-// feed, so a status-based check is required in addition to it, not instead.
-const API_TENNIS_TERMINAL_STATUSES = new Set(["finished", "retired", "walkover", "walk over", "w/o", "wo", "cancelled"]);
-
-/** Honest-empty tennisExtra baseline — same principle as
- * zerofillAdvancedMarkets(): every field zeroed until a real provider
- * (api-tennis's get_live_odds, or PropLine) prices it. Replaces the old
- * computeTennisExtras Poisson-ish synthetic baseline (2026-09-19 revert,
- * same fix football already got twice this session) — a market must never
- * display a fabricated price just because no real one exists yet. */
-function zerofillTennisExtra(): NonNullable<AdvancedMarkets["tennisExtra"]> {
-  return {
-    firstSet: { home: 0, away: 0 },
-    set2: { home: 0, away: 0 },
-    set3: { home: 0, away: 0 },
-    exactSets: { h20: 0, h21: 0, a02: 0, a12: 0 },
-    setHandicap: { line: 0, home: 0, away: 0 },
-    totalGames: { line: 0, over: 0, under: 0 },
-    totalGamesLines: [],
-    set1Games: { line: 0, over: 0, under: 0 },
-    gameHandicap: { line: 0, home: 0, away: 0 },
-  };
-}
-
-/** Tennis prematch from api-tennis.com — real moneyline via
- * extractApiTennisMoneyline (get_odds's "Home/Away" group) wherever a
- * bookmaker has priced the match; honest gap (hasRealOdds:false, zerofilled
- * markets) otherwise — never a fabricated price. */
-async function buildTennisUpcomingFromApiTennis(): Promise<UpcomingMatch[]> {
-  if (!CONFIG.TENNIS_API_KEY) return [];
-  const today = new Date();
-  const dateStart = today.toISOString().slice(0, 10);
-  const stop = new Date(today);
-  stop.setDate(stop.getDate() + 7);
-  const dateStop = stop.toISOString().slice(0, 10);
-
-  const fixtures = await apiTennis
-    .getFixtures({ date_start: dateStart, date_stop: dateStop })
-    .catch(() => [] as ApiTennisMatch[]);
-  logger.info({ count: fixtures.length }, "[api-tennis] tennis upcoming raw fixture count");
-
-  // One bulk get_odds call for the whole date range instead of one call per
-  // fixture — match_key is optional (ApiTennisOddsResult is already a
-  // Record<eventKey, ...>, same dict-of-all-matches shape get_livescore()
-  // returns), so the per-fixture version below was making as many REST
-  // calls as there were upcoming fixtures (up to hundreds over a 7-day
-  // window) every time this cache entry expired — the single largest
-  // contributor to burning through the api-tennis.com request quota far
-  // faster than expected (user-reported 2026-09-11).
-  const bulkOdds = await apiTennis
-    .getOdds({ date_start: dateStart, date_stop: dateStop })
-    .catch(() => ({}) as ApiTennisOddsResult);
-
-  const results: UpcomingMatch[] = [];
-  const seen = new Set<string>();
-  for (const fx of fixtures) {
-    if (fx.event_live === "1") continue; // live matches come from buildTennisLiveFromApiTennis
-    const home = fx.event_first_player;
-    const away = fx.event_second_player;
-    if (!home || !away) continue;
-    const key = `${home}|${away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    let resultOdds: { home: number; draw: number; away: number } | null = null;
-    const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
-    if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
-
-    const id = `${API_TENNIS_ID_PREFIX}${fx.event_key}`;
-
-    // PropLine removed 2026-09-20 (user decision) — the extra tennis
-    // markets it used to patch on top (spread/total games/sets/tiebreaks/
-    // aces) stay zerofilled now; api-tennis's own moneyline above is
-    // unaffected.
-    const markets = zerofillAdvancedMarkets();
-    const odds = resultOdds ?? { home: 0, draw: 0, away: 0 };
-
-    results.push({
-      id,
-      home,
-      away,
-      league: fx.tournament_name || fx.event_type_type || "Tênis",
-      country: "Internacional",
-      time: fx.event_time || "",
-      date: fx.event_date || dateStart,
-      sport: "tennis",
-      hasRealOdds: !!resultOdds,
-      odds,
-      markets,
-      homeLogoUrl: fx.event_first_player_logo ?? undefined,
-      awayLogoUrl: fx.event_second_player_logo ?? undefined,
-    });
-  }
-  results.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  return results;
-}
-
-/** Tennis live from api-tennis.com — get_livescore already embeds
- * pointbypoint/scores/statistics inline, no separate per-match call
- * needed. Sets won (not games) is what settlement/UI expect on
- * homeScore/awayScore (getTennisSetsFromExtras reads _liveExtra.sets, not
- * these two fields directly, but the frontend's live list and progress
- * indicators use homeScore/awayScore as "sets won" the same way every
- * other sport uses them as its own scoring unit).
- *
- * CRITICAL — same lesson as the football live-odds bug fixed this session
- * (a team down several goals still showing competitive odds because the
- * poll refresh overwrote the drift engine's corrected price every ~1-2s):
- * this function must never overwrite state.odds/state.markets after the
- * first tick. The drift engine (applyTieredMarketDrift) is the sole owner
- * of what's displayed; this only feeds it fresh facts (sets, current
- * point, server) and a fresh _baseOdds anchor when a real price arrives. */
-async function buildTennisLiveFromApiTennis(): Promise<LiveMatchState[]> {
-  if (!CONFIG.TENNIS_API_KEY) return [];
-  const matches = await apiTennis.getLivescore().catch(() => [] as ApiTennisMatch[]);
-  logger.info({ count: matches.length }, "[api-tennis] tennis live raw match count");
-  const currentIds = new Set<string>();
-  const results: LiveMatchState[] = [];
-
-  // One bulk get_odds/get_live_odds call for every live match instead of
-  // two REST calls per match per tick — same fix and same reason as
-  // buildTennisUpcomingFromApiTennis above (match_key is optional on both
-  // endpoints; each already returns a dict keyed by event_key, the same
-  // shape get_livescore() already returns for every live match in one
-  // call). With N concurrently live tennis matches this was 2N REST calls
-  // per tick; now it's 2 regardless of N. get_odds is scoped to today's
-  // date (unlike get_live_odds, its params lead with date_start/date_stop,
-  // and a live match's odds entry is under today's date) rather than
-  // called with zero params, to avoid relying on undocumented default
-  // range behavior for an endpoint this codebase has only ever called
-  // with an explicit scope so far.
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const bulkOdds = await apiTennis
-    .getOdds({ date_start: todayStr, date_stop: todayStr })
-    .catch(() => ({}) as ApiTennisOddsResult);
-  const bulkLiveOdds = await apiTennis.getLiveOdds().catch(() => ({}) as ApiTennisLiveOddsResult);
-
-  for (const fx of matches) {
-    const home = fx.event_first_player;
-    const away = fx.event_second_player;
-    if (!home || !away) continue;
-
-    const id = `${API_TENNIS_ID_PREFIX}${fx.event_key}`;
-    const existing = liveMatchState.get(id);
-
-    // Prefer the WebSocket's pushed snapshot when one exists for this
-    // event_key — same DTO as the REST fixture, just fresher. Falls back
-    // to the REST fixture untouched when the socket is disconnected or
-    // hasn't seen this match yet.
-    const liveFx = getApiTennisWsMatch(fx.event_key) ?? fx;
-
-    const statusLower = String(liveFx.event_status ?? "").trim().toLowerCase();
-    if (API_TENNIS_TERMINAL_STATUSES.has(statusLower)) {
-      // Already over, but get_livescore() is still returning it — finalize
-      // now instead of leaving it "ao vivo" with stale odds until it
-      // eventually disappears from the feed. Idempotent across repeat
-      // ticks: buildMatchSettlementJobId derives the same job id from the
-      // same final score, so re-finalizing while the provider keeps
-      // returning this match a while longer is a safe no-op.
-      if (existing) {
-        const finalSets = buildApiTennisSets(liveFx.scores);
-        const finalHomeScore = finalSets.filter(([h, a]) => h > a).length;
-        const finalAwayScore = finalSets.filter(([h, a]) => a > h).length;
-        const finalState: LiveMatchState = {
-          ...existing,
-          homeScore: finalHomeScore,
-          awayScore: finalAwayScore,
-          status: liveFx.event_status || "Finished",
-          _liveExtra: { ...existing._liveExtra, sets: finalSets },
-        };
-        try {
-          await finalizeStaleLiveMatch(finalState);
-        } catch (err) {
-          logger.error({ err, id }, "[api-tennis] finalizeStaleLiveMatch failed (status-based)");
-        }
-        liveMatchState.delete(id);
-      }
-      continue; // never re-enters currentIds/results — no longer "ao vivo"
-    }
-    currentIds.add(id);
-
-    const sets = buildApiTennisSets(liveFx.scores);
-    // Real bug found 2026-09-19 while building the incident engine: a bare
-    // h>a/a>h comparison over EVERY entry in `sets` (including the last,
-    // still-in-progress one — buildApiTennisSets's own convention) credited
-    // whichever side merely led the current set (e.g. 5-4) with having
-    // already WON it, showing "1-0 sets" mid-set instead of "0-0" until it
-    // actually finished. Only count entries that meet real tennis
-    // set-completion rules (>=6 games with a 2-game margin, or a 7-6/6-7
-    // tiebreak, or an extended advantage set past 7).
-    const finishedSetsForScore = sets.filter(([h, a]) => {
-      const max = Math.max(h, a);
-      const diff = Math.abs(h - a);
-      if (max < 6) return false;
-      if (max === 6) return diff >= 2;
-      if (max === 7) return diff === 1 || diff === 2;
-      return true; // 8-6, 9-7, ... — already decided
-    });
-    const homeScore = finishedSetsForScore.filter(([h, a]) => h > a).length;
-    const awayScore = finishedSetsForScore.filter(([h, a]) => a > h).length;
-    const currentPoints = parseApiTennisGameResult(liveFx.event_game_result);
-    const serving = parseApiTennisServer(liveFx.event_serve);
-
-    // Fase 5/6 (2026-09-19) — incidents derived purely from these
-    // poll-to-poll deltas, never from pointbypoint (confirmed dormant, see
-    // incidentEngine.ts's header). Suspension is the only consumer; nothing
-    // here touches settlement.
-    const tennisIncidents = detectTennisIncidents(
-      existing?._liveExtra ? { sets: existing._liveExtra.sets ?? [], currentPoints: existing._liveExtra.currentPoints, serving: existing._liveExtra.serving } : undefined,
-      { sets, currentPoints, serving },
-    );
-    const { marketSuspension: tennisMarketSuspension, suspensionReason: tennisSuspensionReason } =
-      computeTennisMarketSuspension({
-        now: Date.now(),
-        existingSuspension: existing?.marketSuspension,
-        existingReason: existing?._suspensionReason,
-        incidents: tennisIncidents,
-      });
-
-    let liveOddsRef: ApiTennisLiveOddsEntry[] | undefined = existing?._apiTennisLiveOddsRef;
-    const liveOddsEntry = bulkLiveOdds[fx.event_key];
-    if (liveOddsEntry?.live_odds) liveOddsRef = liveOddsEntry.live_odds;
-
-    // Real live markets from get_live_odds — confirmed real 2026-09-11
-    // (user-reported: live tennis odds weren't updating at all; root cause
-    // was this exact data being fetched into _apiTennisLiveOddsRef every
-    // tick but never actually read anywhere downstream). Preferred over
-    // get_odds' "Home/Away" (candidate below), which is a prematch/daily
-    // snapshot, not the true in-play price.
-    const realLiveMarkets = extractApiTennisLiveMarkets(liveOddsRef);
-
-    let resultOdds: { home: number; draw: number; away: number } | null = null;
-    if (realLiveMarkets.moneyline) {
-      resultOdds = { home: realLiveMarkets.moneyline.home, draw: 0, away: realLiveMarkets.moneyline.away };
-    } else {
-      const candidate = extractApiTennisMoneyline(bulkOdds[fx.event_key]?.["Home/Away"]);
-      if (candidate) resultOdds = { home: candidate.home, draw: 0, away: candidate.away };
-    }
-
-    const baseOdds = { home: 0, draw: 0, away: 0 };
-    const baseMarkets = zerofillAdvancedMarkets();
-    baseMarkets.tennisExtra = zerofillTennisExtra();
-    // Patch the honest-empty tennisExtra with real per-market data wherever
-    // get_live_odds has it this tick — never fabricate a value for a field
-    // that has none this tick, it just stays zeroed (hidden by the
-    // frontend) until a real price arrives.
-    if (realLiveMarkets.set1) Object.assign(baseMarkets.tennisExtra.firstSet, realLiveMarkets.set1);
-    if (realLiveMarkets.set2) Object.assign(baseMarkets.tennisExtra.set2, realLiveMarkets.set2);
-    if (realLiveMarkets.set3) Object.assign(baseMarkets.tennisExtra.set3, realLiveMarkets.set3);
-    if (realLiveMarkets.gameHandicap) Object.assign(baseMarkets.tennisExtra.gameHandicap, realLiveMarkets.gameHandicap);
-    if (realLiveMarkets.totalGamesLines && realLiveMarkets.totalGamesLines.length > 0) {
-      baseMarkets.tennisExtra.totalGamesLines = realLiveMarkets.totalGamesLines;
-      const mid = realLiveMarkets.totalGamesLines[Math.floor(realLiveMarkets.totalGamesLines.length / 2)]!;
-      baseMarkets.tennisExtra.totalGames = mid;
-    }
-    if (realLiveMarkets.set1GamesLines && realLiveMarkets.set1GamesLines.length > 0) {
-      const mid = realLiveMarkets.set1GamesLines[Math.floor(realLiveMarkets.set1GamesLines.length / 2)]!;
-      baseMarkets.tennisExtra.set1Games = mid;
-    }
-
-    // Real bug fixed 2026-09-12 (user-reported: the "Estatísticas" tab was
-    // always empty for tennis matches) — api-tennis.com's own statistics[]
-    // array (aces, double faults, % first-serve points won, etc.) was
-    // never mapped onto the shared V2StatsGroup shape the frontend reads.
-    let matchStats: LiveMatchState["matchStats"] = existing?.matchStats;
-    let tennisAces = existing?._liveExtra?.tennisAces;
-    if (liveFx.statistics && liveFx.statistics.length > 0) {
-      const built = buildApiTennisMatchStats(liveFx.statistics, fx.first_player_key, fx.second_player_key);
-      if (built.length > 0) matchStats = built;
-      const aces = extractApiTennisAces(liveFx.statistics, fx.first_player_key, fx.second_player_key);
-      if (aces) tennisAces = aces;
-    }
-
-    const state: LiveMatchState = {
-      id,
-      home,
-      away,
-      league: fx.tournament_name || fx.event_type_type || "Tênis",
-      country: "Internacional",
-      sport: "tennis",
-      homeScore,
-      awayScore,
-      minute: 0,
-      status: liveFx.event_status || "",
-      hasRealOdds: !!resultOdds,
-      // Fresh every tick, not frozen at first-seen (real bug fixed
-      // 2026-09-11 — user-reported: live tennis odds never updated at
-      // all). Unlike football, no separate drift engine processes tennis
-      // (applyTieredMarketDrift's poll loop is football-only), so this
-      // builder is the only place tennis odds/markets are ever written —
-      // freezing them here after the first tick meant they froze forever.
-      // Falls back to the last known value only when this tick's fetch
-      // genuinely produced nothing (never regress to the synthetic
-      // baseline just because of a transient API hiccup).
-      odds: resultOdds ?? existing?.odds ?? baseOdds,
-      markets: baseMarkets,
-      _baseOdds: resultOdds ?? baseOdds,
-      _baseMarkets: baseMarkets,
-      _apiTennisLiveOddsRef: liveOddsRef,
-      marketSuspension: tennisMarketSuspension,
-      _suspensionReason: tennisSuspensionReason,
-      events: existing?.events ?? [],
-      matchStats,
-      _liveExtra: {
-        ...existing?._liveExtra,
-        sets,
-        currentPoints,
-        serving,
-        pointByPoint: liveFx.pointbypoint?.length ? liveFx.pointbypoint : existing?._liveExtra?.pointByPoint,
-        tennisAces,
-      },
-      homeLogoUrl: liveFx.event_first_player_logo ?? existing?.homeLogoUrl,
-      awayLogoUrl: liveFx.event_second_player_logo ?? existing?.awayLogoUrl,
-      _lastSeenAt: Date.now(),
-    };
-    liveMatchState.set(id, state);
-    results.push(state);
-  }
-
-  for (const [id, state] of liveMatchState.entries()) {
-    if (!id.startsWith(API_TENNIS_ID_PREFIX)) continue;
-    if (currentIds.has(id)) continue;
-    const missingSince = state._missingSinceAt ?? Date.now();
-    if (!state._missingSinceAt) {
-      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
-      continue;
-    }
-    if (Date.now() - missingSince > API_TENNIS_DISAPPEAR_GRACE_MS) {
-      try {
-        await finalizeStaleLiveMatch(state);
-      } catch (err) {
-        logger.error({ err, id }, "[api-tennis] finalizeStaleLiveMatch failed");
-      }
-      liveMatchState.delete(id);
-    }
-  }
-
-  return results;
-}
 
 
 
@@ -8355,17 +7902,11 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       football = _lastGoodFootballUpcoming;
     }
-    // api-tennis.com restored 2026-09-09 for tennis — first real tennis
-    // provider this platform has ever had. Reworked 2026-09-19: api-tennis
-    // is now the sole match-state/odds source (PropLine is layered into its
-    // PropLine's whole-match fallback removed 2026-09-20 (user decision) —
-    // api-tennis.com is now the sole tennis source, no fallback if it fails.
+    // api-tennis.com removed 2026-09-20 (user decision) — tennis has no
+    // other real data source, so this always runs with zero candidates.
     let tennis: UpcomingMatch[] = [];
     try {
       const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.TENNIS_API_KEY) {
-        tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
-      }
       tennis = chooseUpcomingProvider("tennis", tennisCandidates);
     } catch (err) {
       logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
@@ -8469,19 +8010,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const hockeyLive = sportWithFallback("hockey", chooseLiveProvider("hockey", []));
   const baseballLive = sportWithFallback("baseball", chooseLiveProvider("baseball", []));
   const volleyballLiveItems = sportWithFallback("volleyball", chooseLiveProvider("volleyball", []));
-  let tennisLiveRaw: LiveMatchState[] = [];
-  try {
-    // api-tennis is the sole live source now — PropLine's fallback removed
-    // 2026-09-20 (user decision).
-    const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-    if (CONFIG.TENNIS_API_KEY) {
-      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisLiveFromApiTennis() });
-    }
-    tennisLiveRaw = chooseLiveProvider("tennis", tennisCandidates);
-  } catch (err) {
-    logger.error({ err }, "[tri-fallback] tennis live failed this tick");
-  }
-  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
+  // api-tennis removed 2026-09-20 (user decision) — tennis has no other
+  // real source.
+  const tennisLive = sportWithFallback("tennis", chooseLiveProvider("tennis", []));
   // PropLine removed 2026-09-20 (user decision) — mma has no other source.
   const mmaLive = sportWithFallback("mma", chooseLiveProvider("mma", []));
   let handballLiveRaw: LiveMatchState[] = [];
@@ -8718,26 +8249,14 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
-  // Reverted 2026-09-11 per the user's explicit decision: a GOAL-API
-  // football fixture is only shown in the Ao Vivo list once a real provider
-  // has actually priced its headline 1X2 market (hasRealPriceSource —
-  // PulseScore originally, bzzoiro added 2026-09-14). This replaces the
-  // 2026-09-10 "hybrid" gate (which showed every GOAL-API live fixture
-  // regardless of pricing, betting or not) — the user weighed the tradeoff
-  // (many minor-league fixtures never get real coverage and will simply
-  // never appear) and chose to hide unpriced fixtures entirely rather than
-  // show a match nobody can trust the odds on. Any fixture flagged
-  // liveDecisions.visible=false by admin still gets hidden by the outer
-  // filter regardless of provider.
-  // Widened 2026-09-14: this used to only gate GOAL API fixtures
-  // (id.startsWith("goalapi-football-")) — a bzzoiro-native match
-  // (buildFootballLiveFromBzzoiro, id "bzzoiro-football-*") would have
-  // fallen through the negated prefix check and shown its synthetic
-  // Poisson placeholder as if it were a real bettable price. The rule is
-  // "any football fixture, whatever its provider" now, matching the
-  // "never show unpriced football" policy this filter was built for.
+  // Never show unpriced football: GOAL API and PulseScore (football's only
+  // real data/price sources) were both removed 2026-09-20 (user decision),
+  // so football always has zero live candidates now (see chooseLiveProvider
+  // above) — this filter is currently vacuous, kept as a safety net so a
+  // football fixture is never shown live without a real price source, same
+  // policy as before removal.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
-    m.sport !== "football" || hasRealPriceSource(m._priceSource);
+    m.sport !== "football";
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -9489,9 +9008,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let tennis: UpcomingMatch[] = [];
   try {
     const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.TENNIS_API_KEY) {
-      tennisCandidates.push({ provider: "apitennis", matches: await buildTennisUpcomingFromApiTennis() });
-    }
     tennis = chooseUpcomingProvider("tennis", tennisCandidates);
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
@@ -11459,331 +10975,32 @@ function buildLeagueStandings(
   };
 }
 
-/** Real name+tour only — get_tournaments has no category/surface/location/
- * dates/prize_money (only tournament_key/name/event_type_key/type), so the
- * rest of TournamentRaw stays empty rather than fabricated. tour is derived
- * from the real event_type_type text (e.g. "Wta Singles"), not guessed. */
-async function getActiveTournaments(): Promise<ActiveTournament[]> {
-  if (!CONFIG.TENNIS_API_KEY) return tourListCache ?? [];
-  if (tourListCache && Date.now() - tourListFetchedAt < TOUR_CACHE_TTL) return tourListCache;
-  try {
-    const tournaments = await apiTennis.getTournaments();
-    tourListCache = tournaments.map((t) => ({
-      id: t.tournament_key,
-      name: t.tournament_name,
-      category: "",
-      surface: "",
-      location: "",
-      date_start: "",
-      date_end: "",
-      prize_money: "",
-      tour: /wta/i.test(t.event_type_type) ? "wta" : "atp",
-    }));
-    tourListFetchedAt = Date.now();
-  } catch (err) {
-    logger.error({ err }, "[api-tennis] tournaments fetch failed");
-  }
-  return tourListCache ?? [];
-}
-
-/** Yesterday-through-today finished singles matches, mapped to the
- * pre-existing TennisDailyResult shape. api-tennis.com has no "results"
- * endpoint of its own — get_fixtures with a date range already includes
- * finished matches, same source buildTennisUpcomingFromApiTennis uses for
- * not-yet-started ones. */
-async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
-  if (!CONFIG.TENNIS_API_KEY) return tennisResultsCache ?? [];
-  if (tennisResultsCache && Date.now() - tennisResultsFetchedAt < TENNIS_RESULTS_CACHE_TTL) {
-    return tennisResultsCache;
-  }
-  try {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateStart = yesterday.toISOString().slice(0, 10);
-    const dateStop = new Date().toISOString().slice(0, 10);
-    const fixtures = await apiTennis.getFixtures({ date_start: dateStart, date_stop: dateStop });
-    tennisResultsCache = fixtures
-      .filter((fx) => fx.event_winner && fx.event_live !== "1")
-      .map((fx) => ({
-        id: `${API_TENNIS_ID_PREFIX}${fx.event_key}`,
-        home: fx.event_first_player,
-        away: fx.event_second_player,
-        sets: buildApiTennisSets(fx.scores),
-        homeWon: fx.event_winner === "First Player",
-        status: fx.event_status || "Finished",
-        tournament: fx.tournament_name || fx.event_type_type || "Tênis",
-        date: fx.event_date,
-        time: fx.event_time,
-      }));
-    tennisResultsFetchedAt = Date.now();
-  } catch (err) {
-    logger.error({ err }, "[api-tennis] daily results fetch failed");
-  }
-  return tennisResultsCache ?? [];
-}
-
-// ─── Tournament detail cache ──────────────────────────────────────────────────
-type TournamentMatchPlayer = {
-  id: string;
-  name: string;
-  totalscore: string;
-  s1: string;
-  s2: string;
-  s3: string;
-  s4: string;
-  s5: string;
-  winner: boolean;
-  serve: boolean;
-};
-type TournamentMatch = {
-  id: string;
-  status: string;
-  date: string;
-  time: string;
-  court: string;
-  round: string;
-  roundOrder: number;
-  players: TournamentMatchPlayer[];
-};
-type TournamentDetail = {
-  id: string;
-  league: string;
-  season: string;
-  matches: TournamentMatch[];
-};
-const tourDetailCache = new Map<
-  string,
-  { data: TournamentDetail; at: number }
->();
-const TOUR_DETAIL_TTL = 5 * 60 * 1000; // 5 min
-
-const ROUND_ORDER: Record<string, number> = {
-  "1/64-finals": 1,
-  "1/32-finals": 2,
-  "1/16-finals": 3,
-  "1/8-finals": 4,
-  "quarter-finals": 5,
-  "semi-finals": 6,
-  final: 7,
-};
-
-/** get_draw's bracket (rounds → matches → seeds/TBD/next_slot) flattened
- * into the pre-existing flat TournamentMatch[] list — lossy (loses round
- * grouping/seeding/progression, which the new TournamentBracket component
- * renders in full instead), but reuses the already-working card with zero
- * new frontend shape. get_draw carries no date/time per match, so fixtures
- * for the same tournament_key are cross-referenced by match_key to backfill
- * real date/status; a draw slot with no matching fixture (future round,
- * not yet scheduled) keeps the draw's own status string and an empty date
- * rather than a fabricated "Not Started"/today's date. */
-async function getTournamentDetail(id: string): Promise<TournamentDetail> {
-  const cached = tourDetailCache.get(id);
-  if (cached && Date.now() - cached.at < TOUR_DETAIL_TTL) return cached.data;
-  if (!CONFIG.TENNIS_API_KEY) {
-    if (cached) return cached.data;
-    throw new Error("Detalhe de torneio indisponível");
-  }
-  try {
-    const draw = await apiTennis.getDraw({ tournament_key: id });
-    const rangeStart = new Date();
-    rangeStart.setDate(rangeStart.getDate() - 21);
-    const rangeStop = new Date();
-    rangeStop.setDate(rangeStop.getDate() + 21);
-    const fixtures = await apiTennis
-      .getFixtures({
-        date_start: rangeStart.toISOString().slice(0, 10),
-        date_stop: rangeStop.toISOString().slice(0, 10),
-        tournament_key: id,
-      })
-      .catch(() => [] as ApiTennisMatch[]);
-    const fixtureByKey = new Map(fixtures.map((fx) => [String(fx.event_key), fx]));
-
-    const toPlayer = (
-      p: { player_key: number; name: string } | null,
-      winnerKey: number | null,
-    ): TournamentMatchPlayer | null =>
-      p
-        ? {
-            id: String(p.player_key),
-            name: p.name,
-            totalscore: "",
-            s1: "",
-            s2: "",
-            s3: "",
-            s4: "",
-            s5: "",
-            winner: winnerKey != null && winnerKey === p.player_key,
-            serve: false,
-          }
-        : null;
-
-    const matches: TournamentMatch[] = [];
-    for (const bracket of draw.brackets) {
-      bracket.rounds.forEach((round, roundIdx) => {
-        for (const m of round.matches) {
-          const fx = m.match_key != null ? fixtureByKey.get(String(m.match_key)) : undefined;
-          const players: TournamentMatchPlayer[] = [];
-          const p1 = toPlayer(m.first_player, m.winner_player_key);
-          const p2 = toPlayer(m.second_player, m.winner_player_key);
-          if (p1) players.push(p1);
-          if (p2) players.push(p2);
-          if (players.length > 0 && players.some((p) => p.totalscore === "") && m.result) {
-            for (const p of players) p.totalscore = m.result;
-          }
-          matches.push({
-            id: `${API_TENNIS_ID_PREFIX}${m.match_key ?? `draw-${m.draw_key}`}`,
-            status: fx ? fx.event_status || "Not Started" : m.status || "",
-            date: fx?.event_date ?? "",
-            time: fx?.event_time ?? "",
-            court: "",
-            round: round.round_name,
-            roundOrder: ROUND_ORDER[round.round_name.toLowerCase()] ?? roundIdx + 1,
-            players,
-          });
-        }
-      });
-    }
-
-    const detail: TournamentDetail = {
-      id,
-      league: draw.tournament.tournament_name,
-      season: draw.tournament.tournament_season,
-      matches,
-    };
-    tourDetailCache.set(id, { data: detail, at: Date.now() });
-    return detail;
-  } catch (err) {
-    logger.error({ err, id }, "[api-tennis] tournament detail fetch failed");
-    if (cached) return cached.data;
-    throw new Error("Detalhe de torneio indisponível");
-  }
-}
-
+// api-tennis.com removed 2026-09-20 (user decision) — tennis has no other
+// real source for tournaments/standings/draw/results/news, so these routes
+// always return empty (same dead-stub pattern as /volleyball-results etc.
+// below).
 router.get("/tournaments", async (_req: Request, res: Response) => {
-  try {
-    const tournaments = await getActiveTournaments();
-    res.json({ tournaments });
-  } catch {
-    res.status(500).json({ error: "Torneios indisponíveis" });
-  }
+  res.json({ tournaments: [] });
 });
-
-// ─── Tennis standings (ATP + WTA) ──────────────────────────────────────────
-type StandingPlayer = {
-  id: string;
-  name: string;
-  country: string;
-  rank: string;
-  points: string;
-  movement: string;
-};
-type StandingsTour = { atp: StandingPlayer[]; wta: StandingPlayer[] };
-let standingsCache: StandingsTour | null = null;
-let standingsFetchedAt = 0;
-const STANDINGS_CACHE_TTL = 30 * 60 * 1000;
-
-function apiTennisStandingToPlayer(s: ApiTennisStanding): StandingPlayer {
-  return {
-    id: s.player_key,
-    name: s.player,
-    country: s.country,
-    rank: s.place,
-    points: s.points,
-    movement: s.movement,
-  };
-}
-
-async function getTennisStandings(): Promise<StandingsTour> {
-  if (!CONFIG.TENNIS_API_KEY) return standingsCache ?? { atp: [], wta: [] };
-  if (standingsCache && Date.now() - standingsFetchedAt < STANDINGS_CACHE_TTL) return standingsCache;
-  try {
-    const [atp, wta] = await Promise.all([
-      apiTennis.getStandings("ATP"),
-      apiTennis.getStandings("WTA"),
-    ]);
-    standingsCache = {
-      atp: atp.map(apiTennisStandingToPlayer),
-      wta: wta.map(apiTennisStandingToPlayer),
-    };
-    standingsFetchedAt = Date.now();
-  } catch (err) {
-    logger.error({ err }, "[api-tennis] standings fetch failed");
-  }
-  return standingsCache ?? { atp: [], wta: [] };
-}
 
 router.get("/standings", async (_req: Request, res: Response) => {
-  try {
-    const standings = await getTennisStandings();
-    res.json(standings);
-  } catch {
-    res.status(500).json({ error: "Rankings indisponíveis" });
-  }
+  res.json({ atp: [], wta: [] });
 });
 
-router.get("/tournaments/:id", async (req: Request, res: Response) => {
-  const id = String(req.params["id"]);
-  try {
-    const detail = await getTournamentDetail(id);
-    res.json(detail);
-  } catch {
-    res.status(500).json({ error: "Detalhe de torneio indisponível" });
-  }
+router.get("/tournaments/:id", async (_req: Request, res: Response) => {
+  res.status(404).json({ error: "Detalhe de torneio indisponível" });
 });
 
-// Raw get_draw passthrough (rounds → matches → seeds/TBD/next_slot) for the
-// TournamentBracket component — /tournaments/:id above flattens the same
-// data into the pre-existing TournamentMatch[] list, which loses the round
-// grouping/seeding/progression this renders instead. apiTennis.getDraw
-// already caches internally, so this shares that cache with
-// getTournamentDetail rather than doubling the network calls.
-router.get("/tournaments/:id/draw", async (req: Request, res: Response) => {
-  const id = String(req.params["id"]);
-  if (!CONFIG.TENNIS_API_KEY) {
-    res.status(404).json({ error: "Chave do torneio indisponível" });
-    return;
-  }
-  try {
-    const draw = await apiTennis.getDraw({ tournament_key: id });
-    res.json(draw);
-  } catch (err) {
-    logger.error({ err, id }, "[api-tennis] raw draw fetch failed");
-    res.status(404).json({ error: "Chave do torneio indisponível" });
-  }
+router.get("/tournaments/:id/draw", async (_req: Request, res: Response) => {
+  res.status(404).json({ error: "Chave do torneio indisponível" });
 });
 
 router.get("/results", async (_req: Request, res: Response) => {
-  try {
-    const results = await getTennisDailyResults();
-    res.json({ results });
-  } catch {
-    res.status(500).json({ error: "Resultados indisponíveis" });
-  }
+  res.json({ results: [] });
 });
 
-// get_news is Ultra-plan-only per api-tennis.com's docs — a subscription-tier
-// error is handled the same as any other failure here (empty fallback), no
-// special guard. No UI consumes this yet; the route exists ready for when
-// one does.
-router.get("/tennis-news", async (req: Request, res: Response) => {
-  if (!CONFIG.TENNIS_API_KEY) {
-    res.json({ articles: [] });
-    return;
-  }
-  try {
-    const rangeStart = new Date();
-    rangeStart.setDate(rangeStart.getDate() - 7);
-    const articles = await apiTennis.getNews({
-      date_start: rangeStart.toISOString().slice(0, 10),
-      date_stop: new Date().toISOString().slice(0, 10),
-      player_key: req.query.player_key ? String(req.query.player_key) : undefined,
-      tournament_key: req.query.tournament_key ? String(req.query.tournament_key) : undefined,
-    });
-    res.json({ articles });
-  } catch (err) {
-    logger.error({ err }, "[api-tennis] news fetch failed");
-    res.json({ articles: [] });
-  }
+router.get("/tennis-news", async (_req: Request, res: Response) => {
+  res.json({ articles: [] });
 });
 
 // Volleyball/hockey/basketball/MLB "yesterday's results" used to be sourced
@@ -12794,33 +12011,9 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   let team1Name = home,
     team2Name = away;
 
-  // GOAL API removed 2026-09-20 (user decision) — football H2H/recent-form
-  // now always falls through to the empty result below; tennis keeps its
-  // own real H2H via api-tennis.com.
-  if (sport === "tennis" && matchId && CONFIG.TENNIS_API_KEY) {
-    try {
-      const rangeStart = new Date();
-      rangeStart.setDate(rangeStart.getDate() - 3);
-      const rangeStop = new Date();
-      rangeStop.setDate(rangeStop.getDate() + 3);
-      const fixtures = await apiTennis.getFixtures({
-        date_start: rangeStart.toISOString().slice(0, 10),
-        date_stop: rangeStop.toISOString().slice(0, 10),
-        match_key: matchId,
-      });
-      const fx = fixtures[0];
-      if (fx?.first_player_key && fx?.second_player_key) {
-        const h2h = await apiTennis.getH2H(fx.first_player_key, fx.second_player_key);
-        const built = buildApiTennisConfrontos(h2h, home, away);
-        homeWins = built.homeWins;
-        awayWins = built.awayWins;
-        draws = built.draws;
-        recentMeetings = built.recentMeetings;
-      }
-    } catch (err) {
-      logger.error({ err, matchId }, "[api-tennis] H2H fetch failed");
-    }
-  }
+  // GOAL API and api-tennis both removed 2026-09-20 (user decision) —
+  // football and tennis H2H/recent-form now always fall through to the
+  // empty result below.
 
   const result: ConfrontosResult = {
     homeWins,
@@ -12854,36 +12047,9 @@ router.get("/team-upcoming", async (_req: Request, res: Response) => {
 // (confirmed real 2026-09-09) is the real replacement — ids are opaque cuid
 // strings, not numbers, hence the frontend's playerId type moving from
 // number to string alongside this fix.
-router.get("/player-profile/:id", async (req: Request, res: Response) => {
-  const playerId = String(req.params.id ?? "");
-  const sport = String(req.query.sport ?? "football");
-  if (!playerId) {
-    res.status(404).json({ error: "player profile unavailable" });
-    return;
-  }
-
-  if (sport === "tennis") {
-    if (!CONFIG.TENNIS_API_KEY) {
-      res.status(404).json({ error: "player profile unavailable" });
-      return;
-    }
-    try {
-      const players = await apiTennis.getPlayers({ player_key: playerId });
-      const player = players[0];
-      if (!player?.player_key) {
-        res.status(404).json({ error: "player profile unavailable" });
-        return;
-      }
-      res.json({ ...buildApiTennisPlayerProfile(player), sport: "tennis" });
-    } catch (err) {
-      logger.error({ err, playerId }, "[api-tennis] player profile fetch failed");
-      res.status(404).json({ error: "player profile unavailable" });
-    }
-    return;
-  }
-
-  // GOAL API removed 2026-09-20 (user decision) — football player profiles
-  // always 404 now, same as tennis without a key above.
+// GOAL API and api-tennis both removed 2026-09-20 (user decision) —
+// football and tennis player profiles always 404 now.
+router.get("/player-profile/:id", async (_req: Request, res: Response) => {
   res.status(404).json({ error: "player profile unavailable" });
 });
 

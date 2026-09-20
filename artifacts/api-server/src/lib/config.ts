@@ -59,25 +59,11 @@ const AI_AGENTS_MODEL =
 
 // ── BET62 Live + Match Tracker + Streaming ──
 //
-//  ODDS/MERCADOS: PulseScore — agregador odds multi-bookmaker.
-//    • Odds em tempo real, mercados normalizados (canonicalMarket). REST
-//      polling para futebol e tênis; WebSocket (~1s) dedicado ao futebol
-//      mas ainda não consumido no payload ao vivo (só observação — ver
-//      footballWs.ts).
-//    • Cota ilimitada. Nunca usar para estatísticas/H2H/rankings/logos.
-//
-//  TRACKER LIVE: StatScore — placar/minuto/incidentes AO VIVO.
-//    • Endpoint: /get_pushes/{eventId}. Auth: header X-Auth (OBRIGATÓRIO) + query ?auth= fallback compat.
-//    • Requer Referer: https://widgets.statscore.com/. Payload mais rico (minute, status, incidents[]).
-//    • Requer mapeamento MANUAL do admin (live_stream_mappings.statscore_event_id).
-//    • Fallback automático: SportScore -> Statpal -> PulseScore (por nome de time, zero trabalho manual).
-//
-//  STATS/EVENTOS: StatPal — dados estatísticos, play-by-play, metadados.
-//    • RESPONSABILIDADES: Estatísticas de jogo, play-by-play, H2H, rankings/standings, logos, ligas detalhadas.
-//    • NÃO FAZ: Agregação multi-bookmaker de odds (isso é PulseScore).
-//    • Soccer: /v2/soccer/matches/live + /match/{id}/statistics. Outros esportes: /v1/*
-//    • Cota: 300.000 requests/dia. Cache TTL rigoroso. Verificação de quota via /user-request-count (GRÁTIS, não conta na cota).
-//    • 100% AUTOMÁTICO por nome de time (ZERO trabalho manual por partida — futebol apenas).
+// This section originally documented StatScore/StatPal/PulseScore/
+// SportScore as the odds/tracker/stats architecture — all removed by
+// explicit user decision (last of them, PulseScore, on 2026-09-20, along
+// with GOAL API/PropLine/api-tennis.com). No sports-data provider remains;
+// every sport is without real scores/odds until a new one is integrated.
 //
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
@@ -93,64 +79,6 @@ const SMYTDRYT_HOST_URL =
 const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
-// api-tennis.com — dedicated tennis provider (2026-09-09). Auth is an
-// `APIkey` QUERY PARAM (not a Bearer header like GOAL API), and every
-// operation goes through one endpoint with a `method=` selector rather than
-// separate REST paths — the response envelope is `{success, result}`, not
-// GOAL API's `{success, data}`. get_fixtures/get_livescore already embed
-// pointbypoint/scores/statistics inline (no separate per-match calls
-// needed). A real inbound WebSocket (confirmed 2026-09-09) pushes live
-// event + point-by-point updates using the SAME APIkey.
-// api-tennis is tennis's match-state authority (fixtures/live score/sets/
-// server/H2H/rankings/statistics).
-const TENNIS_API_KEY = process.env["TENNIS_API_KEY"] ?? "";
-const TENNIS_API_BASE_URL =
-  process.env["TENNIS_API_BASE_URL"]?.trim() || "https://api.api-tennis.com/tennis/";
-const TENNIS_API_WS_URL = process.env["TENNIS_API_WS_URL"]?.trim() || "wss://wss.api-tennis.com/live";
-
-// PulseScore (api.pulsescore.net) — dedicated odds/markets/bookmakers
-// provider (2026-09-10), confirmed real via 5 endpoints the user pasted
-// (soccer/leagues, soccer/events list+detail, live-events list+detail).
-// Auth is a plain `x-secret: <key>` header — a third distinct auth style
-// from GOAL API's Bearer and api-tennis's APIkey query param. Every
-// response is already normalized on PulseScore's side into
-// canonicalMarket/canonicalOutcome (MATCH_RESULT, OVER_UNDER,
-// ASIAN_HANDICAP, ...) with numeric `odds` and a raw `rawOdds` string kept
-// alongside — this client only wraps the transport, real market/odds
-// normalization into BET62's own shape is a separate, later step (see
-// providers/pulsescore/README.md).
-// Deactivated 2026-09-14 on explicit user instruction. Forced to "" here
-// rather than deleting the integration outright — every PulseScore call
-// site (shadowMatchSync's live/prematch crons, the WebSocket wake-up
-// signal, matches.ts's odds path) already gates on
-// `if (CONFIG.PULSESCORE_API_KEY)`, so this one line turns all of them
-// off regardless of whether the real key is still set in Railway.
-// Reversible by deleting this line if PulseScore is ever needed again.
-const PULSESCORE_API_KEY = "";
-const PULSESCORE_BASE_URL =
-  process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net";
-// Confirmed real in production (2026-09-10): the account's PRO plan enforces
-// 1 request/second per bookmaker (HTTP 429 "Too many requests..." on the
-// second request), and PulseScoreClient had no throttling — the shadow-match
-// sync's own pagination loop tripped it (two requests 27ms apart). Default
-// is slightly over 1000ms to leave margin for clock/network jitter.
-const PULSESCORE_MIN_REQUEST_INTERVAL_MS =
-  Number(process.env["PULSESCORE_MIN_REQUEST_INTERVAL_MS"] ?? "1100") || 1100;
-// Confirmed real via the user-provided PulseScore docs (2026-09-10): the
-// PRO plan (this account's plan) includes 1 concurrent WebSocket
-// connection per bookmaker, auth via a `key` QUERY PARAM (not the REST
-// client's `x-secret` header) — this is the 1xBet ("onexbet") bookmaker's
-// endpoint specifically, matching every REST path this integration already
-// uses.
-// UNCONFIRMED 2026-09-11: mirrors the REST path's onexbet->v3/bet365
-// switch, but unlike the REST paths (each verified via a real request),
-// this exact WS path was never tested against bet365. Low risk either
-// way — startPulseScoreWebSocket() is called with no callback (see
-// api/index.ts), so nothing consumes its frames yet; a wrong URL just
-// means silent reconnect attempts, no functional impact.
-const PULSESCORE_WS_URL =
-  process.env["PULSESCORE_WS_URL"]?.trim() || "wss://api.pulsescore.net/api/v3/bet365/ws/live";
-
 export const CONFIG = {
   SILENTAPI_BASE_URL,
   SILENTAPI_AUTH_TOKEN,
@@ -164,13 +92,6 @@ export const CONFIG = {
   AI_AGENTS_MODEL,
   SMYTDRYT_HOST_URL,
   SMYTDRYT_DEFAULT_STATS_HOST,
-  TENNIS_API_KEY,
-  TENNIS_API_BASE_URL,
-  TENNIS_API_WS_URL,
-  PULSESCORE_API_KEY,
-  PULSESCORE_BASE_URL,
-  PULSESCORE_MIN_REQUEST_INTERVAL_MS,
-  PULSESCORE_WS_URL,
   LIVE_UPDATE_INTERVAL: 750,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,
