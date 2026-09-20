@@ -7808,7 +7808,15 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
 // matches are actually live right now.
 async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
   if (!CONFIG.MRDOGE_API_KEY) return [];
-  const matches = getMrDogeLiveMatches().filter((m) => m.sport?.name === "soccer");
+  // No sport filter here: getMrDogeLiveMatches() already contains only
+  // matches from MRDOGE_LIVE_SPORTS's own subscribeLive({sports:["soccer"]})
+  // filter. match.sport.name is a localized DISPLAY string (e.g. "Soccer" or
+  // "Football", confirmed via the real Sport/Region type — same {id,name}
+  // shape as Region, whose own doc comment gives "England"/"Inglaterra" as
+  // an example) — never equal to the lowercase "soccer" SportName enum
+  // value used for filtering/subscribing, so comparing against it here
+  // silently dropped every real match.
+  const matches = getMrDogeLiveMatches();
   syncMrDogeOddsSubscriptions(matches.map((m) => m.id));
   return matches.map((m): LiveMatchState => {
     const stats = m.stats?.sport === "soccer" ? m.stats : null;
