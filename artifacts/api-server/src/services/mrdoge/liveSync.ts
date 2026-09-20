@@ -5,15 +5,25 @@
 // reconnect/resubscribe logic (see @mrdoge/node's docs) keeps this map fresh
 // without routes/matches.ts's poll loop doing anything beyond reading it.
 //
-// Football only for now (see lib/config.ts's MRDOGE_API_KEY comment) — add a
-// sport to MRDOGE_LIVE_SPORTS once its stats-mapping + odds are wired in
-// routes/matches.ts; the subscription itself needs no other change.
+// All 6 sports Mr. Doge actually supports (see lib/config.ts's
+// MRDOGE_API_KEY comment) share this one subscription — subscribeLive
+// takes the full sports list in a single call, so adding a sport here
+// costs nothing extra against the tier's subscription-count quota (only
+// per-match odds.subscribe calls, wired separately per sport in
+// routes/matches.ts, count against that).
 import { getMrDogeClient } from "./client.js";
 import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import type { Match, Subscription } from "@mrdoge/node";
 
-const MRDOGE_LIVE_SPORTS: string[] = ["soccer"];
+const MRDOGE_LIVE_SPORTS: string[] = [
+  "soccer",
+  "tennis",
+  "basketball",
+  "ice_hockey",
+  "baseball",
+  "volleyball",
+];
 
 const liveMatchesById = new Map<string, Match>();
 let subscription: Subscription<"matches.subscribeLive"> | null = null;
