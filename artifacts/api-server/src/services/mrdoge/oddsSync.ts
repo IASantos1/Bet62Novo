@@ -8,6 +8,7 @@
 import { getMrDogeClient } from "./client.js";
 import { logger } from "../../lib/logger.js";
 import type { Market, Subscription } from "@mrdoge/node";
+import { MRDOGE_SOCCER_BET_TYPES } from "./common.js";
 
 const oddsByMatchId = new Map<string, Market[]>();
 const subsByMatchId = new Map<string, Subscription<"odds.subscribe">>();
@@ -50,7 +51,10 @@ async function runSync(liveMatchIds: string[]): Promise<void> {
   for (const matchId of liveMatchIds) {
     if (subsByMatchId.has(matchId)) continue;
     try {
-      const sub = await mrdoge.odds.subscribe({ matchId });
+      const sub = await mrdoge.odds.subscribe({
+        matchId,
+        betTypes: [...MRDOGE_SOCCER_BET_TYPES],
+      });
       subsByMatchId.set(matchId, sub);
       oddsByMatchId.set(matchId, sub.snapshot);
       sub.on("odds.upd", (markets) => {

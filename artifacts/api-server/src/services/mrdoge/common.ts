@@ -61,6 +61,13 @@ export const MRDOGE_ID_PREFIX: Record<string, string> = {
   volleyball: "mrdoge-volleyball-",
 };
 
+export const MRDOGE_SOCCER_BET_TYPES = [
+  "SOCCER_MATCH_RESULT_PRELIVE",
+  "SOCCER_MATCH_RESULT",
+  "SOCCER_UNDER_OVER",
+  "SOCCER_BOTH_TEAMS_TO_SCORE",
+] as const;
+
 export function mrDogeMatchId(bet62Sport: string, match: Match): string {
   return `${MRDOGE_ID_PREFIX[bet62Sport] ?? `mrdoge-${bet62Sport}-`}${match.id}`;
 }
@@ -206,15 +213,27 @@ export function extractMrDogeSoccerLiveExtra(stats: SoccerStats | null | undefin
   cornersHome?: number;
   cornersAway?: number;
   cornersTotal?: number;
+  foulsHome?: number;
+  foulsAway?: number;
   cardsHome?: number;
   cardsAway?: number;
   cardsTotal?: number;
+  yellowCardsHome?: number;
+  yellowCardsAway?: number;
+  redCardsHomeCount?: number;
+  redCardsAwayCount?: number;
   possessionHome?: number;
   possessionAway?: number;
   shotsTotalHome?: number;
   shotsTotalAway?: number;
   shotsOnTargetHome?: number;
   shotsOnTargetAway?: number;
+  offsidesHome?: number;
+  offsidesAway?: number;
+  xgHome?: number;
+  xgAway?: number;
+  throwInsHome?: number;
+  throwInsAway?: number;
   woodworkHome?: number;
   woodworkAway?: number;
 } {
@@ -234,9 +253,15 @@ export function extractMrDogeSoccerLiveExtra(stats: SoccerStats | null | undefin
       stats.homeCorners != null && stats.awayCorners != null
         ? stats.homeCorners + stats.awayCorners
         : undefined,
+    foulsHome: stats.homeFouls,
+    foulsAway: stats.awayFouls,
     cardsHome,
     cardsAway,
     cardsTotal: cardsHome != null && cardsAway != null ? cardsHome + cardsAway : undefined,
+    yellowCardsHome: stats.homeYellowCards,
+    yellowCardsAway: stats.awayYellowCards,
+    redCardsHomeCount: stats.homeRedCards,
+    redCardsAwayCount: stats.awayRedCards,
     // Mr. Doge sends possession as a 0-1 fraction; BET62's _liveExtra
     // possessionHome/Away fields (frontend V2StatsGroup renderer) expect a
     // 0-100 percentage, same convention every other provider used here.
@@ -246,9 +271,190 @@ export function extractMrDogeSoccerLiveExtra(stats: SoccerStats | null | undefin
     shotsTotalAway: stats.awayShots,
     shotsOnTargetHome: stats.homeShotsOnTarget,
     shotsOnTargetAway: stats.awayShotsOnTarget,
+    offsidesHome: stats.homeOffsides,
+    offsidesAway: stats.awayOffsides,
+    xgHome: stats.homeExpectedGoals,
+    xgAway: stats.awayExpectedGoals,
+    throwInsHome: stats.homeThrowIns,
+    throwInsAway: stats.awayThrowIns,
     woodworkHome: stats.homeWoodworkHits,
     woodworkAway: stats.awayWoodworkHits,
   };
+}
+
+function formatStatValue(
+  value: number | null | undefined,
+  options?: { digits?: number; suffix?: string },
+): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  const digits = options?.digits ?? (Number.isInteger(value) ? 0 : 1);
+  return `${value.toFixed(digits)}${options?.suffix ?? ""}`;
+}
+
+function pushSoccerStatRow(
+  rows: Array<{ name: string; home: string; away: string }>,
+  name: string,
+  home: number | null | undefined,
+  away: number | null | undefined,
+  options?: { digits?: number; suffix?: string },
+): void {
+  if (home == null && away == null) return;
+  rows.push({
+    name,
+    home: formatStatValue(home, options),
+    away: formatStatValue(away, options),
+  });
+}
+
+export function buildMrDogeSoccerMatchStats(
+  stats: SoccerStats | null | undefined,
+): Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> {
+  if (!stats) return [];
+
+  const overviewRows: Array<{ name: string; home: string; away: string }> = [];
+  pushSoccerStatRow(
+    overviewRows,
+    "Posse de bola",
+    stats.homePossession != null ? Math.round(stats.homePossession * 100) : undefined,
+    stats.awayPossession != null ? Math.round(stats.awayPossession * 100) : undefined,
+    { suffix: "%" },
+  );
+  pushSoccerStatRow(overviewRows, "Remates", stats.homeShots, stats.awayShots);
+  pushSoccerStatRow(
+    overviewRows,
+    "Remates enquadrados",
+    stats.homeShotsOnTarget,
+    stats.awayShotsOnTarget,
+  );
+  pushSoccerStatRow(overviewRows, "Cantos", stats.homeCorners, stats.awayCorners);
+  pushSoccerStatRow(
+    overviewRows,
+    "Cartoes amarelos",
+    stats.homeYellowCards,
+    stats.awayYellowCards,
+  );
+  pushSoccerStatRow(
+    overviewRows,
+    "Cartoes vermelhos",
+    stats.homeRedCards,
+    stats.awayRedCards,
+  );
+  pushSoccerStatRow(overviewRows, "Faltas", stats.homeFouls, stats.awayFouls);
+  pushSoccerStatRow(overviewRows, "Fora de jogo", stats.homeOffsides, stats.awayOffsides);
+
+  const extraRows: Array<{ name: string; home: string; away: string }> = [];
+  pushSoccerStatRow(
+    extraRows,
+    "xG",
+    stats.homeExpectedGoals,
+    stats.awayExpectedGoals,
+    { digits: 2 },
+  );
+  pushSoccerStatRow(
+    extraRows,
+    "Bola ao poste",
+    stats.homeWoodworkHits,
+    stats.awayWoodworkHits,
+  );
+  pushSoccerStatRow(extraRows, "Lancamentos", stats.homeThrowIns, stats.awayThrowIns);
+  pushSoccerStatRow(extraRows, "Pontapes de baliza", stats.homeGoalKicks, stats.awayGoalKicks);
+  pushSoccerStatRow(extraRows, "Penaltis", stats.homePenaltyKicks, stats.awayPenaltyKicks);
+  pushSoccerStatRow(extraRows, "Desarmes", stats.homeTackles, stats.awayTackles);
+
+  const groups: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> = [];
+  if (overviewRows.length > 0) groups.push({ title: "Resumo do jogo", rows: overviewRows });
+  if (extraRows.length > 0) groups.push({ title: "Estatisticas avancadas", rows: extraRows });
+  return groups;
+}
+
+function timelineMinute(
+  event: { captions?: string[]; timeOffsetSeconds?: number },
+): number {
+  const fromCaption = event.captions?.[0] ?? "";
+  const minuteMatch = /(\d{1,3})/.exec(fromCaption);
+  if (minuteMatch) return Number(minuteMatch[1]);
+  if (event.timeOffsetSeconds != null && Number.isFinite(event.timeOffsetSeconds)) {
+    return Math.max(0, Math.round(event.timeOffsetSeconds / 60));
+  }
+  return 0;
+}
+
+function timelineTeam(
+  match: Match,
+  side: string | null | undefined,
+  captions?: string[],
+): string {
+  if (side === "home") return match.homeTeam.name;
+  if (side === "away") return match.awayTeam.name;
+  const captionTeam = captions?.[1]?.trim();
+  return captionTeam || "";
+}
+
+function timelinePlayer(captions?: string[]): string {
+  if (!captions || captions.length === 0) return "";
+  return captions[captions.length - 1]?.trim() ?? "";
+}
+
+export function buildMrDogeTimelineEvents(match: Match): Array<{
+  type: string;
+  team: string;
+  minute: number;
+  player: string;
+  detail?: string;
+}> {
+  const timeline = match.timeline ?? [];
+  const events: Array<{
+    type: string;
+    team: string;
+    minute: number;
+    player: string;
+    detail?: string;
+  }> = [];
+
+  for (const event of timeline) {
+    let type = "event";
+    let detail: string | undefined;
+
+    switch (event.type) {
+      case "GoalWithScorer":
+        type = "goal";
+        detail = "Golo";
+        break;
+      case "OwnGoal":
+        type = "goal";
+        detail = "Autogolo";
+        break;
+      case "YellowCardWithPlayer":
+        type = "card";
+        detail = "Amarelo";
+        break;
+      case "RedCardWithPlayer":
+        type = "card";
+        detail = "Vermelho";
+        break;
+      case "PenaltyKick":
+        detail = "Penalti";
+        break;
+      case "Corner":
+        detail = "Canto";
+        break;
+      case "Substitution":
+        detail = "Substituicao";
+        break;
+      default:
+        continue;
+    }
+
+    events.push({
+      type,
+      team: timelineTeam(match, event.side, event.captions),
+      minute: timelineMinute(event),
+      player: timelinePlayer(event.captions),
+      detail,
+    });
+  }
+
+  return events;
 }
 
 /** Real tennis live state — no odds/markets yet (Fase 0 probe needed

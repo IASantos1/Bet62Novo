@@ -503,7 +503,7 @@ type CasinoBanner = {
   position: "top" | "middle";
   games: CasinoGame[];
 };
-type LiveTransport = "idle" | "cache" | "sse" | "polling";
+type LiveTransport = "idle" | "cache" | "ws" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
   const normalized = path.replace(/\/+$/, "");
@@ -4957,6 +4957,8 @@ export default function Home({
   // WC live matches kept separate so bet ticket can show "AO VIVO" for WC bets
   const wcLiveForTicketRef = useRef<Match[]>([]);
   // SSE connection for real-time live updates
+  const liveWsRef = useRef<WebSocket | null>(null);
+  const liveWsHealthyRef = useRef(false);
   const sseRef = useRef<EventSource | null>(null);
   const sseActiveRef = useRef(false); // true when SSE is connected and receiving data
   const liveExpandedFullFetchRef = useRef<string | null>(null);
@@ -8058,7 +8060,12 @@ export default function Home({
 
   useEffect(() => {
     if (activeTab !== "live") {
-      // Leave live tab — close SSE
+      // Leave live tab — close push transports
+      if (liveWsRef.current) {
+        liveWsRef.current.close();
+        liveWsRef.current = null;
+      }
+      liveWsHealthyRef.current = false;
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;
@@ -8110,9 +8117,112 @@ export default function Home({
       );
     };
 
-    // ── 2. Open SSE for real-time push updates (<100ms latency) ─────────────
+    const handleRealtimePayload = (data: any, transport: "ws" | "sse") => {
+      resetFallbackBackoff();
+      setLiveTransport(transport);
+      if (data.type === "update" && data.matchId) {
+        const matchId = String(data.matchId);
+        const isTennisDelta = matchId.includes("tennis");
+        const msgNow = Date.now();
+        liveDataFetchedAt.current = msgNow;
+        matchLastSeenRef.current[matchId] = msgNow;
+        const deltaMinuteRaw = data.delta?.minute;
+        if (
+          typeof deltaMinuteRaw === "number" &&
+          Number.isFinite(deltaMinuteRaw)
+        ) {
+          const prevMinute = apiMinutesRef.current[matchId];
+          if (
+            typeof prevMinute !== "number" ||
+            deltaMinuteRaw >= prevMinute
+          ) {
+            apiMinutesRef.current[matchId] = deltaMinuteRaw;
+            if (
+              typeof prevMinute !== "number" ||
+              deltaMinuteRaw > prevMinute
+            ) {
+              minuteChangedAtRef.current[matchId] = msgNow;
+            }
+          }
+        }
+        setLiveMatches((prev) =>
+          prev.map((m) =>
+            String(m.id) === matchId
+              ? { ...m, ...(data.delta ?? {}), isLive: true }
+              : m,
+          ),
+        );
+        if (isTennisDelta) {
+          void refreshLiveMatchById(matchId, {
+            forceFresh: true,
+            syncExpanded: true,
+          });
+        }
+      } else if (
+        data.type === "batch_update" &&
+        Array.isArray(data.updates)
+      ) {
+        const msgNow = Date.now();
+        liveDataFetchedAt.current = msgNow;
+        const tennisIds = new Set<string>();
+        setLiveMatches((prev) => {
+          if (prev.length === 0) return prev;
+          const next = [...prev];
+          let changed = false;
+          for (const upd of data.updates as Array<{
+            matchId?: string;
+            delta?: Partial<Match>;
+          }>) {
+            const matchId = String(upd?.matchId ?? "");
+            if (!matchId || !upd?.delta || typeof upd.delta !== "object")
+              continue;
+            if (matchId.includes("tennis")) tennisIds.add(matchId);
+            matchLastSeenRef.current[matchId] = msgNow;
+            const deltaMinuteRaw = (upd.delta as Match).minute;
+            if (
+              typeof deltaMinuteRaw === "number" &&
+              Number.isFinite(deltaMinuteRaw)
+            ) {
+              const prevMinute = apiMinutesRef.current[matchId];
+              if (
+                typeof prevMinute !== "number" ||
+                deltaMinuteRaw >= prevMinute
+              ) {
+                apiMinutesRef.current[matchId] = deltaMinuteRaw;
+                if (
+                  typeof prevMinute !== "number" ||
+                  deltaMinuteRaw > prevMinute
+                ) {
+                  minuteChangedAtRef.current[matchId] = msgNow;
+                }
+              }
+            }
+            const idx = next.findIndex((m) => String(m.id) === matchId);
+            if (idx < 0) continue;
+            next[idx] = {
+              ...next[idx],
+              ...(upd.delta as Partial<Match>),
+              isLive: true,
+            };
+            changed = true;
+          }
+          return changed ? next : prev;
+        });
+        for (const tennisId of tennisIds) {
+          void refreshLiveMatchById(tennisId, {
+            forceFresh: true,
+            syncExpanded: true,
+          });
+        }
+      } else if (Array.isArray(data.matches)) {
+        writeSnapshot(liveSnapshotKey(), data.matches);
+        processLiveData(data);
+        setLiveLoading(false);
+      }
+    };
+
     const openSSE = () => {
-      if (sseRef.current) return; // already open
+      if (sseRef.current || liveWsRef.current) return;
       if (typeof window === "undefined" || !("EventSource" in window)) {
         setLiveTransport(browserOnline ? "polling" : "cache");
         return;
@@ -8135,109 +8245,7 @@ export default function Home({
       es.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data) as any;
-          resetFallbackBackoff();
-          setLiveTransport("sse");
-          if (data.type === "update" && data.matchId) {
-            // Sub-second delta — patch just the changed match
-            const matchId = String(data.matchId);
-            const isTennisDelta = matchId.includes("tennis");
-            const msgNow = Date.now();
-            liveDataFetchedAt.current = msgNow;
-            matchLastSeenRef.current[matchId] = msgNow;
-            const deltaMinuteRaw = data.delta?.minute;
-            if (
-              typeof deltaMinuteRaw === "number" &&
-              Number.isFinite(deltaMinuteRaw)
-            ) {
-              const prevMinute = apiMinutesRef.current[matchId];
-              if (
-                typeof prevMinute !== "number" ||
-                deltaMinuteRaw >= prevMinute
-              ) {
-                apiMinutesRef.current[matchId] = deltaMinuteRaw;
-                if (
-                  typeof prevMinute !== "number" ||
-                  deltaMinuteRaw > prevMinute
-                ) {
-                  minuteChangedAtRef.current[matchId] = msgNow;
-                }
-              }
-            }
-            setLiveMatches((prev) =>
-              prev.map((m) =>
-                String(m.id) === matchId
-                  ? { ...m, ...(data.delta ?? {}), isLive: true }
-                  : m,
-              ),
-            );
-            if (isTennisDelta) {
-              void refreshLiveMatchById(matchId, {
-                forceFresh: true,
-                syncExpanded: true,
-              });
-            }
-          } else if (
-            data.type === "batch_update" &&
-            Array.isArray(data.updates)
-          ) {
-            const msgNow = Date.now();
-            liveDataFetchedAt.current = msgNow;
-            const tennisIds = new Set<string>();
-            setLiveMatches((prev) => {
-              if (prev.length === 0) return prev;
-              const next = [...prev];
-              let changed = false;
-              for (const upd of data.updates as Array<{
-                matchId?: string;
-                delta?: Partial<Match>;
-              }>) {
-                const matchId = String(upd?.matchId ?? "");
-                if (!matchId || !upd?.delta || typeof upd.delta !== "object")
-                  continue;
-                if (matchId.includes("tennis")) tennisIds.add(matchId);
-                matchLastSeenRef.current[matchId] = msgNow;
-                const deltaMinuteRaw = (upd.delta as Match).minute;
-                if (
-                  typeof deltaMinuteRaw === "number" &&
-                  Number.isFinite(deltaMinuteRaw)
-                ) {
-                  const prevMinute = apiMinutesRef.current[matchId];
-                  if (
-                    typeof prevMinute !== "number" ||
-                    deltaMinuteRaw >= prevMinute
-                  ) {
-                    apiMinutesRef.current[matchId] = deltaMinuteRaw;
-                    if (
-                      typeof prevMinute !== "number" ||
-                      deltaMinuteRaw > prevMinute
-                    ) {
-                      minuteChangedAtRef.current[matchId] = msgNow;
-                    }
-                  }
-                }
-                const idx = next.findIndex((m) => String(m.id) === matchId);
-                if (idx < 0) continue;
-                next[idx] = {
-                  ...next[idx],
-                  ...(upd.delta as Partial<Match>),
-                  isLive: true,
-                };
-                changed = true;
-              }
-              return changed ? next : prev;
-            });
-            for (const tennisId of tennisIds) {
-              void refreshLiveMatchById(tennisId, {
-                forceFresh: true,
-                syncExpanded: true,
-              });
-            }
-          } else if (Array.isArray(data.matches)) {
-            // Full snapshot from server broadcast
-            writeSnapshot(liveSnapshotKey(), data.matches);
-            processLiveData(data);
-            setLiveLoading(false);
-          }
+          handleRealtimePayload(data, "sse");
         } catch {
           /* ignore malformed frames */
         }
@@ -8254,14 +8262,70 @@ export default function Home({
           clearTimeout(sseReconnectTimerRef.current);
         // Reconnect quickly when the live stream drops
         sseReconnectTimerRef.current = setTimeout(() => {
-          if (sseRef.current === null && activeTabRef.current === "live")
+          if (
+            sseRef.current === null &&
+            liveWsRef.current === null &&
+            activeTabRef.current === "live"
+          )
             openSSE();
         }, 700);
       };
     };
-    openSSE();
 
-    // ── 3. HTTP fallback poll with progressive backoff while SSE is degraded ──
+    const openWebSocket = () => {
+      if (liveWsRef.current) return;
+      if (typeof window === "undefined" || typeof WebSocket === "undefined") {
+        openSSE();
+        return;
+      }
+
+      let ws: WebSocket;
+      try {
+        const proto = window.location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${proto}://${window.location.host}/api/matches/ws`);
+      } catch {
+        openSSE();
+        return;
+      }
+
+      liveWsRef.current = ws;
+      ws.onopen = () => {
+        liveWsHealthyRef.current = true;
+        if (sseRef.current) {
+          sseRef.current.close();
+          sseRef.current = null;
+        }
+        sseActiveRef.current = false;
+        resetFallbackBackoff();
+        setLiveTransport("ws");
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const raw =
+            typeof evt.data === "string" ? evt.data : String(evt.data ?? "");
+          if (!raw) return;
+          liveWsHealthyRef.current = true;
+          handleRealtimePayload(JSON.parse(raw), "ws");
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+      ws.onclose = () => {
+        if (liveWsRef.current === ws) liveWsRef.current = null;
+        liveWsHealthyRef.current = false;
+        if (cancelled || activeTabRef.current !== "live") return;
+        if (sseRef.current === null) openSSE();
+      };
+      ws.onerror = () => {
+        try {
+          ws.close();
+        } catch {}
+      };
+    };
+
+    openWebSocket();
+
+    // ── 3. HTTP fallback poll while push transport is degraded ────────────────
     // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.
     const scheduleFallbackPoll = (delayMs: number) => {
       if (cancelled) return;
@@ -8269,11 +8333,16 @@ export default function Home({
       livePollTimerRef.current = setTimeout(async () => {
         if (cancelled) return;
         const streamAgeMs = Date.now() - (liveDataFetchedAt.current ?? 0);
-        const sseHealthy = sseActiveRef.current && streamAgeMs <= 2_500;
+        const pushHealthy =
+          (liveWsHealthyRef.current || sseActiveRef.current) &&
+          streamAgeMs <= 2_500;
 
-        if (!sseHealthy) {
+        if (!pushHealthy) {
           const result = await fetchLive(false);
-          if (result === "success" && sseActiveRef.current)
+          if (
+            result === "success" &&
+            (liveWsHealthyRef.current || sseActiveRef.current)
+          )
             resetFallbackBackoff();
           else if (result !== "skipped") advanceFallbackBackoff();
         } else {
@@ -8306,6 +8375,11 @@ export default function Home({
       }
       liveFetchInFlightRef.current = false;
       livePollBackoffStepRef.current = 0;
+      if (liveWsRef.current) {
+        liveWsRef.current.close();
+        liveWsRef.current = null;
+      }
+      liveWsHealthyRef.current = false;
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;

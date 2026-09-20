@@ -20,6 +20,7 @@ import { getMrDogeClient } from "../services/mrdoge/client.js";
 import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
 import {
+  MRDOGE_SOCCER_BET_TYPES,
   mrDogeMatchId,
   mrDogeStartTimeToLisbon,
   mrDogeSoccerStatus,
@@ -29,6 +30,8 @@ import {
   extractMrDogeSoccerTotalGoals,
   extractMrDogeSoccerBtts,
   extractMrDogeSoccerLiveExtra,
+  buildMrDogeSoccerMatchStats,
+  buildMrDogeTimelineEvents,
   extractMrDogeTennisLiveExtra,
   extractMrDogeBasketballLiveExtra,
   extractMrDogeIceHockeyLiveExtra,
@@ -5637,7 +5640,10 @@ let broadcastPending = false;
 let consecutiveEmptyBroadcasts = 0;
 let lastBroadcastAt = 0;
 
-// Global buffer for delta updates — collected over 40ms and flushed in a single packet (MAX plan tuned)
+const LIVE_DELTA_BATCH_MS = 25;
+
+// Global buffer for delta updates — collected for just a few milliseconds so
+// repeated odds ticks can coalesce without visibly lagging the UI.
 let pendingBatchUpdates: Array<{
   matchId: string;
   delta: Partial<LiveMatchState>;
@@ -7781,12 +7787,6 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 // against production traffic.
 const MRDOGE_PREMATCH_ODDS_MAX = 100;
 const MRDOGE_PREMATCH_ODDS_CONCURRENCY = 5;
-const MRDOGE_SOCCER_BET_TYPES = [
-  "SOCCER_MATCH_RESULT_PRELIVE",
-  "SOCCER_MATCH_RESULT",
-  "SOCCER_UNDER_OVER",
-  "SOCCER_BOTH_TEAMS_TO_SCORE",
-];
 
 async function fetchMrDogePrematchOdds(
   mrdoge: ReturnType<typeof getMrDogeClient>,
@@ -7842,7 +7842,11 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       startDate,
       endDate,
     });
-    const oddsByMatchId = await fetchMrDogePrematchOdds(mrdoge, matches, MRDOGE_SOCCER_BET_TYPES);
+    const oddsByMatchId = await fetchMrDogePrematchOdds(
+      mrdoge,
+      matches,
+      [...MRDOGE_SOCCER_BET_TYPES],
+    );
     let withRealOdds = 0;
     const built = matches.map((m): UpcomingMatch => {
       const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
@@ -7904,6 +7908,7 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     const moneyline = extractMrDogeSoccerMoneyline(odds);
     const btts = extractMrDogeSoccerBtts(odds);
     const markets = zerofillAdvancedMarkets();
+    const liveExtra = extractMrDogeSoccerLiveExtra(stats);
     Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
     if (btts) markets.bothTeamsScore = btts;
     return {
@@ -7920,8 +7925,11 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       hasRealOdds: moneyline != null,
       odds: moneyline ?? { home: 0, draw: 0, away: 0 },
       markets,
-      events: [],
-      _liveExtra: { phase, ...extractMrDogeSoccerLiveExtra(stats) },
+      events: buildMrDogeTimelineEvents(m),
+      redCardsHome: stats?.homeRedCards ?? 0,
+      redCardsAway: stats?.awayRedCards ?? 0,
+      matchStats: buildMrDogeSoccerMatchStats(stats),
+      _liveExtra: { phase, ...liveExtra },
     };
   });
 }
@@ -9014,11 +9022,11 @@ export function broadcastBatchDelta(
   // Add to global buffer
   pendingBatchUpdates.push(...updates);
 
-  // If buffer getting large, flush immediately; otherwise wait 100ms
+  // If buffer getting large, flush immediately; otherwise wait one tiny batch window.
   if (pendingBatchUpdates.length > 50) {
     flushBatchUpdates();
   } else if (!batchFlushTimer) {
-    batchFlushTimer = setTimeout(flushBatchUpdates, 100);
+    batchFlushTimer = setTimeout(flushBatchUpdates, LIVE_DELTA_BATCH_MS);
   }
 }
 
