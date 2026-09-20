@@ -10305,7 +10305,7 @@ export default function Home({
       <div className="flex items-center gap-1.5">
         <span className="relative flex h-1.5 w-1.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+          <span className="b62-live-dot relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
         </span>
         <span className="text-[10px] font-bold text-red-500 tabular-nums">
           {liveBadgeLabel}
@@ -10711,7 +10711,7 @@ export default function Home({
             <RcBadge count={rcH} />
           </div>
           <div
-            className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}
+            className={`b62-font-display ${big ? "text-3xl" : "text-xl"} font-bold text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}
             style={
               big
                 ? {
@@ -10890,7 +10890,7 @@ export default function Home({
         {...makeTap(() => setExpandedMatch(match))}
         className={`relative overflow-hidden rounded-2xl border transition-transform cursor-pointer active:scale-[0.99] ${
           isDarkTheme
-            ? "border-zinc-700/60 bg-zinc-900 shadow-[0_6px_16px_rgba(0,0,0,0.24)]"
+            ? "b62-glass shadow-[0_6px_16px_rgba(0,0,0,0.24)]"
             : "border-zinc-200 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.07)]"
         }`}
       >
@@ -10979,7 +10979,7 @@ export default function Home({
                       {homeName}
                     </span>
                     {!isEmBreve && (
-                      <span className="text-[15px] font-black text-white tabular-nums shrink-0">{match.homeScore ?? 0}</span>
+                      <span className="b62-font-display text-[15px] font-bold text-white tabular-nums shrink-0">{match.homeScore ?? 0}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -10993,7 +10993,7 @@ export default function Home({
                       {awayName}
                     </span>
                     {!isEmBreve && (
-                      <span className="text-[15px] font-black text-zinc-400 tabular-nums shrink-0">{match.awayScore ?? 0}</span>
+                      <span className="b62-font-display text-[15px] font-bold text-zinc-400 tabular-nums shrink-0">{match.awayScore ?? 0}</span>
                     )}
                   </div>
                   {isEmBreve && (match.time || dateStr) && (
