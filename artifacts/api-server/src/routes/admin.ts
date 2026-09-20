@@ -27,11 +27,6 @@ import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
-import {
-  getPalaceCasinoProviders,
-  getPalaceCasinoAgentInfo,
-} from "../services/palaceCasino/client.js";
-import { memberAccountForUser } from "./casino.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 
 function escapeCsv(val: unknown): string {
@@ -2142,100 +2137,6 @@ router.get(
     } catch (err) {
       logger.error({ err }, "GET /api/admin/replay/:matchId/history error");
       res.status(500).json({ error: "Erro ao carregar histórico de replays" });
-    }
-  },
-);
-
-
-// Read-only diagnostic for the Palace Casino integration. Includes
-// agent/info specifically so the account's configured currency can be
-// eyeballed before going live — it was found to be USD ("internal_usd",
-// currency: 1) rather than the EUR our ledger assumes; the user asked
-// Palace Casino to switch it to EUR, so this is how to confirm that
-// actually landed (no documented currency-code table to check
-// programmatically — see getPalaceCasinoAgentInfo's doc comment).
-router.get(
-  "/palace-casino-debug",
-  adminMiddleware,
-  async (req: AdminRequest, res) => {
-    // Booleans only, never the actual secret values — this is meant to be
-    // eyeballed in a browser, unlike PALACE_CASINO_API_TOKEN/
-    // PALACE_CASINO_CALLBACK_TOKEN themselves which stay Railway-env-only.
-    const base = {
-      apiTokenConfigured: !!CONFIG.PALACE_CASINO_API_TOKEN,
-      callbackTokenConfigured: !!CONFIG.PALACE_CASINO_CALLBACK_TOKEN,
-      // What must be pasted into Palace Casino's own callback-URL setting —
-      // trusts the request's own host/protocol so this is always correct
-      // for whichever environment (production vs. any preview deploy) it's
-      // viewed from.
-      expectedCallbackUrl: `${req.protocol}://${req.get("host")}/api/casino/palace/callback`,
-    };
-    if (!CONFIG.PALACE_CASINO_API_TOKEN) {
-      res.status(503).json({ ...base, error: "PALACE_CASINO_API_TOKEN não configurada" });
-      return;
-    }
-    try {
-      const [agent, providers] = await Promise.all([
-        getPalaceCasinoAgentInfo(),
-        getPalaceCasinoProviders(),
-      ]);
-      res.json({ ...base, agent, count: providers.length, providers });
-    } catch (err) {
-      logger.error({ err }, "GET /api/admin/palace-casino-debug error");
-      res.status(500).json({
-        ...base,
-        error: "Erro ao consultar Palace Casino",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
-  },
-);
-
-// Simulates a real Palace Casino wallet callback against our OWN server —
-// exercises the exact same route/token-check/DB-lookup path a genuine
-// Palace Casino "authenticate" call would, without needing Palace Casino to
-// actually call us. Built specifically to diagnose "game shows CREDIT 0":
-// if this returns the real balance, our callback implementation is proven
-// correct and the problem is entirely on Palace Casino's side (callback URL
-// not configured, or the agent account not yet funded/limited correctly);
-// if this itself fails, the error here is the real bug to fix.
-router.post(
-  "/palace-casino-debug/self-test",
-  adminMiddleware,
-  async (req: AdminRequest, res) => {
-    const userId = Number((req.body as { userId?: unknown })?.userId);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      res.status(400).json({ error: "userId inválido" });
-      return;
-    }
-    if (!CONFIG.PALACE_CASINO_CALLBACK_TOKEN) {
-      res.status(503).json({ error: "PALACE_CASINO_CALLBACK_TOKEN não configurada" });
-      return;
-    }
-    try {
-      const port = process.env["API_PORT"] ?? process.env["PORT"] ?? "8080";
-      const resp = await fetch(`http://127.0.0.1:${port}/api/casino/palace/callback`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Callback-Token": CONFIG.PALACE_CASINO_CALLBACK_TOKEN,
-        },
-        body: JSON.stringify({
-          command: "authenticate",
-          data: { account: memberAccountForUser(userId) },
-          timestamp: String(Math.floor(Date.now() / 1000)),
-          check: "21",
-        }),
-        signal: AbortSignal.timeout(6000),
-      });
-      const data = await resp.json().catch(() => null);
-      res.json({ httpStatus: resp.status, response: data });
-    } catch (err) {
-      logger.error({ err, userId }, "POST /api/admin/palace-casino-debug/self-test error");
-      res.status(500).json({
-        error: "Erro ao executar teste",
-        detail: err instanceof Error ? err.message : String(err),
-      });
     }
   },
 );

@@ -19,10 +19,6 @@ import { db, paymentsTable, usersTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { sendDepositConfirmed } from "./lib/mailer.js";
-import crypto from "crypto";
-import { CONFIG } from "./lib/config.js";
-import { timingSafeEqualString } from "./lib/security.js";
-import { userIdFromMemberAccount } from "./routes/casino.js";
 
 const app: Express = express();
 
@@ -180,140 +176,16 @@ app.post(
   },
 );
 
-// ── SilentAPI casino wallet callback MUST be registered before express.json() ──
-// The signature is an HMAC-SHA256 over the *raw* request body bytes — if
-// Express parsed and re-serialized the JSON first, key ordering/whitespace
-// could differ from what SilentAPI signed, breaking verification.
-app.post(
-  "/api/casino/callback",
-  express.raw({ type: "application/json" }),
-  async (req: Request, res: Response) => {
-    const secret = CONFIG.SILENTAPI_CALLBACK_SECRET;
-    const signature = req.headers["x-signature"];
-    if (!secret || typeof signature !== "string") {
-      res.status(400).json({ code: 1, msg: "Missing webhook config" });
-      return;
-    }
-
-    const rawBody = req.body as Buffer;
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(rawBody)
-      .digest("hex");
-    if (!timingSafeEqualString(expected, signature)) {
-      logger.warn("[casino-callback] signature verification failed");
-      res.status(401).json({ code: 1, msg: "Invalid signature" });
-      return;
-    }
-
-    let payload: {
-      serial_number?: string;
-      member_account?: string;
-      win_amount?: string;
-      bet_amount?: string;
-      game_uid?: string;
-      game_round?: string;
-      currency?: string;
-    };
-    try {
-      payload = JSON.parse(rawBody.toString("utf8"));
-    } catch {
-      res.status(400).json({ code: 1, msg: "Invalid JSON" });
-      return;
-    }
-
-    const serialNumber = String(payload.serial_number ?? "").trim();
-    const memberAccount = String(payload.member_account ?? "").trim();
-    if (!serialNumber || !memberAccount) {
-      res.status(400).json({ code: 1, msg: "Missing serial_number or member_account" });
-      return;
-    }
-    const userId = userIdFromMemberAccount(memberAccount);
-    if (userId === null) {
-      logger.warn({ memberAccount }, "[casino-callback] unknown member_account format");
-      res.status(400).json({ code: 1, msg: "Unknown member_account" });
-      return;
-    }
-
-    // GetGameUrl has no currency parameter at all (confirmed against
-    // SilentAPI's docs) — the wallet's operating currency is fixed on their
-    // side by account/game configuration, not by anything we send. This
-    // ledger is EUR-only (see lib/ledger.ts), so if a round settles in
-    // anything else we must NOT apply win_amount/bet_amount as if they were
-    // EUR — reject instead of silently misbooking real money, and rely on
-    // SilentAPI's retry-on-failure behavior to redeliver once the account is
-    // fixed to operate in EUR.
-    const currency = String(payload.currency ?? "").trim().toUpperCase();
-    if (currency && currency !== "EUR") {
-      logger.error(
-        { currency, memberAccount, serialNumber },
-        "[casino-callback] non-EUR currency — SilentAPI account is not configured for EUR, rejecting to avoid misbooking",
-      );
-      res.status(400).json({ code: 1, msg: "Unsupported currency, account must be configured for EUR" });
-      return;
-    }
-
-    // Net delta for this round — the provider bundles bet and win into one
-    // callback rather than sending them as separate events. Rounded to cents
-    // to satisfy insertLedgerEntry's amount format (matches how every other
-    // money-moving path in this codebase records amounts).
-    const winAmount = Number(payload.win_amount ?? 0);
-    const betAmount = Number(payload.bet_amount ?? 0);
-    if (!Number.isFinite(winAmount) || !Number.isFinite(betAmount)) {
-      res.status(400).json({ code: 1, msg: "Invalid amounts" });
-      return;
-    }
-    const netAmount = (Math.round((winAmount - betAmount) * 100) / 100).toFixed(2);
-
-    try {
-      const newBalance = await db.transaction(async (tx) => {
-        // Idempotency: onConflictDoNothing on serial_number means a retried
-        // callback for the same round applies the balance change at most
-        // once, but we still need to answer with the (already-updated)
-        // balance either way — SilentAPI's retry logic expects the same
-        // success response, not an error, on a duplicate delivery.
-        // enforceNonNegative mirrors the Palace Casino integration's own
-        // `bet` handler (casino.ts) — that path already guards against a
-        // negative balance the same way; this SilentAPI callback was
-        // missing the identical guard (audit finding, 2026-08-10),
-        // meaning a losing round's net debit could push balance below
-        // zero with nothing stopping it.
-        await applyBalanceDelta(tx, {
-          userId,
-          amount: netAmount,
-          kind: "casino_round_settlement",
-          idempotencyKey: `casino:${serialNumber}`,
-          refType: "casino_round",
-          refId: payload.game_round ?? serialNumber,
-          metadata: payload,
-          enforceNonNegative: true,
-        });
-        const [user] = await tx
-          .select({ balance: usersTable.balance })
-          .from(usersTable)
-          .where(eq(usersTable.id, userId))
-          .limit(1);
-        return user?.balance;
-      });
-
-      if (newBalance === undefined) {
-        logger.error({ userId, serialNumber }, "[casino-callback] user not found after balance update");
-        res.status(400).json({ code: 1, msg: "Unknown member_account" });
-        return;
-      }
-
-      res.json({ code: 0, msg: "Success", balance: Number(newBalance) });
-    } catch (err) {
-      logger.error({ err, userId, serialNumber }, "[casino-callback] processing error");
-      res.status(500).json({ code: 1, msg: "Processing failed" });
-    }
-  },
-);
-
 // GOAL API and PropLine webhooks removed 2026-09-20 (user decision, both
 // providers fully removed) — /api/webhooks/goal-api and /hooks/propline no
 // longer exist; the providers themselves are no longer configured to send
 // to them either.
+//
+// SilentAPI's casino wallet callback (/api/casino/callback) removed the
+// same way (user decision) — the route no longer exists here; the
+// dead-stub launch/callback routes for both former casino aggregators
+// (SilentAPI, Palace Casino) live in routes/casino.ts instead, since
+// Palace Casino's callback isn't a raw-body/HMAC route like this one was.
 
 app.use(
   (pinoHttp as any)({
