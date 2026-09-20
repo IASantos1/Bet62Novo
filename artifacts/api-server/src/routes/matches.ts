@@ -7797,15 +7797,30 @@ async function fetchMrDogePrematchOdds(
   const targets = [...matches]
     .sort((a, b) => a.startTime.localeCompare(b.startTime))
     .slice(0, MRDOGE_PREMATCH_ODDS_MAX);
+  let failCount = 0;
+  let firstErr: unknown = null;
   for (let i = 0; i < targets.length; i += MRDOGE_PREMATCH_ODDS_CONCURRENCY) {
     const batch = targets.slice(i, i + MRDOGE_PREMATCH_ODDS_CONCURRENCY);
     const settled = await Promise.allSettled(
       batch.map((m) => mrdoge.odds.list({ matchId: m.id, betTypes })),
     );
     settled.forEach((r, idx) => {
-      if (r.status === "fulfilled") result.set(batch[idx]!.id, r.value);
+      if (r.status === "fulfilled") {
+        result.set(batch[idx]!.id, r.value);
+      } else {
+        failCount++;
+        firstErr ??= r.reason;
+      }
     });
   }
+  // One summary line per refresh cycle (not per-match — this can run against
+  // up to MRDOGE_PREMATCH_ODDS_MAX matches) so a systemic odds.list failure
+  // (rate limit, wrong betType, tier restriction) is visible in Railway logs
+  // instead of silently degrading to every match showing no price.
+  logger.info(
+    { queried: targets.length, succeeded: result.size, failed: failCount, err: firstErr ?? undefined },
+    "[mrdoge] prematch odds.list batch done",
+  );
   return result;
 }
 
@@ -7828,7 +7843,8 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       endDate,
     });
     const oddsByMatchId = await fetchMrDogePrematchOdds(mrdoge, matches, MRDOGE_SOCCER_BET_TYPES);
-    return matches.map((m): UpcomingMatch => {
+    let withRealOdds = 0;
+    const built = matches.map((m): UpcomingMatch => {
       const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
       const odds = oddsByMatchId.get(m.id);
       const moneyline = extractMrDogeSoccerMoneyline(odds);
@@ -7836,6 +7852,7 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       const markets = zerofillAdvancedMarkets();
       Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
       if (btts) markets.bothTeamsScore = btts;
+      if (moneyline != null) withRealOdds++;
       return {
         id: mrDogeMatchId("football", m),
         home: m.homeTeam.name,
@@ -7850,6 +7867,14 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         markets,
       };
     });
+    // GET /upcoming's own filter (routes/matches.ts) hides any match
+    // without hasRealOdds/a nonzero price — this is the number that
+    // actually survives to the frontend, distinct from `matches.length`.
+    logger.info(
+      { fixtures: matches.length, withRealOdds },
+      "[mrdoge] football upcoming built",
+    );
+    return built;
   } catch (err) {
     logger.error({ err }, "[mrdoge] football upcoming fetch failed");
     return [];
