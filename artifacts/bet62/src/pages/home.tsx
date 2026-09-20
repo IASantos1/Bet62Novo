@@ -22215,7 +22215,11 @@ export default function Home({
                           Sem jogos ao vivo neste momento.
                         </div>
                       ) : (
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 overflow-hidden">
+                        <div
+                          className="relative bg-zinc-900 border rounded-xl divide-y divide-zinc-800 overflow-hidden"
+                          style={{ borderColor: "var(--b62-glass-border)", boxShadow: "0 8px 22px rgba(0,0,0,0.35)" }}
+                        >
+                          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                           {balanced.map((m) => {
                             // Per-sport live clock/status label — football
                             // shows the running minute like before, but
@@ -22262,7 +22266,7 @@ export default function Home({
                                     {m.away}
                                   </div>
                                 </div>
-                                <span className="font-black text-sm tabular-nums bg-zinc-800 px-2.5 py-1 rounded shrink-0">
+                                <span className="b62-font-display font-bold text-sm tabular-nums bg-white/[0.06] border border-white/10 px-2.5 py-1 rounded-lg shrink-0">
                                   {m.homeScore} : {m.awayScore}
                                 </span>
                               </button>
@@ -22271,17 +22275,17 @@ export default function Home({
                                   onClick={() => selectMainTab("live")}
                                   className="grid grid-cols-3 gap-1.5 sm:w-40 shrink-0 pl-12 sm:pl-0"
                                 >
-                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                  <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
                                     {m.odds.home.toFixed(2)}
                                   </span>
                                   {m.odds.draw > 1.01 ? (
-                                    <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                    <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
                                       {m.odds.draw.toFixed(2)}
                                     </span>
                                   ) : (
                                     <span />
                                   )}
-                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                  <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
                                     {m.odds.away.toFixed(2)}
                                   </span>
                                 </button>
@@ -22351,7 +22355,8 @@ export default function Home({
                                 setUpcomingSearchQuery("");
                                 selectMainTab("sports");
                               }}
-                              className="text-left rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors p-3.5"
+                              className="text-left rounded-xl border bg-zinc-900 hover:border-red-500/40 transition-colors p-3.5"
+                              style={{ borderColor: "var(--b62-glass-border)" }}
                             >
                               <div className="flex items-baseline justify-between gap-2 mb-2">
                                 <span className="text-[11px] font-bold text-red-500">
@@ -22402,17 +22407,17 @@ export default function Home({
                               </div>
                               {m.odds && (m.odds.home > 1.01 || m.odds.away > 1.01) && (
                                 <div className="grid grid-cols-3 gap-1.5 mt-1">
-                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                  <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
                                     {m.odds.home.toFixed(2)}
                                   </span>
                                   {m.odds.draw > 1.01 ? (
-                                    <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                    <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
                                       {m.odds.draw.toFixed(2)}
                                     </span>
                                   ) : (
                                     <span />
                                   )}
-                                  <span className="text-center text-xs font-bold tabular-nums bg-zinc-800 border border-zinc-700 rounded py-1 hover:border-red-600 hover:text-red-400 transition-colors">
+                                  <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
                                     {m.odds.away.toFixed(2)}
                                   </span>
                                 </div>
