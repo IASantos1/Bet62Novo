@@ -35,9 +35,30 @@ const AI_AGENTS_MODEL =
 // This section originally documented StatScore/StatPal/PulseScore/
 // SportScore as the odds/tracker/stats architecture — all removed by
 // explicit user decision (last of them, PulseScore, on 2026-09-20, along
-// with GOAL API/PropLine/api-tennis.com). No sports-data provider remains;
-// every sport is without real scores/odds until a new one is integrated.
+// with GOAL API/PropLine/api-tennis.com).
 //
+// Mr. Doge (api.mrdoge.co, @mrdoge/node) — new provider (2026-09-20+, user
+// decision), real matches/stats/odds via a JSON-RPC WebSocket protocol
+// (matches.subscribeLive pushes deltas for every live match matching a
+// sports filter in ONE connection, rather than one poll per sport). Auth
+// is a Bearer-style `sk_live_...` key passed to the SDK constructor, not a
+// header this codebase builds itself. Confirmed real via the account's own
+// Business-tier key and the actual published package's shipped .d.ts
+// (not just doc prose) 2026-09-20: matches.list/subscribeLive cover
+// soccer/basketball/american_football/baseball/ice_hockey/volleyball/
+// handball/tennis — darts and MMA (two of BET62's 8 sports) are NOT
+// covered by this provider, no code here can produce real data for them
+// until a separate source is found. odds.list/odds.subscribe (Business
+// tier) are a separate per-match resource, keyed by matchId, not embedded
+// on Match — only 3 market sysnames are confirmed real so far
+// (SOCCER_MATCH_RESULT[_PRELIVE], SOCCER_UNDER_OVER,
+// SOCCER_BOTH_TEAMS_TO_SCORE); betType is an open string at the protocol
+// level (no enum to enumerate from), so any other market requires a real
+// API probe before being wired in — never guess a sysname the way an
+// earlier bzzoiro/PulseScore market mapping did and shipped a
+// misclassified BTTS/corners market.
+const MRDOGE_API_KEY = process.env["MRDOGE_API_KEY"] ?? "";
+
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
 // SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
@@ -53,6 +74,7 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
+  MRDOGE_API_KEY,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

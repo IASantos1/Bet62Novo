@@ -189,6 +189,9 @@ importers:
 
   artifacts/api-server:
     dependencies:
+      '@mrdoge/node':
+        specifier: ^0.4.3
+        version: 0.4.3
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
@@ -890,6 +893,16 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
+
+  '@mrdoge/http@0.4.3':
+    resolution: {integrity: sha512-nGjv4rSvDO/MZh4RVsq2D2tqvNz7+HYlTIarW1JO+6fdaOgd7M7VzZQnGuYy7G9IVuqwmq+txj/jLW6UU6Zvhw==}
+
+  '@mrdoge/node@0.4.3':
+    resolution: {integrity: sha512-Z4E+Mu6ESBj9cXhtjF6mmp4NrBJE5nXddDCVj4Ikp/GDupfAJHtXXsxMuydZqBkVNuVKcr8/+qrrkzAfAAfXMw==}
+    engines: {node: '>=18'}
+
+  '@mrdoge/protocol@0.4.3':
+    resolution: {integrity: sha512-7D1ORoXXOtmDPIH+7bIEODOKQMfF7tumKz5wgcBfVFm14EoG4AhgKK3h9EoiHXO/Hn/cMF5jRvfVA+lLImxbVg==}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
     resolution: {integrity: sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ==}
@@ -2044,6 +2057,7 @@ packages:
   cron-parser@4.9.0:
     resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
     engines: {node: '>=12.0.0'}
+    deprecated: v4 is no longer maintained, upgrade to v5
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -3659,6 +3673,24 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@mrdoge/http@0.4.3':
+    dependencies:
+      '@mrdoge/protocol': 0.4.3
+
+  '@mrdoge/node@0.4.3':
+    dependencies:
+      '@mrdoge/http': 0.4.3
+      '@mrdoge/protocol': 0.4.3
+      ws: 8.21.0
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@mrdoge/protocol@0.4.3':
+    dependencies:
+      zod: 3.25.76
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
     optional: true
