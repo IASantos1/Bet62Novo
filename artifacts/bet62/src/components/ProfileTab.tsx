@@ -925,18 +925,21 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Profile header */}
-      <div className="bg-gradient-to-br from-zinc-900 to-zinc-800 border border-zinc-700 rounded-2xl p-5 mb-6 flex items-center gap-4">
-        <div className="w-14 h-14 rounded-full bg-red-600 flex items-center justify-center text-2xl font-black shrink-0">
+      <div
+        className="b62-glass p-5 mb-6 flex items-center gap-4"
+        style={{ backgroundImage: "linear-gradient(135deg, rgba(220,38,38,0.14), rgba(139,92,246,0.10))" }}
+      >
+        <div className="b62-gradient-cta w-14 h-14 rounded-full flex items-center justify-center text-2xl font-black shrink-0">
           {user.name.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0">
-          <div className="text-lg font-black text-white truncate">{user.name}</div>
+          <div className="b62-font-display text-lg font-bold text-white truncate">{user.name}</div>
           <div className="text-sm text-zinc-400 truncate">{user.email}</div>
           <div className="text-xs text-zinc-600 mt-0.5">{memberId}</div>
         </div>
         <div className="ml-auto text-right shrink-0 hidden sm:block">
           <div className="text-xs text-zinc-500">Saldo disponível</div>
-          <div className="text-xl font-black text-green-400">€ {parseFloat(user.balance).toFixed(2)}</div>
+          <div className="b62-font-display text-xl font-bold text-white">€ {parseFloat(user.balance).toFixed(2)}</div>
           {isExcluded && (
             <div className="text-[10px] text-orange-400 mt-1">Autoexcluído até {selfExcludedUntil?.toLocaleDateString("pt-PT")}</div>
           )}
@@ -954,7 +957,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 <button
                   key={s.id}
                   onClick={() => setActiveSection(s.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${active ? "bg-red-600 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800"}`}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${active ? "b62-gradient-cta text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800"}`}
                 >
                   <Icon size={15} className={active ? "text-white" : "text-zinc-500"} />
                   <span className="flex-1">{s.label}</span>

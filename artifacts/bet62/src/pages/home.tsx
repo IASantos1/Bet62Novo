@@ -19687,7 +19687,7 @@ export default function Home({
                           <div className="flex items-center gap-1.5 rounded-full bg-red-900/30 border border-red-800/60 px-2.5 py-1">
                             <span className="relative flex h-1.5 w-1.5">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                              <span className="b62-live-dot relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
                             </span>
                             <span className="text-[10px] font-black text-red-400">
                               {(() => {
@@ -19758,7 +19758,7 @@ export default function Home({
                             </div>
 
                             <div className="min-w-[108px] flex flex-col items-center">
-                              <span className="text-[28px] font-black text-white tabular-nums">
+                              <span className="b62-font-display text-[28px] font-bold text-white tabular-nums">
                                 {gamesHome}
                                 <span className="text-zinc-400 mx-1.5">-</span>
                                 {gamesAway}
