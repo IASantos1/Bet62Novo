@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Space+Grotesk:wght@600;700;800&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
@@ -498,4 +498,51 @@ input[type="submit"] {
   .bet62-show-in-pwa {
     display: block;
   }
+}
+
+/* Redesign tokens (2026-09-20 futurist pass, Fase 1 — Início/dock only so
+   far) — purely additive next to the existing zinc/red theme above, so
+   nothing not yet migrated changes look. --b62-accent stays the brand red;
+   --b62-accent-2 is the new violet used only in gradients/glows, never
+   alone, so red stays the dominant color. Space Grotesk is for numerals
+   (odds, scores, balances) and section headers only — everything else
+   keeps the existing Inter body font. */
+:root {
+  --b62-accent: 220 38 38; /* red-600, same value as --primary/--destructive above */
+  --b62-accent-2: 139 92 246; /* violet-500, gradient/glow partner only */
+  --b62-glass-bg: rgba(255, 255, 255, 0.045);
+  --b62-glass-border: rgba(255, 255, 255, 0.09);
+  --b62-glow: 0 0 16px rgba(var(--b62-accent), 0.55);
+  --b62-gradient-cta: linear-gradient(135deg, rgb(var(--b62-accent)), rgb(var(--b62-accent-2)));
+  --b62-font-display: "Space Grotesk", var(--app-font-sans);
+}
+
+.b62-glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--b62-glass-border);
+  border-radius: 1.1rem;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+.b62-gradient-cta {
+  background: var(--b62-gradient-cta);
+}
+
+.b62-live-dot {
+  box-shadow: var(--b62-glow);
+  animation: b62-pulse 1.4s ease-in-out infinite;
+}
+
+.b62-font-display {
+  font-family: var(--b62-font-display);
+}
+
+@keyframes b62-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.35); }
+}
+
+@keyframes b62-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }

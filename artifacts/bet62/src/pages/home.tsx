@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import {
   Menu,
   X,
+  Home as HomeIcon,
   Trophy,
   Activity,
   Gift,
@@ -19490,82 +19491,72 @@ export default function Home({
           </div>
         </div>
 
-        {/* TABS — hidden on desktop (shown inline in header above) */}
-        <div className="lg:hidden px-4 max-w-[1600px] mx-auto flex gap-6 overflow-x-auto no-scrollbar">
-          {[
-            { id: "home", icon: <Star size={16} />, label: "DESTAQUES" },
-            { id: "sports", icon: <Trophy size={16} />, label: "ESPORTES" },
-            {
-              id: "live",
-              icon: <Activity size={16} />,
-              label: "AO VIVO",
-              badge: true,
-            },
-            { id: "casino", icon: <Activity size={16} />, label: "CASINO" },
-            {
-              id: "promos",
-              icon: <Gift size={16} />,
-              label: "PROMOÇÕES",
-              onSelect: fetchCashback,
-            },
-          ].map((tab) => (
+      </header>
+
+      {/* MOBILE BOTTOM DOCK — replaces the old underline tab strip on
+          mobile (2026-09-20 futurist redesign, Fase 1). Desktop keeps the
+          inline header nav above unchanged for this phase. Only 5 slots
+          fit a dock, so Esportes stays reachable via Início's own sport
+          filters and Promoções/Carteira/Minhas Apostas move under Perfil's
+          menu (Fase 2) — Ao Vivo keeps its own slot since it's the
+          highest-frequency destination and already carries a live badge. */}
+      <div
+        className="lg:hidden fixed left-0 right-0 z-[50] px-4"
+        style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
+      >
+        <div
+          className="b62-glass flex items-center justify-between px-2.5 py-2 mx-auto max-w-[420px]"
+          style={{ backdropFilter: "blur(20px)", boxShadow: "0 12px 28px rgba(0,0,0,0.5)" }}
+        >
+          {(
+            [
+              { id: "home", icon: HomeIcon, label: "Início", badge: false },
+              { id: "live", icon: Activity, label: "Ao Vivo", badge: true },
+            ] as const
+          ).map((tab) => (
             <button
               key={tab.id}
-              {...makeTap(() =>
-                selectMainTab(
-                  tab.id as typeof activeTab,
-                  (tab as { onSelect?: () => void }).onSelect,
-                ),
-              )}
-              className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+              {...makeTap(() => selectMainTab(tab.id))}
+              className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-2xl transition-colors ${activeTab === tab.id ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
             >
-              {tab.icon}
-              {tab.label}
-              {tab.badge && (
-                <span className="relative flex h-2 w-2 ml-1">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                </span>
-              )}
+              <span className="relative">
+                <tab.icon size={18} />
+                {tab.badge && (
+                  <span className="b62-live-dot absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
+                )}
+              </span>
+              <span className="text-[9px] font-semibold">{tab.label}</span>
             </button>
           ))}
-          {auth.user && (
-            <button
-              {...makeTap(() => {
-                selectMainTab("wallet", () => {
-                  void fetchMyBets(true);
-                });
-              })}
-              className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
-            >
-              <Wallet size={16} />
-              CARTEIRA
-            </button>
-          )}
-          {auth.user && (
-            <button
-              {...makeTap(() => {
-                selectMainTab("mybets", () => {
-                  void fetchMyBets(true);
-                });
-              })}
-              className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
-            >
-              <Clock size={16} />
-              MINHAS APOSTAS
-            </button>
-          )}
-          {auth.user && (
-            <button
-              {...makeTap(() => selectMainTab("profile"))}
-              className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "profile" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
-            >
-              <User size={16} />
-              PERFIL
-            </button>
-          )}
+          <button
+            aria-label="Boletim"
+            {...makeTap(() => setBetSlipOpenMobile(true))}
+            className="b62-gradient-cta w-[52px] h-[52px] rounded-full flex items-center justify-center -mt-6 relative shrink-0"
+            style={{ boxShadow: "0 6px 18px rgba(220,38,38,0.5), 0 0 0 5px hsl(var(--background))" }}
+          >
+            <Ticket size={20} className="text-white" />
+            {bets.length > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-black text-[10px] font-black flex items-center justify-center">
+                {bets.length}
+              </span>
+            )}
+          </button>
+          <button
+            {...makeTap(() => selectMainTab("casino"))}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-2xl transition-colors ${activeTab === "casino" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500"}`}
+          >
+            <Dices size={18} />
+            <span className="text-[9px] font-semibold">Casino</span>
+          </button>
+          <button
+            {...makeTap(() => selectMainTab("profile"))}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-2xl transition-colors ${activeTab === "profile" ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
+          >
+            <User size={18} />
+            <span className="text-[9px] font-semibold">Perfil</span>
+          </button>
         </div>
-      </header>
+      </div>
 
       {/* MOBILE SIDEBAR OVERLAY */}
       <AnimatePresence>
@@ -22013,10 +22004,11 @@ export default function Home({
             {!expandedMatch && activeTab === "home" && (
               <div className="space-y-6 max-w-[1100px] mx-auto">
                 <div
-                  className="relative rounded-2xl overflow-hidden border border-zinc-800 p-6 sm:p-8"
+                  className="relative rounded-2xl overflow-hidden border p-6 sm:p-8"
                   style={{
+                    borderColor: "var(--b62-glass-border)",
                     backgroundImage:
-                      "linear-gradient(115deg, rgba(24,4,4,0.88), rgba(9,9,11,0.94)), url(https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop)",
+                      "linear-gradient(115deg, rgba(220,38,38,0.22), rgba(139,92,246,0.16)), linear-gradient(115deg, rgba(24,4,4,0.88), rgba(9,9,11,0.94)), url(https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop)",
                     backgroundSize: "cover",
                     backgroundPosition: "center",
                   }}
@@ -22024,10 +22016,10 @@ export default function Home({
                   <p className="text-red-400 text-xs font-bold uppercase tracking-wider mb-2">
                     Free Bet · 1.º Depósito
                   </p>
-                  <div className="text-4xl sm:text-5xl font-black text-white leading-none">
+                  <div className="b62-font-display text-4xl sm:text-5xl font-extrabold text-white leading-none">
                     Deposite €10
                   </div>
-                  <div className="text-xl sm:text-2xl font-black text-white mt-1 mb-5">
+                  <div className="b62-font-display text-xl sm:text-2xl font-bold text-white mt-1 mb-5">
                     Ganhe <span className="text-red-500">€5</span> em Free Bets
                   </div>
                   {auth.user ? (
@@ -22036,7 +22028,8 @@ export default function Home({
                         setDepositModalOpen(true);
                         setActiveTab("wallet");
                       }}
-                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-lg transition-colors"
+                      className="b62-gradient-cta text-white font-bold px-6 py-3 rounded-lg transition-transform active:scale-[0.98]"
+                      style={{ boxShadow: "0 8px 20px rgba(220,38,38,0.35)" }}
                     >
                       Depositar Agora
                     </button>
@@ -22046,7 +22039,8 @@ export default function Home({
                         setAuthMode("register");
                         setAuthModalOpen(true);
                       }}
-                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-lg transition-colors"
+                      className="b62-gradient-cta text-white font-bold px-6 py-3 rounded-lg transition-transform active:scale-[0.98]"
+                      style={{ boxShadow: "0 8px 20px rgba(220,38,38,0.35)" }}
                     >
                       Registre-se Agora
                     </button>
@@ -22096,13 +22090,13 @@ export default function Home({
 
                 <div>
                   <div className="flex items-center gap-2 mb-3">
-                    <Dices size={16} className="text-red-500" />
-                    <h2 className="font-black text-sm uppercase tracking-wide">
+                    <Dices size={16} className="text-violet-400" />
+                    <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide">
                       Casino em Destaque
                     </h2>
                     <button
                       onClick={() => selectMainTab("casino")}
-                      className="ml-auto text-red-500 text-xs font-bold flex items-center gap-0.5 hover:text-red-400"
+                      className="ml-auto text-violet-400 text-xs font-bold flex items-center gap-0.5 hover:text-violet-300"
                     >
                       Ver todos <ChevronRight size={13} />
                     </button>
@@ -22128,7 +22122,7 @@ export default function Home({
                             onClick={() => launchCasinoGame(game)}
                             title={game.name}
                             aria-label={game.name}
-                            className="aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
+                            className="aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
                           >
                             {casinoLoadingGame === game.id ? (
                               <div className="absolute inset-0 flex items-center justify-center">
@@ -26026,6 +26020,38 @@ export default function Home({
             )}
 
             {activeTab === "profile" && auth.user && (
+              <div className="max-w-[720px] mx-auto space-y-2 mb-6">
+                {/* Quick-links row (2026-09-20 futurist redesign, Fase 1) —
+                    the mobile bottom dock only has 5 slots, so Esportes,
+                    Carteira, Minhas Apostas and Promoções moved here to
+                    stay reachable on mobile instead of the old tab strip. */}
+                {[
+                  { id: "sports", icon: Trophy, label: "Esportes" },
+                  { id: "wallet", icon: Wallet, label: "Minha Carteira", onSelect: () => void fetchMyBets(true) },
+                  { id: "mybets", icon: Clock, label: "Minhas Apostas", onSelect: () => void fetchMyBets(true) },
+                  { id: "promos", icon: Gift, label: "Promoções", onSelect: fetchCashback },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    {...makeTap(() =>
+                      selectMainTab(
+                        item.id as typeof activeTab,
+                        (item as { onSelect?: () => void }).onSelect,
+                      ),
+                    )}
+                    className="w-full flex items-center gap-3 b62-glass px-4 py-3 hover:border-zinc-600 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center shrink-0 text-zinc-300">
+                      <item.icon size={16} />
+                    </div>
+                    <span className="flex-1 text-left text-sm font-semibold">{item.label}</span>
+                    <ChevronRight size={14} className="text-zinc-500" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {activeTab === "profile" && auth.user && (
               <ProfileTab
                 myBets={myBets}
                 myBetsLoading={myBetsLoading}
@@ -27144,8 +27170,11 @@ export default function Home({
             className="lg:hidden fixed left-0 right-0 z-[55] px-3"
             style={{
               bottom: showAppBanner
-                ? "calc(5.5rem + env(safe-area-inset-bottom, 0px))"
-                : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+                ? "calc(10rem + env(safe-area-inset-bottom, 0px))"
+                // Stacks above the new bottom dock nav (2026-09-20 futurist
+                // redesign, Fase 1) instead of the old 0.75rem, which is now
+                // where the dock itself sits.
+                : "calc(5.25rem + env(safe-area-inset-bottom, 0px))",
             }}
             {...makeTap(() => setBetSlipOpenMobile(true))}
           >
