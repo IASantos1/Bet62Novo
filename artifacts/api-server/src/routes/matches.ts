@@ -15,6 +15,19 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
+import { getMrDogeClient } from "../services/mrdoge/client.js";
+import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
+import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
+import {
+  mrDogeMatchId,
+  mrDogeStartTimeToLisbon,
+  mrDogeSoccerStatus,
+  totalGoalsMapToFields,
+  extractMrDogeSoccerMoneyline,
+  extractMrDogeSoccerTotalGoals,
+  extractMrDogeSoccerBtts,
+  extractMrDogeSoccerLiveExtra,
+} from "../services/mrdoge/common.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
@@ -7749,6 +7762,83 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return [];
 }
 
+// Mr. Doge (api.mrdoge.co) — football phase 1 (2026-09-20). Prematch odds
+// are intentionally NOT wired here yet — only the fixture list — pending a
+// real-API rate-limit-safety check on how many concurrent odds.subscribe
+// calls a full day's upcoming fixture set would need; live odds (below) are
+// already wired since that's per-currently-live-match, a much smaller set.
+async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
+  if (!CONFIG.MRDOGE_API_KEY) return [];
+  try {
+    const mrdoge = getMrDogeClient();
+    const startDate = new Date().toISOString().slice(0, 10);
+    const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const matches = await mrdoge.matches.listAll({
+      sports: ["soccer"],
+      status: ["upcoming"],
+      startDate,
+      endDate,
+    });
+    return matches.map((m): UpcomingMatch => {
+      const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
+      return {
+        id: mrDogeMatchId("football", m),
+        home: m.homeTeam.name,
+        away: m.awayTeam.name,
+        league: m.competition.name,
+        country: m.region.name,
+        date,
+        time,
+        sport: "football",
+        hasRealOdds: false,
+        odds: { home: 0, draw: 0, away: 0 },
+        markets: zerofillAdvancedMarkets(),
+      };
+    });
+  } catch (err) {
+    logger.error({ err }, "[mrdoge] football upcoming fetch failed");
+    return [];
+  }
+}
+
+// Mr. Doge live football — reads the shared in-memory map liveSync.ts's
+// single matches.subscribeLive connection maintains (no per-tick REST call
+// here), and drives the per-match odds.subscribe lifecycle every tick via
+// syncMrDogeOddsSubscriptions so odds streaming always tracks whichever
+// matches are actually live right now.
+async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
+  if (!CONFIG.MRDOGE_API_KEY) return [];
+  const matches = getMrDogeLiveMatches().filter((m) => m.sport?.name === "soccer");
+  syncMrDogeOddsSubscriptions(matches.map((m) => m.id));
+  return matches.map((m): LiveMatchState => {
+    const stats = m.stats?.sport === "soccer" ? m.stats : null;
+    const { status, phase } = mrDogeSoccerStatus(stats?.clock);
+    const odds = getMrDogeOdds(m.id);
+    const moneyline = extractMrDogeSoccerMoneyline(odds);
+    const btts = extractMrDogeSoccerBtts(odds);
+    const markets = zerofillAdvancedMarkets();
+    Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
+    if (btts) markets.bothTeamsScore = btts;
+    return {
+      id: mrDogeMatchId("football", m),
+      home: m.homeTeam.name,
+      away: m.awayTeam.name,
+      league: m.competition.name,
+      country: m.region.name,
+      sport: "football",
+      homeScore: stats?.homeScore ?? 0,
+      awayScore: stats?.awayScore ?? 0,
+      minute: stats?.clock?.minute ?? 0,
+      status,
+      hasRealOdds: moneyline != null,
+      odds: moneyline ?? { home: 0, draw: 0, away: 0 },
+      markets,
+      events: [],
+      _liveExtra: { phase, ...extractMrDogeSoccerLiveExtra(stats) },
+    };
+  });
+}
+
 
 
 
@@ -7888,11 +7978,15 @@ async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
-    // GOAL API removed 2026-09-20 (user decision) — football has no other
-    // real data source, so this always runs with zero candidates.
+    // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
+    // real data source again as of the same day (fixtures only — see
+    // buildFootballUpcomingFromMrDoge's own comment on odds).
     let football: UpcomingMatch[] = [];
     try {
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (CONFIG.MRDOGE_API_KEY) {
+        candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
+      }
       football = chooseUpcomingProvider("football", candidates);
       _lastGoodFootballUpcoming = football;
     } catch (err) {
@@ -7992,9 +8086,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    // GOAL API removed 2026-09-20 (user decision) — football has no other
-    // real data source.
+    // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
+    // real live data source again as of the same day.
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (CONFIG.MRDOGE_API_KEY) {
+      candidates.push({ provider: "mrdoge", matches: await buildFootballLiveFromMrDoge() });
+    }
     footballLiveRaw = chooseLiveProvider("football", candidates);
   } catch (err) {
     logger.error(
@@ -8996,11 +9093,15 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // GET / handler). Same chooseUpcomingProvider quality gate
   // rebuildUpcomingCache already uses, for consistency between the two
   // caches.
-  // GOAL API removed 2026-09-20 (user decision) — football has no other
-  // real data source, so this always runs with zero candidates.
+  // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
+  // real data source again as of the same day (see rebuildUpcomingCache's
+  // matching comment).
   let football: UpcomingMatch[] = [];
   try {
     const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (CONFIG.MRDOGE_API_KEY) {
+      candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
+    }
     football = chooseUpcomingProvider("football", candidates);
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");

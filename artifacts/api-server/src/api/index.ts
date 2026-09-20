@@ -4,6 +4,7 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
+import { startMrDogeLiveSync } from "../services/mrdoge/liveSync.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
 // Node's default behavior since v15 is to crash the process on an unhandled
@@ -39,6 +40,16 @@ server.listen(port, () => {
   // (or early in-play when the outcome is already determined).
   startSettlementWorker();
   logger.info("Auto-settlement worker started");
+
+  // Mr. Doge (api.mrdoge.co) — matches.subscribeLive is a single persistent
+  // WebSocket subscription covering every live match across the sports
+  // listed in services/mrdoge/liveSync.ts, not a per-tick poll. Retried
+  // every 30s (no-ops once already connected) so a startup race against
+  // Railway's network or a subscription "closed" event (rate limit, auth
+  // hiccup) self-heals without a manual restart. Inert while
+  // CONFIG.MRDOGE_API_KEY is unset.
+  void startMrDogeLiveSync();
+  setInterval(() => void startMrDogeLiveSync(), 30_000);
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY
