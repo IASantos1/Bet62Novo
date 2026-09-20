@@ -5,21 +5,27 @@
 // same reason the old (deleted) SportMonks integration tracked them via a
 // dedicated countSportMonksRedCards helper (services/sportmonks/football.ts)
 // rather than inferring them from anything score-shaped.
-import type { GoalApiMatchEvent } from "./index.js";
+import type { GoalApiCard } from "./index.js";
 
-/** Only "GOAL" events have been confirmed real for this endpoint so far
- * (raw response pasted 2026-09-09) — no card event has actually been
- * observed, so the type/side match below is a best-effort guess pending a
- * real sample, not a confirmed field mapping like the GOAL handling in
- * buildGoalApiEvents. Side is read from "info" since a card event has no
- * scorer field to infer it from. */
+/** Real bug fixed 2026-09-20 (user-reported: red-card suspension never
+ * actually triggering despite looking wired up): cards were never
+ * confirmed real on the /events endpoint (only "GOAL" has ever been
+ * observed there) — this function used to read `e.info === team` and
+ * `e.type.includes("card")` against events, which could never match
+ * anything, making red-card suspension a silent no-op. Cards live on
+ * their own dedicated /fixtures/:id/cards endpoint (confirmed real
+ * 2026-09-20, raw response captured with 3 real yellow cards), whose
+ * `card` field takes values like "yellow card", and whose `homeFault`/
+ * `awayFault` (the fouling player's name, non-null only for the team that
+ * committed the foul) — not an `info` field — is the real side signal. */
 export function countGoalApiRedCards(
-  events: GoalApiMatchEvent[] | null | undefined,
+  cards: GoalApiCard[] | null | undefined,
   team: "home" | "away",
 ): number {
-  if (!events) return 0;
-  return events.filter((e) => {
-    const type = e.type.toLowerCase();
-    return e.info === team && type.includes("card") && type.includes("red");
+  if (!cards) return 0;
+  return cards.filter((c) => {
+    const isRed = c.card.toLowerCase().includes("red");
+    const isTeam = team === "home" ? c.homeFault != null : c.awayFault != null;
+    return isRed && isTeam;
   }).length;
 }

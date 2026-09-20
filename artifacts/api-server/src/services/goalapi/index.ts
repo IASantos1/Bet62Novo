@@ -163,11 +163,50 @@ export type GoalApiMatchEvent = {
   updatedAt?: string;
 };
 
+/** /fixtures/:id/substitutions's real row shape — confirmed real
+ * 2026-09-20 (raw response captured by the user). The type this project
+ * had before ({minute, team, playerOut, playerIn}) never matched any real
+ * response; every consumer reading those fields was silently getting
+ * `undefined` from a real, non-empty API response. `substitution` and
+ * `substitutionPlayerId` are each a single "Out | In" string, not two
+ * separate fields. */
 export type GoalApiSubstitution = {
-  minute: number;
+  id: string;
+  fixtureId: string;
+  time: string;
+  timeNum?: number;
+  substitution: string;
+  substitutionPlayerId: string;
   team: "home" | "away";
-  playerOut: string;
-  playerIn: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+/** /fixtures/:id/cards's real row shape — confirmed real 2026-09-20 (raw
+ * response captured by the user for a match with 3 real yellow cards).
+ * This is a SEPARATE endpoint from /fixtures/:id/events, whose own `type`
+ * field has only ever been observed as "GOAL" — cards were never coming
+ * through the events endpoint's `type`/`info` fields the way
+ * countGoalApiRedCards (liveMatchEngine.ts) assumed before this date, so
+ * red-card-based suspension was silently a no-op despite looking wired
+ * up. `card` has been observed as "yellow card"; "red card" is inferred
+ * from the response's own `grouped: {yellow, red, ...}` keys, not yet
+ * observed directly — still real vocabulary from the provider's own
+ * grouping, not a guess at a value they don't use. */
+export type GoalApiCard = {
+  id: string;
+  fixtureId: string;
+  time: string;
+  timeNum?: number;
+  card: string;
+  homeFault: string | null;
+  homePlayerId: string | null;
+  awayFault: string | null;
+  awayPlayerId: string | null;
+  info: string | null;
+  scoreInfoTime: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 /** One row of /fixtures/:id/statistics's match.fullTime/firstHalf/
@@ -679,6 +718,13 @@ export class GoalApiClient {
     return this.cachedGet<GoalApiMatchEvent[]>(`/fixtures/${encodeURIComponent(id)}/events`, undefined, GOAL_API_TTL.LIVE);
   }
 
+  /** Confirmed real 2026-09-20 — separate endpoint from getFixtureEvents,
+   * whose own `type` field has only ever been observed as "GOAL". Cards
+   * never come through /events at all. */
+  getFixtureCards(id: string): Promise<GoalApiCard[]> {
+    return this.cachedGet<GoalApiCard[]>(`/fixtures/${encodeURIComponent(id)}/cards`, undefined, GOAL_API_TTL.LIVE);
+  }
+
   getFixtureStatistics(id: string): Promise<GoalApiFixtureStatistics> {
     return this.cachedGet<GoalApiFixtureStatistics>(
       `/fixtures/${encodeURIComponent(id)}/statistics`,
@@ -880,6 +926,7 @@ export const goalApi = {
   getFixturesByDate: (date: string) => getGoalApiClient().getFixturesByDate(date),
   getFixtureById: (id: string) => getGoalApiClient().getFixtureById(id),
   getFixtureEvents: (id: string) => getGoalApiClient().getFixtureEvents(id),
+  getFixtureCards: (id: string) => getGoalApiClient().getFixtureCards(id),
   getFixtureCommentary: (id: string) => getGoalApiClient().getFixtureCommentary(id),
   getFixtureStatistics: (id: string) => getGoalApiClient().getFixtureStatistics(id),
   getFixtureSubstitutions: (id: string) => getGoalApiClient().getFixtureSubstitutions(id),

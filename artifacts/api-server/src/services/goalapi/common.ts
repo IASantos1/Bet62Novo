@@ -7,6 +7,7 @@ import type {
   GoalApiCommentaryEntry,
   GoalApiMatchEvent,
   GoalApiSubstitution,
+  GoalApiCard,
   GoalApiLineups,
   GoalApiLineupTeam,
   GoalApiLineupEntry,
@@ -127,21 +128,31 @@ function parseGoalApiEventMinute(time: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Maps GOAL API's raw match events (+ substitutions, a separate
- * documented endpoint — /fixtures/:id/substitutions) into the shape
- * routes/matches.ts's LiveMatchState.events field already expects (same
- * field every other provider in this file populates), sorted by minute so
- * the incident timeline reads chronologically regardless of which
- * endpoint contributed each entry.
+/** Maps GOAL API's raw match events (+ substitutions and cards, two
+ * separate documented endpoints — /fixtures/:id/substitutions and
+ * /fixtures/:id/cards) into the shape routes/matches.ts's
+ * LiveMatchState.events field already expects (same field every other
+ * provider in this file populates), sorted by minute so the incident
+ * timeline reads chronologically regardless of which endpoint
+ * contributed each entry.
  *
- * Only "GOAL" events have been observed in a real response so far — side
- * is derived from whichever of homeScorer/awayScorer is populated,
- * falling back to the "info" field ("home"/"away") when neither scorer
- * name was recorded; "info": "Penalty" is appended to the detail instead
- * of being treated as a side. */
+ * Only "GOAL" events have been observed in a real response on /events so
+ * far — side is derived from whichever of homeScorer/awayScorer is
+ * populated, falling back to the "info" field ("home"/"away") when
+ * neither scorer name was recorded; "info": "Penalty" is appended to the
+ * detail instead of being treated as a side.
+ *
+ * substitutions/cards field mapping fixed 2026-09-20: both were reading
+ * fields ({minute, playerOut, playerIn} / nothing at all) that never
+ * existed on the real API response, confirmed by a real capture — real
+ * substitutions carry `time` + one combined "Out | In" `substitution`
+ * string, real cards carry `time` + `card` ("yellow card"/"red card") +
+ * `homeFault`/`awayFault` (the fouling player's name on whichever side
+ * committed it, null on the other). */
 export function buildGoalApiEvents(
   events: GoalApiMatchEvent[] | null | undefined,
   substitutions?: GoalApiSubstitution[] | null,
+  cards?: GoalApiCard[] | null,
 ): Array<{ type: string; team: string; minute: number; player: string; playerId?: string; detail?: string }> {
   const fromEvents = (events ?? []).map((e) => {
     const team: "home" | "away" = e.homeScorer ? "home" : e.awayScorer ? "away" : e.info === "away" ? "away" : "home";
@@ -160,14 +171,29 @@ export function buildGoalApiEvents(
       detail: detailParts.length > 0 ? detailParts.join(" · ") : undefined,
     };
   });
-  const fromSubs = (substitutions ?? []).map((s) => ({
-    type: "substitution",
-    team: s.team,
-    minute: s.minute,
-    player: s.playerIn,
-    detail: `Saiu: ${s.playerOut}`,
-  }));
-  return [...fromEvents, ...fromSubs].sort((a, b) => a.minute - b.minute);
+  const fromSubs = (substitutions ?? []).map((s) => {
+    const [playerOut, playerIn] = s.substitution.split("|").map((p) => p.trim());
+    return {
+      type: "substitution",
+      team: s.team,
+      minute: s.timeNum ?? parseGoalApiEventMinute(s.time),
+      player: playerIn ?? "?",
+      detail: playerOut ? `Saiu: ${playerOut}` : undefined,
+    };
+  });
+  const fromCards = (cards ?? []).map((c) => {
+    const team: "home" | "away" = c.homeFault != null ? "home" : "away";
+    const player = (team === "home" ? c.homeFault : c.awayFault) ?? "?";
+    const playerId = (team === "home" ? c.homePlayerId : c.awayPlayerId) ?? undefined;
+    return {
+      type: c.card.toLowerCase().includes("red") ? "red_card" : "yellow_card",
+      team,
+      minute: c.timeNum ?? parseGoalApiEventMinute(c.time),
+      player,
+      playerId,
+    };
+  });
+  return [...fromEvents, ...fromSubs, ...fromCards].sort((a, b) => a.minute - b.minute);
 }
 
 /** Goal log with player/assist for settlement's player goal/assist props

@@ -8156,8 +8156,10 @@ function estimateGoalApiLiveMinute(fx: GoalApiFixture): number {
  * by risk exactly like the old SportMonks integration did
  * (footballSuspensionDelayMs from lib/config.ts — never reinvented here):
  * a goal uses the "goal" tier; a red card — detected via
- * countGoalApiRedCards against /fixtures/:id/events, since a red card
- * doesn't move the score the way a goal does — uses the higher "var" tier,
+ * countGoalApiRedCards against /fixtures/:id/cards (confirmed real
+ * 2026-09-20 — a separate endpoint from /events, whose own `type` has
+ * only ever been "GOAL"), since a red card doesn't move the score the way
+ * a goal does — uses the higher "var" tier,
  * same choice the deleted SportMonks/API-Football cross-reference made for
  * the same reason (a red card swings the match materially more than a
  * routine goal). */
@@ -8255,10 +8257,11 @@ async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
     let footballGoalLog = existing?._liveExtra?.footballGoalLog;
     try {
       const events = await goalApi.getFixtureEvents(fx.id);
-      redCardsHome = countGoalApiRedCards(events, "home");
-      redCardsAway = countGoalApiRedCards(events, "away");
+      const cards = await goalApi.getFixtureCards(fx.id).catch(() => []);
+      redCardsHome = countGoalApiRedCards(cards, "home");
+      redCardsAway = countGoalApiRedCards(cards, "away");
       const substitutions = await goalApi.getFixtureSubstitutions(fx.id).catch(() => []);
-      matchEvents = buildGoalApiEvents(events, substitutions);
+      matchEvents = buildGoalApiEvents(events, substitutions, cards);
       footballGoalLog = buildGoalApiFootballGoalEvents(events);
     } catch {
       /* keep previous counts/events/goal log if the events call fails this tick */
