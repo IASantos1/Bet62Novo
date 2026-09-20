@@ -14,6 +14,11 @@ const oddsByMatchId = new Map<string, Market[]>();
 const subsByMatchId = new Map<string, Subscription<"odds.subscribe">>();
 let syncInFlight = false;
 
+type LiveOddsTarget = {
+  matchId: string;
+  sport: string;
+};
+
 export function getMrDogeOdds(matchId: string): Market[] | undefined {
   return oddsByMatchId.get(matchId);
 }
@@ -27,16 +32,16 @@ function dropSubscription(matchId: string): void {
  * (raw provider ids, not BET62's prefixed ones) that should have live odds
  * streaming. Idempotent and re-entrancy-guarded — a slow subscribe() call
  * from one tick never overlaps the next tick's sync. */
-export function syncMrDogeOddsSubscriptions(liveMatchIds: string[]): void {
+export function syncMrDogeOddsSubscriptions(targets: LiveOddsTarget[]): void {
   if (syncInFlight) return;
   syncInFlight = true;
-  void runSync(liveMatchIds).finally(() => {
+  void runSync(targets).finally(() => {
     syncInFlight = false;
   });
 }
 
-async function runSync(liveMatchIds: string[]): Promise<void> {
-  const wanted = new Set(liveMatchIds);
+async function runSync(targets: LiveOddsTarget[]): Promise<void> {
+  const wanted = new Set(targets.map((target) => target.matchId));
   for (const [matchId, sub] of subsByMatchId) {
     if (wanted.has(matchId)) continue;
     dropSubscription(matchId);
@@ -48,13 +53,21 @@ async function runSync(liveMatchIds: string[]): Promise<void> {
   }
 
   const mrdoge = getMrDogeClient();
-  for (const matchId of liveMatchIds) {
+  for (const { matchId, sport } of targets) {
     if (subsByMatchId.has(matchId)) continue;
+    const params =
+      sport === "soccer"
+        ? { matchId, betTypes: [...MRDOGE_SOCCER_BET_TYPES] }
+        : { matchId };
     try {
-      const sub = await mrdoge.odds.subscribe({
-        matchId,
-        betTypes: [...MRDOGE_SOCCER_BET_TYPES],
-      });
+      try {
+        const snapshot = await mrdoge.odds.list(params);
+        if (snapshot.length > 0) oddsByMatchId.set(matchId, snapshot);
+      } catch (err) {
+        logger.warn({ err, matchId, sport }, "[mrdoge] odds.list warmup failed");
+      }
+
+      const sub = await mrdoge.odds.subscribe(params);
       subsByMatchId.set(matchId, sub);
       oddsByMatchId.set(matchId, sub.snapshot);
       sub.on("odds.upd", (markets) => {
@@ -64,8 +77,12 @@ async function runSync(liveMatchIds: string[]): Promise<void> {
         logger.warn({ reason, message, matchId }, "[mrdoge] odds.subscribe closed");
         dropSubscription(matchId);
       });
+      logger.info(
+        { matchId, sport, markets: sub.snapshot.length },
+        "[mrdoge] odds.subscribe started",
+      );
     } catch (err) {
-      logger.warn({ err, matchId }, "[mrdoge] odds.subscribe failed");
+      logger.warn({ err, matchId, sport }, "[mrdoge] odds.subscribe failed");
     }
   }
 }

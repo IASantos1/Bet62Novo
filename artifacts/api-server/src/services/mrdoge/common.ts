@@ -206,6 +206,56 @@ export function extractMrDogeSoccerBtts(
   return { yes: yesLine.price, no: noLine.price };
 }
 
+function scoreGenericMoneylineMarket(market: Market): number {
+  const available = market.lines.filter((line) => line.isAvailable);
+  if (available.length < 2) return -1_000;
+  const codes = new Set(available.map((line) => String(line.code).toUpperCase()));
+  const betType = String(market.betType ?? "").toUpperCase();
+
+  let score = 0;
+  const isThreeWay = codes.has("1") && codes.has("X") && codes.has("2");
+  const isTwoWay = codes.has("1") && codes.has("2") && available.length === 2;
+  if (isThreeWay) score += 100;
+  else if (isTwoWay) score += 80;
+  else return -1_000;
+
+  if (betType.includes("RESULT")) score += 40;
+  if (betType.includes("MONEYLINE")) score += 35;
+  if (betType.includes("WINNER")) score += 30;
+  if (betType.includes("MATCH")) score += 20;
+  if (betType.includes("PRELIVE")) score += 10;
+  if (betType.includes("TOTAL")) score -= 50;
+  if (betType.includes("HANDICAP")) score -= 50;
+  if (betType.includes("SET")) score -= 35;
+  if (betType.includes("GAME")) score -= 35;
+  if (betType.includes("QUARTER")) score -= 35;
+  if (betType.includes("PERIOD")) score -= 35;
+  if (betType.includes("HALF")) score -= 35;
+  if (betType.includes("TEAM")) score -= 20;
+
+  return score;
+}
+
+export function extractMrDogeGenericMoneyline(
+  markets: Market[] | undefined,
+): { home: number; draw: number; away: number } | null {
+  if (!markets || markets.length === 0) return null;
+
+  const ranked = [...markets]
+    .map((market) => ({ market, score: scoreGenericMoneylineMarket(market) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0]?.market;
+  if (!best) return null;
+
+  const home = best.lines.find((line) => line.isAvailable && String(line.code).toUpperCase() === "1")?.price;
+  const away = best.lines.find((line) => line.isAvailable && String(line.code).toUpperCase() === "2")?.price;
+  const draw = best.lines.find((line) => line.isAvailable && String(line.code).toUpperCase() === "X")?.price ?? 0;
+  if (!home || !away) return null;
+  return { home, draw, away };
+}
+
 /** Real per-team football stats this tick, straight off Mr. Doge's
  * SoccerStats — never fabricated, absent fields simply stay unset (see
  * every _liveExtra field's own optionality in routes/matches.ts). */

@@ -27,6 +27,7 @@ import {
   mrDogeGenericStatus,
   totalGoalsMapToFields,
   extractMrDogeSoccerMoneyline,
+  extractMrDogeGenericMoneyline,
   extractMrDogeSoccerTotalGoals,
   extractMrDogeSoccerBtts,
   extractMrDogeSoccerLiveExtra,
@@ -7802,7 +7803,11 @@ async function fetchMrDogePrematchOdds(
   for (let i = 0; i < targets.length; i += MRDOGE_PREMATCH_ODDS_CONCURRENCY) {
     const batch = targets.slice(i, i + MRDOGE_PREMATCH_ODDS_CONCURRENCY);
     const settled = await Promise.allSettled(
-      batch.map((m) => mrdoge.odds.list({ matchId: m.id, betTypes })),
+      batch.map((m) =>
+        betTypes.length > 0
+          ? mrdoge.odds.list({ matchId: m.id, betTypes })
+          : mrdoge.odds.list({ matchId: m.id }),
+      ),
     );
     settled.forEach((r, idx) => {
       if (r.status === "fulfilled") {
@@ -7900,7 +7905,6 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
   // doc comment gives "England"/"Inglaterra" as an example) that silently
   // dropped every match the first time this filtered on it instead.
   const matches = getMrDogeLiveMatches().filter((m) => m.stats?.sport === "soccer");
-  syncMrDogeOddsSubscriptions(matches.map((m) => m.id));
   return matches.map((m): LiveMatchState => {
     const stats = m.stats?.sport === "soccer" ? m.stats : null;
     const { status, phase } = mrDogeSoccerStatus(stats?.clock);
@@ -7955,8 +7959,10 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
         startDate,
         endDate,
       });
+      const oddsByMatchId = await fetchMrDogePrematchOdds(mrdoge, matches, []);
       return matches.map((m): UpcomingMatch => {
         const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
+        const moneyline = extractMrDogeGenericMoneyline(oddsByMatchId.get(m.id));
         return {
           id: mrDogeMatchId(bet62Sport, m),
           home: m.homeTeam.name,
@@ -7966,8 +7972,8 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
           date,
           time,
           sport: bet62Sport,
-          hasRealOdds: false,
-          odds: { home: 0, draw: 0, away: 0 },
+          hasRealOdds: moneyline != null,
+          odds: moneyline ?? { home: 0, draw: 0, away: 0 },
           markets: zerofillAdvancedMarkets(),
         };
       });
@@ -7995,6 +8001,7 @@ function buildMrDogeLiveMatches(
   const matches = getMrDogeLiveMatches().filter((m) => m.stats?.sport === mrDogeSport);
   return matches.map((m): LiveMatchState => {
     const { homeScore, awayScore, status, liveExtra } = mapExtra(m);
+    const moneyline = extractMrDogeGenericMoneyline(getMrDogeOdds(m.id));
     return {
       id: mrDogeMatchId(bet62Sport, m),
       home: m.homeTeam.name,
@@ -8006,8 +8013,8 @@ function buildMrDogeLiveMatches(
       awayScore,
       minute: 0,
       status,
-      hasRealOdds: false,
-      odds: { home: 0, draw: 0, away: 0 },
+      hasRealOdds: moneyline != null,
+      odds: moneyline ?? { home: 0, draw: 0, away: 0 },
       markets: zerofillAdvancedMarkets(),
       events: [],
       _liveExtra: liveExtra,
@@ -8331,6 +8338,14 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     rebuildUpcomingCache().catch(() => {});
   }
   const allUpcoming = _allUpcomingCache;
+
+  if (CONFIG.MRDOGE_API_KEY) {
+    syncMrDogeOddsSubscriptions(
+      getMrDogeLiveMatches()
+        .filter((m) => !!m.stats?.sport)
+        .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) })),
+    );
+  }
 
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
   // All sports-data providers removed (2026-09-08) — every sport below runs
@@ -9485,13 +9500,17 @@ function waitMs(ms: number): Promise<void> {
 const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
 
 router.get("/upcoming", async (req: Request, res: Response) => {
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, max-age=0",
+  );
   const sport = String(req.query["sport"] ?? "all");
   const range = String(req.query["range"] ?? "default");
   const cache = upcomingTopCache
     ? await getUpcomingAll()
     : await Promise.race([
         getUpcomingAll(),
-        waitMs(1500).then(
+        waitMs(9000).then(
           () =>
             upcomingTopCache ?? {
               football: [],
