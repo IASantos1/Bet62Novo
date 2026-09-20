@@ -2,7 +2,42 @@
 // client.ts's header and lib/config.ts's MRDOGE_API_KEY comment for the
 // provider's real confirmed scope (6 of BET62's 8 sports; darts/MMA are
 // not covered by this provider at all).
-import type { Clock, Match, Market, SoccerStats } from "@mrdoge/node";
+import type {
+  BaseballStats,
+  BasketballStats,
+  Clock,
+  IceHockeyStats,
+  Match,
+  Market,
+  SoccerStats,
+  TennisStats,
+  VolleyballStats,
+} from "@mrdoge/node";
+
+/** Shared `Period[]` -> BET62's `Array<[home, away]>` tuple convention
+ * (sets/quarters/periods/innings, all the same shape in every sport's
+ * stats). Keeps only periods that have been played or are in progress —
+ * periods not yet reached (both scores null, not inPlay) are left out
+ * entirely rather than padded with fabricated zeros. */
+function periodsToTuples(
+  periods: Array<{ homeScore: number | null; awayScore: number | null; inPlay: boolean }> | undefined,
+): Array<[number, number]> {
+  if (!periods) return [];
+  return periods
+    .filter((p) => p.homeScore != null || p.awayScore != null || p.inPlay)
+    .map((p): [number, number] => [p.homeScore ?? 0, p.awayScore ?? 0]);
+}
+
+/** Non-soccer clock -> a plain display status string. Unlike football,
+ * these sports have no literal-string checks elsewhere in matches.ts to
+ * match, so this just surfaces Mr. Doge's own pre-formatted label —
+ * `isFinishedVisibilityStatus` already matches on "finished" via
+ * substring, so the finished case still visually resolves matches. */
+export function mrDogeGenericStatus(clock: Clock | null | undefined): string {
+  if (!clock) return "";
+  if (clock.state === "finished") return "Finished";
+  return clock.displayLong ?? clock.display ?? clock.state;
+}
 
 /** BET62's own sport key -> Mr. Doge's SportName. Only the 6 sports the
  * provider actually supports (confirmed via the real published package's
@@ -213,5 +248,103 @@ export function extractMrDogeSoccerLiveExtra(stats: SoccerStats | null | undefin
     shotsOnTargetAway: stats.awayShotsOnTarget,
     woodworkHome: stats.homeWoodworkHits,
     woodworkAway: stats.awayWoodworkHits,
+  };
+}
+
+/** Real tennis live state — no odds/markets yet (Fase 0 probe needed
+ * before guessing any tennis betType sysname, see this file's header). */
+export function extractMrDogeTennisLiveExtra(stats: TennisStats | null | undefined): {
+  sets?: Array<[number, number]>;
+  currentPoints?: [number | string, number | string];
+  serving?: [boolean, boolean];
+} {
+  if (!stats) return {};
+  const sets = periodsToTuples(stats.periods).map((tuple, i, arr): [number, number] => {
+    // The in-progress set's period entry only gets a real score once the
+    // set finishes — homeGamesInCurrentSet/awayGamesInCurrentSet is the
+    // live source for the last (current) entry while it's still 0/0.
+    const isLast = i === arr.length - 1;
+    if (isLast && tuple[0] === 0 && tuple[1] === 0) {
+      return [stats.homeGamesInCurrentSet ?? 0, stats.awayGamesInCurrentSet ?? 0];
+    }
+    return tuple;
+  });
+  return {
+    sets: sets.length ? sets : undefined,
+    currentPoints:
+      stats.homeCurrentGamePoints != null && stats.awayCurrentGamePoints != null
+        ? [stats.homeCurrentGamePoints, stats.awayCurrentGamePoints]
+        : undefined,
+    serving:
+      stats.homeServes != null && stats.awayServes != null ? [stats.homeServes, stats.awayServes] : undefined,
+  };
+}
+
+/** Real basketball live state — no odds/markets yet (same Fase 0 caveat). */
+export function extractMrDogeBasketballLiveExtra(stats: BasketballStats | null | undefined): {
+  quarters?: Array<[number, number]>;
+  clockStr?: string;
+  clockSec?: number;
+  clockRunning?: boolean;
+} {
+  if (!stats) return {};
+  const quarters = periodsToTuples(stats.periods);
+  return {
+    quarters: quarters.length ? quarters : undefined,
+    clockStr: stats.clock?.display ?? undefined,
+    clockSec: stats.clock?.remainingSeconds ?? stats.clock?.elapsedSeconds ?? undefined,
+    clockRunning: stats.clock?.state === "live",
+  };
+}
+
+/** Real ice hockey live state — no odds/markets yet (same Fase 0 caveat). */
+export function extractMrDogeIceHockeyLiveExtra(stats: IceHockeyStats | null | undefined): {
+  periods?: Array<[number, number]>;
+  clockStr?: string;
+  clockSec?: number;
+  clockRunning?: boolean;
+} {
+  if (!stats) return {};
+  const periods = periodsToTuples(stats.periods);
+  return {
+    periods: periods.length ? periods : undefined,
+    clockStr: stats.clock?.display ?? undefined,
+    clockSec: stats.clock?.remainingSeconds ?? stats.clock?.elapsedSeconds ?? undefined,
+    clockRunning: stats.clock?.state === "live",
+  };
+}
+
+/** Real baseball live state — no odds/markets yet (same Fase 0 caveat).
+ * `bases` is untyped (`unknown[]`) at the protocol level, so it's left out
+ * rather than guessed at. */
+export function extractMrDogeBaseballLiveExtra(stats: BaseballStats | null | undefined): {
+  innings?: Array<[number, number]>;
+  outs?: number;
+} {
+  if (!stats) return {};
+  const innings = periodsToTuples(stats.periods);
+  return {
+    innings: innings.length ? innings : undefined,
+    outs: stats.outs,
+  };
+}
+
+/** Real volleyball live state — no odds/markets yet (same Fase 0 caveat).
+ * The in-progress set's period entry IS the live point score (volleyball
+ * sets run well past a typical "sets won" count, so no games-in-current-set
+ * substitute like tennis is needed here). */
+export function extractMrDogeVolleyballLiveExtra(stats: VolleyballStats | null | undefined): {
+  currentPts?: [number, number];
+  vollSets?: Array<[number, number]>;
+} {
+  if (!stats) return {};
+  const periods = stats.periods ?? [];
+  const current = periods.find((p) => p.inPlay);
+  const vollSets = periods
+    .filter((p) => !p.inPlay && (p.homeScore != null || p.awayScore != null))
+    .map((p): [number, number] => [p.homeScore ?? 0, p.awayScore ?? 0]);
+  return {
+    currentPts: current ? [current.homeScore ?? 0, current.awayScore ?? 0] : undefined,
+    vollSets: vollSets.length ? vollSets : undefined,
   };
 }
