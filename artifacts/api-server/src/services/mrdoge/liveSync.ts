@@ -18,6 +18,11 @@ const MRDOGE_LIVE_SPORTS: string[] = ["soccer"];
 const liveMatchesById = new Map<string, Match>();
 let subscription: Subscription<"matches.subscribeLive"> | null = null;
 let starting = false;
+// Logged once (not every 30s retry tick) so a missing key is diagnosable
+// from Railway logs alone — before this, an unset key made every part of
+// the Mr. Doge integration go completely silent, indistinguishable from
+// "the key is set but something else is wrong".
+let loggedMissingKey = false;
 
 export function getMrDogeLiveMatches(): Match[] {
   return [...liveMatchesById.values()];
@@ -26,7 +31,16 @@ export function getMrDogeLiveMatches(): Match[] {
 /** Idempotent — safe to call on every server-startup tick/retry timer. No-ops
  * once a subscription is already active or in the middle of starting. */
 export async function startMrDogeLiveSync(): Promise<void> {
-  if (!CONFIG.MRDOGE_API_KEY || subscription || starting) return;
+  if (!CONFIG.MRDOGE_API_KEY) {
+    if (!loggedMissingKey) {
+      logger.warn(
+        "[mrdoge] MRDOGE_API_KEY not set — Mr. Doge stays inert (no fixtures, no live data, no odds) until it's configured",
+      );
+      loggedMissingKey = true;
+    }
+    return;
+  }
+  if (subscription || starting) return;
   starting = true;
   try {
     const mrdoge = getMrDogeClient();
