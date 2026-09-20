@@ -19495,12 +19495,11 @@ export default function Home({
 
       {/* MOBILE BOTTOM DOCK — replaces the old underline tab strip on
           mobile (2026-09-20 futurist redesign). Desktop keeps the inline
-          header nav above unchanged for this phase. Esportes was dropped
-          to fit 5 slots in Fase 1 and moved under Perfil's menu — user
-          testing on a real device flagged it as effectively missing
-          (buried, not reachable from the main nav), so it's back here as
-          a 6th slot; Promoções/Carteira/Minhas Apostas stay under Perfil
-          since those are lower-frequency than browsing sports. */}
+          header nav above unchanged for this phase. Perfil removed from
+          here (user-requested, real device): it's redundant with the
+          avatar already in the header up top. The purple Boletim bubble
+          moves from the raised center slot into Perfil's old spot at the
+          end — a normal-height icon like the others now, not elevated. */}
       <div
         className="lg:hidden fixed left-0 right-0 z-[50] px-3"
         style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
@@ -19531,19 +19530,6 @@ export default function Home({
             </button>
           ))}
           <button
-            aria-label="Boletim"
-            {...makeTap(() => setBetSlipOpenMobile(true))}
-            className="b62-gradient-cta w-[50px] h-[50px] rounded-full flex items-center justify-center -mt-6 relative shrink-0"
-            style={{ boxShadow: "0 6px 18px rgba(220,38,38,0.5), 0 0 0 5px hsl(var(--background))" }}
-          >
-            <Ticket size={19} className="text-white" />
-            {bets.length > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-black text-[10px] font-black flex items-center justify-center">
-                {bets.length}
-              </span>
-            )}
-          </button>
-          <button
             {...makeTap(() => selectMainTab("casino"))}
             className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === "casino" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500"}`}
           >
@@ -19551,11 +19537,19 @@ export default function Home({
             <span className="text-[8.5px] font-semibold">Casino</span>
           </button>
           <button
-            {...makeTap(() => selectMainTab("profile"))}
-            className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === "profile" ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
+            aria-label="Boletim"
+            {...makeTap(() => setBetSlipOpenMobile(true))}
+            className="flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors text-zinc-500"
           >
-            <User size={17} />
-            <span className="text-[8.5px] font-semibold">Perfil</span>
+            <span className="relative w-7 h-7 rounded-full b62-gradient-cta flex items-center justify-center">
+              <Ticket size={14} className="text-white" />
+              {bets.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-black text-[9px] font-black flex items-center justify-center">
+                  {bets.length}
+                </span>
+              )}
+            </span>
+            <span className="text-[8.5px] font-semibold">Boletim</span>
           </button>
         </div>
       </div>
