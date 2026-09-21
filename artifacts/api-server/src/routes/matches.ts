@@ -20,7 +20,6 @@ import { getMrDogeClient } from "../services/mrdoge/client.js";
 import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
 import {
-  MRDOGE_SOCCER_BET_TYPES,
   MRDOGE_SPORT_BY_BET62,
   mrDogeMatchId,
   mrDogeRegionFlag,
@@ -798,8 +797,8 @@ export type UpcomingMatch = {
   leagueId?: string;
   isWomens?: boolean;
   /** Football only — true when the league is in the curated priority allowlist
-   * (footballLeagueAllowedStrict). Drives the default "today + big leagues up
-   * to 7 days ahead" vs "?range=month" widening in GET /upcoming. */
+   * (footballLeagueAllowedStrict). Drives ordering/tiering; the default
+   * upcoming visibility window is 15 days, while "?range=month" widens it. */
   isPriorityLeague?: boolean;
   providerStatusGroup?: number;
   providerStatusText?: string;
@@ -873,7 +872,7 @@ function mrDogeCatalogDateWindow(range: string): {
   endDate: string;
 } {
   const startDate = new Date().toISOString().slice(0, 10);
-  const days = range === "month" ? 30 : 7;
+  const days = range === "month" ? 30 : 15;
   const endDate = new Date(
     Date.now() + days * 24 * 60 * 60 * 1000,
   ).toISOString().slice(0, 10);
@@ -1749,7 +1748,10 @@ function footballLeagueAllowedStrict(
 }
 
 const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
-const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
+// Live score data comes from one shared matches subscription. Odds are a
+// separate per-match Business-tier subscription, so cap only the expensive
+// odds streams while still exposing every non-blocked live fixture.
+const MRDOGE_LIVE_ODDS_MAX = 100;
 
 function isMajorWomensLeague(name: string): boolean {
   const lower = String(name ?? "")
@@ -8072,7 +8074,11 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 // refresh cycle never bursts hundreds of requests at once. Raise
 // MRDOGE_PREMATCH_ODDS_MAX once the account's real rate limit is confirmed
 // against production traffic.
-const MRDOGE_PREMATCH_ODDS_MAX = 100;
+// Mr. Doge's odds endpoint returns every market available for one match when
+// betTypes is omitted. Keep this high enough for a 15-day prematch window,
+// while still protecting the provider/account from an accidental unbounded
+// request burst on refresh.
+const MRDOGE_PREMATCH_ODDS_MAX = 500;
 const MRDOGE_PREMATCH_ODDS_CONCURRENCY = 5;
 
 async function fetchMrDogePrematchOdds(
@@ -8138,12 +8144,12 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         footballCompetitionVisibilityBand(
           match.region.name,
           match.competition.name,
-        ) === "preferred",
+        ) !== "blocked",
     );
     const oddsByMatchId = await fetchMrDogePrematchOdds(
       mrdoge,
       eligibleMatches,
-      [...MRDOGE_SOCCER_BET_TYPES],
+      [],
     );
     let withRealOdds = 0;
     const built = eligibleMatches.map((m): UpcomingMatch => {
@@ -8225,7 +8231,7 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         footballCompetitionVisibilityBand(
           match.country ?? "",
           match.league ?? "",
-        ) === "preferred",
+        ) !== "blocked",
     );
     logger.info(
       {
@@ -8753,34 +8759,35 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     const nonFootballTargets = liveOddsTargets
       .filter((m) => m.stats?.sport !== "soccer")
       .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) }));
-    const footballOddsPreferredTargets = liveOddsTargets
+    const footballOddsTargets = liveOddsTargets
       .filter((m) => m.stats?.sport === "soccer")
       .filter(
         (m) =>
           footballCompetitionVisibilityBand(
             m.region.name,
             m.competition.name,
-          ) === "preferred",
+          ) !== "blocked",
       )
+      .sort(
+        (a, b) =>
+          Number(
+            footballCompetitionVisibilityBand(
+              a.region.name,
+              a.competition.name,
+            ) === "preferred",
+          ) -
+          Number(
+            footballCompetitionVisibilityBand(
+              b.region.name,
+              b.competition.name,
+            ) === "preferred",
+          ),
+      )
+      .slice(0, MRDOGE_LIVE_ODDS_MAX)
       .map((m) => ({ matchId: m.id, sport: "soccer" }));
-    const footballOddsFallbackTargets =
-      footballOddsPreferredTargets.length > 0
-        ? []
-        : liveOddsTargets
-            .filter((m) => m.stats?.sport === "soccer")
-            .filter(
-              (m) =>
-                footballCompetitionVisibilityBand(
-                  m.region.name,
-                  m.competition.name,
-                ) === "fallback",
-            )
-            .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT)
-            .map((m) => ({ matchId: m.id, sport: "soccer" }));
     syncMrDogeOddsSubscriptions(
       [
-        ...footballOddsPreferredTargets,
-        ...footballOddsFallbackTargets,
+        ...footballOddsTargets,
         ...nonFootballTargets,
       ],
     );
@@ -8807,26 +8814,29 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
-  const footballPreferredLive = footballLive.filter(
-    (match) =>
-      footballCompetitionVisibilityBand(
-        match.country ?? "",
-        match.league ?? "",
-      ) === "preferred",
-  );
-  const footballFallbackLive = footballLive
+  const footballVisibleLive = footballLive
     .filter(
       (match) =>
         footballCompetitionVisibilityBand(
           match.country ?? "",
           match.league ?? "",
-        ) === "fallback",
+        ) !== "blocked",
     )
-    .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT);
-  const footballVisibleLive =
-    footballPreferredLive.length > 0
-      ? footballPreferredLive
-      : footballFallbackLive;
+    .sort(
+      (a, b) =>
+        Number(
+          footballCompetitionVisibilityBand(
+            a.country ?? "",
+            a.league ?? "",
+          ) !== "preferred",
+        ) -
+        Number(
+          footballCompetitionVisibilityBand(
+            b.country ?? "",
+            b.league ?? "",
+          ) !== "preferred",
+        ),
+    );
   // PropLine removed 2026-09-20 (user decision); Mr. Doge is basketball,
   // hockey, baseball, and volleyball's real live source again as of the
   // same day.
@@ -9638,7 +9648,6 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
         if (rawId) {
           const odds = await getMrDogeClient().odds.list({
             matchId: rawId,
-            betTypes: [...MRDOGE_SOCCER_BET_TYPES],
           });
           const btts = extractMrDogeSoccerBtts(odds);
           const extended = extractMrDogeSoccerExtendedMarkets(odds);
@@ -9783,7 +9792,6 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
         ? cached
         : await getMrDogeClient().odds.list({
             matchId: id,
-            betTypes: [...MRDOGE_SOCCER_BET_TYPES],
           });
     res.json({
       markets: markets
@@ -10116,7 +10124,7 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
+const UPCOMING_DEFAULT_PRIORITY_DAYS = 15;
 const UPCOMING_MONTH_EDGE_DAY = 21;
 const UPCOMING_NEXT_MONTH_VISIBLE_DAY = 8;
 
@@ -10368,10 +10376,9 @@ router.get("/upcoming", async (req: Request, res: Response) => {
         return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
       })() &&
       (() => {
-        // Default view keeps at least 7 days ahead, but once we're late in
-        // the current month (day 21+) it stretches just enough to surface
-        // the opening fixtures of the next month too (up to day 8), per the
-        // user's prematch-window request.
+        // Default view keeps 15 days ahead, but once we're late in the
+        // current month (day 21+) it stretches just enough to surface the
+        // opening fixtures of the next month too (up to day 8).
         if (range === "month") return true;
         const kickoffMs = parseUpcomingKickoffMs(m);
         if (kickoffMs == null) return true;
