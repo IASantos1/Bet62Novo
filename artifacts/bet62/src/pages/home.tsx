@@ -13637,16 +13637,24 @@ export default function Home({
                         (Number(mk?.totalGoals?.over35 ?? 0) > 1.01) ||
                         (Number(mk?.totalGoals?.over45 ?? 0) > 1.01) ||
                         (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.away ?? 0) > 1.01) ||
                         (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.away ?? 0) > 1.01) ||
                         (Number(mk?.toWinBothHalves?.home ?? 0) > 1.01) ||
+                        (Number(mk?.toWinBothHalves?.away ?? 0) > 1.01) ||
                         (Number(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
-                        (Number(mk?.exactGoals?.g0 ?? 0) > 1.01);
+                        (Number(mk?.exactGoals?.g0 ?? 0) > 1.01) ||
+                        Object.values((mk?.teamGoals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasGols) baseTabs.push({ key: "gols", label: "Gols" });
                       const hasEspeciais =
                         (Number(mk?.btts1H?.yes ?? 0) > 1.01) ||
                         (Number(mk?.highestScoringHalf?.first ?? 0) > 1.01) ||
                         (Number(mk?.teamGoals?.homeOver05 ?? 0) > 1.01) ||
-                        (Number(mk?.teamGoals?.awayOver05 ?? 0) > 1.01);
+                        (Number(mk?.teamGoals?.awayOver05 ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.away ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.away ?? 0) > 1.01);
                       if (hasEspeciais) baseTabs.push({ key: "especiais", label: "Especiais" });
                       const hasHandicap =
                         (Number(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
@@ -16410,7 +16418,8 @@ export default function Home({
                 !isLateGame &&
                 (modalTab === "placar" || modalTab === "todos") &&
                 m &&
-                m.correctScore && (
+                m.correctScore &&
+                Object.keys(m.correctScore).length > 0 && (
                   <div>
                     <MarketAccordionSection
                       title="Placar Exato"
@@ -16441,7 +16450,7 @@ export default function Home({
                 !isLateGame &&
                 modalTab === "placar" &&
                 m &&
-                !m.correctScore &&
+                (!m.correctScore || Object.keys(m.correctScore).length === 0) &&
                 !m.winningMargin && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
@@ -17123,91 +17132,126 @@ export default function Home({
                           />
                         </MarketGroup>
                       )}
-                    {!isLateGame && m.asianTotals && m.asianTotals.o225 > 0 && (
+                    {!isLateGame &&
+                      m.asianTotals &&
+                      Object.values(m.asianTotals).some((v) => Number(v ?? 0) > 0) && (
                       <>
-                        <MarketGroup title="Total Asiático — 0.5">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o05"
-                            odd={m.asianTotals.o05}
-                            market="asiatico"
-                            label="Mais de 0.5"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u05"
-                            odd={m.asianTotals.u05}
-                            market="asiatico"
-                            label="Menos de 0.5"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 2.25">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o225"
-                            odd={m.asianTotals.o225}
-                            market="asiatico"
-                            label="Mais de 2.25"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u225"
-                            odd={m.asianTotals.u225}
-                            market="asiatico"
-                            label="Menos de 2.25"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 2.75">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o275"
-                            odd={m.asianTotals.o275}
-                            market="asiatico"
-                            label="Mais de 2.75"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u275"
-                            odd={m.asianTotals.u275}
-                            market="asiatico"
-                            label="Menos de 2.75"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 4.5">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o45"
-                            odd={m.asianTotals.o45}
-                            market="asiatico"
-                            label="Mais de 4.5"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u45"
-                            odd={m.asianTotals.u45}
-                            market="asiatico"
-                            label="Menos de 4.5"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 5.5">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o55"
-                            odd={m.asianTotals.o55}
-                            market="asiatico"
-                            label="Mais de 5.5"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u55"
-                            odd={m.asianTotals.u55}
-                            market="asiatico"
-                            label="Menos de 5.5"
-                          />
-                        </MarketGroup>
+                        {(m.asianTotals.o05 > 0 || m.asianTotals.u05 > 0) && (
+                          <MarketGroup title="Total Asiático — 0.5">
+                            {m.asianTotals.o05 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o05"
+                                odd={m.asianTotals.o05}
+                                market="asiatico"
+                                label="Mais de 0.5"
+                              />
+                            )}
+                            {m.asianTotals.u05 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u05"
+                                odd={m.asianTotals.u05}
+                                market="asiatico"
+                                label="Menos de 0.5"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o225 > 0 || m.asianTotals.u225 > 0) && (
+                          <MarketGroup title="Total Asiático — 2.25">
+                            {m.asianTotals.o225 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o225"
+                                odd={m.asianTotals.o225}
+                                market="asiatico"
+                                label="Mais de 2.25"
+                              />
+                            )}
+                            {m.asianTotals.u225 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u225"
+                                odd={m.asianTotals.u225}
+                                market="asiatico"
+                                label="Menos de 2.25"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o275 > 0 || m.asianTotals.u275 > 0) && (
+                          <MarketGroup title="Total Asiático — 2.75">
+                            {m.asianTotals.o275 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o275"
+                                odd={m.asianTotals.o275}
+                                market="asiatico"
+                                label="Mais de 2.75"
+                              />
+                            )}
+                            {m.asianTotals.u275 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u275"
+                                odd={m.asianTotals.u275}
+                                market="asiatico"
+                                label="Menos de 2.75"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o45 > 0 || m.asianTotals.u45 > 0) && (
+                          <MarketGroup title="Total Asiático — 4.5">
+                            {m.asianTotals.o45 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o45"
+                                odd={m.asianTotals.o45}
+                                market="asiatico"
+                                label="Mais de 4.5"
+                              />
+                            )}
+                            {m.asianTotals.u45 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u45"
+                                odd={m.asianTotals.u45}
+                                market="asiatico"
+                                label="Menos de 4.5"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o55 > 0 || m.asianTotals.u55 > 0) && (
+                          <MarketGroup title="Total Asiático — 5.5">
+                            {m.asianTotals.o55 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o55"
+                                odd={m.asianTotals.o55}
+                                market="asiatico"
+                                label="Mais de 5.5"
+                              />
+                            )}
+                            {m.asianTotals.u55 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u55"
+                                odd={m.asianTotals.u55}
+                                market="asiatico"
+                                label="Menos de 5.5"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
                       </>
                     )}
-                    {!m.drawNoBet && !m.asianHandicap && !m.europeanHandicap && !m.asianTotals && (
+                    {!m.drawNoBet &&
+                      !m.asianHandicap &&
+                      !m.europeanHandicap &&
+                      !Object.values(m.asianTotals ?? {}).some((v) => Number(v ?? 0) > 0) && (
                       <div className="text-center text-zinc-600 py-6 text-sm">
                         Mercado não disponível para esta partida.
                       </div>
