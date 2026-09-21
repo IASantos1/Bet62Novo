@@ -82,6 +82,16 @@ export function mrDogeMatchId(bet62Sport: string, match: Match): string {
   return `${MRDOGE_ID_PREFIX[bet62Sport] ?? `mrdoge-${bet62Sport}-`}${match.id}`;
 }
 
+export function mrDogeTeamLogo(teamId: number | string | null | undefined): string | undefined {
+  if (teamId == null || teamId === "") return undefined;
+  return `https://api.mrdoge.co/images/teams/${teamId}.png`;
+}
+
+export function mrDogeRegionFlag(regionId: number | string | null | undefined): string | undefined {
+  if (regionId == null || regionId === "") return undefined;
+  return `https://api.mrdoge.co/images/regions/${regionId}.png`;
+}
+
 /** Mr. Doge's `match.startTime` is ISO-8601 UTC. BET62's UpcomingMatch/
  * matchStartsInMinutes convention (routes/matches.ts) expects `date`/`time`
  * as Europe/Lisbon LOCAL strings — Intl's own timeZone conversion handles

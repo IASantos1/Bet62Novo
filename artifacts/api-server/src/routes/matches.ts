@@ -22,8 +22,10 @@ import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/o
 import {
   MRDOGE_SOCCER_BET_TYPES,
   mrDogeMatchId,
+  mrDogeRegionFlag,
   mrDogeStartTimeToLisbon,
   mrDogeSoccerStatus,
+  mrDogeTeamLogo,
   mrDogeGenericStatus,
   totalGoalsMapToFields,
   extractMrDogeSoccerMoneyline,
@@ -456,6 +458,7 @@ export type LiveMatchState = {
   // those two fields are no longer read for logos anywhere.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  regionFlagUrl?: string;
   // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
   // populated on the same fixture object every other football field here
   // comes from).
@@ -731,6 +734,7 @@ export type UpcomingMatch = {
   // homeImageVersion in getTeamBadgeAsset.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  regionFlagUrl?: string;
   // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
   // same fixture object every other football field here comes from).
   stadium?: string;
@@ -7998,6 +8002,11 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         id: mrDogeMatchId("football", m),
         home: m.homeTeam.name,
         away: m.awayTeam.name,
+        homeTeamId: String(m.homeTeam.id),
+        awayTeamId: String(m.awayTeam.id),
+        homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
+        awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+        regionFlagUrl: mrDogeRegionFlag(m.region.id),
         league: m.competition.name,
         country: m.region.name,
         date,
@@ -8051,6 +8060,11 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       id: mrDogeMatchId("football", m),
       home: m.homeTeam.name,
       away: m.awayTeam.name,
+      homeTeamId: String(m.homeTeam.id),
+      awayTeamId: String(m.awayTeam.id),
+      homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
+      awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+      regionFlagUrl: mrDogeRegionFlag(m.region.id),
       league: m.competition.name,
       country: m.region.name,
       sport: "football",
@@ -8096,6 +8110,11 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
           id: mrDogeMatchId(bet62Sport, m),
           home: m.homeTeam.name,
           away: m.awayTeam.name,
+          homeTeamId: String(m.homeTeam.id),
+          awayTeamId: String(m.awayTeam.id),
+          homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
+          awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+          regionFlagUrl: mrDogeRegionFlag(m.region.id),
           league: m.competition.name,
           country: m.region.name,
           date,
@@ -8136,6 +8155,11 @@ function buildMrDogeLiveMatches(
       id: mrDogeMatchId(bet62Sport, m),
       home: m.homeTeam.name,
       away: m.awayTeam.name,
+      homeTeamId: String(m.homeTeam.id),
+      awayTeamId: String(m.awayTeam.id),
+      homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
+      awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+      regionFlagUrl: mrDogeRegionFlag(m.region.id),
       league: m.competition.name,
       country: m.region.name,
       sport: bet62Sport,

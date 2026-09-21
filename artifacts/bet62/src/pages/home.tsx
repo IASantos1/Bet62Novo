@@ -3810,6 +3810,7 @@ type Match = {
   // the only source getTeamBadgeAsset uses; see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  regionFlagUrl?: string;
   // Football only — GOAL API's matchStadium/matchReferee.
   stadium?: string;
   referee?: string;
@@ -10204,7 +10205,11 @@ export default function Home({
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
             const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-            const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
+            const fUrl =
+              !leagueLogo
+                ? (match.regionFlagUrl ??
+                  getCountryFlagUrl(match.country, match.league ?? undefined, match.home))
+                : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
                 <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -11006,7 +11011,11 @@ export default function Home({
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
                 const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-                const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
+                const fUrl =
+                  !leagueLogo
+                    ? (match.regionFlagUrl ??
+                      getCountryFlagUrl(match.country, match.league ?? undefined, match.home))
+                    : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
                     <div className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -11212,12 +11221,10 @@ export default function Home({
       className={`${compact ? "w-[46px] h-[46px]" : "w-[54px] h-[54px]"} rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden ${badgePadded ? "p-1.5" : ""}`}
     >
       {badge ? (
-        <img
+        <StableImage
           src={badge}
           alt={name}
           className={`w-full h-full ${badgeFit === "contain" ? "object-contain" : "object-cover"}`}
-          loading="lazy"
-          decoding="async"
         />
       ) : isSelection ? (
         <span
@@ -11500,7 +11507,11 @@ export default function Home({
             {/* Round country flag + sport icon badge */}
             {(() => {
               const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-              const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
+              const flagUrl =
+                !leagueLogo
+                  ? (match.regionFlagUrl ??
+                    getCountryFlagUrl(match.country, match.league ?? undefined, match.home))
+                  : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
                   <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
