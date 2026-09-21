@@ -39,10 +39,39 @@ export type BigBangGamesPage = {
 };
 
 function requireApiKey(): string {
-  if (!CONFIG.BIGBANG_API_KEY) {
+  const apiKey = CONFIG.BIGBANG_API_KEY.trim();
+  if (!apiKey) {
     throw Object.assign(new Error("BIGBANG_API_KEY não configurada"), { status: 503 });
   }
-  return CONFIG.BIGBANG_API_KEY;
+  return apiKey;
+}
+
+function buildBigBangUrl(path: string, apiKeyAsQuery = false): string {
+  if (!apiKeyAsQuery) return `${BIGBANG_BASE_URL}${path}`;
+  const apiKey = requireApiKey();
+  const url = new URL(`${BIGBANG_BASE_URL}${path}`);
+  url.searchParams.set("api_key", apiKey);
+  return url.toString();
+}
+
+async function parseBigBangResponse<T>(resp: Response): Promise<BigBangEnvelope<T>> {
+  return (await resp.json().catch(() => ({
+    success: false,
+    error: {
+      code: resp.status,
+      message: `Resposta inválida da BigBang (${resp.status})`,
+    },
+  }))) as BigBangEnvelope<T>;
+}
+
+function assertBigBangOk<T>(resp: Response, payload: BigBangEnvelope<T>): void {
+  if (!resp.ok || payload.success === false) {
+    const message =
+      payload && "error" in payload
+        ? (payload.error?.message ?? `BigBang respondeu ${resp.status}`)
+        : `BigBang respondeu ${resp.status}`;
+    throw Object.assign(new Error(message), { status: resp.status || payload?.error?.code || 502 });
+  }
 }
 
 async function bigBangFetch<T>(
@@ -50,7 +79,7 @@ async function bigBangFetch<T>(
   init?: RequestInit,
 ): Promise<BigBangEnvelope<T>> {
   const apiKey = requireApiKey();
-  const resp = await fetch(`${BIGBANG_BASE_URL}${path}`, {
+  let resp = await fetch(buildBigBangUrl(path, false), {
     ...init,
     headers: {
       "X-API-Key": apiKey,
@@ -59,23 +88,23 @@ async function bigBangFetch<T>(
     },
     signal: init?.signal ?? AbortSignal.timeout(15_000),
   });
+  let payload = await parseBigBangResponse<T>(resp);
 
-  const payload = (await resp.json().catch(() => ({
-    success: false,
-    error: {
-      code: resp.status,
-      message: `Resposta inválida da BigBang (${resp.status})`,
-    },
-  }))) as BigBangEnvelope<T>;
-
-  if (!resp.ok || payload.success === false) {
-    const message =
-      payload && "error" in payload
-        ? (payload.error?.message ?? `BigBang respondeu ${resp.status}`)
-        : `BigBang respondeu ${resp.status}`;
-    throw Object.assign(new Error(message), { status: resp.status || payload?.error?.code || 502 });
+  // Official docs allow `?api_key=` as a fallback auth mechanism. Retry once
+  // there on 401 in case an upstream proxy strips the custom header.
+  if (resp.status === 401) {
+    resp = await fetch(buildBigBangUrl(path, true), {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      signal: init?.signal ?? AbortSignal.timeout(15_000),
+    });
+    payload = await parseBigBangResponse<T>(resp);
   }
 
+  assertBigBangOk(resp, payload);
   return payload;
 }
 

@@ -16,7 +16,7 @@
 // skipped with a warning, never inserted as a dangling/broken banner.
 //
 // Run with: pnpm --filter @workspace/api-server run seed:featured-banners
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, ilike, notInArray, sql } from "drizzle-orm";
 import { db, casinoGamesTable, casinoBannersTable, initDb } from "@workspace/db";
 
 const FEATURED: Array<{ search: string; title: string; subtitle?: string; sortOrder: number }> = [
@@ -100,7 +100,7 @@ async function main() {
       and(
         eq(casinoBannersTable.position, "top"),
         eq(casinoBannersTable.isActive, true),
-        sql`${casinoBannersTable.title} <> ALL(${keptTitles})`,
+        notInArray(casinoBannersTable.title, keptTitles),
       ),
     )
     .returning({ title: casinoBannersTable.title });
