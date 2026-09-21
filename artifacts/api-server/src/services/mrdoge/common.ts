@@ -76,6 +76,23 @@ export const MRDOGE_SOCCER_BET_TYPES = [
   "SOCCER_MATCH_RESULT",
   "SOCCER_UNDER_OVER",
   "SOCCER_BOTH_TEAMS_TO_SCORE",
+  "SOCCER_DOUBLE_CHANCE",
+  "SOCCER_MATCH_RESULT_NODRAW",
+  "SOCCER_CORRECT_SCORE_EXTENDED",
+  "SOCCER_FIRST_HALF_RESULT",
+  "SOCCER_SECOND_HALF_RESULT",
+  "SOCCER_HALFTIME_FULLTIME",
+  "SOCCER_MATCH_RESULT_HANDICAP",
+  "SOCCER_HOME_UNDER_OVER",
+  "SOCCER_AWAY_UNDER_OVER",
+  "SOCCER_HOME_CLEAN_SHEET",
+  "SOCCER_AWAY_CLEAN_SHEET",
+  "SOCCER_GOALS_ODD_EVEN",
+  "SOCCER_HOME_WIN_TO_NIL",
+  "SOCCER_AWAY_WIN_TO_NIL",
+  "SOCCER_MATCH_RESULT_ASIAN",
+  "SOCCER_ASIAN_UNDER_OVER",
+  "SOCCER_NUMBER_OF_GOALS",
 ] as const;
 
 export function mrDogeMatchId(bet62Sport: string, match: Match): string {
@@ -157,24 +174,180 @@ export function totalGoalsMapToFields(
   return out;
 }
 
-/** Real per-market extraction — ONLY the 3 betType sysnames confirmed real
- * in Mr. Doge's own docs (SOCCER_MATCH_RESULT[_PRELIVE], SOCCER_UNDER_OVER,
- * SOCCER_BOTH_TEAMS_TO_SCORE). `betType` is an open string at the protocol
- * level (no enum to enumerate from) — every other market needs a real API
- * probe (Fase 0) before being wired in here, never a guessed sysname. */
+type MrDogeMarketLine = Market["lines"][number];
+
+export type MrDogeSoccerExtendedMarkets = {
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  drawNoBet?: { home: number; away: number };
+  halfTime?: { home: number; draw: number; away: number };
+  secondHalf?: { home: number; draw: number; away: number };
+  htft?: {
+    hh: number;
+    hd: number;
+    ha: number;
+    dh: number;
+    dd: number;
+    da: number;
+    ah: number;
+    ad: number;
+    aa: number;
+  };
+  correctScore?: Record<string, number>;
+  europeanHandicap?: { line: number; home: number; draw: number; away: number };
+  asianTotals?: Partial<{
+    o05: number;
+    u05: number;
+    o45: number;
+    u45: number;
+    o55: number;
+    u55: number;
+    o225: number;
+    u225: number;
+    o275: number;
+    u275: number;
+  }>;
+  teamGoals?: Partial<{
+    homeOver05: number;
+    homeUnder05: number;
+    homeOver15: number;
+    homeUnder15: number;
+    homeOver25: number;
+    homeUnder25: number;
+    awayOver05: number;
+    awayUnder05: number;
+    awayOver15: number;
+    awayUnder15: number;
+    awayOver25: number;
+    awayUnder25: number;
+  }>;
+  winToNil?: { home: number; away: number };
+  cleanSheet?: { home: number; away: number };
+  goalOddEven?: { odd: number; even: number };
+  exactGoals?: Partial<{
+    g0: number;
+    g1: number;
+    g2: number;
+    g3: number;
+    g4: number;
+    g5plus: number;
+  }>;
+};
+
+function mrDogeLineCode(line: MrDogeMarketLine): string {
+  return String(line.code ?? "").trim().toUpperCase();
+}
+
+function mrDogeLineCaption(line: MrDogeMarketLine): string {
+  return String((line as { caption?: unknown }).caption ?? "").trim();
+}
+
+function mrDogeIsAvailable(line: MrDogeMarketLine): boolean {
+  return line.isAvailable && Number.isFinite(line.price) && line.price > 1.001;
+}
+
+function mrDogeParseNumericValue(text: string): number | undefined {
+  const matches = text.match(/[+-]?\d+(?:[.,]\d+)?/g);
+  if (!matches || matches.length === 0) return undefined;
+  const value = Number(matches[matches.length - 1]!.replace(",", "."));
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function mrDogeParseOverUnderLine(
+  market: Market,
+  line: MrDogeMarketLine,
+): { side: "over" | "under"; line: number } | null {
+  const code = mrDogeLineCode(line);
+  const text = `${mrDogeLineCaption(line)} ${String(market.displayName ?? "")}`.trim();
+  const side =
+    code === "O" || code.startsWith("O") || /\bover\b|mais de/i.test(text)
+      ? "over"
+      : code === "U" || code.startsWith("U") || /\bunder\b|menos de/i.test(text)
+        ? "under"
+        : null;
+  if (!side) return null;
+
+  const fromCode = /^([OU])([+-]?\d+(?:\.\d+)?)$/i.exec(code);
+  const lineValue =
+    fromCode != null ? Number(fromCode[2]) : mrDogeParseNumericValue(text);
+  if (!Number.isFinite(lineValue)) return null;
+  return { side, line: lineValue };
+}
+
+function mrDogeExtractThreeWayResult(
+  markets: Market[] | undefined,
+  betType: string,
+): { home: number; draw: number; away: number } | null {
+  if (!markets) return null;
+  const market = markets.find((m) => m.betType === betType);
+  if (!market) return null;
+  const available = market.lines.filter(mrDogeIsAvailable);
+  const home = available.find((line) => mrDogeLineCode(line) === "1")?.price;
+  const draw = available.find((line) => mrDogeLineCode(line) === "X")?.price;
+  const away = available.find((line) => mrDogeLineCode(line) === "2")?.price;
+  if (!home || !draw || !away) return null;
+  return { home, draw, away };
+}
+
+function mrDogeExtractTwoWayResult(
+  markets: Market[] | undefined,
+  betType: string,
+): { home: number; away: number } | null {
+  if (!markets) return null;
+  const market = markets.find((m) => m.betType === betType);
+  if (!market) return null;
+  const available = market.lines.filter(mrDogeIsAvailable);
+  const home = available.find((line) => mrDogeLineCode(line) === "1")?.price;
+  const away = available.find((line) => mrDogeLineCode(line) === "2")?.price;
+  if (!home || !away) return null;
+  return { home, away };
+}
+
+function mrDogeExtractYesNo(
+  markets: Market[] | undefined,
+  betType: string,
+): { yes: number; no: number } | null {
+  if (!markets) return null;
+  const market = markets.find((m) => m.betType === betType);
+  if (!market) return null;
+  const available = market.lines.filter(mrDogeIsAvailable);
+  if (available.length < 2) return null;
+
+  const yesLine =
+    available.find((line) => /^(Y|YES|GG)$/i.test(mrDogeLineCode(line))) ??
+    available.find((line) => /\byes\b|\bsim\b/i.test(mrDogeLineCaption(line)));
+  const noLine =
+    available.find((line) => /^(N|NO|NG)$/i.test(mrDogeLineCode(line))) ??
+    available.find((line) => /\bno\b|\bnão\b|\bnao\b/i.test(mrDogeLineCaption(line)));
+
+  if (yesLine && noLine) return { yes: yesLine.price, no: noLine.price };
+  return { yes: available[0]!.price, no: available[1]!.price };
+}
+
+function mrDogeExtractYesPrice(
+  markets: Market[] | undefined,
+  betType: string,
+): number | undefined {
+  const yesNo = mrDogeExtractYesNo(markets, betType);
+  return yesNo?.yes;
+}
+
+function mrDogeParseCorrectScore(text: string): string | undefined {
+  const exact = /(\d+)\s*-\s*(\d+)/.exec(text);
+  if (exact) return `${Number(exact[1])}-${Number(exact[2])}`;
+  if (/any|qualquer|other|outro/i.test(text)) return "Outro";
+  return undefined;
+}
+
+/** Real football extraction wired only to betTypes observed in live API
+ * probes. Parsing is defensive because Mr. Doge's line codes/captions vary
+ * between markets ("Y/N", "1/X/2", "Over 1.5", "1/2", etc.). */
 export function extractMrDogeSoccerMoneyline(
   markets: Market[] | undefined,
 ): { home: number; draw: number; away: number } | null {
-  if (!markets) return null;
-  const market = markets.find(
-    (m) => m.betType === "SOCCER_MATCH_RESULT" || m.betType === "SOCCER_MATCH_RESULT_PRELIVE",
+  return (
+    mrDogeExtractThreeWayResult(markets, "SOCCER_MATCH_RESULT") ??
+    mrDogeExtractThreeWayResult(markets, "SOCCER_MATCH_RESULT_PRELIVE")
   );
-  if (!market) return null;
-  const home = market.lines.find((l) => l.code === "1" && l.isAvailable)?.price;
-  const draw = market.lines.find((l) => l.code === "X" && l.isAvailable)?.price;
-  const away = market.lines.find((l) => l.code === "2" && l.isAvailable)?.price;
-  if (!home || !draw || !away) return null;
-  return { home, draw, away };
 }
 
 /** BET62's totalGoals slots are fixed lines (0.5/1.5/.../6.5) — this
@@ -190,15 +363,13 @@ export function extractMrDogeSoccerTotalGoals(
   for (const market of markets) {
     if (market.betType !== "SOCCER_UNDER_OVER") continue;
     for (const line of market.lines) {
-      if (!line.isAvailable) continue;
-      const m = /^([OU])(\d+(?:\.\d+)?)$/.exec(line.code);
-      if (!m) continue;
-      const value = Number(m[2]);
-      if (!Number.isFinite(value)) continue;
-      const entry = byLine.get(value) ?? {};
-      if (m[1] === "O") entry.over = line.price;
+      if (!mrDogeIsAvailable(line)) continue;
+      const parsed = mrDogeParseOverUnderLine(market, line);
+      if (!parsed) continue;
+      const entry = byLine.get(parsed.line) ?? {};
+      if (parsed.side === "over") entry.over = line.price;
       else entry.under = line.price;
-      byLine.set(value, entry);
+      byLine.set(parsed.line, entry);
     }
   }
   for (const [value, entry] of byLine) {
@@ -217,13 +388,185 @@ export function extractMrDogeSoccerTotalGoals(
 export function extractMrDogeSoccerBtts(
   markets: Market[] | undefined,
 ): { yes: number; no: number } | null {
-  if (!markets) return null;
-  const market = markets.find((m) => m.betType === "SOCCER_BOTH_TEAMS_TO_SCORE");
-  if (!market) return null;
-  const yesLine = market.lines.find((l) => l.code === "GG" && l.isAvailable);
-  const noLine = market.lines.find((l) => l.code !== "GG" && l.isAvailable);
-  if (!yesLine || !noLine) return null;
-  return { yes: yesLine.price, no: noLine.price };
+  return mrDogeExtractYesNo(markets, "SOCCER_BOTH_TEAMS_TO_SCORE");
+}
+
+export function extractMrDogeSoccerExtendedMarkets(
+  markets: Market[] | undefined,
+): MrDogeSoccerExtendedMarkets {
+  const out: MrDogeSoccerExtendedMarkets = {};
+  if (!markets || markets.length === 0) return out;
+
+  const dc = markets.find((m) => m.betType === "SOCCER_DOUBLE_CHANCE");
+  if (dc) {
+    const available = dc.lines.filter(mrDogeIsAvailable);
+    const homeOrDraw = available.find((line) => mrDogeLineCode(line) === "1X")?.price ?? 0;
+    const awayOrDraw = available.find((line) => mrDogeLineCode(line) === "X2")?.price ?? 0;
+    const homeOrAway = available.find((line) => mrDogeLineCode(line) === "12")?.price ?? 0;
+    if (homeOrDraw > 0 || awayOrDraw > 0 || homeOrAway > 0) {
+      out.doubleChance = { homeOrDraw, awayOrDraw, homeOrAway };
+    }
+  }
+
+  const dnb = mrDogeExtractTwoWayResult(markets, "SOCCER_MATCH_RESULT_NODRAW");
+  if (dnb) out.drawNoBet = dnb;
+
+  const halfTime = mrDogeExtractThreeWayResult(markets, "SOCCER_FIRST_HALF_RESULT");
+  if (halfTime) out.halfTime = halfTime;
+
+  const secondHalf = mrDogeExtractThreeWayResult(markets, "SOCCER_SECOND_HALF_RESULT");
+  if (secondHalf) out.secondHalf = secondHalf;
+
+  const htftMarket = markets.find((m) => m.betType === "SOCCER_HALFTIME_FULLTIME");
+  if (htftMarket) {
+    const mapped: NonNullable<MrDogeSoccerExtendedMarkets["htft"]> = {
+      hh: 0, hd: 0, ha: 0, dh: 0, dd: 0, da: 0, ah: 0, ad: 0, aa: 0,
+    };
+    const selMap: Record<string, keyof typeof mapped> = {
+      "1/1": "hh",
+      "1/X": "hd",
+      "1/2": "ha",
+      "X/1": "dh",
+      "X/X": "dd",
+      "X/2": "da",
+      "2/1": "ah",
+      "2/X": "ad",
+      "2/2": "aa",
+    };
+    for (const line of htftMarket.lines) {
+      if (!mrDogeIsAvailable(line)) continue;
+      const key = selMap[mrDogeLineCode(line)];
+      if (key) mapped[key] = line.price;
+    }
+    if (Object.values(mapped).some((price) => price > 0)) out.htft = mapped;
+  }
+
+  const correctScoreMarket = markets.find((m) => m.betType === "SOCCER_CORRECT_SCORE_EXTENDED");
+  if (correctScoreMarket) {
+    const scores: Record<string, number> = {};
+    for (const line of correctScoreMarket.lines) {
+      if (!mrDogeIsAvailable(line)) continue;
+      const score =
+        mrDogeParseCorrectScore(mrDogeLineCaption(line)) ??
+        mrDogeParseCorrectScore(mrDogeLineCode(line));
+      if (score) scores[score] = line.price;
+    }
+    if (Object.keys(scores).length > 0) out.correctScore = scores;
+  }
+
+  const euroMarkets = markets
+    .filter((m) => m.betType === "SOCCER_MATCH_RESULT_HANDICAP")
+    .map((market) => {
+      const prices = mrDogeExtractThreeWayResult([market], "SOCCER_MATCH_RESULT_HANDICAP");
+      if (!prices) return null;
+      const sample = market.lines.find(mrDogeIsAvailable);
+      const lineValue = sample ? mrDogeParseNumericValue(mrDogeLineCaption(sample)) : undefined;
+      if (lineValue == null) return null;
+      return { line: lineValue, ...prices };
+    })
+    .filter((entry): entry is { line: number; home: number; draw: number; away: number } => entry != null)
+    .sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+  if (euroMarkets.length > 0) out.europeanHandicap = euroMarkets[0]!;
+
+  const asianTotals: NonNullable<MrDogeSoccerExtendedMarkets["asianTotals"]> = {};
+  const asianKeyByLine: Record<string, ["o05" | "o45" | "o55" | "o225" | "o275", "u05" | "u45" | "u55" | "u225" | "u275"]> = {
+    "0.5": ["o05", "u05"],
+    "2.25": ["o225", "u225"],
+    "2.75": ["o275", "u275"],
+    "4.5": ["o45", "u45"],
+    "5.5": ["o55", "u55"],
+  };
+  for (const market of markets) {
+    if (market.betType !== "SOCCER_ASIAN_UNDER_OVER") continue;
+    for (const line of market.lines) {
+      if (!mrDogeIsAvailable(line)) continue;
+      const parsed = mrDogeParseOverUnderLine(market, line);
+      if (!parsed) continue;
+      const target = asianKeyByLine[String(parsed.line)];
+      if (!target) continue;
+      const key = parsed.side === "over" ? target[0] : target[1];
+      asianTotals[key] = line.price;
+    }
+  }
+  if (Object.keys(asianTotals).length > 0) out.asianTotals = asianTotals;
+
+  const teamGoals: NonNullable<MrDogeSoccerExtendedMarkets["teamGoals"]> = {};
+  const teamGoalSuffixByLine: Record<string, "05" | "15" | "25"> = {
+    "0.5": "05",
+    "1.5": "15",
+    "2.5": "25",
+  };
+  for (const market of markets) {
+    const sidePrefix =
+      market.betType === "SOCCER_HOME_UNDER_OVER"
+        ? "home"
+        : market.betType === "SOCCER_AWAY_UNDER_OVER"
+          ? "away"
+          : null;
+    if (!sidePrefix) continue;
+    for (const line of market.lines) {
+      if (!mrDogeIsAvailable(line)) continue;
+      const parsed = mrDogeParseOverUnderLine(market, line);
+      if (!parsed) continue;
+      const suffix = teamGoalSuffixByLine[String(parsed.line)];
+      if (!suffix) continue;
+      const key = `${sidePrefix}${parsed.side === "over" ? "Over" : "Under"}${suffix}` as keyof typeof teamGoals;
+      teamGoals[key] = line.price;
+    }
+  }
+  if (Object.keys(teamGoals).length > 0) out.teamGoals = teamGoals;
+
+  const winToNil = {
+    home: mrDogeExtractYesPrice(markets, "SOCCER_HOME_WIN_TO_NIL") ?? 0,
+    away: mrDogeExtractYesPrice(markets, "SOCCER_AWAY_WIN_TO_NIL") ?? 0,
+  };
+  if (winToNil.home > 0 || winToNil.away > 0) out.winToNil = winToNil;
+
+  const cleanSheet = {
+    home: mrDogeExtractYesPrice(markets, "SOCCER_HOME_CLEAN_SHEET") ?? 0,
+    away: mrDogeExtractYesPrice(markets, "SOCCER_AWAY_CLEAN_SHEET") ?? 0,
+  };
+  if (cleanSheet.home > 0 || cleanSheet.away > 0) out.cleanSheet = cleanSheet;
+
+  const oddEvenMarket = markets.find((m) => m.betType === "SOCCER_GOALS_ODD_EVEN");
+  if (oddEvenMarket) {
+    const odd =
+      oddEvenMarket.lines.find((line) => mrDogeIsAvailable(line) && mrDogeLineCode(line) === "1")?.price ??
+      oddEvenMarket.lines.find((line) => mrDogeIsAvailable(line) && /\bodd\b|ímpar|impar/i.test(mrDogeLineCaption(line)))?.price ??
+      0;
+    const even =
+      oddEvenMarket.lines.find((line) => mrDogeIsAvailable(line) && mrDogeLineCode(line) === "0")?.price ??
+      oddEvenMarket.lines.find((line) => mrDogeIsAvailable(line) && /\beven\b|par/i.test(mrDogeLineCaption(line)))?.price ??
+      0;
+    if (odd > 0 || even > 0) out.goalOddEven = { odd, even };
+  }
+
+  const exactGoalsMarket = markets.find((m) => m.betType === "SOCCER_NUMBER_OF_GOALS");
+  if (exactGoalsMarket) {
+    const exactGoals: NonNullable<MrDogeSoccerExtendedMarkets["exactGoals"]> = {};
+    for (const line of exactGoalsMarket.lines) {
+      if (!mrDogeIsAvailable(line)) continue;
+      const caption = mrDogeLineCaption(line);
+      const code = mrDogeLineCode(line);
+      const text = `${caption} ${code}`.trim();
+      let key: keyof typeof exactGoals | undefined;
+      if (/no goals|sem golos|sem gols/i.test(text) || code === "0000") key = "g0";
+      else if (/5\+|5 ou mais|5 or more/i.test(text)) key = "g5plus";
+      else {
+        const value = mrDogeParseNumericValue(caption);
+        if (value === 0) key = "g0";
+        else if (value === 1) key = "g1";
+        else if (value === 2) key = "g2";
+        else if (value === 3) key = "g3";
+        else if (value === 4) key = "g4";
+        else if (value != null && value >= 5) key = "g5plus";
+      }
+      if (key) exactGoals[key] = line.price;
+    }
+    if (Object.keys(exactGoals).length > 0) out.exactGoals = exactGoals;
+  }
+
+  return out;
 }
 
 function scoreGenericMoneylineMarket(market: Market): number {

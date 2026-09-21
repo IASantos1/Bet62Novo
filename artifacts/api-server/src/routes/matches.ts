@@ -33,6 +33,7 @@ import {
   extractMrDogeGenericMoneyline,
   extractMrDogeSoccerTotalGoals,
   extractMrDogeSoccerBtts,
+  extractMrDogeSoccerExtendedMarkets,
   extractMrDogeSoccerLiveExtra,
   buildMrDogeSoccerMatchStats,
   buildMrDogeTimelineEvents,
@@ -8022,9 +8023,47 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       const odds = oddsByMatchId.get(m.id);
       const moneyline = extractMrDogeSoccerMoneyline(odds);
       const btts = extractMrDogeSoccerBtts(odds);
+      const extended = extractMrDogeSoccerExtendedMarkets(odds);
       const markets = zerofillAdvancedMarkets();
       Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
       if (btts) markets.bothTeamsScore = btts;
+      if (extended.doubleChance) markets.doubleChance = extended.doubleChance;
+      if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
+      if (extended.halfTime) markets.halfTime = extended.halfTime;
+      if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
+      if (extended.htft) markets.htft = extended.htft;
+      if (extended.correctScore) markets.correctScore = extended.correctScore;
+      if (extended.europeanHandicap) markets.europeanHandicap = extended.europeanHandicap;
+      if (extended.asianTotals) {
+        markets.asianTotals = {
+          o05: 0,
+          u05: 0,
+          o45: 0,
+          u45: 0,
+          o55: 0,
+          u55: 0,
+          o225: 0,
+          u225: 0,
+          o275: 0,
+          u275: 0,
+          ...extended.asianTotals,
+        };
+      }
+      if (extended.teamGoals) markets.teamGoals = { ...(markets.teamGoals ?? {}), ...extended.teamGoals };
+      if (extended.winToNil) markets.winToNil = extended.winToNil;
+      if (extended.cleanSheet) markets.cleanSheet = extended.cleanSheet;
+      if (extended.goalOddEven) markets.goalOddEven = extended.goalOddEven;
+      if (extended.exactGoals) {
+        markets.exactGoals = {
+          g0: 0,
+          g1: 0,
+          g2: 0,
+          g3: 0,
+          g4: 0,
+          g5plus: 0,
+          ...extended.exactGoals,
+        };
+      }
       if (moneyline != null) withRealOdds++;
       return {
         id: mrDogeMatchId("football", m),
@@ -8080,10 +8119,48 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     const odds = getMrDogeOdds(m.id);
     const moneyline = extractMrDogeSoccerMoneyline(odds);
     const btts = extractMrDogeSoccerBtts(odds);
+    const extended = extractMrDogeSoccerExtendedMarkets(odds);
     const markets = zerofillAdvancedMarkets();
     const liveExtra = extractMrDogeSoccerLiveExtra(stats);
     Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
     if (btts) markets.bothTeamsScore = btts;
+    if (extended.doubleChance) markets.doubleChance = extended.doubleChance;
+    if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
+    if (extended.halfTime) markets.halfTime = extended.halfTime;
+    if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
+    if (extended.htft) markets.htft = extended.htft;
+    if (extended.correctScore) markets.correctScore = extended.correctScore;
+    if (extended.europeanHandicap) markets.europeanHandicap = extended.europeanHandicap;
+    if (extended.asianTotals) {
+      markets.asianTotals = {
+        o05: 0,
+        u05: 0,
+        o45: 0,
+        u45: 0,
+        o55: 0,
+        u55: 0,
+        o225: 0,
+        u225: 0,
+        o275: 0,
+        u275: 0,
+        ...extended.asianTotals,
+      };
+    }
+    if (extended.teamGoals) markets.teamGoals = { ...(markets.teamGoals ?? {}), ...extended.teamGoals };
+    if (extended.winToNil) markets.winToNil = extended.winToNil;
+    if (extended.cleanSheet) markets.cleanSheet = extended.cleanSheet;
+    if (extended.goalOddEven) markets.goalOddEven = extended.goalOddEven;
+    if (extended.exactGoals) {
+      markets.exactGoals = {
+        g0: 0,
+        g1: 0,
+        g2: 0,
+        g3: 0,
+        g4: 0,
+        g5plus: 0,
+        ...extended.exactGoals,
+      };
+    }
     return {
       id: mrDogeMatchId("football", m),
       home: m.homeTeam.name,
