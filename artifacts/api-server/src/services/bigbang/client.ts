@@ -79,6 +79,7 @@ async function bigBangFetch<T>(
   init?: RequestInit,
 ): Promise<BigBangEnvelope<T>> {
   const apiKey = requireApiKey();
+  let authMode = "header";
   let resp = await fetch(buildBigBangUrl(path, false), {
     ...init,
     headers: {
@@ -93,6 +94,7 @@ async function bigBangFetch<T>(
   // Official docs allow `?api_key=` as a fallback auth mechanism. Retry once
   // there on 401 in case an upstream proxy strips the custom header.
   if (resp.status === 401) {
+    authMode = "query";
     resp = await fetch(buildBigBangUrl(path, true), {
       ...init,
       headers: {
@@ -102,9 +104,31 @@ async function bigBangFetch<T>(
       signal: init?.signal ?? AbortSignal.timeout(15_000),
     });
     payload = await parseBigBangResponse<T>(resp);
+    if (resp.status === 401) {
+      throw Object.assign(
+        new Error(
+          `BigBang rejeitou a autenticação nas duas formas suportadas (X-API-Key e ?api_key=) para ${path}. ` +
+            "Verifique BIGBANG_API_KEY no ambiente/deploy e confirme no dashboard da BigBang se a key está ativa e autorizada.",
+        ),
+        { status: 401, authMode: "header+query" },
+      );
+    }
   }
 
-  assertBigBangOk(resp, payload);
+  try {
+    assertBigBangOk(resp, payload);
+  } catch (err) {
+    if (resp.status === 401) {
+      throw Object.assign(
+        new Error(
+          `BigBang rejeitou a autenticação via ${authMode} para ${path}. ` +
+            "Verifique BIGBANG_API_KEY no ambiente/deploy e confirme no dashboard da BigBang se a key está ativa.",
+        ),
+        { status: 401, authMode },
+      );
+    }
+    throw err;
+  }
   return payload;
 }
 
