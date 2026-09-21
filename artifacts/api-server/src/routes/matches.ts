@@ -1871,6 +1871,138 @@ export function filterFootballMarketsByTier(
   return out;
 }
 
+function mrDogeNoVigHomeProb(
+  odds: { home: number; away: number } | null | undefined,
+): number {
+  if (!odds) return 0.5;
+  if (!(odds.home > 1.01) || !(odds.away > 1.01)) return 0.5;
+  const homeImpl = 1 / odds.home;
+  const awayImpl = 1 / odds.away;
+  const total = homeImpl + awayImpl;
+  if (!(total > 0)) return 0.5;
+  return mc(homeImpl / total, 0.08, 0.92);
+}
+
+function mrDogeTwoWayOddsFromProb(
+  pHome: number,
+  overround = 1.06,
+): { home: number; draw: number; away: number } {
+  const [home, away] = probsToDecimalOdds(
+    [mc(pHome, 0.05, 0.95), mc(1 - pHome, 0.05, 0.95)],
+    overround,
+  );
+  return { home: home!, draw: 0, away: away! };
+}
+
+function buildMrDogeTennisMarkets(
+  match: Match,
+  odds: { home: number; draw: number; away: number } | null,
+): { markets: AdvancedMarkets; fallbackOdds: { home: number; draw: number; away: number } } {
+  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, any>;
+  const stats = match.stats?.sport === "tennis" ? match.stats : null;
+  const pHome = mrDogeNoVigHomeProb(odds);
+  if (stats) {
+    const liveExtra = extractMrDogeTennisLiveExtra(stats);
+    const sets = liveExtra.sets ?? [];
+    const inPlayNow = !!liveExtra.currentPoints || !!liveExtra.serving;
+    const completedSets = inPlayNow ? sets.slice(0, -1) : sets;
+    const homeSetsWon = completedSets.filter(([home, away]) => home > away).length;
+    const awaySetsWon = completedSets.filter(([home, away]) => away > home).length;
+    markets.tennisExtra = computeLiveTennisExtras(
+      pHome,
+      sets,
+      homeSetsWon,
+      awaySetsWon,
+      Math.max(1, homeSetsWon + awaySetsWon + 1),
+      liveExtra.currentPoints,
+      liveExtra.serving,
+    );
+  } else {
+    markets.tennisExtra = computeTennisExtras(pHome);
+  }
+  return {
+    markets: markets as AdvancedMarkets,
+    fallbackOdds: mrDogeTwoWayOddsFromProb(pHome),
+  };
+}
+
+function buildMrDogeVolleyballMarkets(
+  match: Match,
+  odds: { home: number; draw: number; away: number } | null,
+): { markets: AdvancedMarkets; fallbackOdds: { home: number; draw: number; away: number } } {
+  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, any>;
+  const stats = match.stats?.sport === "volleyball" ? match.stats : null;
+  const liveExtra = extractMrDogeVolleyballLiveExtra(stats);
+  const vollSets = liveExtra.vollSets ?? [];
+  const homeSetsWon = vollSets.filter(([home, away]) => home > away).length;
+  const awaySetsWon = vollSets.filter(([home, away]) => away > home).length;
+  const currentPts = liveExtra.currentPts ?? [0, 0];
+  const implied = mrDogeNoVigHomeProb(odds);
+  const pSetHome = mc(
+    (implied +
+      estimateVolleyballSetWinProb(
+        homeSetsWon,
+        awaySetsWon,
+        currentPts[0] ?? 0,
+        currentPts[1] ?? 0,
+      )) /
+      2,
+    0.12,
+    0.88,
+  );
+  markets.volleyballExtra = computeVolleyballExtras(pSetHome);
+  return {
+    markets: markets as AdvancedMarkets,
+    fallbackOdds: mrDogeTwoWayOddsFromProb(
+      volleyballMatchWinProbFromSets(pSetHome, homeSetsWon, awaySetsWon),
+    ),
+  };
+}
+
+function buildMrDogeSyntheticMarkets(
+  bet62Sport: string,
+  match: Match,
+  odds: { home: number; draw: number; away: number } | null,
+): { markets: AdvancedMarkets; fallbackOdds: { home: number; draw: number; away: number } } {
+  switch (bet62Sport) {
+    case "tennis":
+      return buildMrDogeTennisMarkets(match, odds);
+    case "basketball":
+      return {
+        markets: makeBasketballMarketsFromTeams(match.homeTeam.name, match.awayTeam.name),
+        fallbackOdds: {
+          ...makeBasketballMoneylineFromTeams(match.homeTeam.name, match.awayTeam.name),
+          draw: 0,
+        },
+      };
+    case "hockey":
+      return {
+        markets: makeHockeyMarketsFromTeams(match.homeTeam.name, match.awayTeam.name),
+        fallbackOdds: makeHockeyMoneylineFromTeams(match.homeTeam.name, match.awayTeam.name),
+      };
+    case "baseball":
+      return {
+        markets: makeMLBMarketsFromTeams(
+          match.homeTeam.name,
+          match.awayTeam.name,
+          odds?.home,
+          odds?.away,
+        ),
+        fallbackOdds: {
+          ...makeMLBMoneylineFromTeams(match.homeTeam.name, match.awayTeam.name),
+          draw: 0,
+        },
+      };
+    case "volleyball":
+      return buildMrDogeVolleyballMarkets(match, odds);
+    default:
+      return {
+        markets: zerofillAdvancedMarkets(),
+        fallbackOdds: { home: 0, draw: 0, away: 0 },
+      };
+  }
+}
+
 // Stake headroom by market tier — a multiplier applied on top of the admin's
 // global max stake (never above it). Tier 4 caps exposure on leagues nobody
 // is really betting big on; Tier 1 gets the full admin-configured ceiling.
@@ -7938,14 +8070,10 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
   });
 }
 
-// Tennis/basketball/hockey/baseball/volleyball — same fixtures+live pattern
-// as football, minus odds/markets: the only 3 betType sysnames confirmed
-// real anywhere in Mr. Doge's docs are all soccer-specific (see this file's
-// header on extractMrDogeSoccerMoneyline). A real API probe (Fase 0) is
-// needed per sport before wiring any market here — until then these stay
-// at the same honest-empty odds baseline every provider-less sport already
-// uses (chooseUpcomingProvider/chooseLiveProvider's own empty-candidates
-// path), just backed by real fixtures/score/clock instead of nothing.
+// Tennis/basketball/hockey/baseball/volleyball — MRDoge provides the live
+// fixture/clock backbone while BET62 hydrates the full market surface with a
+// hybrid model: real top-line odds when MRDoge exposes them, and the
+// codebase's existing sport-specific market builders for the deeper tabs.
 function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () => Promise<UpcomingMatch[]> {
   return async function buildUpcoming(): Promise<UpcomingMatch[]> {
     if (!CONFIG.MRDOGE_API_KEY) return [];
@@ -7963,6 +8091,7 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
       return matches.map((m): UpcomingMatch => {
         const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
         const moneyline = extractMrDogeGenericMoneyline(oddsByMatchId.get(m.id));
+        const hybrid = buildMrDogeSyntheticMarkets(bet62Sport, m, moneyline);
         return {
           id: mrDogeMatchId(bet62Sport, m),
           home: m.homeTeam.name,
@@ -7973,8 +8102,8 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
           time,
           sport: bet62Sport,
           hasRealOdds: moneyline != null,
-          odds: moneyline ?? { home: 0, draw: 0, away: 0 },
-          markets: zerofillAdvancedMarkets(),
+          odds: moneyline ?? hybrid.fallbackOdds,
+          markets: hybrid.markets,
         };
       });
     } catch (err) {
@@ -8002,6 +8131,7 @@ function buildMrDogeLiveMatches(
   return matches.map((m): LiveMatchState => {
     const { homeScore, awayScore, status, liveExtra } = mapExtra(m);
     const moneyline = extractMrDogeGenericMoneyline(getMrDogeOdds(m.id));
+    const hybrid = buildMrDogeSyntheticMarkets(bet62Sport, m, moneyline);
     return {
       id: mrDogeMatchId(bet62Sport, m),
       home: m.homeTeam.name,
@@ -8014,8 +8144,8 @@ function buildMrDogeLiveMatches(
       minute: 0,
       status,
       hasRealOdds: moneyline != null,
-      odds: moneyline ?? { home: 0, draw: 0, away: 0 },
-      markets: zerofillAdvancedMarkets(),
+      odds: moneyline ?? hybrid.fallbackOdds,
+      markets: hybrid.markets,
       events: [],
       _liveExtra: liveExtra,
     };

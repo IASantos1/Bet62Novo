@@ -9983,7 +9983,7 @@ export default function Home({
               ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white")
               : "bg-zinc-800/40 border-zinc-700/30 opacity-70"
           } select-none`}
-          title="Aguardando preço real da PulseScore para este jogo"
+          title="Aguardando preco real do feed ao vivo para este jogo"
         >
           <span
             className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-zinc-500" : "text-[10px] leading-none opacity-50"}`}
@@ -10241,6 +10241,7 @@ export default function Home({
     const minute = getDisplayMinute(match);
     const sport = match.sport ?? "football";
     const extra = match._liveExtra;
+    const hasPlayableOddsOnCard = matchHasPlayableOdds(match);
     const flag =
       COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ??
       sportEmoji(match.sport);
@@ -10352,6 +10353,27 @@ export default function Home({
       return `${match.scheduledDate} ${time}`;
     })();
 
+    const interruptedLikeStatus = (() => {
+      const raw = String(match.status ?? "");
+      if (/interromp|interrupt|suspend|suspenso|paused|abandon|delay|postpon/i.test(raw)) {
+        return true;
+      }
+      // Some MRDoge tennis/volleyball feeds keep the set badge visible even
+      // while the market stream is effectively halted. In that case prefer an
+      // explicit interrupted badge instead of a misleading "2S"/"Soon".
+      if (
+        match.isLive &&
+        (sport === "tennis" || sport === "volleyball") &&
+        !hasPlayableOddsOnCard &&
+        !extra?.currentPoints &&
+        !extra?.currentPts &&
+        (/^\d+S$/i.test(raw) || /soon/i.test(raw))
+      ) {
+        return true;
+      }
+      return false;
+    })();
+
     const isStarting = isEmBreve && (match.startsIn ?? 999) <= 2;
     const liveBadge = isEmBreve ? (
       <div className="flex items-center gap-1.5">
@@ -10373,6 +10395,15 @@ export default function Home({
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] font-bold text-zinc-400 tabular-nums">
           {match.status === "Encerrado" ? "FIN" : liveBadgeLabel}
+        </span>
+      </div>
+    ) : interruptedLikeStatus ? (
+      <div className="flex items-center gap-1.5">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+        </span>
+        <span className="text-[10px] font-bold text-red-500 tabular-nums">
+          Interrompido
         </span>
       </div>
     ) : (
@@ -10859,7 +10890,7 @@ export default function Home({
     const isPenShootout =
       match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const canShowOdds = matchHasPlayableOdds(match);
+    const canShowOdds = hasPlayableOddsOnCard;
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) =>
       e.stopPropagation();
     const oddsRow =

@@ -35,8 +35,18 @@ function periodsToTuples(
  * substring, so the finished case still visually resolves matches. */
 export function mrDogeGenericStatus(clock: Clock | null | undefined): string {
   if (!clock) return "";
+  const state = String(clock.state ?? "").toLowerCase();
+  const display = String(clock.displayLong ?? clock.display ?? clock.state ?? "");
   if (clock.state === "finished") return "Finished";
-  return clock.displayLong ?? clock.display ?? clock.state;
+  if (
+    state === "interrupted" ||
+    state === "suspended" ||
+    state === "paused" ||
+    /interrupt|suspend|pause|abandon|delay|postpon/i.test(display)
+  ) {
+    return "Interrompido";
+  }
+  return display;
 }
 
 /** BET62's own sport key -> Mr. Doge's SportName. Only the 6 sports the
