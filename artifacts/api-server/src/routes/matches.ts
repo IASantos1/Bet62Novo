@@ -21,6 +21,7 @@ import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
 import {
   MRDOGE_SOCCER_BET_TYPES,
+  MRDOGE_SPORT_BY_BET62,
   mrDogeMatchId,
   mrDogeRegionFlag,
   mrDogeStartTimeToLisbon,
@@ -760,6 +761,21 @@ type ProviderQualitySnapshot = {
   reason: string;
 };
 
+type MatchCatalogRegion = {
+  id: number;
+  name: string;
+  eventCount: number;
+  competitionCount: number;
+  flagUrl?: string;
+};
+
+type MatchCatalogCompetition = {
+  id: number;
+  name: string;
+  regionId: number;
+  eventCount: number;
+};
+
 const UPCOMING_MIN_TOTAL = 3;
 const UPCOMING_MIN_TEAM_RATIO = 0.9;
 const UPCOMING_MIN_ANY_ODDS_RATIO = 0.35;
@@ -768,6 +784,18 @@ const LIVE_MIN_TOTAL = 1;
 const LIVE_MIN_TEAM_RATIO = 0.9;
 const LIVE_MIN_SCORE_RATIO = 0.6;
 const LIVE_MIN_CLOCK_RATIO = 0.35;
+
+function mrDogeCatalogDateWindow(range: string): {
+  startDate: string;
+  endDate: string;
+} {
+  const startDate = new Date().toISOString().slice(0, 10);
+  const days = range === "month" ? 30 : 7;
+  const endDate = new Date(
+    Date.now() + days * 24 * 60 * 60 * 1000,
+  ).toISOString().slice(0, 10);
+  return { startDate, endDate };
+}
 
 function providerRatio(part: number, total: number): number {
   return total > 0 ? part / total : 0;
@@ -9652,6 +9680,106 @@ function waitMs(ms: number): Promise<void> {
 }
 
 const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
+
+router.get("/catalog", async (req: Request, res: Response) => {
+  const sport = String(req.query["sport"] ?? "");
+  const range = String(req.query["range"] ?? "default");
+  const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
+
+  if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport) {
+    res.json({ sport, provider: "mrdoge", regions: [] as MatchCatalogRegion[] });
+    return;
+  }
+
+  try {
+    const mrdoge = getMrDogeClient();
+    const { startDate, endDate } = mrDogeCatalogDateWindow(range);
+    const regions = await mrdoge.regions.list({
+      sports: [mrdogeSport],
+      status: ["live", "upcoming"],
+      startDate,
+      endDate,
+      locale: "pt-BR",
+      timezone: "Europe/Lisbon",
+    });
+
+    const normalized = [...regions]
+      .map(
+        (region): MatchCatalogRegion => ({
+          id: region.id,
+          name: region.name,
+          eventCount: region.eventCount ?? 0,
+          competitionCount: region.competitionCount ?? 0,
+          flagUrl: mrDogeRegionFlag(region.id),
+        }),
+      )
+      .sort(
+        (a, b) =>
+          b.eventCount - a.eventCount ||
+          b.competitionCount - a.competitionCount ||
+          a.name.localeCompare(b.name, "pt-BR"),
+      );
+
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+    res.json({ sport, provider: "mrdoge", regions: normalized });
+  } catch (err) {
+    logger.warn({ err, sport }, "[mrdoge] catalog regions failed");
+    res.status(200).json({ sport, provider: "mrdoge", regions: [] as MatchCatalogRegion[] });
+  }
+});
+
+router.get("/catalog/competitions", async (req: Request, res: Response) => {
+  const sport = String(req.query["sport"] ?? "");
+  const range = String(req.query["range"] ?? "default");
+  const regionId = Number(req.query["regionId"] ?? 0);
+  const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
+
+  if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport || !Number.isFinite(regionId) || regionId <= 0) {
+    res.json({ sport, regionId, provider: "mrdoge", competitions: [] as MatchCatalogCompetition[] });
+    return;
+  }
+
+  try {
+    const mrdoge = getMrDogeClient();
+    const { startDate, endDate } = mrDogeCatalogDateWindow(range);
+    const competitions = await mrdoge.competitions.list({
+      sports: [mrdogeSport],
+      regionIds: [regionId],
+      status: ["live", "upcoming"],
+      startDate,
+      endDate,
+      limit: 200,
+      locale: "pt-BR",
+      timezone: "Europe/Lisbon",
+    });
+
+    const normalized = [...competitions]
+      .map(
+        (competition): MatchCatalogCompetition => ({
+          id: competition.id,
+          name: competition.name,
+          regionId: competition.regionId,
+          eventCount: competition.eventCount ?? 0,
+        }),
+      )
+      .sort(
+        (a, b) =>
+          b.eventCount - a.eventCount ||
+          a.name.localeCompare(b.name, "pt-BR"),
+      );
+
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+    res.json({ sport, regionId, provider: "mrdoge", competitions: normalized });
+  } catch (err) {
+    logger.warn({ err, sport, regionId }, "[mrdoge] catalog competitions failed");
+    res.status(200).json({
+      sport,
+      regionId,
+      provider: "mrdoge",
+      competitions: [] as MatchCatalogCompetition[],
+    });
+  }
+});
 
 router.get("/upcoming", async (req: Request, res: Response) => {
   res.setHeader(

@@ -3353,6 +3353,30 @@ const OTHER_SPORTS: {
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
 
+type SidebarCatalogRegion = {
+  id: number;
+  name: string;
+  eventCount: number;
+  competitionCount: number;
+  flagUrl?: string;
+};
+
+type SidebarCatalogCompetition = {
+  id: number;
+  name: string;
+  regionId: number;
+  eventCount: number;
+};
+
+const MRDOGE_CATALOG_SPORTS = new Set([
+  "football",
+  "tennis",
+  "basketball",
+  "hockey",
+  "volleyball",
+  "baseball",
+]);
+
 type SidebarTreeContentProps = {
   selectedSport: string;
   setSelectedSport: (s: string) => void;
@@ -3370,6 +3394,12 @@ type SidebarTreeContentProps = {
   setSelectedLeague?: (l: string | null) => void;
   selectedCountry?: string | null;
   setSelectedCountry?: (c: string | null) => void;
+  catalogBySport?: Record<string, SidebarCatalogRegion[]>;
+  competitionCatalogByRegion?: Record<string, SidebarCatalogCompetition[]>;
+  catalogLoadingSport?: string | null;
+  competitionLoadingKey?: string | null;
+  ensureSportCatalog?: (sport: string) => void;
+  ensureCompetitionCatalog?: (sport: string, region: SidebarCatalogRegion) => void;
 };
 
 function SidebarTreeContent({
@@ -3387,9 +3417,23 @@ function SidebarTreeContent({
   setSelectedLeague,
   selectedCountry,
   setSelectedCountry,
+  catalogBySport,
+  competitionCatalogByRegion,
+  catalogLoadingSport,
+  competitionLoadingKey,
+  ensureSportCatalog,
+  ensureCompetitionCatalog,
 }: SidebarTreeContentProps) {
   const py = compact ? "py-1.5" : "py-2";
   const textSize = compact ? "text-[12px]" : "text-[13px]";
+  const dynamicSportKeys = new Set([
+    "football",
+    "tennis",
+    "basketball",
+    "hockey",
+    "volleyball",
+    "baseball",
+  ]);
 
   function go(sport: string) {
     setSelectedSport(sport);
@@ -3404,7 +3448,152 @@ function SidebarTreeContent({
     } else {
       setExpandedSport(key);
       setExpandedCountry(null);
+      if (dynamicSportKeys.has(key)) ensureSportCatalog?.(key);
     }
+  }
+
+  function renderDynamicSportTree(
+    sportKey: string,
+    icon: string,
+    fallbackLeagues?: string[],
+    fallbackCountry?: string,
+  ) {
+    const regions = catalogBySport?.[sportKey] ?? [];
+    const showDynamic = dynamicSportKeys.has(sportKey) && regions.length > 0;
+    if (!showDynamic) return null;
+
+    return (
+      <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+        {regions.map((region) => {
+          const regionKey = `${sportKey}:${region.id}`;
+          const competitions = competitionCatalogByRegion?.[regionKey] ?? [];
+          const isLoadingCompetitions = competitionLoadingKey === regionKey;
+          return (
+            <div key={regionKey}>
+              <button
+                onClick={() => {
+                  const isActive = selectedCountry === region.name;
+                  setExpandedCountry(isActive ? null : regionKey);
+                  setSelectedCountry?.(isActive ? null : region.name);
+                  setSelectedLeague?.(null);
+                  setSelectedSport(sportKey);
+                  setActiveTab("sports");
+                  if (!isActive) ensureCompetitionCatalog?.(sportKey, region);
+                  onClose?.();
+                }}
+                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === region.name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === regionKey ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+              >
+                {region.flagUrl ? (
+                  <StableImage
+                    src={region.flagUrl}
+                    alt=""
+                    className="w-4 h-4 rounded-full shrink-0 object-cover"
+                  />
+                ) : (
+                  <span className="text-xs leading-none shrink-0">{fallbackCountry ?? icon}</span>
+                )}
+                <span className="flex-1 text-left truncate">{region.name}</span>
+                <span className="text-[10px] text-zinc-500 shrink-0">
+                  {region.eventCount || region.competitionCount}
+                </span>
+                <ChevronRight
+                  size={10}
+                  className={`transition-transform shrink-0 ${expandedCountry === regionKey ? "rotate-90 text-red-400" : "text-zinc-600"}`}
+                />
+              </button>
+              {expandedCountry === regionKey && (
+                <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                  {isLoadingCompetitions && competitions.length === 0 && (
+                    <div className="px-2 py-1 text-[11px] text-zinc-500">
+                      A carregar competições...
+                    </div>
+                  )}
+                  {competitions.map((competition) => {
+                    const active = selectedLeague === competition.name;
+                    const logo = getLeagueLogo(
+                      competition.name,
+                      region.name,
+                    );
+                    return (
+                      <button
+                        key={`${regionKey}:${competition.id}`}
+                        onClick={() => {
+                          setSelectedLeague?.(
+                            active ? null : competition.name,
+                          );
+                          setSelectedCountry?.(null);
+                          setSelectedSport(sportKey);
+                          setActiveTab("sports");
+                          onClose?.();
+                        }}
+                        className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                      >
+                        {logo ? (
+                          <img
+                            src={logo}
+                            alt=""
+                            className="w-4 h-4 shrink-0 object-contain"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <span className="text-xs leading-none shrink-0">
+                            {LEAGUE_FLAGS[competition.name] ?? icon}
+                          </span>
+                        )}
+                        <span className="truncate flex-1">
+                          {competition.name}
+                        </span>
+                        {competition.eventCount > 0 && (
+                          <span className="text-[10px] text-zinc-500 shrink-0">
+                            {competition.eventCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {!isLoadingCompetitions &&
+                    competitions.length === 0 &&
+                    fallbackLeagues &&
+                    fallbackLeagues.map((league) => {
+                      const active = selectedLeague === league;
+                      const logo = getLeagueLogo(league, fallbackCountry);
+                      return (
+                        <button
+                          key={`${regionKey}:${league}`}
+                          onClick={() => {
+                            setSelectedLeague?.(active ? null : league);
+                            setSelectedCountry?.(null);
+                            setSelectedSport(sportKey);
+                            setActiveTab("sports");
+                            onClose?.();
+                          }}
+                          className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                        >
+                          {logo ? (
+                            <img
+                              src={logo}
+                              alt=""
+                              className="w-4 h-4 shrink-0 object-contain"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <span className="text-xs leading-none shrink-0">
+                              {LEAGUE_FLAGS[league] ?? icon}
+                            </span>
+                          )}
+                          <span className="truncate">{league}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -3481,67 +3670,74 @@ function SidebarTreeContent({
           />
         </button>
         {expandedSport === "football" && (
-          <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-            {FOOTBALL_COUNTRIES.map(({ name, flag, leagues }) => (
-              <div key={name}>
-                <button
-                  onClick={() => {
-                    const isActive = selectedCountry === name;
-                    setExpandedCountry(isActive ? null : name);
-                    setSelectedCountry?.(isActive ? null : name);
-                    setSelectedLeague?.(null);
-                    setSelectedSport("football");
-                    setActiveTab("sports");
-                    onClose?.();
-                  }}
-                  className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
-                >
-                  <span className="text-xs leading-none shrink-0">{flag}</span>
-                  <span className="flex-1 text-left truncate">{name}</span>
-                  <ChevronRight
-                    size={10}
-                    className={`transition-transform shrink-0 ${expandedCountry === name ? "rotate-90 text-red-400" : "text-zinc-600"}`}
-                  />
-                </button>
-                {expandedCountry === name && (
-                  <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-                    {leagues.map((league) => {
-                      const active = selectedLeague === league;
-                      const logo = getLeagueLogo(league, name);
-                      return (
-                        <button
-                          key={league}
-                          onClick={() => {
-                            setSelectedLeague?.(active ? null : league);
-                            setSelectedCountry?.(null);
-                            setSelectedSport("football");
-                            setActiveTab("sports");
-                            onClose?.();
-                          }}
-                          className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
-                        >
-                          {logo ? (
-                            <img
-                              src={logo}
-                              alt=""
-                              className="w-4 h-4 shrink-0 object-contain"
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <span className="text-xs leading-none shrink-0">
-                              {LEAGUE_FLAGS[league] ?? "⚽"}
-                            </span>
-                          )}
-                          <span className="truncate">{league}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          renderDynamicSportTree("football", "⚽") ?? (
+            <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+              {catalogLoadingSport === "football" && (
+                <div className="px-2 py-1 text-[11px] text-zinc-500">
+                  A carregar catálogo...
+                </div>
+              )}
+              {FOOTBALL_COUNTRIES.map(({ name, flag, leagues }) => (
+                <div key={name}>
+                  <button
+                    onClick={() => {
+                      const isActive = selectedCountry === name;
+                      setExpandedCountry(isActive ? null : name);
+                      setSelectedCountry?.(isActive ? null : name);
+                      setSelectedLeague?.(null);
+                      setSelectedSport("football");
+                      setActiveTab("sports");
+                      onClose?.();
+                    }}
+                    className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                  >
+                    <span className="text-xs leading-none shrink-0">{flag}</span>
+                    <span className="flex-1 text-left truncate">{name}</span>
+                    <ChevronRight
+                      size={10}
+                      className={`transition-transform shrink-0 ${expandedCountry === name ? "rotate-90 text-red-400" : "text-zinc-600"}`}
+                    />
+                  </button>
+                  {expandedCountry === name && (
+                    <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                      {leagues.map((league) => {
+                        const active = selectedLeague === league;
+                        const logo = getLeagueLogo(league, name);
+                        return (
+                          <button
+                            key={league}
+                            onClick={() => {
+                              setSelectedLeague?.(active ? null : league);
+                              setSelectedCountry?.(null);
+                              setSelectedSport("football");
+                              setActiveTab("sports");
+                              onClose?.();
+                            }}
+                            className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                          >
+                            {logo ? (
+                              <img
+                                src={logo}
+                                alt=""
+                                className="w-4 h-4 shrink-0 object-contain"
+                                loading="lazy"
+                                decoding="async"
+                              />
+                            ) : (
+                              <span className="text-xs leading-none shrink-0">
+                                {LEAGUE_FLAGS[league] ?? "⚽"}
+                              </span>
+                            )}
+                            <span className="truncate">{league}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 
@@ -3560,39 +3756,46 @@ function SidebarTreeContent({
             />
           </button>
           {expandedSport === key && (
-            <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-              {leagues.map((league) => {
-                const active = selectedLeague === league;
-                const logo = getLeagueLogo(league);
-                return (
-                  <button
-                    key={league}
-                    onClick={() => {
-                      setSelectedLeague?.(active ? null : league);
-                      setSelectedSport(key);
-                      setActiveTab("sports");
-                      onClose?.();
-                    }}
-                    className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
-                  >
-                    {logo ? (
-                      <img
-                        src={logo}
-                        alt=""
-                        className="w-4 h-4 shrink-0 object-contain"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <span className="text-xs leading-none shrink-0">
-                        {LEAGUE_FLAGS[league] ?? "🏆"}
-                      </span>
-                    )}
-                    <span className="truncate">{league}</span>
-                  </button>
-                );
-              })}
-            </div>
+            renderDynamicSportTree(key, icon, leagues) ?? (
+              <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                {catalogLoadingSport === key && (
+                  <div className="px-2 py-1 text-[11px] text-zinc-500">
+                    A carregar catálogo...
+                  </div>
+                )}
+                {leagues.map((league) => {
+                  const active = selectedLeague === league;
+                  const logo = getLeagueLogo(league);
+                  return (
+                    <button
+                      key={league}
+                      onClick={() => {
+                        setSelectedLeague?.(active ? null : league);
+                        setSelectedSport(key);
+                        setActiveTab("sports");
+                        onClose?.();
+                      }}
+                      className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
+                    >
+                      {logo ? (
+                        <img
+                          src={logo}
+                          alt=""
+                          className="w-4 h-4 shrink-0 object-contain"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <span className="text-xs leading-none shrink-0">
+                          {LEAGUE_FLAGS[league] ?? "🏆"}
+                        </span>
+                      )}
+                      <span className="truncate">{league}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
       ))}
@@ -5743,6 +5946,17 @@ export default function Home({
     string | null
   >(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [catalogBySport, setCatalogBySport] = useState<
+    Record<string, SidebarCatalogRegion[]>
+  >({});
+  const [competitionCatalogByRegion, setCompetitionCatalogByRegion] =
+    useState<Record<string, SidebarCatalogCompetition[]>>({});
+  const [catalogLoadingSport, setCatalogLoadingSport] = useState<string | null>(
+    null,
+  );
+  const [competitionLoadingKey, setCompetitionLoadingKey] = useState<
+    string | null
+  >(null);
 
   // Top Competições — computed from live + upcoming matches
   const PRIORITY_LEAGUES = [
@@ -5787,6 +6001,80 @@ export default function Home({
     );
     return (priority.length > 0 ? priority : available).slice(0, 8);
   })();
+
+  useEffect(() => {
+    setCatalogBySport({});
+    setCompetitionCatalogByRegion({});
+    setCatalogLoadingSport(null);
+    setCompetitionLoadingKey(null);
+  }, [upcomingRange]);
+
+  const ensureSportCatalog = useCallback(
+    async (sport: string) => {
+      if (!MRDOGE_CATALOG_SPORTS.has(sport)) return;
+      if ((catalogBySport[sport] ?? []).length > 0) return;
+      if (catalogLoadingSport === sport) return;
+
+      setCatalogLoadingSport(sport);
+      try {
+        const params = new URLSearchParams({ sport });
+        if (upcomingRange === "month") params.set("range", "month");
+        const r = await fetch(`/api/matches/catalog?${params.toString()}`);
+        const data = r.ok ? await r.json() : { regions: [] };
+        const regions = Array.isArray(data?.regions)
+          ? (data.regions as SidebarCatalogRegion[])
+          : [];
+        setCatalogBySport((prev) =>
+          (prev[sport] ?? []).length > 0 ? prev : { ...prev, [sport]: regions },
+        );
+      } catch {
+        /* keep fallback sidebar */
+      } finally {
+        setCatalogLoadingSport((prev) => (prev === sport ? null : prev));
+      }
+    },
+    [catalogBySport, catalogLoadingSport, upcomingRange],
+  );
+
+  const ensureCompetitionCatalog = useCallback(
+    async (sport: string, region: SidebarCatalogRegion) => {
+      if (!MRDOGE_CATALOG_SPORTS.has(sport)) return;
+      const key = `${sport}:${region.id}`;
+      if ((competitionCatalogByRegion[key] ?? []).length > 0) return;
+      if (competitionLoadingKey === key) return;
+
+      setCompetitionLoadingKey(key);
+      try {
+        const params = new URLSearchParams({
+          sport,
+          regionId: String(region.id),
+        });
+        if (upcomingRange === "month") params.set("range", "month");
+        const r = await fetch(
+          `/api/matches/catalog/competitions?${params.toString()}`,
+        );
+        const data = r.ok ? await r.json() : { competitions: [] };
+        const competitions = Array.isArray(data?.competitions)
+          ? (data.competitions as SidebarCatalogCompetition[])
+          : [];
+        setCompetitionCatalogByRegion((prev) =>
+          (prev[key] ?? []).length > 0
+            ? prev
+            : { ...prev, [key]: competitions },
+        );
+      } catch {
+        /* keep fallback sidebar */
+      } finally {
+        setCompetitionLoadingKey((prev) => (prev === key ? null : prev));
+      }
+    },
+    [competitionCatalogByRegion, competitionLoadingKey, upcomingRange],
+  );
+
+  useEffect(() => {
+    if (!sidebarExpandedSport) return;
+    void ensureSportCatalog(sidebarExpandedSport);
+  }, [sidebarExpandedSport, ensureSportCatalog]);
 
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(
@@ -7529,6 +7817,9 @@ export default function Home({
           awayTeamId?: string;
           homeImageVersion?: string;
           awayImageVersion?: string;
+          homeLogoUrl?: string;
+          awayLogoUrl?: string;
+          regionFlagUrl?: string;
         }>;
         // Stable merge: update existing cards in-place, add new ones at the
         // end, drop gone ones — prevents visible layout shift on re-fetch.
@@ -19715,6 +20006,12 @@ export default function Home({
                   setSelectedLeague={setSelectedLeague}
                   selectedCountry={selectedCountry}
                   setSelectedCountry={setSelectedCountry}
+                  catalogBySport={catalogBySport}
+                  competitionCatalogByRegion={competitionCatalogByRegion}
+                  catalogLoadingSport={catalogLoadingSport}
+                  competitionLoadingKey={competitionLoadingKey}
+                  ensureSportCatalog={ensureSportCatalog}
+                  ensureCompetitionCatalog={ensureCompetitionCatalog}
                 />
               </div>
             </motion.div>
@@ -19741,6 +20038,12 @@ export default function Home({
               setSelectedLeague={setSelectedLeague}
               selectedCountry={selectedCountry}
               setSelectedCountry={setSelectedCountry}
+              catalogBySport={catalogBySport}
+              competitionCatalogByRegion={competitionCatalogByRegion}
+              catalogLoadingSport={catalogLoadingSport}
+              competitionLoadingKey={competitionLoadingKey}
+              ensureSportCatalog={ensureSportCatalog}
+              ensureCompetitionCatalog={ensureCompetitionCatalog}
             />
           </div>
         </aside>
