@@ -9438,6 +9438,46 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/upcoming-match/:id", async (req: Request, res: Response) => {
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, max-age=0",
+  );
+  const id = String(req.params["id"] ?? "");
+  const forceFresh = String(req.query["fresh"] ?? "0") === "1";
+  if (!id) {
+    res.json({ match: null });
+    return;
+  }
+
+  const flattenUpcoming = (cache: UpcomingTopCache): UpcomingMatch[] => [
+    ...cache.football,
+    ...cache.tennis,
+    ...cache.basketball,
+    ...cache.hockey,
+    ...cache.volleyball,
+    ...cache.baseball,
+    ...cache.mma,
+    ...cache.darts,
+    ...cache.boxing,
+    ...cache.cricket,
+    ...cache.handball,
+    ...cache.formula1,
+  ];
+
+  try {
+    const cache = forceFresh ? await refreshUpcomingTop() : await getUpcomingAll();
+    let match = flattenUpcoming(cache).find((m) => String(m.id) === id) ?? null;
+    if (!match && !forceFresh) {
+      const fresh = await refreshUpcomingTop();
+      match = flattenUpcoming(fresh).find((m) => String(m.id) === id) ?? null;
+    }
+    res.json({ match });
+  } catch {
+    res.json({ match: null });
+  }
+});
+
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/event-stream");

@@ -5198,6 +5198,7 @@ export default function Home({
   const sseRef = useRef<EventSource | null>(null);
   const sseActiveRef = useRef(false); // true when SSE is connected and receiving data
   const liveExpandedFullFetchRef = useRef<string | null>(null);
+  const upcomingExpandedFullFetchRef = useRef<string | null>(null);
   const livePrefetchingRef = useRef<Set<string>>(new Set());
   const liveTennisHydratingRef = useRef<Set<string>>(new Set());
   const finishedMatchScores = useRef<
@@ -7251,6 +7252,79 @@ export default function Home({
         liveExpandedFullFetchRef.current = null;
     };
   }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!expandedMatch || expandedMatch.isLive) return;
+    const id = String(expandedMatch.id);
+    const snap = readSnapshot(matchSnapshotKey(id));
+    const canUseSnap = !!(
+      snap &&
+      Date.now() - snap.savedAt < 10 * 60_000 &&
+      snap.value
+    );
+    if (canUseSnap) {
+      setExpandedMatch((prev) =>
+        prev && String(prev.id) === id
+          ? ({ ...(snap.value as any), isLive: false } as Match)
+          : prev,
+      );
+    }
+    if (upcomingExpandedFullFetchRef.current === id) return;
+    upcomingExpandedFullFetchRef.current = id;
+
+    let cancelled = false;
+    let currentCtrl: AbortController | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 4;
+
+    const runFetch = () => {
+      const ctrl = new AbortController();
+      currentCtrl = ctrl;
+      const tid = setTimeout(() => ctrl.abort(), 12_000);
+      fetch(`/api/matches/upcoming-match/${encodeURIComponent(id)}?fresh=1`, {
+        signal: ctrl.signal,
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const m = d?.match as Match | null | undefined;
+          if (!m) return false;
+          writeSnapshot(matchSnapshotKey(id), m as any);
+          setUpcomingMatches((prev) =>
+            prev.map((item) =>
+              String(item.id) === id ? ({ ...m, isLive: false } as Match) : item,
+            ),
+          );
+          setExpandedMatch((prev) => {
+            if (!prev || String(prev.id) !== id) return prev;
+            return { ...(m as any), isLive: false } as Match;
+          });
+          return !!(m as any).markets;
+        })
+        .catch(() => false)
+        .finally(() => {
+          clearTimeout(tid);
+        })
+        .then((gotMarkets) => {
+          if (cancelled) return;
+          attempt += 1;
+          if (gotMarkets || attempt >= MAX_ATTEMPTS) {
+            upcomingExpandedFullFetchRef.current = null;
+            return;
+          }
+          retryTimer = setTimeout(runFetch, 3_000);
+        });
+    };
+
+    runFetch();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      currentCtrl?.abort();
+      if (upcomingExpandedFullFetchRef.current === id)
+        upcomingExpandedFullFetchRef.current = null;
+    };
+  }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]);
 
   const normalizeTeamName = (value: string | undefined) =>
     String(value ?? "")
