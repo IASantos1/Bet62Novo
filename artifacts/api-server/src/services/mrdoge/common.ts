@@ -80,6 +80,7 @@ export const MRDOGE_SOCCER_BET_TYPES = [
   "SOCCER_MATCH_RESULT_NODRAW",
   "SOCCER_CORRECT_SCORE_EXTENDED",
   "SOCCER_FIRST_HALF_RESULT",
+  "SOCCER_FIRST_HALF_UNDER_OVER",
   "SOCCER_SECOND_HALF_RESULT",
   "SOCCER_HALFTIME_FULLTIME",
   "SOCCER_MATCH_RESULT_HANDICAP",
@@ -181,6 +182,7 @@ export type MrDogeSoccerExtendedMarkets = {
   drawNoBet?: { home: number; away: number };
   asianHandicap?: { line: number; home: number; away: number };
   halfTime?: { home: number; draw: number; away: number };
+  firstHalfTotal?: { line: number; over: number; under: number };
   secondHalf?: { home: number; draw: number; away: number };
   htft?: {
     hh: number;
@@ -474,6 +476,44 @@ export function extractMrDogeSoccerBtts(
   return mrDogeExtractYesNo(markets, "SOCCER_BOTH_TEAMS_TO_SCORE");
 }
 
+function mrDogeExtractSingleLineOverUnder(
+  markets: Market[] | undefined,
+  betType: string,
+  preferredLine?: number,
+): { line: number; over: number; under: number } | null {
+  if (!markets) return null;
+  const byLine = new Map<number, { over?: number; under?: number }>();
+  for (const market of markets) {
+    if (market.betType !== betType) continue;
+    for (const line of market.lines) {
+      if (!mrDogeIsAvailable(line)) continue;
+      const parsed = mrDogeParseOverUnderLine(market, line);
+      if (!parsed) continue;
+      const entry = byLine.get(parsed.line) ?? {};
+      if (parsed.side === "over") entry.over = line.price;
+      else entry.under = line.price;
+      byLine.set(parsed.line, entry);
+    }
+  }
+
+  const complete = Array.from(byLine.entries())
+    .filter(([, entry]) => entry.over != null && entry.under != null)
+    .map(([line, entry]) => ({
+      line,
+      over: entry.over!,
+      under: entry.under!,
+    }));
+  if (complete.length === 0) return null;
+  if (preferredLine == null) return complete[0]!;
+
+  complete.sort(
+    (a, b) =>
+      Math.abs(a.line - preferredLine) - Math.abs(b.line - preferredLine) ||
+      a.line - b.line,
+  );
+  return complete[0]!;
+}
+
 export function extractMrDogeSoccerExtendedMarkets(
   markets: Market[] | undefined,
 ): MrDogeSoccerExtendedMarkets {
@@ -493,6 +533,13 @@ export function extractMrDogeSoccerExtendedMarkets(
 
   const dnb = mrDogeExtractTwoWayResult(markets, "SOCCER_MATCH_RESULT_NODRAW");
   if (dnb) out.drawNoBet = dnb;
+
+  const firstHalfTotal = mrDogeExtractSingleLineOverUnder(
+    markets,
+    "SOCCER_FIRST_HALF_UNDER_OVER",
+    1.5,
+  );
+  if (firstHalfTotal) out.firstHalfTotal = firstHalfTotal;
 
   const asianMarkets = markets
     .filter((m) => m.betType === "SOCCER_MATCH_RESULT_ASIAN")

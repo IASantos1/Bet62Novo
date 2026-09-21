@@ -3870,6 +3870,7 @@ type AdvancedMarkets = {
   _spread?: number;
   _total?: number;
   _total1H?: number;
+  firstHalfTotal?: { line: number; over: number; under: number };
   _spreadLine?: number;
   // Extended football markets
   drawNoBet?: { home: number; away: number };
@@ -13835,6 +13836,8 @@ export default function Home({
                         ((Number(mk?.halfTime?.home ?? 0) > 1.01) ||
                           (Number(mk?.halfTime?.draw ?? 0) > 1.01) ||
                           (Number(mk?.halfTime?.away ?? 0) > 1.01) ||
+                          (Number(mk?.firstHalfTotal?.over ?? 0) > 1.01) ||
+                          (Number(mk?.firstHalfTotal?.under ?? 0) > 1.01) ||
                           (Number(mk?.firstGoal?.home ?? 0) > 1.01) ||
                           (Number(mk?.drawNoBet?.home ?? 0) > 1.01));
                       if (has1Tempo) baseTabs.push({ key: "1tempo", label: "1º Tempo" });
@@ -15397,22 +15400,24 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
-                    {m._total1H && m.totalGoals.over15 > 0 && (
-                      <MarketGroup title={`Total 1º Tempo — ${m._total1H}`}>
+                    {m.firstHalfTotal &&
+                      (Number(m.firstHalfTotal.over ?? 0) > 0 ||
+                        Number(m.firstHalfTotal.under ?? 0) > 0) && (
+                      <MarketGroup title={`Total 1º Tempo — ${m.firstHalfTotal.line}`}>
                         <MarketOddsBtn
                           match={match}
-                          sel={`b-h1-pts-o-${m._total1H}`}
-                          odd={m.totalGoals.over15}
+                          sel={`b-h1-pts-o-${m.firstHalfTotal.line}`}
+                          odd={m.firstHalfTotal.over}
                           market="totais"
-                          label={`Mais de ${m._total1H}`}
+                          label={`Mais de ${m.firstHalfTotal.line}`}
                           suspKey="totalGoals"
                         />
                         <MarketOddsBtn
                           match={match}
-                          sel={`b-h1-pts-u-${m._total1H}`}
-                          odd={m.totalGoals.under15}
+                          sel={`b-h1-pts-u-${m.firstHalfTotal.line}`}
+                          odd={m.firstHalfTotal.under}
                           market="totais"
-                          label={`Menos de ${m._total1H}`}
+                          label={`Menos de ${m.firstHalfTotal.line}`}
                           suspKey="totalGoals"
                         />
                       </MarketGroup>

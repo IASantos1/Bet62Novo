@@ -160,6 +160,7 @@ export type AdvancedMarkets = {
     awayPlusOneHalf: number;
   };
   halfTime: { home: number; draw: number; away: number };
+  firstHalfTotal?: { line: number; over: number; under: number };
   firstGoal: { home: number; noGoal: number; away: number };
   // Extended football markets
   drawNoBet?: { home: number; away: number };
@@ -8112,6 +8113,10 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
       if (extended.asianHandicap) markets.asianHandicap = extended.asianHandicap;
       if (extended.halfTime) markets.halfTime = extended.halfTime;
+      if (extended.firstHalfTotal) {
+        markets.firstHalfTotal = extended.firstHalfTotal;
+        markets._total1H = extended.firstHalfTotal.line;
+      }
       if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
       if (extended.htft) markets.htft = extended.htft;
       if (extended.correctScore) markets.correctScore = extended.correctScore;
@@ -8210,6 +8215,10 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
     if (extended.asianHandicap) markets.asianHandicap = extended.asianHandicap;
     if (extended.halfTime) markets.halfTime = extended.halfTime;
+    if (extended.firstHalfTotal) {
+      markets.firstHalfTotal = extended.firstHalfTotal;
+      markets._total1H = extended.firstHalfTotal.line;
+    }
     if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
     if (extended.htft) markets.htft = extended.htft;
     if (extended.correctScore) markets.correctScore = extended.correctScore;
@@ -9535,6 +9544,10 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
           if (extended.asianHandicap)
             enrichedMarkets.asianHandicap = extended.asianHandicap;
           if (extended.halfTime) enrichedMarkets.halfTime = extended.halfTime;
+          if (extended.firstHalfTotal) {
+            enrichedMarkets.firstHalfTotal = extended.firstHalfTotal;
+            enrichedMarkets._total1H = extended.firstHalfTotal.line;
+          }
           if (extended.secondHalf)
             enrichedMarkets.secondHalf = extended.secondHalf;
           if (extended.htft) enrichedMarkets.htft = extended.htft;
