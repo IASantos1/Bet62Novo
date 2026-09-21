@@ -14395,23 +14395,33 @@ export default function Home({
                     key={`inline-${bucket}-${section.section}-${groupIndex}`}
                     title={group.title}
                   >
-                    {group.items.map(({ market, originalIndex }) => (
-                      <div
-                        key={`all-row-${bucket}-${originalIndex}`}
-                        className="w-full flex gap-2"
-                      >
-                        {market.choices.map((choice, choiceIndex) => (
-                          <MarketOddsBtn
-                            key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                            match={match}
-                            sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                            odd={choice.odds}
-                            market={`all-${bucket}-${originalIndex}`}
-                            label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
-                          />
-                        ))}
-                      </div>
-                    ))}
+                    <div className="w-full flex flex-col gap-2">
+                      {group.items.map(({ market, originalIndex }) => (
+                        <div
+                          key={`all-row-${bucket}-${originalIndex}`}
+                          className={`w-full grid gap-2 ${
+                            market.choices.length === 1
+                              ? "grid-cols-1"
+                              : market.choices.length === 2
+                                ? "grid-cols-2"
+                                : market.choices.length === 3
+                                  ? "grid-cols-3"
+                                  : "grid-cols-2 sm:grid-cols-3"
+                          }`}
+                        >
+                          {market.choices.map((choice, choiceIndex) => (
+                            <MarketOddsBtn
+                              key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                              match={match}
+                              sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                              odd={choice.odds}
+                              market={`all-${bucket}-${originalIndex}`}
+                              label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
+                            />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
                   </MarketGroup>
                 ))}
               </div>
