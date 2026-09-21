@@ -7542,7 +7542,7 @@ export default function Home({
       return;
     const minute = getDisplayMinute(expandedMatch);
     if (minute < 85) return;
-    const allowedLateTabs = new Set(["todos", "resultado", "gols", "handicap", "mercados"]);
+    const allowedLateTabs = new Set(["todos", "resultado", "gols", "handicap"]);
     if (!allowedLateTabs.has(modalTab)) {
       setModalTab("todos");
       setTimeout(() => scrollTabIntoView("todos", "instant"), 0);
@@ -7767,7 +7767,7 @@ export default function Home({
   useEffect(() => {
     const shouldLoadAllOdds =
       !!expandedMatch &&
-      (((matchViewTab === "markets" && modalTab === "mercados") ||
+      (((matchViewTab === "markets" && modalTab === "todos") ||
         matchViewTab === "odds"));
     if (!shouldLoadAllOdds || !expandedMatch) return;
     const sport = expandedMatch.sport ?? "football";
@@ -7812,8 +7812,8 @@ export default function Home({
   useEffect(() => {
     if (matchViewTab !== "odds") return;
     setMatchViewTab("markets");
-    setModalTab("mercados");
-    setTimeout(() => scrollTabIntoView("mercados", "instant"), 0);
+    setModalTab("todos");
+    setTimeout(() => scrollTabIntoView("todos", "instant"), 0);
   }, [matchViewTab, scrollTabIntoView]);
 
   useEffect(() => {
@@ -10539,6 +10539,15 @@ export default function Home({
     return true;
   };
 
+  const getLiveSuspensionLabel = (match: Match): "GOLO" | "SUSPENSO" => {
+    const rawReason = String(match._suspensionReason ?? "")
+      .trim()
+      .toUpperCase();
+    return rawReason.includes("GOLO") || rawReason.includes("GOAL")
+      ? "GOLO"
+      : "SUSPENSO";
+  };
+
   const OddsButton = ({
     match,
     selection,
@@ -10580,10 +10589,9 @@ export default function Home({
     const suspendedBoxClass = isWCVariant
       ? `${isDarkTheme ? "border-zinc-700/70 bg-zinc-900/90" : "border-zinc-300 bg-zinc-100"}`
       : "bg-zinc-900/70 border-zinc-700/40 opacity-90";
-    const renderBlockedOdd = (
-      blockedOdd: number | null,
-      blockedLabel = "Bloq.",
-      title = "Mercado temporariamente bloqueado",
+    const renderStatusOdd = (
+      statusLabel: "Aposta Já" | "GOLO" | "SUSPENSO",
+      title: string,
     ) => (
       <div
         className={`relative ${baseBoxClass} ${suspendedBoxClass} select-none`}
@@ -10596,50 +10604,23 @@ export default function Home({
           {label}
         </span>
         <span
-          className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-base leading-none text-white"} tabular-nums`}
+          className={`${isWCVariant ? `mt-1 text-[10px] font-black tracking-[0.18em] uppercase ${statusLabel === "SUSPENSO" ? isDarkTheme ? "text-red-300" : "text-red-700" : isDarkTheme ? "text-amber-300" : "text-amber-700"}` : `mt-1 font-bold text-[9px] leading-none uppercase tracking-wider ${statusLabel === "SUSPENSO" ? "text-red-300" : "text-amber-300"}`}`}
         >
-          {blockedOdd != null && Number.isFinite(blockedOdd) && blockedOdd > 0 ? blockedOdd.toFixed(2) : "--"}
-        </span>
-        <span
-          className={`${isWCVariant ? `mt-0.5 text-[8px] font-black tracking-[0.18em] uppercase ${isDarkTheme ? "text-amber-400/90" : "text-amber-700"}` : "mt-0.5 text-[8px] font-black tracking-[0.16em] uppercase text-amber-300/85"}`}
-        >
-          {blockedLabel}
+          {statusLabel}
         </span>
       </div>
     );
     if (oddInvalid) {
-      if (isSuspended) return renderBlockedOdd(null, "Susp.", "Mercado suspenso");
-      return (
-        <div
-          className={`relative ${baseBoxClass} ${
-            isWCVariant
-              ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white")
-              : "bg-zinc-800/40 border-zinc-700/30 opacity-70"
-          } select-none`}
-          title="Aguardando preco real do feed ao vivo para este jogo"
-        >
-          <span
-            className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-zinc-500" : "text-[10px] leading-none opacity-50"}`}
-          >
-            {label}
-          </span>
-          <span
-            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-500"} tabular-nums flex items-center gap-0.5`}
-          >
-            {oddInvalid ? "--" : odd.toFixed(2)}
-            {!oddInvalid && oddsUp && (
-              <span className="text-green-400 text-[9px] font-black leading-none shrink-0">
-                ▲
-              </span>
-            )}
-            {!oddInvalid && oddsDown && (
-              <span className="text-red-400 text-[9px] font-black leading-none shrink-0">
-                ▼
-              </span>
-            )}
-          </span>
-        </div>
-      );
+      if (isSuspended) {
+        return renderStatusOdd(
+          getLiveSuspensionLabel(match),
+          "Mercado suspenso",
+        );
+      }
+      if (market === "result" && match.sport === "football" && match.isLive) {
+        return renderStatusOdd("Aposta Já", "Mercado indisponível neste momento");
+      }
+      return null;
     }
     const isSelected = !!bets.find(
       (b) =>
@@ -10648,7 +10629,12 @@ export default function Home({
         b.selection === selection,
     );
 
-    if (isSuspended) return renderBlockedOdd(odd, "Susp.", "Mercado suspenso");
+    if (isSuspended) {
+      return renderStatusOdd(
+        getLiveSuspensionLabel(match),
+        "Mercado suspenso",
+      );
+    }
 
     // Football-only: this heuristic exists to hide football's "obvious
     // blowout" late-game prices (90-minute clock, goal-difference score).
@@ -10665,7 +10651,7 @@ export default function Home({
     // legitimate, bettable market in every sport, not just tennis —
     // hiding it just disables real markets.
     if (odd < 1.15 && market === "result" && match.sport === "football") {
-      return renderBlockedOdd(odd, "Bloq.", "Mercado bloqueado temporariamente");
+      return renderStatusOdd("Aposta Já", "Mercado temporariamente protegido");
     }
 
     const isObviousResult =
@@ -10763,34 +10749,11 @@ export default function Home({
       match.marketSuspension?.["result"] != null &&
       match.marketSuspension["result"] > now;
     if (!resultSuspended) return null;
-    const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
-    let label = "SUSPENSO";
-    let toneClass = "bg-red-500/15 text-red-300 border-red-500/35";
-    if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) {
-      label = "GOLO";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("VAR")) {
-      label = "VAR";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("PENAL")) {
-      label = "PENÁLTI";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("CHANCE")) {
-      label = "GRANDE CHANCE";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("MATCH POINT")) {
-      label = "MATCH POINT";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("SET POINT")) {
-      label = "SET POINT";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("BREAK POINT")) {
-      label = "BREAK POINT";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    } else if (rawReason.includes("FIM DE SET")) {
-      label = "FIM DE SET";
-      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
-    }
+    const label = getLiveSuspensionLabel(match);
+    const toneClass =
+      label === "GOLO"
+        ? "bg-amber-400/15 text-amber-300 border-amber-400/35"
+        : "bg-red-500/15 text-red-300 border-red-500/35";
     return (
       <div className="w-full mb-1 flex justify-center">
         <span
@@ -13426,6 +13389,7 @@ export default function Home({
         : false;
     const isSusp = globalSusp || perMarketSusp;
     if (isSusp) {
+      const suspensionLabel = getLiveSuspensionLabel(match);
       return (
         <div
           className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-75 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/85" : "border-zinc-300 bg-zinc-100"}`}
@@ -13435,11 +13399,18 @@ export default function Home({
           <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
             {cleanLabel}
           </span>
-          <span className={`text-sm font-black leading-none tabular-nums ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
-            {odd.toFixed(2)}
-          </span>
-          <span className="mt-1 text-[8px] font-black tracking-[0.16em] uppercase text-amber-400">
-            Susp.
+          <span
+            className={`mt-1 text-[10px] font-black leading-none uppercase tracking-[0.18em] ${
+              suspensionLabel === "GOLO"
+                ? isDarkTheme
+                  ? "text-amber-300"
+                  : "text-amber-700"
+                : isDarkTheme
+                  ? "text-red-300"
+                  : "text-red-700"
+            }`}
+          >
+            {suspensionLabel}
           </span>
         </div>
       );
@@ -13898,8 +13869,6 @@ export default function Home({
                       const baseTabs: Array<{ key: string; label: string; icon?: string }> = [
                         { key: "todos", label: "Todos" },
                       ];
-                      const hasAllMarketsTab =
-                        (match.sport ?? "football") === "football";
                       const hasResult = (match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01;
                       if (hasResult) baseTabs.push({ key: "resultado", label: "Resultado" });
                       const hasDupla =
@@ -13986,16 +13955,9 @@ export default function Home({
                         const idx = baseTabs.findIndex((t) => t.key === "resultado");
                         baseTabs.splice(idx >= 0 ? idx : 1, 0, { key: "betbuilder", label: "Bet Builder", icon: "🧩" });
                       }
-                      if (hasAllMarketsTab) {
-                        const idx = baseTabs.findIndex((t) => t.key === "gols");
-                        baseTabs.splice(idx >= 0 ? idx + 1 : baseTabs.length, 0, {
-                          key: "mercados",
-                          label: "Mercados",
-                        });
-                      }
                       if (isLateGame) {
                         return baseTabs.filter((t) =>
-                          ["todos", "resultado", "gols", "handicap", "mercados"].includes(t.key),
+                          ["todos", "resultado", "gols", "handicap"].includes(t.key),
                         );
                       }
                       return baseTabs;
@@ -14122,10 +14084,10 @@ export default function Home({
                 </div>
               )}
 
-              {modalTab === "mercados" && (
+              {isFootball && modalTab === "todos" && (
                 <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                   <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
-                    📊 Todos os Mercados
+                    📊 Mais Mercados
                   </div>
                   {allOddsLoading || !allOddsData ? (
                     <div className="flex items-center justify-center py-12">
@@ -26584,7 +26546,7 @@ export default function Home({
                   title={game.name}
                   aria-label={game.name}
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
-                  className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
+                  className={`${sizeClass} casino-card-shine aspect-[5/6] rounded-lg border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
                 >
                   <span
                     role="button"
@@ -26601,10 +26563,10 @@ export default function Home({
                       e.stopPropagation();
                       toggleCasinoFavorite(game);
                     }}
-                    className="absolute top-2 right-2 z-10 inline-flex items-center justify-center h-8 w-8 rounded-full bg-black/55 backdrop-blur border border-white/10 hover:border-yellow-400/70"
+                    className="absolute top-1.5 right-1.5 z-10 inline-flex items-center justify-center h-6 w-6 rounded-full bg-black/55 backdrop-blur border border-white/10 hover:border-yellow-400/70"
                   >
                     <Star
-                      size={15}
+                      size={12}
                       className={
                         casinoFavoriteGames[casinoGameStorageKey(game)]
                           ? "text-yellow-300 fill-yellow-300"
@@ -26613,7 +26575,7 @@ export default function Home({
                     />
                   </span>
                   {casinoLoadingGame === game.id ? (
-                    <RefreshCw className="animate-spin text-zinc-400" size={28} />
+                    <RefreshCw className="animate-spin text-zinc-400" size={22} />
                   ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
                     // Game artwork already has its title baked in — no
                     // overlay caption here, it only fought with that text
@@ -26637,8 +26599,8 @@ export default function Home({
                     />
                   ) : (
                     <>
-                      <Activity className="text-red-600" size={28} />
-                      <span className="relative text-[11px] font-bold text-white px-2 text-center leading-tight mt-2">
+                      <Activity className="text-red-600" size={22} />
+                      <span className="relative text-[10px] font-bold text-white px-2 text-center leading-tight mt-1.5">
                         {game.name}
                       </span>
                     </>
@@ -26718,7 +26680,7 @@ export default function Home({
                       ) : (
                         <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
                           {casinoPopular.map((game) =>
-                            renderGameTile(game, "w-[calc(33%-0.5rem)] sm:w-32 flex-shrink-0"),
+                            renderGameTile(game, "w-[calc(28%-0.45rem)] sm:w-28 flex-shrink-0"),
                           )}
                         </div>
                       )}
@@ -26824,7 +26786,7 @@ export default function Home({
                     </div>
                   ) : (
                     <>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
                         {casinoGames.map((game) => renderGameTile(game, ""))}
                       </div>
 

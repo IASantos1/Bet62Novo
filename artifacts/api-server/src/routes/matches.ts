@@ -1715,12 +1715,6 @@ function isLeagueUniversallyBlocked(name: string): boolean {
   if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return true;
   if (/\b(under[ -]?\d{2})\b/.test(lower)) return true;
   if (
-    /\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(
-      lower,
-    )
-  )
-    return true;
-  if (
     /\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(
       lower,
     )
@@ -1757,15 +1751,52 @@ function footballLeagueAllowedStrict(
 const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
 const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
 
+function isMajorWomensLeague(name: string): boolean {
+  const lower = String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!lower) return false;
+  return [
+    "women's champions league",
+    "womens champions league",
+    "uefa women's champions league",
+    "uefa womens champions league",
+    "women's euro",
+    "womens euro",
+    "euro women",
+    "euro feminina",
+    "world cup women",
+    "women's world cup",
+    "womens world cup",
+    "liga f",
+    "super league women",
+    "wsl",
+    "nwsl",
+    "libertadores feminina",
+    "libertadores femenina",
+    "copa america femenina",
+    "copa america feminina",
+    "brasileirao feminino",
+    "brasileirao feminina",
+    "campeonato brasileiro feminino",
+  ].some((pattern) => lower.includes(pattern));
+}
+
 function footballCompetitionVisibilityBand(
   countryRaw: string,
   leagueDisplayName: string,
 ): "blocked" | "preferred" | "fallback" {
   if (!leagueDisplayName) return "blocked";
   if (isVirtualFootballLeague(leagueDisplayName)) return "blocked";
+  if (isWomensLeague(leagueDisplayName)) {
+    return isMajorWomensLeague(leagueDisplayName) ||
+      isIntlTournamentName(leagueDisplayName)
+      ? "preferred"
+      : "blocked";
+  }
   if (isLeagueUniversallyBlocked(leagueDisplayName)) return "blocked";
   if (isBlockedLeague(leagueDisplayName)) return "blocked";
-  if (isWomensLeague(leagueDisplayName)) return "blocked";
 
   const countryKey = normalizeCountryKey(countryRaw);
   const key = `${countryKey}: ${leagueDisplayName}`.toLowerCase();
@@ -1785,17 +1816,12 @@ function leaguePriority(name: string, country?: string): number {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-  // ── Block youth / women / reserve / amateur / futsal leagues universally ──────
-  // These keywords in the league name ALWAYS indicate a non-main competition.
+  // ── Block youth / reserve / amateur / futsal leagues universally ─────────────
+  // Women's football is handled separately by footballCompetitionVisibilityBand():
+  // only the biggest competitions survive, everything else stays blocked there.
   // Pattern must precede parent-league match (e.g. "liga mx u21" ⊃ "liga mx").
   if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return 999; // U17, U20, U21, U23…
   if (/\b(under[ -]?\d{2})\b/.test(lower)) return 999; // Under-21, Under 23…
-  if (
-    /\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(
-      lower,
-    )
-  )
-    return 999;
   if (
     /\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(
       lower,
@@ -7931,10 +7957,8 @@ function isBlockedLeague(name: string): boolean {
   return false;
 }
 
-/** Returns true for women's football leagues — blocked outright per user
- * request (2026-09-10), same as isBlockedLeague's youth leagues. Was
- * previously "kept but flagged for frontend" (isWomens tag on
- * UpcomingMatch); now filtered out at the source instead. */
+/** Detect women's football competitions so visibility can be limited to a
+ * tiny explicit allowlist of major tournaments only. */
 function isWomensLeague(name: string): boolean {
   return /women|feminine|féminin|feminino|femminile|frauen|femenin|damall|nwsl|wsl/i.test(
     name,
