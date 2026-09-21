@@ -51,6 +51,87 @@ import * as net from "net";
 
 const router: IRouter = Router();
 
+function extractProviderMatchId(rawId: string): string {
+  return String(rawId ?? "")
+    .replace(/^[a-z]+-v\d+-/i, "")
+    .replace(/^mrdoge-[a-z_]+-/i, "")
+    .replace(/^sportmonks-[a-z_]+-/i, "");
+}
+
+function mrDogeAllOddsGroup(market: Market): string {
+  const betType = String((market as any).betType ?? "").toUpperCase();
+  const name = String(market.displayName ?? "").toLowerCase();
+  if (
+    betType.includes("CORRECT_SCORE") ||
+    betType.includes("NUMBER_OF_GOALS") ||
+    name.includes("correct score")
+  ) {
+    return "Placar";
+  }
+  if (
+    betType.includes("FIRST_HALF") ||
+    betType.includes("SECOND_HALF") ||
+    betType.includes("HALFTIME") ||
+    name.includes("1st half") ||
+    name.includes("2nd half")
+  ) {
+    return "Tempos";
+  }
+  if (
+    betType.includes("ASIAN") ||
+    betType.includes("HANDICAP") ||
+    betType.includes("NODRAW")
+  ) {
+    return "Asiático";
+  }
+  if (
+    betType.includes("UNDER_OVER") ||
+    betType.includes("TOTAL") ||
+    betType.includes("GOALS") ||
+    betType.includes("TO_SCORE")
+  ) {
+    return "Golos";
+  }
+  if (
+    betType.includes("DOUBLE_CHANCE") ||
+    betType.includes("BOTH_TEAMS_TO_SCORE") ||
+    betType.includes("WIN_TO_NIL") ||
+    betType.includes("CLEAN_SHEET")
+  ) {
+    return "Especiais";
+  }
+  return "Principal";
+}
+
+function mapMrDogeMarketToAllOdds(market: Market): {
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+} | null {
+  const lines = Array.isArray((market as any).lines) ? ((market as any).lines as Array<Record<string, unknown>>) : [];
+  const choices = lines
+    .filter((line) => {
+      const price = Number(line["price"] ?? 0);
+      const available = line["isAvailable"];
+      return Number.isFinite(price) && price > 1.01 && available !== false;
+    })
+    .map((line) => {
+      const code = String(line["code"] ?? line["caption"] ?? "");
+      const caption = String(line["caption"] ?? line["code"] ?? "");
+      return {
+        name: code || caption,
+        label: caption || code,
+        odds: Number(line["price"] ?? 0),
+      };
+    });
+  if (choices.length === 0) return null;
+  return {
+    name: String(market.displayName ?? (market as any).betType ?? "Mercado"),
+    group: mrDogeAllOddsGroup(market),
+    choices,
+  };
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type AdvancedMarkets = {
@@ -9474,6 +9555,38 @@ router.get("/upcoming-match/:id", async (req: Request, res: Response) => {
     res.json({ match });
   } catch {
     res.json({ match: null });
+  }
+});
+
+router.get("/all-odds/:id", async (req: Request, res: Response) => {
+  res.setHeader(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, max-age=0",
+  );
+  const id = extractProviderMatchId(String(req.params["id"] ?? ""));
+  const sport = String(req.query["sport"] ?? "football").toLowerCase();
+  if (!id || (sport !== "football" && sport !== "soccer")) {
+    res.json({ markets: [] });
+    return;
+  }
+
+  try {
+    const cached = getMrDogeOdds(id);
+    const markets =
+      cached && cached.length > 0
+        ? cached
+        : await getMrDogeClient().odds.list({
+            matchId: id,
+            betTypes: [...MRDOGE_SOCCER_BET_TYPES],
+          });
+    res.json({
+      markets: markets
+        .map((market) => mapMrDogeMarketToAllOdds(market))
+        .filter(Boolean),
+    });
+  } catch (err) {
+    logger.warn({ err, id, sport }, "[mrdoge] all-odds fetch failed");
+    res.json({ markets: [] });
   }
 });
 

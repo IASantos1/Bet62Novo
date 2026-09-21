@@ -52,6 +52,7 @@ import {
   CreditCard,
   Crown,
   SortAsc,
+  BarChart3,
   ChevronLeft,
   CircleDot,
 } from "lucide-react";
@@ -6317,7 +6318,10 @@ export default function Home({
   };
   const getProviderMatchId = useCallback(
     (matchId: string | number | undefined | null): string => {
-      return String(matchId ?? "").replace(/^[a-z]+-v\d+-/, "");
+      return String(matchId ?? "")
+        .replace(/^[a-z]+-v\d+-/i, "")
+        .replace(/^mrdoge-[a-z_]+-/i, "")
+        .replace(/^sportmonks-[a-z_]+-/i, "");
     },
     [],
   );
@@ -7653,16 +7657,46 @@ export default function Home({
       .finally(() => setTopScorersLoading(false));
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The /v2-match-odds backend endpoint (SportsAPI Pro V2) was removed —
-  // there is no replacement source for the full markets list, so the
-  // "odds" tab now always settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "odds" || !expandedMatch) return;
-    setAllOddsData([]);
-    setAllOddsLoading(false);
+    const sport = expandedMatch.sport ?? "football";
+    if (sport !== "football") {
+      setAllOddsData([]);
+      setAllOddsLoading(false);
+      setAllOddsQuery("");
+      setAllOddsSectionOpen({});
+      return;
+    }
+    const rawId = getProviderMatchId(expandedMatch.id);
+    if (!rawId) {
+      setAllOddsData([]);
+      setAllOddsLoading(false);
+      setAllOddsQuery("");
+      setAllOddsSectionOpen({});
+      return;
+    }
+    let cancelled = false;
+    setAllOddsLoading(true);
     setAllOddsQuery("");
     setAllOddsSectionOpen({});
-  }, [matchViewTab, expandedMatch?.id]);
+    fetch(`/api/matches/all-odds/${encodeURIComponent(rawId)}?sport=${encodeURIComponent(sport)}`)
+      .then((r) => (r.ok ? r.json() : { markets: [] }))
+      .then((d) => {
+        if (cancelled) return;
+        setAllOddsData(Array.isArray(d?.markets) ? d.markets : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAllOddsData([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setAllOddsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]);
 
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
@@ -20283,6 +20317,15 @@ export default function Home({
                           <Activity size={11} />
                           Stats
                         </button>
+                        {(expandedMatch.sport ?? "football") === "football" && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "odds" ? "markets" : "odds")}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "odds" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          >
+                            <BarChart3 size={11} />
+                            Todos Merc.
+                          </button>
+                        )}
                         {(expandedMatch.sport ?? "football") === "football" && (
                           <button
                             onClick={() => setMatchViewTab(matchViewTab === "yesterday" ? "markets" : "yesterday")}
