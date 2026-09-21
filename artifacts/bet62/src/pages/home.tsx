@@ -14173,27 +14173,47 @@ export default function Home({
       if (!isFootball || allOddsLoading || sections.length === 0) return null;
       return (
         <div className="space-y-2">
-          {sections.map((section) => (
-            <div key={`inline-${bucket}-${section.section}`} className="space-y-2">
-              {section.markets.map(({ market, originalIndex }) => (
-                <MarketGroup
-                  key={`inline-${bucket}-${section.section}-${originalIndex}`}
-                  title={formatExtraAllOddsMarketTitle(market, bucket)}
-                >
-                  {market.choices.map((choice, choiceIndex) => (
-                    <MarketOddsBtn
-                      key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                      match={match}
-                      sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                      odd={choice.odds}
-                      market={`all-${bucket}-${originalIndex}`}
-                      label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
-                    />
-                  ))}
-                </MarketGroup>
-              ))}
-            </div>
-          ))}
+          {sections.map((section) => {
+            const groupedMarkets: Array<{
+              title: string;
+              items: Array<{
+                market: AllOddsMarket;
+                originalIndex: number;
+              }>;
+            }> = section.markets.reduce((acc, entry) => {
+              const title = formatExtraAllOddsMarketTitle(entry.market, bucket);
+              const last = acc[acc.length - 1];
+              if (last && last.title === title) {
+                last.items.push(entry);
+                return acc;
+              }
+              acc.push({ title, items: [entry] });
+              return acc;
+            }, []);
+            return (
+              <div key={`inline-${bucket}-${section.section}`} className="space-y-2">
+                {groupedMarkets.map((group, groupIndex) => (
+                  <MarketGroup
+                    key={`inline-${bucket}-${section.section}-${groupIndex}`}
+                    title={group.title}
+                  >
+                    {group.items.flatMap(({ market, originalIndex }) =>
+                      market.choices.map((choice, choiceIndex) => (
+                        <MarketOddsBtn
+                          key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                          match={match}
+                          sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                          odd={choice.odds}
+                          market={`all-${bucket}-${originalIndex}`}
+                          label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
+                        />
+                      )),
+                    )}
+                  </MarketGroup>
+                ))}
+              </div>
+            );
+          })}
         </div>
       );
     };
