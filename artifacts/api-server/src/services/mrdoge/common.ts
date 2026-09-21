@@ -253,6 +253,14 @@ function mrDogeParseNumericValue(text: string): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
+function mrDogeReadNumericCandidate(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    return mrDogeParseNumericValue(value);
+  }
+  return undefined;
+}
+
 function mrDogeParseOverUnderLine(
   market: Market,
   line: MrDogeMarketLine,
@@ -268,8 +276,24 @@ function mrDogeParseOverUnderLine(
   if (!side) return null;
 
   const fromCode = /^([OU])([+-]?\d+(?:\.\d+)?)$/i.exec(code);
+  const raw = line as Record<string, unknown>;
+  const marketAny = market as Record<string, unknown>;
   const lineValue =
-    fromCode != null ? Number(fromCode[2]) : mrDogeParseNumericValue(text);
+    fromCode != null
+      ? Number(fromCode[2])
+      : mrDogeParseNumericValue(text) ??
+        mrDogeReadNumericCandidate(raw["line"]) ??
+        mrDogeReadNumericCandidate(raw["handicap"]) ??
+        mrDogeReadNumericCandidate(raw["spread"]) ??
+        mrDogeReadNumericCandidate(raw["value"]) ??
+        mrDogeReadNumericCandidate(raw["point"]) ??
+        mrDogeReadNumericCandidate(raw["points"]) ??
+        mrDogeReadNumericCandidate(marketAny["line"]) ??
+        mrDogeReadNumericCandidate(marketAny["handicap"]) ??
+        mrDogeReadNumericCandidate(marketAny["spread"]) ??
+        mrDogeReadNumericCandidate(marketAny["value"]) ??
+        mrDogeReadNumericCandidate(marketAny["point"]) ??
+        mrDogeReadNumericCandidate(marketAny["points"]);
   if (!Number.isFinite(lineValue)) return null;
   return { side, line: lineValue };
 }
