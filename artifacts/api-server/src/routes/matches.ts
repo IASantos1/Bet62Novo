@@ -8895,14 +8895,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
-  // Never show unpriced football: GOAL API and PulseScore (football's only
-  // real data/price sources) were both removed 2026-09-20 (user decision),
-  // so football always has zero live candidates now (see chooseLiveProvider
-  // above) — this filter is currently vacuous, kept as a safety net so a
-  // football fixture is never shown live without a real price source, same
-  // policy as before removal.
-  const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
-    m.sport !== "football";
+  // Football live is sourced from Mr. Doge again (2026-09-20+). The old
+  // "hide every football live fixture" guard was left behind from the brief
+  // gap after GOAL API/PulseScore removal and caused matches to appear only
+  // in "Em Breve" and then vanish at kickoff instead of entering "Ao Vivo".
+  // Keep all live football fixtures visible now; suspended/interrupted odds
+  // are handled at market/button level, not by hiding the match itself.
+  const isVisibleFootballFixture = (_m: LiveMatchState): boolean => true;
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
