@@ -8029,6 +8029,7 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       if (btts) markets.bothTeamsScore = btts;
       if (extended.doubleChance) markets.doubleChance = extended.doubleChance;
       if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
+      if (extended.asianHandicap) markets.asianHandicap = extended.asianHandicap;
       if (extended.halfTime) markets.halfTime = extended.halfTime;
       if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
       if (extended.htft) markets.htft = extended.htft;
@@ -8126,6 +8127,7 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     if (btts) markets.bothTeamsScore = btts;
     if (extended.doubleChance) markets.doubleChance = extended.doubleChance;
     if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
+    if (extended.asianHandicap) markets.asianHandicap = extended.asianHandicap;
     if (extended.halfTime) markets.halfTime = extended.halfTime;
     if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
     if (extended.htft) markets.htft = extended.htft;

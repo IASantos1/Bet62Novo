@@ -179,6 +179,7 @@ type MrDogeMarketLine = Market["lines"][number];
 export type MrDogeSoccerExtendedMarkets = {
   doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   drawNoBet?: { home: number; away: number };
+  asianHandicap?: { line: number; home: number; away: number };
   halfTime?: { home: number; draw: number; away: number };
   secondHalf?: { home: number; draw: number; away: number };
   htft?: {
@@ -271,6 +272,64 @@ function mrDogeParseOverUnderLine(
     fromCode != null ? Number(fromCode[2]) : mrDogeParseNumericValue(text);
   if (!Number.isFinite(lineValue)) return null;
   return { side, line: lineValue };
+}
+
+function mrDogeParseSignedNumericValue(text: string): number | undefined {
+  const match = text.match(/[+-]\s*\d+(?:[.,]\d+)?/);
+  if (match) {
+    const value = Number(match[0].replace(/\s+/g, "").replace(",", "."));
+    if (Number.isFinite(value)) return value;
+  }
+  return mrDogeParseNumericValue(text);
+}
+
+function mrDogeParseAsianHandicapLine(market: Market): number | undefined {
+  const marketAny = market as Record<string, unknown>;
+  const candidateTexts: string[] = [
+    String(market.displayName ?? ""),
+    String(marketAny["caption"] ?? ""),
+    String(marketAny["name"] ?? ""),
+  ];
+  const candidateUnknowns: unknown[] = [
+    marketAny["line"],
+    marketAny["handicap"],
+    marketAny["spread"],
+    marketAny["value"],
+    marketAny["point"],
+    marketAny["points"],
+    marketAny["hcp"],
+    marketAny["hdp"],
+  ];
+
+  for (const line of market.lines) {
+    const raw = line as Record<string, unknown>;
+    candidateTexts.push(mrDogeLineCaption(line));
+    candidateUnknowns.push(
+      raw["line"],
+      raw["handicap"],
+      raw["spread"],
+      raw["value"],
+      raw["point"],
+      raw["points"],
+      raw["hcp"],
+      raw["hdp"],
+    );
+  }
+
+  for (const value of candidateUnknowns) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = mrDogeParseSignedNumericValue(value);
+      if (parsed != null) return parsed;
+    }
+  }
+
+  for (const text of candidateTexts) {
+    const parsed = mrDogeParseSignedNumericValue(text);
+    if (parsed != null) return parsed;
+  }
+
+  return undefined;
 }
 
 function mrDogeExtractThreeWayResult(
@@ -410,6 +469,19 @@ export function extractMrDogeSoccerExtendedMarkets(
 
   const dnb = mrDogeExtractTwoWayResult(markets, "SOCCER_MATCH_RESULT_NODRAW");
   if (dnb) out.drawNoBet = dnb;
+
+  const asianMarkets = markets
+    .filter((m) => m.betType === "SOCCER_MATCH_RESULT_ASIAN")
+    .map((market) => {
+      const prices = mrDogeExtractTwoWayResult([market], "SOCCER_MATCH_RESULT_ASIAN");
+      if (!prices) return null;
+      const line = mrDogeParseAsianHandicapLine(market);
+      if (line == null) return null;
+      return { line, ...prices };
+    })
+    .filter((entry): entry is { line: number; home: number; away: number } => entry != null)
+    .sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+  if (asianMarkets.length > 0) out.asianHandicap = asianMarkets[0]!;
 
   const halfTime = mrDogeExtractThreeWayResult(markets, "SOCCER_FIRST_HALF_RESULT");
   if (halfTime) out.halfTime = halfTime;
