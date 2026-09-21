@@ -5993,30 +5993,66 @@ export default function Home({
     string | null
   >(null);
 
-  // Top Competições — computed from live + upcoming matches
+  // Top Competições — follows BET62's curated football priority structure.
   const PRIORITY_LEAGUES = [
     "UEFA Champions League",
     "Champions League",
+    "UEFA Europa League",
+    "Europa League",
+    "UEFA Conference League",
+    "Conference League",
     "Premier League",
     "La Liga",
-    "Bundesliga",
     "Serie A",
+    "Bundesliga",
     "Ligue 1",
     "Liga Portugal",
-    "Eredivisie",
-    "Copa do Brasil",
+    "Brasileirão Série A",
     "Brasileirão",
-    "Serie B",
-    "Copa del Rey",
-    "DFB-Pokal",
-    "FA Cup",
-    "Europa League",
-    "UEFA Europa League",
-    "Conference League",
+    "Eredivisie",
+    "Belgian Pro League",
+    "Jupiler Pro League",
+    "Süper Lig",
+    "Super Lig",
+    "MLS",
+    "Major League Soccer",
+    "Saudi Pro League",
     "Liga MX",
-    "A-League",
-    "National Basketball League",
+    "Championship",
+    "League One",
+    "League Two",
+    "Scottish Premiership",
+    "Scottish Championship",
+    "Segunda División",
+    "LaLiga2",
+    "Serie B",
+    "2. Bundesliga",
+    "Ligue 2",
+    "J1 League",
+    "J2 League",
+    "K League 1",
+    "Chinese Super League",
+    "Thai League 1",
+    "UAE Pro League",
+    "Qatar Stars League",
+    "Egyptian Premier League",
+    "Botola Pro",
+    "South African Premiership",
+    "Tunisian Ligue Professionnelle 1",
   ];
+  const normalizeLeaguePriorityKey = (value: string) =>
+    String(value ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  const leaguePriorityIndex = (league: string) => {
+    const normalizedLeague = normalizeLeaguePriorityKey(league);
+    const index = PRIORITY_LEAGUES.findIndex((entry) =>
+      normalizedLeague.includes(normalizeLeaguePriorityKey(entry)),
+    );
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
   const sidebarTopLeagues = (() => {
     const leagueMap = new Map<string, TopLeagueEntry>();
     [...liveMatches, ...upcomingMatches].forEach((m) => {
@@ -6029,11 +6065,13 @@ export default function Home({
       }
     });
     const available = Array.from(leagueMap.values());
-    const priority = available.filter((l) =>
-      PRIORITY_LEAGUES.some((p) =>
-        l.league.toLowerCase().includes(p.toLowerCase()),
-      ),
-    );
+    const priority = available
+      .filter((l) => leaguePriorityIndex(l.league) !== Number.MAX_SAFE_INTEGER)
+      .sort(
+        (a, b) =>
+          leaguePriorityIndex(a.league) - leaguePriorityIndex(b.league) ||
+          a.league.localeCompare(b.league, "pt-BR"),
+      );
     return (priority.length > 0 ? priority : available).slice(0, 8);
   })();
 
@@ -23479,21 +23517,14 @@ export default function Home({
                 });
                 // Top 3 featured: pick from major-league matches first,
                 // fall back to first 3 if fewer than 3 major-league matches exist.
-                const _FEATURED_KW = [
-                  "champions league","premier league","la liga","bundesliga",
-                  "serie a","ligue 1","primeira liga","liga portugal","eredivisie",
-                  "super lig","süper lig","liga mx","mls","brasileirao","brasileirão",
-                  "campeonato brasileiro","libertadores","copa america","copa del rey",
-                  "coppa italia","fa cup","dfb pokal","nations league","world cup",
-                  "copa do mundo","nba","nhl","mlb","wimbledon","roland garros",
-                  "us open","australian open","atp finals","wta finals",
-                  "atp 1000","masters 1000","rolex masters","champions trophy",
-                ];
-                const _isMajorLeague = (lg: string) => {
-                  const l = (lg ?? "").toLowerCase();
-                  return _FEATURED_KW.some((k) => l.includes(k));
-                };
-                const _majorPool = visibleUpcoming.filter((m) => _isMajorLeague(m.league ?? ""));
+                const _majorPool = [...visibleUpcoming]
+                  .filter((m) => leaguePriorityIndex(m.league ?? "") !== Number.MAX_SAFE_INTEGER)
+                  .sort(
+                    (a, b) =>
+                      leaguePriorityIndex(a.league ?? "") -
+                        leaguePriorityIndex(b.league ?? "") ||
+                      String(a.league ?? "").localeCompare(String(b.league ?? ""), "pt-BR"),
+                  );
                 const featuredUpcoming = _majorPool.length >= 3
                   ? _majorPool.slice(0, 3)
                   : visibleUpcoming.slice(0, 3);
