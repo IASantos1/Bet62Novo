@@ -6415,7 +6415,7 @@ export default function Home({
     ].some((pattern) => full.includes(pattern));
   }, [normalizeAllOddsText]);
   const classifyExtraAllOddsBucket = useCallback(
-    (market: AllOddsMarket): "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | null => {
+    (market: AllOddsMarket): "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais" | null => {
       const group = normalizeAllOddsText(market.group ?? "");
       const name = normalizeAllOddsText(market.name ?? "");
       const full = `${group} ${name}`.trim();
@@ -6440,6 +6440,13 @@ export default function Home({
       }
       if (/handicap/.test(full)) {
         return "handicap";
+      }
+      if (
+        /(win to nil|clean sheet|highest scoring half|both halves|score in both halves|team to score|no goal scored|exactly one team to score|first team to score|last team to score)/.test(
+          full,
+        )
+      ) {
+        return "especiais";
       }
       if (/(goal|goals|golo|golos|gol|gols)/.test(full)) {
         return "gols";
@@ -13882,7 +13889,8 @@ export default function Home({
                           | "escanteios"
                           | "cartoes"
                           | "handicap"
-                          | "asiatico",
+                          | "asiatico"
+                          | "especiais",
                       ) =>
                         extraAllOddsSections.some((section) =>
                           section.markets.some(
@@ -13926,7 +13934,8 @@ export default function Home({
                         (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
                         (Number(mk?.winToNil?.away ?? 0) > 1.01) ||
                         (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
-                        (Number(mk?.cleanSheet?.away ?? 0) > 1.01);
+                        (Number(mk?.cleanSheet?.away ?? 0) > 1.01) ||
+                        hasExtraBucket("especiais");
                       if (hasEspeciais) baseTabs.push({ key: "especiais", label: "Especiais" });
                       const hasHandicap =
                         (Number(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
@@ -14068,7 +14077,7 @@ export default function Home({
     }
 
     const getExtraAllOddsSectionsForBucket = (
-      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) =>
       extraAllOddsSections
         .map((section) => ({
@@ -14083,10 +14092,11 @@ export default function Home({
     const extraCardsSections = getExtraAllOddsSectionsForBucket("cartoes");
     const extraHandicapSections = getExtraAllOddsSectionsForBucket("handicap");
     const extraAsianSections = getExtraAllOddsSectionsForBucket("asiatico");
+    const extraSpecialSections = getExtraAllOddsSectionsForBucket("especiais");
     const formatExtraAllOddsChoiceLabel = (
       market: AllOddsMarket,
       choice: { name: string; label: string; odds: number },
-      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) => {
       const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
       const choiceName = normalizeAllOddsText(choice.name ?? "");
@@ -14118,7 +14128,7 @@ export default function Home({
     };
     const formatExtraAllOddsMarketTitle = (
       market: AllOddsMarket,
-      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) => {
       const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
       if (bucket === "gols") {
@@ -14164,11 +14174,14 @@ export default function Home({
         }
         return "Asiático";
       }
+      if (bucket === "especiais") {
+        return market.name || market.group || "Especiais";
+      }
       return market.name || market.group || "Mercado";
     };
     const renderInlineExtraAllOdds = (
       sections: typeof extraAllOddsSections,
-      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) => {
       if (!isFootball || allOddsLoading || sections.length === 0) return null;
       if (match.isLive && modalTab === "todos") return null;
@@ -15502,6 +15515,8 @@ export default function Home({
                       !((m as any).cleanSheet?.home > 0) &&
                       !((m as any).toWinBothHalves?.home > 0) &&
                       !((m as any).highestScoringHalf?.first > 0) &&
+                      !allOddsLoading &&
+                      extraSpecialSections.length === 0 &&
                       modalTab === "especiais" && (
                         <div className="text-center text-zinc-600 py-6 text-sm">
                           Mercados especiais não disponíveis para esta partida.
@@ -15509,6 +15524,7 @@ export default function Home({
                       )}
                   </div>
                 )}
+              {renderInlineExtraAllOdds(extraSpecialSections, "especiais")}
 
               {/* ── BEISEBOL: TOTAL DE CORRIDAS ── */}
               {isBaseball &&
