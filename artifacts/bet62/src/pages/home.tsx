@@ -1560,6 +1560,7 @@ function getLeagueLogo(
   league: string | null | undefined,
   country?: string | null,
   homeTeam?: string | null,
+  options?: { exactOnly?: boolean },
 ): string | undefined {
   const l = league ?? "";
   if (!l) return undefined;
@@ -1568,6 +1569,7 @@ function getLeagueLogo(
     return ck ? COUNTRY_ISO[ck] : undefined;
   })();
   if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso, homeTeam)) return LEAGUE_LOGOS[l];
+  if (options?.exactOnly) return undefined;
   const lLower = l.toLowerCase();
   // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo -
   // Grupo A", etc. LONGEST matching key wins, not the first one declared in
@@ -1593,6 +1595,34 @@ function getLeagueLogo(
     }
   }
   return bestContains?.url;
+}
+
+function getCompetitionDisplayAssets(match: {
+  sport?: string;
+  league?: string | null;
+  country?: string | null;
+  home: string;
+  regionFlagUrl?: string;
+}): { leagueLogo?: string; flagUrl: string | null } {
+  const exactOnly =
+    (match.sport ?? "football") === "football" && !!match.regionFlagUrl;
+  const leagueLogo = getLeagueLogo(
+    match.league,
+    match.country,
+    match.home,
+    exactOnly ? { exactOnly: true } : undefined,
+  );
+  return {
+    leagueLogo,
+    flagUrl: leagueLogo
+      ? null
+      : (match.regionFlagUrl ??
+        getCountryFlagUrl(
+          match.country ?? undefined,
+          match.league ?? undefined,
+          match.home,
+        )),
+  };
 }
 
 const TEAM_COUNTRY: Record<string, string> = {
@@ -3513,6 +3543,8 @@ function SidebarTreeContent({
                     const logo = getLeagueLogo(
                       competition.name,
                       region.name,
+                      undefined,
+                      { exactOnly: true },
                     );
                     return (
                       <button
@@ -10266,8 +10298,34 @@ export default function Home({
       ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
       : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
     const oddInvalid = odd <= 0 || !Number.isFinite(odd);
+    const suspendedBoxClass = isWCVariant
+      ? `${isDarkTheme ? "border-red-900/50 bg-red-950/30" : "border-red-200 bg-red-50"}`
+      : "bg-red-950/25 border-red-700/30 opacity-85";
+    const renderSuspendedOdd = () => (
+      <div
+        className={`relative ${baseBoxClass} ${suspendedBoxClass} select-none`}
+        title="Mercado suspenso"
+        aria-disabled="true"
+      >
+        <span
+          className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-red-300" : "text-[10px] leading-none text-red-200/80"}`}
+        >
+          {label}
+        </span>
+        <span
+          className={`${isWCVariant ? "mt-1 text-sm font-black text-red-400" : "font-bold text-base leading-none text-red-300"} tabular-nums`}
+        >
+          --
+        </span>
+        <span
+          className={`${isWCVariant ? "mt-0.5 text-[8px] font-black tracking-[0.18em] uppercase text-red-300/80" : "mt-0.5 text-[8px] font-black tracking-[0.16em] uppercase text-red-200/75"}`}
+        >
+          Susp.
+        </span>
+      </div>
+    );
     if (oddInvalid) {
-      if (isSuspended) return null;
+      if (isSuspended) return renderSuspendedOdd();
       return (
         <div
           className={`relative ${baseBoxClass} ${
@@ -10307,9 +10365,7 @@ export default function Home({
         b.selection === selection,
     );
 
-    if (isSuspended) {
-      return null;
-    }
+    if (isSuspended) return renderSuspendedOdd();
 
     // Football-only: this heuristic exists to hide football's "obvious
     // blowout" late-game prices (90-minute clock, goal-difference score).
@@ -10495,12 +10551,8 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-            const fUrl =
-              !leagueLogo
-                ? (match.regionFlagUrl ??
-                  getCountryFlagUrl(match.country, match.league ?? undefined, match.home))
-                : null;
+            const { leagueLogo, flagUrl: fUrl } =
+              getCompetitionDisplayAssets(match);
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
                 <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -11175,13 +11227,6 @@ export default function Home({
         return false;
       })();
 
-    // Suspension: only the `result` key gates the card odds-row — settled set/period
-    // markets have far-future timestamps and must NOT count as "suspended" here.
-    const isLiveSuspended =
-      match.isLive &&
-      (match.marketSuspension?.["result"] != null &&
-        match.marketSuspension["result"] > Date.now());
-
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
     const isPenShootout =
       match.isLive && sport === "football" && !!match.markets?.penExtra;
@@ -11201,14 +11246,14 @@ export default function Home({
           onPointerMove={stopLiveCardOpen}
           onPointerUp={stopLiveCardOpen}
         >
-          {isPenShootout && !isLiveSuspended && (
+          {isPenShootout && (
             <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">
               🎯 Vencedor da Final
             </div>
           )}
           <SuspensionBanner match={match} />
           <div className="flex gap-1.5 w-full">
-            {!isLiveSuspended && isPenShootout ? (
+            {isPenShootout ? (
               <>
                 <OddsButton
                   match={match}
@@ -11229,7 +11274,7 @@ export default function Home({
                   variant="worldcup"
                 />
               </>
-            ) : !isLiveSuspended ? (
+            ) : (
               isObviousLiveResult ? (
                 <button
                   className="flex-1 flex flex-col items-center py-3 px-2 rounded-2xl text-xs border border-amber-200 bg-amber-50"
@@ -11272,9 +11317,9 @@ export default function Home({
                   />
                 </>
               )
-            ) : null}
+            )}
           </div>
-          {!isLiveSuspended && !isPenShootout && !match.hasRealOdds && (
+          {!isPenShootout && !match.hasRealOdds && (
             <div className="flex items-center justify-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
               <span className="text-[9px] font-semibold tracking-wide text-zinc-500">
@@ -11301,12 +11346,8 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-                const fUrl =
-                  !leagueLogo
-                    ? (match.regionFlagUrl ??
-                      getCountryFlagUrl(match.country, match.league ?? undefined, match.home))
-                    : null;
+                const { leagueLogo, flagUrl: fUrl } =
+                  getCompetitionDisplayAssets(match);
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
                     <div className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -11378,7 +11419,7 @@ export default function Home({
                     {homeFlag ? (
                       <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : homeBadge?.src ? (
-                      <img src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[13px] font-black leading-tight truncate flex-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
@@ -11392,7 +11433,7 @@ export default function Home({
                     {awayFlag ? (
                       <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : awayBadge?.src ? (
-                      <img src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[12px] font-semibold leading-tight truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
@@ -11423,19 +11464,19 @@ export default function Home({
                 onPointerMove={stopLiveCardOpen}
                 onPointerUp={stopLiveCardOpen}
               >
-                {isPenShootout && !isLiveSuspended && (
+                {isPenShootout && (
                   <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">
                     🎯 Vencedor da Final
                   </div>
                 )}
                 <SuspensionBanner match={match} />
                 <div className="flex gap-1.5 w-full">
-                  {!isLiveSuspended && isPenShootout ? (
+                  {isPenShootout ? (
                     <>
                       <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                       <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                     </>
-                  ) : !isLiveSuspended ? (
+                  ) : (
                     sport === "formula1" ? (
                       /* F1 live: race winner driver buttons */
                       <div className="flex gap-1 flex-wrap w-full">
@@ -11468,7 +11509,7 @@ export default function Home({
                         <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                       </>
                     )
-                  ) : null}
+                  )}
                 </div>
               </div>
             )}
@@ -11610,7 +11651,7 @@ export default function Home({
         );
       }
       // ── Standard sports: 1X2 ────────────────────────────────────────────────
-      return canShowOdds ? (
+      return canShowOdds || isSuspendedMatch ? (
         <div
           className="flex flex-col gap-1 sm:w-[280px] sm:shrink-0"
           onClick={stopCardOpen}
@@ -11622,74 +11663,73 @@ export default function Home({
           onPointerUp={stopCardOpen}
         >
           <SuspensionBanner match={match} />
-          {!isSuspendedMatch && (
-            <>
-              {/* ── 1X2 ─────────────────────────────────────────────── */}
-              <div className="flex gap-1 w-full">
+          <>
+            {/* ── 1X2 ─────────────────────────────────────────────── */}
+            <div className="flex gap-1 w-full">
+              <OddsButton
+                match={match}
+                selection="home"
+                odd={match.odds.home}
+                market="result"
+                label="1"
+                grow
+                variant="worldcup"
+              />
+              {hasDraw && (
                 <OddsButton
                   match={match}
-                  selection="home"
-                  odd={match.odds.home}
+                  selection="draw"
+                  odd={match.odds.draw}
                   market="result"
-                  label="1"
+                  label="X"
                   grow
                   variant="worldcup"
                 />
-                {hasDraw && (
-                  <OddsButton
-                    match={match}
-                    selection="draw"
-                    odd={match.odds.draw}
-                    market="result"
-                    label="X"
-                    grow
-                    variant="worldcup"
-                  />
-                )}
+              )}
+              <OddsButton
+                match={match}
+                selection="away"
+                odd={match.odds.away}
+                market="result"
+                label="2"
+                grow
+                variant="worldcup"
+              />
+            </div>
+            {!match.hasRealOdds && !isSuspendedMatch && (
+              <div className="flex items-center justify-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-[9px] font-semibold tracking-wide text-zinc-600">
+                  EST.
+                </span>
+              </div>
+            )}
+            {/* ── MMA: "vai até o limite" + total de rounds, alongside the
+                standard moneyline above (real PulseScore odds, no synthetic
+                model) ── */}
+            {sport === "mma" && match.mmaExtra?.toDistance && (
+              <div className="flex gap-1 w-full mt-1">
                 <OddsButton
                   match={match}
-                  selection="away"
-                  odd={match.odds.away}
-                  market="result"
-                  label="2"
+                  selection="yes"
+                  odd={match.mmaExtra.toDistance.yes}
+                  market="mma_distance"
+                  label="Vai ao Limite"
+                  grow
+                  variant="worldcup"
+                />
+                <OddsButton
+                  match={match}
+                  selection="no"
+                  odd={match.mmaExtra.toDistance.no}
+                  market="mma_distance"
+                  label="Não Vai ao Limite"
                   grow
                   variant="worldcup"
                 />
               </div>
-              {!match.hasRealOdds && (
-                <div className="flex items-center justify-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  <span className="text-[9px] font-semibold tracking-wide text-zinc-600">
-                    EST.
-                  </span>
-                </div>
-              )}
-              {/* ── MMA: "vai até o limite" + total de rounds, alongside the
-                  standard moneyline above (real PulseScore odds, no synthetic
-                  model) ── */}
-              {sport === "mma" && match.mmaExtra?.toDistance && (
-                <div className="flex gap-1 w-full mt-1">
-                  <OddsButton
-                    match={match}
-                    selection="yes"
-                    odd={match.mmaExtra.toDistance.yes}
-                    market="mma_distance"
-                    label="Vai ao Limite"
-                    grow
-                    variant="worldcup"
-                  />
-                  <OddsButton
-                    match={match}
-                    selection="no"
-                    odd={match.mmaExtra.toDistance.no}
-                    market="mma_distance"
-                    label="Não Vai ao Limite"
-                    grow
-                    variant="worldcup"
-                  />
-                </div>
-              )}
-              {sport === "mma" &&
+            )}
+            {sport === "mma" &&
                 (match.mmaExtra?.totalRoundsLines?.length ?? 0) > 0 &&
                 (() => {
                   const mid = match.mmaExtra!.totalRoundsLines![
@@ -11775,8 +11815,7 @@ export default function Home({
                     </div>
                   );
                 })}
-            </>
-          )}
+          </>
         </div>
       ) : null;
     };
@@ -11797,12 +11836,8 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-              const flagUrl =
-                !leagueLogo
-                  ? (match.regionFlagUrl ??
-                    getCountryFlagUrl(match.country, match.league ?? undefined, match.home))
-                  : null;
+              const { leagueLogo, flagUrl } =
+                getCompetitionDisplayAssets(match);
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
                   <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -11855,7 +11890,7 @@ export default function Home({
                     {homeFlag ? (
                       <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : homeBadge?.src ? (
-                      <img src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
@@ -11865,7 +11900,7 @@ export default function Home({
                     {awayFlag ? (
                       <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : awayBadge?.src ? (
-                      <img src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
