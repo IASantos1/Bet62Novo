@@ -6374,15 +6374,18 @@ export default function Home({
   );
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
+  const normalizeAllOddsText = useCallback(
+    (value: string) =>
+      String(value ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim(),
+    [],
+  );
   const isDuplicateNativeAllOddsMarket = useCallback((market: AllOddsMarket) => {
-    const group = String(market.group ?? "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-    const name = String(market.name ?? "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+    const group = normalizeAllOddsText(market.group ?? "");
+    const name = normalizeAllOddsText(market.name ?? "");
     const full = `${group} ${name}`.trim();
     return [
       "resultado final",
@@ -6410,7 +6413,41 @@ export default function Home({
       "intervalo / final",
       "placar exato",
     ].some((pattern) => full.includes(pattern));
-  }, []);
+  }, [normalizeAllOddsText]);
+  const classifyExtraAllOddsBucket = useCallback(
+    (market: AllOddsMarket): "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | null => {
+      const group = normalizeAllOddsText(market.group ?? "");
+      const name = normalizeAllOddsText(market.name ?? "");
+      const full = `${group} ${name}`.trim();
+      if (
+        /(corner|corners|canto|cantos|escanteio|escanteios)/.test(full)
+      ) {
+        return "escanteios";
+      }
+      if (
+        /(card|cards|cartao|cartoes|cartaoes|cartao?s|cartaoes|cartões|cartao|cartoes)/.test(
+          full,
+        )
+      ) {
+        return "cartoes";
+      }
+      if (
+        /(asian|asiatico|asiatico|asiatic|draw no bet|empate anulado)/.test(
+          full,
+        )
+      ) {
+        return "asiatico";
+      }
+      if (/handicap/.test(full)) {
+        return "handicap";
+      }
+      if (/(goal|goals|golo|golos|gol|gols)/.test(full)) {
+        return "gols";
+      }
+      return null;
+    },
+    [normalizeAllOddsText],
+  );
   const allOddsSections = useMemo(() => {
     if (!allOddsData || allOddsData.length === 0) return [];
 
@@ -6541,56 +6578,6 @@ export default function Home({
         }))
         .filter((section) => section.markets.length > 0),
     [allOddsSections, isDuplicateNativeAllOddsMarket],
-  );
-  const getAllOddsChoiceKey = useCallback(
-    (originalIndex: number, choiceIndex: number) =>
-      `all_${originalIndex}_${choiceIndex}`,
-    [],
-  );
-  const isAllOddsChoiceSelected = useCallback(
-    (matchId: string | number, marketKey: string) =>
-      bets.some((b) => b.matchId === matchId && b.market === marketKey),
-    [bets],
-  );
-  const toggleAllOddsChoice = useCallback(
-    (
-      match: Match,
-      market: AllOddsMarket,
-      choice: { label: string; odds: number },
-      originalIndex: number,
-      choiceIndex: number,
-    ) => {
-      const marketKey = getAllOddsChoiceKey(originalIndex, choiceIndex);
-      const alreadySelected = bets.some(
-        (b) => b.matchId === match.id && b.market === marketKey,
-      );
-      if (alreadySelected) {
-        setBets((prev) =>
-          prev.filter(
-            (b) => !(b.matchId === match.id && b.market === marketKey),
-          ),
-        );
-        return;
-      }
-      setBets((prev) => [
-        ...prev.filter(
-          (b) =>
-            !(
-              b.matchId === match.id &&
-              String(b.market ?? "").startsWith(`all_${originalIndex}_`)
-            ),
-        ),
-        {
-          matchId: match.id,
-          matchTitle: `${match.home} — ${match.away}`,
-          odd: choice.odds,
-          market: marketKey,
-          selection: `${market.name}: ${choice.label}`,
-          label: choice.label,
-        },
-      ]);
-    },
-    [bets, getAllOddsChoiceKey],
   );
   const [lineupsData, setLineupsData] = useState<LineupsV2 | null>(null);
   const [lineupsLoading, setLineupsLoading] = useState(false);
@@ -7797,8 +7784,7 @@ export default function Home({
   useEffect(() => {
     const shouldLoadAllOdds =
       !!expandedMatch &&
-      (((matchViewTab === "markets" && modalTab === "todos") ||
-        matchViewTab === "odds"));
+      (matchViewTab === "markets" || matchViewTab === "odds");
     if (!shouldLoadAllOdds || !expandedMatch) return;
     const sport = expandedMatch.sport ?? "football";
     if (sport !== "football") {
@@ -14062,6 +14048,73 @@ export default function Home({
       );
     }
 
+    const getExtraAllOddsSectionsForBucket = (
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+    ) =>
+      extraAllOddsSections
+        .map((section) => ({
+          ...section,
+          markets: section.markets.filter(
+            ({ market }) => classifyExtraAllOddsBucket(market) === bucket,
+          ),
+        }))
+        .filter((section) => section.markets.length > 0);
+    const extraGoalsSections = getExtraAllOddsSectionsForBucket("gols");
+    const extraCornersSections = getExtraAllOddsSectionsForBucket("escanteios");
+    const extraCardsSections = getExtraAllOddsSectionsForBucket("cartoes");
+    const extraHandicapSections = getExtraAllOddsSectionsForBucket("handicap");
+    const extraAsianSections = getExtraAllOddsSectionsForBucket("asiatico");
+    const renderInlineExtraAllOdds = (
+      sections: typeof extraAllOddsSections,
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+    ) => {
+      if (!isFootball || allOddsLoading || sections.length === 0) return null;
+      return (
+        <div>
+          {sections.map((section) => (
+            <MarketAccordionSection
+              key={`inline-${bucket}-${section.section}`}
+              title={
+                section.section === "Outros"
+                  ? "Mercados Adicionais"
+                  : section.section
+              }
+              defaultOpen={false}
+              count={section.markets.length}
+            >
+              <div className="space-y-3">
+                {section.markets.map(({ market, originalIndex }) => {
+                  const title =
+                    market.group &&
+                    market.group !== market.name &&
+                    market.group !== section.section
+                      ? `${market.group} — ${market.name}`
+                      : market.name;
+                  return (
+                    <MarketGroup
+                      key={`inline-${bucket}-${section.section}-${originalIndex}`}
+                      title={title}
+                    >
+                      {market.choices.map((choice, choiceIndex) => (
+                        <MarketOddsBtn
+                          key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                          match={match}
+                          sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                          odd={choice.odds}
+                          market={`all-${bucket}-${originalIndex}`}
+                          label={choice.label}
+                        />
+                      ))}
+                    </MarketGroup>
+                  );
+                })}
+              </div>
+            </MarketAccordionSection>
+          ))}
+        </div>
+      );
+    };
+
     marketGroupSeqRef.current = 0;
     return (
       <MarketTabCtx.Provider value={modalTab}>
@@ -14105,118 +14158,6 @@ export default function Home({
                       {tab.label}
                     </button>
                   ))}
-                </div>
-              )}
-
-              {isFootball && modalTab === "todos" && (
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
-                    📊 Mais Mercados
-                  </div>
-                  {allOddsLoading || !allOddsData ? (
-                    <div className="flex items-center justify-center py-12">
-                      <RefreshCw
-                        className="animate-spin text-blue-400"
-                        size={28}
-                      />
-                    </div>
-                  ) : allOddsData.length === 0 ? (
-                    <div className="text-center text-zinc-500 py-8">
-                      <div className="text-2xl mb-2">📭</div>
-                      <div className="text-sm font-medium">
-                        Mercados indisponíveis
-                      </div>
-                      <div className="text-xs text-zinc-600 mt-1">
-                        Odds não disponíveis para este jogo
-                      </div>
-                    </div>
-                  ) : extraAllOddsSections.length === 0 ? null : (
-                    <div className="space-y-4">
-                      {extraAllOddsSections.map((section) => (
-                        <MarketAccordionSection
-                          key={section.section}
-                          title={
-                            section.section === "Outros"
-                              ? "Mercados Adicionais"
-                              : section.section
-                          }
-                          defaultOpen={false}
-                          count={section.markets.length}
-                        >
-                          <div className="space-y-3">
-                            {section.markets.map(
-                              ({ market, originalIndex, featured }) => (
-                                <div
-                                  key={`${section.section}-${originalIndex}`}
-                                  className={`rounded-lg border p-3 ${
-                                    featured
-                                      ? "bg-zinc-950/90 border-zinc-700"
-                                      : "bg-zinc-950/60 border-zinc-800"
-                                  }`}
-                                >
-                                  {market.group &&
-                                    market.group !== market.name &&
-                                    market.group !== section.section && (
-                                      <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
-                                        {market.group}
-                                      </div>
-                                    )}
-                                  <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">
-                                    {market.name}
-                                  </div>
-                                  <div
-                                    className={`grid gap-2 ${
-                                      market.choices.length === 3
-                                        ? "grid-cols-3"
-                                        : "grid-cols-2"
-                                    }`}
-                                  >
-                                    {market.choices.map((choice, choiceIndex) => {
-                                      const marketKey = getAllOddsChoiceKey(
-                                        originalIndex,
-                                        choiceIndex,
-                                      );
-                                      const isSelected =
-                                        isAllOddsChoiceSelected(
-                                          match.id,
-                                          marketKey,
-                                        );
-                                      return (
-                                        <button
-                                          key={marketKey}
-                                          onClick={() =>
-                                            toggleAllOddsChoice(
-                                              match,
-                                              market,
-                                              choice,
-                                              originalIndex,
-                                              choiceIndex,
-                                            )
-                                          }
-                                          className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
-                                            isSelected
-                                              ? "bg-red-600 border-red-500 text-white"
-                                              : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
-                                          }`}
-                                        >
-                                          <span className="text-[10px] text-inherit opacity-70 mb-0.5">
-                                            {choice.label}
-                                          </span>
-                                          <span className="font-black text-base tabular-nums">
-                                            {choice.odds.toFixed(2)}
-                                          </span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        </MarketAccordionSection>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -15060,7 +15001,9 @@ export default function Home({
                 !showPen &&
                 modalTab === "gols" &&
                 m &&
-                m.totalGoals.over25 === 0 && (
+                m.totalGoals.over25 === 0 &&
+                !allOddsLoading &&
+                extraGoalsSections.length === 0 && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
@@ -15347,6 +15290,7 @@ export default function Home({
                     </div>
                   </div>
                 )}
+              {renderInlineExtraAllOdds(extraGoalsSections, "gols")}
 
               {/* ── FUTEBOL: ESPECIAIS ── */}
               {isFootball &&
@@ -16327,6 +16271,7 @@ export default function Home({
                     )}
                   </div>
                 )}
+              {renderInlineExtraAllOdds(extraHandicapSections, "handicap")}
               {!isBasketball &&
                 !isVolleyball &&
                 (!isFootball || (!showET && !showPen)) &&
@@ -16334,7 +16279,9 @@ export default function Home({
                 m &&
                 (isTennis
                   ? !hasTennisHandicapMarkets && (m.handicap?.homeMinusOne ?? 0) === 0
-                  : (m.handicap?.homeMinusOne ?? 0) === 0) && (
+                  : (m.handicap?.homeMinusOne ?? 0) === 0) &&
+                !allOddsLoading &&
+                extraHandicapSections.length === 0 && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
@@ -17251,7 +17198,9 @@ export default function Home({
                 m &&
                 !m.corners &&
                 !m.homeCorners &&
-                !m.awayCorners && (
+                !m.awayCorners &&
+                !allOddsLoading &&
+                extraCornersSections.length === 0 && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
@@ -17333,6 +17282,7 @@ export default function Home({
                     />
                   </MarketGroup>
                 )}
+              {renderInlineExtraAllOdds(extraCornersSections, "escanteios")}
 
               {/* ── FUTEBOL: CARTÕES ── */}
               {isFootball &&
@@ -17385,7 +17335,9 @@ export default function Home({
                 m &&
                 !m.cards &&
                 !m.homeCards &&
-                !m.awayCards && (
+                !m.awayCards &&
+                !allOddsLoading &&
+                extraCardsSections.length === 0 && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
                   </div>
@@ -17438,6 +17390,7 @@ export default function Home({
                     )}
                   </div>
                 )}
+              {renderInlineExtraAllOdds(extraCardsSections, "cartoes")}
 
               {/* ── FUTEBOL: ASIÁTICO ── */}
               {isFootball &&
@@ -17640,13 +17593,16 @@ export default function Home({
                     {!m.drawNoBet &&
                       !m.asianHandicap &&
                       !m.europeanHandicap &&
-                      !Object.values(m.asianTotals ?? {}).some((v) => Number(v ?? 0) > 0) && (
+                      !Object.values(m.asianTotals ?? {}).some((v) => Number(v ?? 0) > 0) &&
+                      !allOddsLoading &&
+                      extraAsianSections.length === 0 && (
                       <div className="text-center text-zinc-600 py-6 text-sm">
                         Mercado não disponível para esta partida.
                       </div>
                     )}
                   </div>
                 )}
+              {renderInlineExtraAllOdds(extraAsianSections, "asiatico")}
 
               {/* ── HÓQUEI: TOTAIS ── */}
               {isHockey &&
