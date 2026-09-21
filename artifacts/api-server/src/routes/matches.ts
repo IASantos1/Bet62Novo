@@ -9827,7 +9827,13 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
     });
   } catch (err) {
     logger.warn({ err, id, sport }, "[mrdoge] all-odds fetch failed");
-    res.json({ markets: [] });
+    // An upstream timeout is not the same thing as a match having no extra
+    // markets. Surface a temporary failure so the frontend does not present
+    // a partial/native-only catalogue as if it were complete.
+    res.status(503).json({
+      markets: [],
+      error: "mrdoge_odds_temporarily_unavailable",
+    });
   }
 });
 
