@@ -10,13 +10,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:settlement": "tsx --test src/tests/settlement.spec.ts",
     "test:core": "tsx --test src/tests/core.spec.ts",
-    "seed:casino": "tsx src/scripts/seedCasinoGames.ts",
-    "seed:palace-casino": "tsx src/scripts/seedPalaceCasinoGames.ts",
     "seed:featured-banners": "tsx src/scripts/seedFeaturedCasinoBanners.ts",
+    "casino:sync-bigbang": "tsx src/scripts/syncBigBangCasinoGames.ts",
     "casino:disable-all": "tsx src/scripts/deactivateAllCasinoGames.ts",
     "casino:delete-all": "tsx src/scripts/deleteAllCasinoGames.ts"
   },
   "dependencies": {
+    "@mrdoge/node": "^0.4.3",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "bcryptjs": "^3.0.3",

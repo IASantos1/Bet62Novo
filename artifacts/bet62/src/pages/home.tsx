@@ -52,6 +52,7 @@ import {
   CreditCard,
   Crown,
   SortAsc,
+  BarChart3,
   ChevronLeft,
   CircleDot,
 } from "lucide-react";
@@ -484,15 +485,22 @@ type CasinoGame = {
   vendorCode: number | null;
   category: string;
   img: string | null;
-  source?: string; // "silentapi" (default) | "palace"
+  source?: string; // "bigbang" | legacy providers kept only for old rows
 };
-// Casino's default/first-page view is pinned to this provider (user
-// request, 2026-08-11: every game shown before picking a category/
-// searching should be Pragmatic Play). A bare substring, not the exact
-// Palace Casino provider_name string — /api/casino/games matches it with
-// ilike specifically so this doesn't have to be byte-perfect (see
-// routes/casino.ts's provider filter comment).
-const CASINO_DEFAULT_PROVIDER = "Pragmatic";
+const CASINO_FAVORITES_STORAGE_KEY = "bet62_casino_favorites_v1";
+
+function casinoGameStorageKey(game: Pick<CasinoGame, "id" | "provider" | "source">): string {
+  return `${game.source ?? "bigbang"}:${game.provider}:${game.id}`;
+}
+
+function normalizeCasinoSearchText(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
 type CasinoBanner = {
   id: number;
   title: string;
@@ -503,7 +511,7 @@ type CasinoBanner = {
   position: "top" | "middle";
   games: CasinoGame[];
 };
-type LiveTransport = "idle" | "cache" | "sse" | "polling";
+type LiveTransport = "idle" | "cache" | "ws" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
   const normalized = path.replace(/\/+$/, "");
@@ -1560,6 +1568,7 @@ function getLeagueLogo(
   league: string | null | undefined,
   country?: string | null,
   homeTeam?: string | null,
+  options?: { exactOnly?: boolean },
 ): string | undefined {
   const l = league ?? "";
   if (!l) return undefined;
@@ -1568,6 +1577,7 @@ function getLeagueLogo(
     return ck ? COUNTRY_ISO[ck] : undefined;
   })();
   if (LEAGUE_LOGOS[l] && !leagueLogoKeyConflictsWithCountry(l, countryIso, homeTeam)) return LEAGUE_LOGOS[l];
+  if (options?.exactOnly) return undefined;
   const lLower = l.toLowerCase();
   // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo -
   // Grupo A", etc. LONGEST matching key wins, not the first one declared in
@@ -1593,6 +1603,34 @@ function getLeagueLogo(
     }
   }
   return bestContains?.url;
+}
+
+function getCompetitionDisplayAssets(match: {
+  sport?: string;
+  league?: string | null;
+  country?: string | null;
+  home: string;
+  regionFlagUrl?: string;
+}): { leagueLogo?: string; flagUrl: string | null } {
+  const exactOnly =
+    (match.sport ?? "football") === "football" && !!match.regionFlagUrl;
+  const leagueLogo = getLeagueLogo(
+    match.league,
+    match.country,
+    match.home,
+    exactOnly ? { exactOnly: true } : undefined,
+  );
+  return {
+    leagueLogo,
+    flagUrl: leagueLogo
+      ? null
+      : (match.regionFlagUrl ??
+        getCountryFlagUrl(
+          match.country ?? undefined,
+          match.league ?? undefined,
+          match.home,
+        )),
+  };
 }
 
 const TEAM_COUNTRY: Record<string, string> = {
@@ -3353,6 +3391,30 @@ const OTHER_SPORTS: {
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
 
+type SidebarCatalogRegion = {
+  id: number;
+  name: string;
+  eventCount: number;
+  competitionCount: number;
+  flagUrl?: string;
+};
+
+type SidebarCatalogCompetition = {
+  id: number;
+  name: string;
+  regionId: number;
+  eventCount: number;
+};
+
+const MRDOGE_CATALOG_SPORTS = new Set([
+  "football",
+  "tennis",
+  "basketball",
+  "hockey",
+  "volleyball",
+  "baseball",
+]);
+
 type SidebarTreeContentProps = {
   selectedSport: string;
   setSelectedSport: (s: string) => void;
@@ -3370,6 +3432,12 @@ type SidebarTreeContentProps = {
   setSelectedLeague?: (l: string | null) => void;
   selectedCountry?: string | null;
   setSelectedCountry?: (c: string | null) => void;
+  catalogBySport?: Record<string, SidebarCatalogRegion[]>;
+  competitionCatalogByRegion?: Record<string, SidebarCatalogCompetition[]>;
+  catalogLoadingSport?: string | null;
+  competitionLoadingKey?: string | null;
+  ensureSportCatalog?: (sport: string) => void;
+  ensureCompetitionCatalog?: (sport: string, region: SidebarCatalogRegion) => void;
 };
 
 function SidebarTreeContent({
@@ -3387,9 +3455,23 @@ function SidebarTreeContent({
   setSelectedLeague,
   selectedCountry,
   setSelectedCountry,
+  catalogBySport,
+  competitionCatalogByRegion,
+  catalogLoadingSport,
+  competitionLoadingKey,
+  ensureSportCatalog,
+  ensureCompetitionCatalog,
 }: SidebarTreeContentProps) {
   const py = compact ? "py-1.5" : "py-2";
   const textSize = compact ? "text-[12px]" : "text-[13px]";
+  const dynamicSportKeys = new Set([
+    "football",
+    "tennis",
+    "basketball",
+    "hockey",
+    "volleyball",
+    "baseball",
+  ]);
 
   function go(sport: string) {
     setSelectedSport(sport);
@@ -3404,7 +3486,154 @@ function SidebarTreeContent({
     } else {
       setExpandedSport(key);
       setExpandedCountry(null);
+      if (dynamicSportKeys.has(key)) ensureSportCatalog?.(key);
     }
+  }
+
+  function renderDynamicSportTree(
+    sportKey: string,
+    icon: string,
+    fallbackLeagues?: string[],
+    fallbackCountry?: string,
+  ) {
+    const regions = catalogBySport?.[sportKey] ?? [];
+    const showDynamic = dynamicSportKeys.has(sportKey) && regions.length > 0;
+    if (!showDynamic) return null;
+
+    return (
+      <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+        {regions.map((region) => {
+          const regionKey = `${sportKey}:${region.id}`;
+          const competitions = competitionCatalogByRegion?.[regionKey] ?? [];
+          const isLoadingCompetitions = competitionLoadingKey === regionKey;
+          return (
+            <div key={regionKey}>
+              <button
+                onClick={() => {
+                  const isActive = selectedCountry === region.name;
+                  setExpandedCountry(isActive ? null : regionKey);
+                  setSelectedCountry?.(isActive ? null : region.name);
+                  setSelectedLeague?.(null);
+                  setSelectedSport(sportKey);
+                  setActiveTab("sports");
+                  if (!isActive) ensureCompetitionCatalog?.(sportKey, region);
+                  onClose?.();
+                }}
+                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === region.name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === regionKey ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+              >
+                {region.flagUrl ? (
+                  <StableImage
+                    src={region.flagUrl}
+                    alt=""
+                    className="w-4 h-4 rounded-full shrink-0 object-cover"
+                  />
+                ) : (
+                  <span className="text-xs leading-none shrink-0">{fallbackCountry ?? icon}</span>
+                )}
+                <span className="flex-1 text-left truncate">{region.name}</span>
+                <span className="text-[10px] text-zinc-500 shrink-0">
+                  {region.eventCount || region.competitionCount}
+                </span>
+                <ChevronRight
+                  size={10}
+                  className={`transition-transform shrink-0 ${expandedCountry === regionKey ? "rotate-90 text-red-400" : "text-zinc-600"}`}
+                />
+              </button>
+              {expandedCountry === regionKey && (
+                <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                  {isLoadingCompetitions && competitions.length === 0 && (
+                    <div className="px-2 py-1 text-[11px] text-zinc-500">
+                      A carregar competições...
+                    </div>
+                  )}
+                  {competitions.map((competition) => {
+                    const active = selectedLeague === competition.name;
+                    const logo = getLeagueLogo(
+                      competition.name,
+                      region.name,
+                      undefined,
+                      { exactOnly: true },
+                    );
+                    return (
+                      <button
+                        key={`${regionKey}:${competition.id}`}
+                        onClick={() => {
+                          setSelectedLeague?.(
+                            active ? null : competition.name,
+                          );
+                          setSelectedCountry?.(null);
+                          setSelectedSport(sportKey);
+                          setActiveTab("sports");
+                          onClose?.();
+                        }}
+                        className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                      >
+                        {logo ? (
+                          <img
+                            src={logo}
+                            alt=""
+                            className="w-4 h-4 shrink-0 object-contain"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <span className="text-xs leading-none shrink-0">
+                            {LEAGUE_FLAGS[competition.name] ?? icon}
+                          </span>
+                        )}
+                        <span className="truncate flex-1">
+                          {competition.name}
+                        </span>
+                        {competition.eventCount > 0 && (
+                          <span className="text-[10px] text-zinc-500 shrink-0">
+                            {competition.eventCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {!isLoadingCompetitions &&
+                    competitions.length === 0 &&
+                    fallbackLeagues &&
+                    fallbackLeagues.map((league) => {
+                      const active = selectedLeague === league;
+                      const logo = getLeagueLogo(league, fallbackCountry);
+                      return (
+                        <button
+                          key={`${regionKey}:${league}`}
+                          onClick={() => {
+                            setSelectedLeague?.(active ? null : league);
+                            setSelectedCountry?.(null);
+                            setSelectedSport(sportKey);
+                            setActiveTab("sports");
+                            onClose?.();
+                          }}
+                          className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                        >
+                          {logo ? (
+                            <img
+                              src={logo}
+                              alt=""
+                              className="w-4 h-4 shrink-0 object-contain"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <span className="text-xs leading-none shrink-0">
+                              {LEAGUE_FLAGS[league] ?? icon}
+                            </span>
+                          )}
+                          <span className="truncate">{league}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -3481,67 +3710,74 @@ function SidebarTreeContent({
           />
         </button>
         {expandedSport === "football" && (
-          <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-            {FOOTBALL_COUNTRIES.map(({ name, flag, leagues }) => (
-              <div key={name}>
-                <button
-                  onClick={() => {
-                    const isActive = selectedCountry === name;
-                    setExpandedCountry(isActive ? null : name);
-                    setSelectedCountry?.(isActive ? null : name);
-                    setSelectedLeague?.(null);
-                    setSelectedSport("football");
-                    setActiveTab("sports");
-                    onClose?.();
-                  }}
-                  className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
-                >
-                  <span className="text-xs leading-none shrink-0">{flag}</span>
-                  <span className="flex-1 text-left truncate">{name}</span>
-                  <ChevronRight
-                    size={10}
-                    className={`transition-transform shrink-0 ${expandedCountry === name ? "rotate-90 text-red-400" : "text-zinc-600"}`}
-                  />
-                </button>
-                {expandedCountry === name && (
-                  <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-                    {leagues.map((league) => {
-                      const active = selectedLeague === league;
-                      const logo = getLeagueLogo(league, name);
-                      return (
-                        <button
-                          key={league}
-                          onClick={() => {
-                            setSelectedLeague?.(active ? null : league);
-                            setSelectedCountry?.(null);
-                            setSelectedSport("football");
-                            setActiveTab("sports");
-                            onClose?.();
-                          }}
-                          className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
-                        >
-                          {logo ? (
-                            <img
-                              src={logo}
-                              alt=""
-                              className="w-4 h-4 shrink-0 object-contain"
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <span className="text-xs leading-none shrink-0">
-                              {LEAGUE_FLAGS[league] ?? "⚽"}
-                            </span>
-                          )}
-                          <span className="truncate">{league}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          renderDynamicSportTree("football", "⚽") ?? (
+            <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+              {catalogLoadingSport === "football" && (
+                <div className="px-2 py-1 text-[11px] text-zinc-500">
+                  A carregar catálogo...
+                </div>
+              )}
+              {FOOTBALL_COUNTRIES.map(({ name, flag, leagues }) => (
+                <div key={name}>
+                  <button
+                    onClick={() => {
+                      const isActive = selectedCountry === name;
+                      setExpandedCountry(isActive ? null : name);
+                      setSelectedCountry?.(isActive ? null : name);
+                      setSelectedLeague?.(null);
+                      setSelectedSport("football");
+                      setActiveTab("sports");
+                      onClose?.();
+                    }}
+                    className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                  >
+                    <span className="text-xs leading-none shrink-0">{flag}</span>
+                    <span className="flex-1 text-left truncate">{name}</span>
+                    <ChevronRight
+                      size={10}
+                      className={`transition-transform shrink-0 ${expandedCountry === name ? "rotate-90 text-red-400" : "text-zinc-600"}`}
+                    />
+                  </button>
+                  {expandedCountry === name && (
+                    <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                      {leagues.map((league) => {
+                        const active = selectedLeague === league;
+                        const logo = getLeagueLogo(league, name);
+                        return (
+                          <button
+                            key={league}
+                            onClick={() => {
+                              setSelectedLeague?.(active ? null : league);
+                              setSelectedCountry?.(null);
+                              setSelectedSport("football");
+                              setActiveTab("sports");
+                              onClose?.();
+                            }}
+                            className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                          >
+                            {logo ? (
+                              <img
+                                src={logo}
+                                alt=""
+                                className="w-4 h-4 shrink-0 object-contain"
+                                loading="lazy"
+                                decoding="async"
+                              />
+                            ) : (
+                              <span className="text-xs leading-none shrink-0">
+                                {LEAGUE_FLAGS[league] ?? "⚽"}
+                              </span>
+                            )}
+                            <span className="truncate">{league}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 
@@ -3560,39 +3796,46 @@ function SidebarTreeContent({
             />
           </button>
           {expandedSport === key && (
-            <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-              {leagues.map((league) => {
-                const active = selectedLeague === league;
-                const logo = getLeagueLogo(league);
-                return (
-                  <button
-                    key={league}
-                    onClick={() => {
-                      setSelectedLeague?.(active ? null : league);
-                      setSelectedSport(key);
-                      setActiveTab("sports");
-                      onClose?.();
-                    }}
-                    className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
-                  >
-                    {logo ? (
-                      <img
-                        src={logo}
-                        alt=""
-                        className="w-4 h-4 shrink-0 object-contain"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <span className="text-xs leading-none shrink-0">
-                        {LEAGUE_FLAGS[league] ?? "🏆"}
-                      </span>
-                    )}
-                    <span className="truncate">{league}</span>
-                  </button>
-                );
-              })}
-            </div>
+            renderDynamicSportTree(key, icon, leagues) ?? (
+              <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                {catalogLoadingSport === key && (
+                  <div className="px-2 py-1 text-[11px] text-zinc-500">
+                    A carregar catálogo...
+                  </div>
+                )}
+                {leagues.map((league) => {
+                  const active = selectedLeague === league;
+                  const logo = getLeagueLogo(league);
+                  return (
+                    <button
+                      key={league}
+                      onClick={() => {
+                        setSelectedLeague?.(active ? null : league);
+                        setSelectedSport(key);
+                        setActiveTab("sports");
+                        onClose?.();
+                      }}
+                      className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
+                    >
+                      {logo ? (
+                        <img
+                          src={logo}
+                          alt=""
+                          className="w-4 h-4 shrink-0 object-contain"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <span className="text-xs leading-none shrink-0">
+                          {LEAGUE_FLAGS[league] ?? "🏆"}
+                        </span>
+                      )}
+                      <span className="truncate">{league}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
       ))}
@@ -3634,6 +3877,7 @@ type AdvancedMarkets = {
   _spread?: number;
   _total?: number;
   _total1H?: number;
+  firstHalfTotal?: { line: number; over: number; under: number };
   _spreadLine?: number;
   // Extended football markets
   drawNoBet?: { home: number; away: number };
@@ -3810,6 +4054,7 @@ type Match = {
   // the only source getTeamBadgeAsset uses; see that function.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  regionFlagUrl?: string;
   // Football only — GOAL API's matchStadium/matchReferee.
   stadium?: string;
   referee?: string;
@@ -4831,12 +5076,14 @@ export default function Home({
   const [casinoTotal, setCasinoTotal] = useState(0);
   const [casinoLoadingPage, setCasinoLoadingPage] = useState(false);
   const CASINO_PAGE_SIZE = 24;
-  // Category pill ("Todos"/"Populares"/"Novos"/"Slots"/"Ao Vivo"/"Baccarat"/
-  // "Blackjack"/"Roulette" — see CASINO_CATEGORY_CHIPS) and sort dropdown
+  // Category pill ("Populares"/"Novos"/"Slots"/"Ao Vivo"/"Jogos Rápidos"/
+  // "Crash"/"Jackpots"/"Blackjack"/"Roleta"/"Bacará"/"Game Shows"/
+  // "Favoritos" — see CASINO_CATEGORY_CHIPS) and sort dropdown
   // ("popular"/"new"/"az") driving the flat "Slots" grid below. Both map
   // directly to /api/casino/games's category/sort query params.
-  const [casinoCategory, setCasinoCategory] = useState("Todos");
+  const [casinoCategory, setCasinoCategory] = useState("Populares");
   const [casinoSort, setCasinoSort] = useState<"popular" | "new" | "az">("popular");
+  const [casinoFavoriteGames, setCasinoFavoriteGames] = useState<Record<string, CasinoGame>>({});
   // "Jogos Populares" showcase row — own isolated state/effect (fetched once
   // per tab open, top 10 by popularity), never touches the main grid's
   // casinoGames/casinoPage so scrolling/filtering the grid can't affect it.
@@ -4957,9 +5204,12 @@ export default function Home({
   // WC live matches kept separate so bet ticket can show "AO VIVO" for WC bets
   const wcLiveForTicketRef = useRef<Match[]>([]);
   // SSE connection for real-time live updates
+  const liveWsRef = useRef<WebSocket | null>(null);
+  const liveWsHealthyRef = useRef(false);
   const sseRef = useRef<EventSource | null>(null);
   const sseActiveRef = useRef(false); // true when SSE is connected and receiving data
   const liveExpandedFullFetchRef = useRef<string | null>(null);
+  const upcomingExpandedFullFetchRef = useRef<string | null>(null);
   const livePrefetchingRef = useRef<Set<string>>(new Set());
   const liveTennisHydratingRef = useRef<Set<string>>(new Set());
   const finishedMatchScores = useRef<
@@ -5740,31 +5990,78 @@ export default function Home({
     string | null
   >(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [catalogBySport, setCatalogBySport] = useState<
+    Record<string, SidebarCatalogRegion[]>
+  >({});
+  const [competitionCatalogByRegion, setCompetitionCatalogByRegion] =
+    useState<Record<string, SidebarCatalogCompetition[]>>({});
+  const [catalogLoadingSport, setCatalogLoadingSport] = useState<string | null>(
+    null,
+  );
+  const [competitionLoadingKey, setCompetitionLoadingKey] = useState<
+    string | null
+  >(null);
 
-  // Top Competições — computed from live + upcoming matches
+  // Top Competições — follows BET62's curated football priority structure.
   const PRIORITY_LEAGUES = [
     "UEFA Champions League",
     "Champions League",
+    "UEFA Europa League",
+    "Europa League",
+    "UEFA Conference League",
+    "Conference League",
     "Premier League",
     "La Liga",
-    "Bundesliga",
     "Serie A",
+    "Bundesliga",
     "Ligue 1",
     "Liga Portugal",
-    "Eredivisie",
-    "Copa do Brasil",
+    "Brasileirão Série A",
     "Brasileirão",
-    "Serie B",
-    "Copa del Rey",
-    "DFB-Pokal",
-    "FA Cup",
-    "Europa League",
-    "UEFA Europa League",
-    "Conference League",
+    "Eredivisie",
+    "Belgian Pro League",
+    "Jupiler Pro League",
+    "Süper Lig",
+    "Super Lig",
+    "MLS",
+    "Major League Soccer",
+    "Saudi Pro League",
     "Liga MX",
-    "A-League",
-    "National Basketball League",
+    "Championship",
+    "League One",
+    "League Two",
+    "Scottish Premiership",
+    "Scottish Championship",
+    "Segunda División",
+    "LaLiga2",
+    "Serie B",
+    "2. Bundesliga",
+    "Ligue 2",
+    "J1 League",
+    "J2 League",
+    "K League 1",
+    "Chinese Super League",
+    "Thai League 1",
+    "UAE Pro League",
+    "Qatar Stars League",
+    "Egyptian Premier League",
+    "Botola Pro",
+    "South African Premiership",
+    "Tunisian Ligue Professionnelle 1",
   ];
+  const normalizeLeaguePriorityKey = (value: string) =>
+    String(value ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  const leaguePriorityIndex = (league: string) => {
+    const normalizedLeague = normalizeLeaguePriorityKey(league);
+    const index = PRIORITY_LEAGUES.findIndex((entry) =>
+      normalizedLeague.includes(normalizeLeaguePriorityKey(entry)),
+    );
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
   const sidebarTopLeagues = (() => {
     const leagueMap = new Map<string, TopLeagueEntry>();
     [...liveMatches, ...upcomingMatches].forEach((m) => {
@@ -5777,13 +6074,89 @@ export default function Home({
       }
     });
     const available = Array.from(leagueMap.values());
-    const priority = available.filter((l) =>
-      PRIORITY_LEAGUES.some((p) =>
-        l.league.toLowerCase().includes(p.toLowerCase()),
-      ),
-    );
+    const priority = available
+      .filter((l) => leaguePriorityIndex(l.league) !== Number.MAX_SAFE_INTEGER)
+      .sort(
+        (a, b) =>
+          leaguePriorityIndex(a.league) - leaguePriorityIndex(b.league) ||
+          a.league.localeCompare(b.league, "pt-BR"),
+      );
     return (priority.length > 0 ? priority : available).slice(0, 8);
   })();
+
+  useEffect(() => {
+    setCatalogBySport({});
+    setCompetitionCatalogByRegion({});
+    setCatalogLoadingSport(null);
+    setCompetitionLoadingKey(null);
+  }, [upcomingRange]);
+
+  const ensureSportCatalog = useCallback(
+    async (sport: string) => {
+      if (!MRDOGE_CATALOG_SPORTS.has(sport)) return;
+      if ((catalogBySport[sport] ?? []).length > 0) return;
+      if (catalogLoadingSport === sport) return;
+
+      setCatalogLoadingSport(sport);
+      try {
+        const params = new URLSearchParams({ sport });
+        if (upcomingRange === "month") params.set("range", "month");
+        const r = await fetch(`/api/matches/catalog?${params.toString()}`);
+        const data = r.ok ? await r.json() : { regions: [] };
+        const regions = Array.isArray(data?.regions)
+          ? (data.regions as SidebarCatalogRegion[])
+          : [];
+        setCatalogBySport((prev) =>
+          (prev[sport] ?? []).length > 0 ? prev : { ...prev, [sport]: regions },
+        );
+      } catch {
+        /* keep fallback sidebar */
+      } finally {
+        setCatalogLoadingSport((prev) => (prev === sport ? null : prev));
+      }
+    },
+    [catalogBySport, catalogLoadingSport, upcomingRange],
+  );
+
+  const ensureCompetitionCatalog = useCallback(
+    async (sport: string, region: SidebarCatalogRegion) => {
+      if (!MRDOGE_CATALOG_SPORTS.has(sport)) return;
+      const key = `${sport}:${region.id}`;
+      if ((competitionCatalogByRegion[key] ?? []).length > 0) return;
+      if (competitionLoadingKey === key) return;
+
+      setCompetitionLoadingKey(key);
+      try {
+        const params = new URLSearchParams({
+          sport,
+          regionId: String(region.id),
+        });
+        if (upcomingRange === "month") params.set("range", "month");
+        const r = await fetch(
+          `/api/matches/catalog/competitions?${params.toString()}`,
+        );
+        const data = r.ok ? await r.json() : { competitions: [] };
+        const competitions = Array.isArray(data?.competitions)
+          ? (data.competitions as SidebarCatalogCompetition[])
+          : [];
+        setCompetitionCatalogByRegion((prev) =>
+          (prev[key] ?? []).length > 0
+            ? prev
+            : { ...prev, [key]: competitions },
+        );
+      } catch {
+        /* keep fallback sidebar */
+      } finally {
+        setCompetitionLoadingKey((prev) => (prev === key ? null : prev));
+      }
+    },
+    [competitionCatalogByRegion, competitionLoadingKey, upcomingRange],
+  );
+
+  useEffect(() => {
+    if (!sidebarExpandedSport) return;
+    void ensureSportCatalog(sidebarExpandedSport);
+  }, [sidebarExpandedSport, ensureSportCatalog]);
 
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(
@@ -5993,7 +6366,10 @@ export default function Home({
   };
   const getProviderMatchId = useCallback(
     (matchId: string | number | undefined | null): string => {
-      return String(matchId ?? "").replace(/^[a-z]+-v\d+-/, "");
+      return String(matchId ?? "")
+        .replace(/^[a-z]+-v\d+-/i, "")
+        .replace(/^mrdoge-[a-z_]+-/i, "")
+        .replace(/^sportmonks-[a-z_]+-/i, "");
     },
     [],
   );
@@ -6696,6 +7072,48 @@ export default function Home({
     return false;
   };
 
+  const countPlayableMarketOdds = (
+    value: unknown,
+    key?: string,
+  ): number => {
+    if (typeof value === "number") {
+      if (
+        key === "line" ||
+        key === "_spread" ||
+        key === "_total" ||
+        key === "_total1H" ||
+        key === "_spreadLine" ||
+        key === "currentSetNum"
+      ) {
+        return 0;
+      }
+      return Number.isFinite(value) && value > 1.01 ? 1 : 0;
+    }
+    if (Array.isArray(value)) {
+      return value.reduce(
+        (acc, item) => acc + countPlayableMarketOdds(item),
+        0,
+      );
+    }
+    if (value && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).reduce(
+        (acc, [childKey, childValue]) =>
+          acc + countPlayableMarketOdds(childValue, childKey),
+        0,
+      );
+    }
+    return 0;
+  };
+
+  const pickRicherMarkets = (
+    primary: Record<string, unknown> | undefined,
+    fallback: Record<string, unknown> | undefined,
+  ) => {
+    const primaryCount = countPlayableMarketOdds(primary);
+    const fallbackCount = countPlayableMarketOdds(fallback);
+    return primaryCount >= fallbackCount ? primary : fallback;
+  };
+
   const matchHasPlayableOdds = (match: Pick<Match, "hasRealOdds" | "odds" | "markets">): boolean =>
     !!(
       match.hasRealOdds ||
@@ -6769,7 +7187,10 @@ export default function Home({
   );
   const liveSnapshotKey = useCallback(() => "bet62_snapshot_live_v1", []);
   const matchSnapshotKey = useCallback(
-    (id: string) => `bet62_snapshot_match_v1:${id}`,
+    (
+      id: string,
+      scope: "generic" | "live" | "upcoming" = "generic",
+    ) => `bet62_snapshot_match_v2:${scope}:${id}`,
     [],
   );
   const LIVE_SNAPSHOT_MAX_AGE_MS = 20_000;
@@ -6822,6 +7243,10 @@ export default function Home({
         if (String(prev.id) !== String(updated.id)) return { ...updated };
         const anyUpdated = updated as any;
         const anyPrev = prev as any;
+        const richerMarkets = pickRicherMarkets(
+          anyUpdated.markets,
+          anyPrev.markets,
+        );
         return {
           ...anyUpdated,
           // tennisExtra is deliberately never included in the live list
@@ -6831,11 +7256,12 @@ export default function Home({
           // tick (this effect) overwrote it with the list's plain markets
           // shell right after that fetch populated it — tennis market
           // groups appearing then immediately disappearing.
-          markets: anyUpdated.markets
+          markets: richerMarkets
             ? {
-                ...anyUpdated.markets,
+                ...richerMarkets,
                 tennisExtra:
-                  anyUpdated.markets.tennisExtra ?? anyPrev.markets?.tennisExtra,
+                  (richerMarkets as any).tennisExtra ??
+                  anyPrev.markets?.tennisExtra,
               }
             : anyPrev.markets,
           events: anyUpdated.events ?? anyPrev.events,
@@ -6848,6 +7274,8 @@ export default function Home({
     if (!expandedMatch?.isLive) return;
     const id = String(expandedMatch.id);
     const isTennisMatch = expandedMatch.sport === "tennis";
+    const isFootballMatch =
+      (expandedMatch.sport ?? "football") === "football";
     // Tennis's tennisExtra (total sets, straight-sets/go-the-distance, exact
     // set score, etc.) is deliberately never included in the live list
     // payload — buildTennisLiveFromPulseScore only stashes a bare `markets`
@@ -6858,8 +7286,9 @@ export default function Home({
     // "markets" — silently hiding every tennisExtra-only market group.
     const hasMarkets = !!(expandedMatch as any).markets;
     const hasTennisExtra = !!(expandedMatch as any).markets?.tennisExtra;
-    if (hasMarkets && (!isTennisMatch || hasTennisExtra)) return;
-    const snap = readSnapshot(matchSnapshotKey(id));
+    if (!isFootballMatch && hasMarkets && (!isTennisMatch || hasTennisExtra))
+      return;
+    const snap = readSnapshot(matchSnapshotKey(id, "live"));
     const canUseSnap = !!(
       snap &&
       Date.now() - snap.savedAt < 10 * 60_000 &&
@@ -6872,7 +7301,7 @@ export default function Home({
     }
     if (liveExpandedFullFetchRef.current === id) return;
     liveExpandedFullFetchRef.current = id;
-    const qs = expandedMatch.sport === "tennis" ? "?fresh=1" : "";
+    const qs = "?fresh=1";
 
     let cancelled = false;
     let currentCtrl: AbortController | null = null;
@@ -6891,10 +7320,17 @@ export default function Home({
         .then((d) => {
           const m = d?.match as Match | null | undefined;
           if (!m) return false;
-          writeSnapshot(matchSnapshotKey(id), m as any);
+          writeSnapshot(matchSnapshotKey(id, "live"), m as any);
           setExpandedMatch((prev) => {
             if (!prev || String(prev.id) !== id) return prev;
-            return { ...(m as any) };
+            const richerMarkets = pickRicherMarkets(
+              (m as any).markets,
+              (prev as any).markets,
+            );
+            return {
+              ...(m as any),
+              markets: richerMarkets,
+            };
           });
           return isTennisMatch
             ? !!(m as any).markets?.tennisExtra
@@ -6928,6 +7364,79 @@ export default function Home({
         liveExpandedFullFetchRef.current = null;
     };
   }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!expandedMatch || expandedMatch.isLive) return;
+    const id = String(expandedMatch.id);
+    const snap = readSnapshot(matchSnapshotKey(id, "upcoming"));
+    const canUseSnap = !!(
+      snap &&
+      Date.now() - snap.savedAt < 10 * 60_000 &&
+      snap.value
+    );
+    if (canUseSnap) {
+      setExpandedMatch((prev) =>
+        prev && String(prev.id) === id
+          ? ({ ...(snap.value as any), isLive: false } as Match)
+          : prev,
+      );
+    }
+    if (upcomingExpandedFullFetchRef.current === id) return;
+    upcomingExpandedFullFetchRef.current = id;
+
+    let cancelled = false;
+    let currentCtrl: AbortController | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 4;
+
+    const runFetch = () => {
+      const ctrl = new AbortController();
+      currentCtrl = ctrl;
+      const tid = setTimeout(() => ctrl.abort(), 12_000);
+      fetch(`/api/matches/upcoming-match/${encodeURIComponent(id)}?fresh=1`, {
+        signal: ctrl.signal,
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const m = d?.match as Match | null | undefined;
+          if (!m) return false;
+          writeSnapshot(matchSnapshotKey(id, "upcoming"), m as any);
+          setUpcomingMatches((prev) =>
+            prev.map((item) =>
+              String(item.id) === id ? ({ ...m, isLive: false } as Match) : item,
+            ),
+          );
+          setExpandedMatch((prev) => {
+            if (!prev || String(prev.id) !== id) return prev;
+            return { ...(m as any), isLive: false } as Match;
+          });
+          return !!(m as any).markets;
+        })
+        .catch(() => false)
+        .finally(() => {
+          clearTimeout(tid);
+        })
+        .then((gotMarkets) => {
+          if (cancelled) return;
+          attempt += 1;
+          if (gotMarkets || attempt >= MAX_ATTEMPTS) {
+            upcomingExpandedFullFetchRef.current = null;
+            return;
+          }
+          retryTimer = setTimeout(runFetch, 3_000);
+        });
+    };
+
+    runFetch();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      currentCtrl?.abort();
+      if (upcomingExpandedFullFetchRef.current === id)
+        upcomingExpandedFullFetchRef.current = null;
+    };
+  }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]);
 
   const normalizeTeamName = (value: string | undefined) =>
     String(value ?? "")
@@ -7256,16 +7765,46 @@ export default function Home({
       .finally(() => setTopScorersLoading(false));
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The /v2-match-odds backend endpoint (SportsAPI Pro V2) was removed —
-  // there is no replacement source for the full markets list, so the
-  // "odds" tab now always settles straight to "not available".
   useEffect(() => {
     if (matchViewTab !== "odds" || !expandedMatch) return;
-    setAllOddsData([]);
-    setAllOddsLoading(false);
+    const sport = expandedMatch.sport ?? "football";
+    if (sport !== "football") {
+      setAllOddsData([]);
+      setAllOddsLoading(false);
+      setAllOddsQuery("");
+      setAllOddsSectionOpen({});
+      return;
+    }
+    const rawId = getProviderMatchId(expandedMatch.id);
+    if (!rawId) {
+      setAllOddsData([]);
+      setAllOddsLoading(false);
+      setAllOddsQuery("");
+      setAllOddsSectionOpen({});
+      return;
+    }
+    let cancelled = false;
+    setAllOddsLoading(true);
     setAllOddsQuery("");
     setAllOddsSectionOpen({});
-  }, [matchViewTab, expandedMatch?.id]);
+    fetch(`/api/matches/all-odds/${encodeURIComponent(rawId)}?sport=${encodeURIComponent(sport)}`)
+      .then((r) => (r.ok ? r.json() : { markets: [] }))
+      .then((d) => {
+        if (cancelled) return;
+        setAllOddsData(Array.isArray(d?.markets) ? d.markets : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAllOddsData([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setAllOddsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]);
 
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
@@ -7526,6 +8065,9 @@ export default function Home({
           awayTeamId?: string;
           homeImageVersion?: string;
           awayImageVersion?: string;
+          homeLogoUrl?: string;
+          awayLogoUrl?: string;
+          regionFlagUrl?: string;
         }>;
         // Stable merge: update existing cards in-place, add new ones at the
         // end, drop gone ones — prevents visible layout shift on re-fetch.
@@ -7926,7 +8468,7 @@ export default function Home({
         const d = r.ok ? await r.json() : null;
         const match = d?.match as Match | null | undefined;
         if (!match) return;
-        writeSnapshot(matchSnapshotKey(id), match as any);
+        writeSnapshot(matchSnapshotKey(id, "live"), match as any);
         setLiveMatches((prev) =>
           prev.map((item) => {
             if (String(item.id) !== id) return item;
@@ -8058,7 +8600,12 @@ export default function Home({
 
   useEffect(() => {
     if (activeTab !== "live") {
-      // Leave live tab — close SSE
+      // Leave live tab — close push transports
+      if (liveWsRef.current) {
+        liveWsRef.current.close();
+        liveWsRef.current = null;
+      }
+      liveWsHealthyRef.current = false;
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;
@@ -8110,9 +8657,112 @@ export default function Home({
       );
     };
 
-    // ── 2. Open SSE for real-time push updates (<100ms latency) ─────────────
+    const handleRealtimePayload = (data: any, transport: "ws" | "sse") => {
+      resetFallbackBackoff();
+      setLiveTransport(transport);
+      if (data.type === "update" && data.matchId) {
+        const matchId = String(data.matchId);
+        const isTennisDelta = matchId.includes("tennis");
+        const msgNow = Date.now();
+        liveDataFetchedAt.current = msgNow;
+        matchLastSeenRef.current[matchId] = msgNow;
+        const deltaMinuteRaw = data.delta?.minute;
+        if (
+          typeof deltaMinuteRaw === "number" &&
+          Number.isFinite(deltaMinuteRaw)
+        ) {
+          const prevMinute = apiMinutesRef.current[matchId];
+          if (
+            typeof prevMinute !== "number" ||
+            deltaMinuteRaw >= prevMinute
+          ) {
+            apiMinutesRef.current[matchId] = deltaMinuteRaw;
+            if (
+              typeof prevMinute !== "number" ||
+              deltaMinuteRaw > prevMinute
+            ) {
+              minuteChangedAtRef.current[matchId] = msgNow;
+            }
+          }
+        }
+        setLiveMatches((prev) =>
+          prev.map((m) =>
+            String(m.id) === matchId
+              ? { ...m, ...(data.delta ?? {}), isLive: true }
+              : m,
+          ),
+        );
+        if (isTennisDelta) {
+          void refreshLiveMatchById(matchId, {
+            forceFresh: true,
+            syncExpanded: true,
+          });
+        }
+      } else if (
+        data.type === "batch_update" &&
+        Array.isArray(data.updates)
+      ) {
+        const msgNow = Date.now();
+        liveDataFetchedAt.current = msgNow;
+        const tennisIds = new Set<string>();
+        setLiveMatches((prev) => {
+          if (prev.length === 0) return prev;
+          const next = [...prev];
+          let changed = false;
+          for (const upd of data.updates as Array<{
+            matchId?: string;
+            delta?: Partial<Match>;
+          }>) {
+            const matchId = String(upd?.matchId ?? "");
+            if (!matchId || !upd?.delta || typeof upd.delta !== "object")
+              continue;
+            if (matchId.includes("tennis")) tennisIds.add(matchId);
+            matchLastSeenRef.current[matchId] = msgNow;
+            const deltaMinuteRaw = (upd.delta as Match).minute;
+            if (
+              typeof deltaMinuteRaw === "number" &&
+              Number.isFinite(deltaMinuteRaw)
+            ) {
+              const prevMinute = apiMinutesRef.current[matchId];
+              if (
+                typeof prevMinute !== "number" ||
+                deltaMinuteRaw >= prevMinute
+              ) {
+                apiMinutesRef.current[matchId] = deltaMinuteRaw;
+                if (
+                  typeof prevMinute !== "number" ||
+                  deltaMinuteRaw > prevMinute
+                ) {
+                  minuteChangedAtRef.current[matchId] = msgNow;
+                }
+              }
+            }
+            const idx = next.findIndex((m) => String(m.id) === matchId);
+            if (idx < 0) continue;
+            next[idx] = {
+              ...next[idx],
+              ...(upd.delta as Partial<Match>),
+              isLive: true,
+            };
+            changed = true;
+          }
+          return changed ? next : prev;
+        });
+        for (const tennisId of tennisIds) {
+          void refreshLiveMatchById(tennisId, {
+            forceFresh: true,
+            syncExpanded: true,
+          });
+        }
+      } else if (Array.isArray(data.matches)) {
+        writeSnapshot(liveSnapshotKey(), data.matches);
+        processLiveData(data);
+        setLiveLoading(false);
+      }
+    };
+
     const openSSE = () => {
-      if (sseRef.current) return; // already open
+      if (sseRef.current || liveWsRef.current) return;
       if (typeof window === "undefined" || !("EventSource" in window)) {
         setLiveTransport(browserOnline ? "polling" : "cache");
         return;
@@ -8135,109 +8785,7 @@ export default function Home({
       es.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data) as any;
-          resetFallbackBackoff();
-          setLiveTransport("sse");
-          if (data.type === "update" && data.matchId) {
-            // Sub-second delta — patch just the changed match
-            const matchId = String(data.matchId);
-            const isTennisDelta = matchId.includes("tennis");
-            const msgNow = Date.now();
-            liveDataFetchedAt.current = msgNow;
-            matchLastSeenRef.current[matchId] = msgNow;
-            const deltaMinuteRaw = data.delta?.minute;
-            if (
-              typeof deltaMinuteRaw === "number" &&
-              Number.isFinite(deltaMinuteRaw)
-            ) {
-              const prevMinute = apiMinutesRef.current[matchId];
-              if (
-                typeof prevMinute !== "number" ||
-                deltaMinuteRaw >= prevMinute
-              ) {
-                apiMinutesRef.current[matchId] = deltaMinuteRaw;
-                if (
-                  typeof prevMinute !== "number" ||
-                  deltaMinuteRaw > prevMinute
-                ) {
-                  minuteChangedAtRef.current[matchId] = msgNow;
-                }
-              }
-            }
-            setLiveMatches((prev) =>
-              prev.map((m) =>
-                String(m.id) === matchId
-                  ? { ...m, ...(data.delta ?? {}), isLive: true }
-                  : m,
-              ),
-            );
-            if (isTennisDelta) {
-              void refreshLiveMatchById(matchId, {
-                forceFresh: true,
-                syncExpanded: true,
-              });
-            }
-          } else if (
-            data.type === "batch_update" &&
-            Array.isArray(data.updates)
-          ) {
-            const msgNow = Date.now();
-            liveDataFetchedAt.current = msgNow;
-            const tennisIds = new Set<string>();
-            setLiveMatches((prev) => {
-              if (prev.length === 0) return prev;
-              const next = [...prev];
-              let changed = false;
-              for (const upd of data.updates as Array<{
-                matchId?: string;
-                delta?: Partial<Match>;
-              }>) {
-                const matchId = String(upd?.matchId ?? "");
-                if (!matchId || !upd?.delta || typeof upd.delta !== "object")
-                  continue;
-                if (matchId.includes("tennis")) tennisIds.add(matchId);
-                matchLastSeenRef.current[matchId] = msgNow;
-                const deltaMinuteRaw = (upd.delta as Match).minute;
-                if (
-                  typeof deltaMinuteRaw === "number" &&
-                  Number.isFinite(deltaMinuteRaw)
-                ) {
-                  const prevMinute = apiMinutesRef.current[matchId];
-                  if (
-                    typeof prevMinute !== "number" ||
-                    deltaMinuteRaw >= prevMinute
-                  ) {
-                    apiMinutesRef.current[matchId] = deltaMinuteRaw;
-                    if (
-                      typeof prevMinute !== "number" ||
-                      deltaMinuteRaw > prevMinute
-                    ) {
-                      minuteChangedAtRef.current[matchId] = msgNow;
-                    }
-                  }
-                }
-                const idx = next.findIndex((m) => String(m.id) === matchId);
-                if (idx < 0) continue;
-                next[idx] = {
-                  ...next[idx],
-                  ...(upd.delta as Partial<Match>),
-                  isLive: true,
-                };
-                changed = true;
-              }
-              return changed ? next : prev;
-            });
-            for (const tennisId of tennisIds) {
-              void refreshLiveMatchById(tennisId, {
-                forceFresh: true,
-                syncExpanded: true,
-              });
-            }
-          } else if (Array.isArray(data.matches)) {
-            // Full snapshot from server broadcast
-            writeSnapshot(liveSnapshotKey(), data.matches);
-            processLiveData(data);
-            setLiveLoading(false);
-          }
+          handleRealtimePayload(data, "sse");
         } catch {
           /* ignore malformed frames */
         }
@@ -8254,14 +8802,70 @@ export default function Home({
           clearTimeout(sseReconnectTimerRef.current);
         // Reconnect quickly when the live stream drops
         sseReconnectTimerRef.current = setTimeout(() => {
-          if (sseRef.current === null && activeTabRef.current === "live")
+          if (
+            sseRef.current === null &&
+            liveWsRef.current === null &&
+            activeTabRef.current === "live"
+          )
             openSSE();
         }, 700);
       };
     };
-    openSSE();
 
-    // ── 3. HTTP fallback poll with progressive backoff while SSE is degraded ──
+    const openWebSocket = () => {
+      if (liveWsRef.current) return;
+      if (typeof window === "undefined" || typeof WebSocket === "undefined") {
+        openSSE();
+        return;
+      }
+
+      let ws: WebSocket;
+      try {
+        const proto = window.location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${proto}://${window.location.host}/api/matches/ws`);
+      } catch {
+        openSSE();
+        return;
+      }
+
+      liveWsRef.current = ws;
+      ws.onopen = () => {
+        liveWsHealthyRef.current = true;
+        if (sseRef.current) {
+          sseRef.current.close();
+          sseRef.current = null;
+        }
+        sseActiveRef.current = false;
+        resetFallbackBackoff();
+        setLiveTransport("ws");
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const raw =
+            typeof evt.data === "string" ? evt.data : String(evt.data ?? "");
+          if (!raw) return;
+          liveWsHealthyRef.current = true;
+          handleRealtimePayload(JSON.parse(raw), "ws");
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+      ws.onclose = () => {
+        if (liveWsRef.current === ws) liveWsRef.current = null;
+        liveWsHealthyRef.current = false;
+        if (cancelled || activeTabRef.current !== "live") return;
+        if (sseRef.current === null) openSSE();
+      };
+      ws.onerror = () => {
+        try {
+          ws.close();
+        } catch {}
+      };
+    };
+
+    openWebSocket();
+
+    // ── 3. HTTP fallback poll while push transport is degraded ────────────────
     // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.
     const scheduleFallbackPoll = (delayMs: number) => {
       if (cancelled) return;
@@ -8269,11 +8873,16 @@ export default function Home({
       livePollTimerRef.current = setTimeout(async () => {
         if (cancelled) return;
         const streamAgeMs = Date.now() - (liveDataFetchedAt.current ?? 0);
-        const sseHealthy = sseActiveRef.current && streamAgeMs <= 2_500;
+        const pushHealthy =
+          (liveWsHealthyRef.current || sseActiveRef.current) &&
+          streamAgeMs <= 2_500;
 
-        if (!sseHealthy) {
+        if (!pushHealthy) {
           const result = await fetchLive(false);
-          if (result === "success" && sseActiveRef.current)
+          if (
+            result === "success" &&
+            (liveWsHealthyRef.current || sseActiveRef.current)
+          )
             resetFallbackBackoff();
           else if (result !== "skipped") advanceFallbackBackoff();
         } else {
@@ -8306,6 +8915,11 @@ export default function Home({
       }
       liveFetchInFlightRef.current = false;
       livePollBackoffStepRef.current = 0;
+      if (liveWsRef.current) {
+        liveWsRef.current.close();
+        liveWsRef.current = null;
+      }
+      liveWsHealthyRef.current = false;
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;
@@ -8334,7 +8948,7 @@ export default function Home({
       for (const id of ids) {
         if (ctrl.signal.aborted) return;
         if (livePrefetchingRef.current.has(id)) continue;
-        const snap = readSnapshot(matchSnapshotKey(id));
+        const snap = readSnapshot(matchSnapshotKey(id, "live"));
         const canUseSnap = !!(
           snap &&
           Date.now() - snap.savedAt < LIVE_SNAPSHOT_MAX_AGE_MS &&
@@ -8352,7 +8966,7 @@ export default function Home({
           );
           const d = r.ok ? await r.json() : null;
           const m = d?.match as Match | null | undefined;
-          if (m) writeSnapshot(matchSnapshotKey(id), m as any);
+          if (m) writeSnapshot(matchSnapshotKey(id, "live"), m as any);
         } catch {
         } finally {
           livePrefetchingRef.current.delete(id);
@@ -8687,36 +9301,80 @@ export default function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(CASINO_FAVORITES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as CasinoGame[];
+      if (!Array.isArray(parsed)) return;
+      setCasinoFavoriteGames(
+        parsed.reduce<Record<string, CasinoGame>>((acc, game) => {
+          if (!game?.id || !game?.provider) return acc;
+          acc[casinoGameStorageKey(game)] = game;
+          return acc;
+        }, {}),
+      );
+    } catch {
+      // Non-critical local preference.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        CASINO_FAVORITES_STORAGE_KEY,
+        JSON.stringify(Object.values(casinoFavoriteGames)),
+      );
+    } catch {
+      // Non-critical local preference.
+    }
+  }, [casinoFavoriteGames]);
+
+  const toggleCasinoFavorite = useCallback((game: CasinoGame) => {
+    setCasinoFavoriteGames((prev) => {
+      const key = casinoGameStorageKey(game);
+      if (prev[key]) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: game };
+    });
+  }, []);
+
+  const favoriteCasinoGames = useMemo(() => Object.values(casinoFavoriteGames), [casinoFavoriteGames]);
+
   // "Jogos Populares" showcase row — near-static (popularity doesn't churn
   // minute to minute), fetch once the first time the tab is opened. The
-  // named headline titles are searched for individually and shown first
-  // (real catalog matches only, same curated-search pattern as
-  // homeCasinoPreview above — no fabricated entries); popularity-sorted
-  // games fill the rest of the row, skipping anything already included.
-  // Both fetches are pinned to Pragmatic Play (CASINO_DEFAULT_PROVIDER) —
-  // user request, 2026-08-11: every game on the casino's first/default
-  // view should be Pragmatic Play. Titles among featuredTitles that turn
-  // out not to be a real Pragmatic Play game in the catalog (e.g. "Wanted
-  // Dead or a Wild" is Hacksaw Gaming, not Pragmatic) simply won't match
-  // here and get silently dropped — no manual curation needed, the
-  // provider filter self-corrects against whatever's actually real.
+  // row intentionally mixes providers/titles that feel like a real casino
+  // lobby instead of pinning everything to a single vendor.
   useEffect(() => {
     if (activeTab !== "casino" || casinoPopular.length > 0) return;
     setCasinoPopularLoading(true);
     const featuredTitles = [
       "Sweet Bonanza",
       "Gates of Olympus",
-      "Sugar Rush 1000",
       "Big Bass Bonanza",
+      "Starlight Princess",
+      "Sugar Rush",
       "Wanted Dead or a Wild",
-      "Book of Gold Multichance",
-      "Fruit Party 2",
+      "Book of Dead",
+      "Reactoonz",
+      "Starburst",
+      "Bonanza Megaways",
+      "Crazy Time",
+      "Lightning Roulette",
+      "MONOPOLY Live",
+      "XXXtreme Lightning Roulette",
+      "Lightning Blackjack",
+      "Infinite Blackjack",
+      "Dream Catcher",
     ];
     Promise.all(
       featuredTitles.map((title) =>
-        fetch(
-          `/api/casino/games?search=${encodeURIComponent(title)}&provider=${encodeURIComponent(CASINO_DEFAULT_PROVIDER)}&limit=1`,
-        )
+        fetch(`/api/casino/games?search=${encodeURIComponent(title)}&limit=1`)
           .then((r) => r.json())
           .then((data) => (Array.isArray(data?.games) ? data.games[0] : null))
           .catch(() => null),
@@ -8732,15 +9390,13 @@ export default function Home({
           seen.add(key);
           featured.push(g);
         }
-        return fetch(
-          `/api/casino/games?sort=popular&provider=${encodeURIComponent(CASINO_DEFAULT_PROVIDER)}&limit=10`,
-        )
+        return fetch(`/api/casino/games?sort=popular&limit=18`)
           .then((r) => r.json())
           .then((data) => {
             const rest: CasinoGame[] = Array.isArray(data?.games)
               ? data.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
               : [];
-            setCasinoPopular([...featured, ...rest].slice(0, 10));
+            setCasinoPopular([...featured, ...rest].slice(0, 18));
           })
           .catch(() => setCasinoPopular(featured));
       })
@@ -8863,39 +9519,50 @@ export default function Home({
     };
   }, [activeTab]);
 
-  // "Populares"/"Novos" are sort-order pills, not real category filters
-  // (Palace Casino's category field is only ever "Slots"/"Ao Vivo" — see
-  // routes/casino.ts's NAME_KEYWORD_CATEGORIES comment); everything else
-  // maps straight to the category query param. The sort dropdown only
-  // applies once neither of those two pills is selected.
+  // "Populares"/"Novos" are primarily sort-order views, while the rest of
+  // the lobby maps to backend intent categories (slots, ao vivo, jogos
+  // rápidos, crash, jackpots, blackjack, roleta, bacará, game shows).
   const casinoGridParams = useCallback(
     (page: number): URLSearchParams => {
       const params = new URLSearchParams({ page: String(page), limit: String(CASINO_PAGE_SIZE) });
-      const isDefaultView = casinoCategory === "Todos" || casinoCategory === "Populares" || casinoCategory === "Novos";
       if (casinoCategory === "Populares") params.set("sort", "popular");
       else if (casinoCategory === "Novos") params.set("sort", "new");
       else {
         params.set("sort", casinoSort);
-        if (casinoCategory !== "Todos") params.set("category", casinoCategory);
+        if (casinoCategory !== "Todos" && casinoCategory !== "Favoritos") {
+          params.set("category", casinoCategory);
+        }
       }
       if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
-      // Casino's default view (no category pill picked away from Todos/
-      // Populares/Novos, no search) is pinned to Pragmatic Play — see
-      // CASINO_DEFAULT_PROVIDER. Not applied once the user searches or
-      // picks an explicit different category (Slots/Ao Vivo/Baccarat/
-      // Blackjack/Roulette) — those are the user actively asking to see
-      // something else, not "the first page" anymore.
-      if (isDefaultView && !casinoSearchDebounced) params.set("provider", CASINO_DEFAULT_PROVIDER);
       return params;
     },
     [casinoCategory, casinoSort, casinoSearchDebounced],
   );
+
+  const filteredFavoriteCasinoGames = useMemo(() => {
+    const searchNeedle = normalizeCasinoSearchText(casinoSearchDebounced);
+    const rows = favoriteCasinoGames.filter((game) => {
+      if (!searchNeedle) return true;
+      return normalizeCasinoSearchText(`${game.name} ${game.provider}`).includes(searchNeedle);
+    });
+    if (casinoSort === "az") {
+      return [...rows].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    }
+    return rows;
+  }, [favoriteCasinoGames, casinoSearchDebounced, casinoSort]);
 
   // Flat "Slots" grid — the casino tab's single browsing view, driven by
   // category pill + sort dropdown + search box. Any of the three changing
   // resets to page 1; "Carregar mais jogos" (loadMoreCasinoGames) advances.
   useEffect(() => {
     if (activeTab !== "casino") return;
+    if (casinoCategory === "Favoritos") {
+      setCasinoPage(1);
+      setCasinoGames(filteredFavoriteCasinoGames);
+      setCasinoTotal(filteredFavoriteCasinoGames.length);
+      setCasinoLoadingPage(false);
+      return;
+    }
     setCasinoPage(1);
     setCasinoGames([]);
     setCasinoLoadingPage(true);
@@ -8907,9 +9574,10 @@ export default function Home({
       })
       .catch(() => {})
       .finally(() => setCasinoLoadingPage(false));
-  }, [activeTab, casinoGridParams]);
+  }, [activeTab, casinoCategory, casinoGridParams, filteredFavoriteCasinoGames]);
 
   const loadMoreCasinoGames = useCallback(() => {
+    if (casinoCategory === "Favoritos") return;
     const nextPage = casinoPage + 1;
     setCasinoLoadingPage(true);
     fetch(`/api/casino/games?${casinoGridParams(nextPage)}`)
@@ -8923,7 +9591,7 @@ export default function Home({
       })
       .catch(() => {})
       .finally(() => setCasinoLoadingPage(false));
-  }, [casinoPage, casinoGridParams]);
+  }, [casinoCategory, casinoPage, casinoGridParams]);
 
   // Real-time stream for pending ticket states, with fetch fallback if SSE drops.
   useEffect(() => {
@@ -9122,10 +9790,9 @@ export default function Home({
       }
       setCasinoLoadingGame(game.id);
       try {
-        // source="palace" games launch through a different aggregator with
-        // an unrelated request shape (provider_id + game_symbol, no
-        // balance sent — see routes/casino.ts's /palace/launch) than the
-        // default SilentAPI path (gameUid + our own balance).
+        // BigBang uses the generic /api/casino/launch path (gameUid only).
+        // Legacy Palace rows, if any still exist in old data, keep their
+        // former launch shape for backwards compatibility.
         const isPalace = game.source === "palace";
         const res = await fetch(
           isPalace ? "/api/casino/palace/launch" : "/api/casino/launch",
@@ -9900,8 +10567,34 @@ export default function Home({
       ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
       : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
     const oddInvalid = odd <= 0 || !Number.isFinite(odd);
+    const suspendedBoxClass = isWCVariant
+      ? `${isDarkTheme ? "border-red-900/50 bg-red-950/30" : "border-red-200 bg-red-50"}`
+      : "bg-red-950/25 border-red-700/30 opacity-85";
+    const renderSuspendedOdd = () => (
+      <div
+        className={`relative ${baseBoxClass} ${suspendedBoxClass} select-none`}
+        title="Mercado suspenso"
+        aria-disabled="true"
+      >
+        <span
+          className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-red-300" : "text-[10px] leading-none text-red-200/80"}`}
+        >
+          {label}
+        </span>
+        <span
+          className={`${isWCVariant ? "mt-1 text-sm font-black text-red-400" : "font-bold text-base leading-none text-red-300"} tabular-nums`}
+        >
+          --
+        </span>
+        <span
+          className={`${isWCVariant ? "mt-0.5 text-[8px] font-black tracking-[0.18em] uppercase text-red-300/80" : "mt-0.5 text-[8px] font-black tracking-[0.16em] uppercase text-red-200/75"}`}
+        >
+          Susp.
+        </span>
+      </div>
+    );
     if (oddInvalid) {
-      if (isSuspended) return null;
+      if (isSuspended) return renderSuspendedOdd();
       return (
         <div
           className={`relative ${baseBoxClass} ${
@@ -9909,7 +10602,7 @@ export default function Home({
               ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white")
               : "bg-zinc-800/40 border-zinc-700/30 opacity-70"
           } select-none`}
-          title="Aguardando preço real da PulseScore para este jogo"
+          title="Aguardando preco real do feed ao vivo para este jogo"
         >
           <span
             className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-zinc-500" : "text-[10px] leading-none opacity-50"}`}
@@ -9941,9 +10634,7 @@ export default function Home({
         b.selection === selection,
     );
 
-    if (isSuspended) {
-      return null;
-    }
+    if (isSuspended) return renderSuspendedOdd();
 
     // Football-only: this heuristic exists to hide football's "obvious
     // blowout" late-game prices (90-minute clock, goal-difference score).
@@ -10129,8 +10820,8 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-            const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
+            const { leagueLogo, flagUrl: fUrl } =
+              getCompetitionDisplayAssets(match);
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
                 <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -10167,6 +10858,7 @@ export default function Home({
     const minute = getDisplayMinute(match);
     const sport = match.sport ?? "football";
     const extra = match._liveExtra;
+    const hasPlayableOddsOnCard = matchHasPlayableOdds(match);
     const flag =
       COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ??
       sportEmoji(match.sport);
@@ -10278,6 +10970,27 @@ export default function Home({
       return `${match.scheduledDate} ${time}`;
     })();
 
+    const interruptedLikeStatus = (() => {
+      const raw = String(match.status ?? "");
+      if (/interromp|interrupt|suspend|suspenso|paused|abandon|delay|postpon/i.test(raw)) {
+        return true;
+      }
+      // Some MRDoge tennis/volleyball feeds keep the set badge visible even
+      // while the market stream is effectively halted. In that case prefer an
+      // explicit interrupted badge instead of a misleading "2S"/"Soon".
+      if (
+        match.isLive &&
+        (sport === "tennis" || sport === "volleyball") &&
+        !hasPlayableOddsOnCard &&
+        !extra?.currentPoints &&
+        !extra?.currentPts &&
+        (/^\d+S$/i.test(raw) || /soon/i.test(raw))
+      ) {
+        return true;
+      }
+      return false;
+    })();
+
     const isStarting = isEmBreve && (match.startsIn ?? 999) <= 2;
     const liveBadge = isEmBreve ? (
       <div className="flex items-center gap-1.5">
@@ -10299,6 +11012,15 @@ export default function Home({
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] font-bold text-zinc-400 tabular-nums">
           {match.status === "Encerrado" ? "FIN" : liveBadgeLabel}
+        </span>
+      </div>
+    ) : interruptedLikeStatus ? (
+      <div className="flex items-center gap-1.5">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+        </span>
+        <span className="text-[10px] font-bold text-red-500 tabular-nums">
+          Interrompido
         </span>
       </div>
     ) : (
@@ -10774,18 +11496,11 @@ export default function Home({
         return false;
       })();
 
-    // Suspension: only the `result` key gates the card odds-row — settled set/period
-    // markets have far-future timestamps and must NOT count as "suspended" here.
-    const isLiveSuspended =
-      match.isLive &&
-      (match.marketSuspension?.["result"] != null &&
-        match.marketSuspension["result"] > Date.now());
-
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
     const isPenShootout =
       match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const canShowOdds = matchHasPlayableOdds(match);
+    const canShowOdds = hasPlayableOddsOnCard;
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) =>
       e.stopPropagation();
     const oddsRow =
@@ -10800,14 +11515,14 @@ export default function Home({
           onPointerMove={stopLiveCardOpen}
           onPointerUp={stopLiveCardOpen}
         >
-          {isPenShootout && !isLiveSuspended && (
+          {isPenShootout && (
             <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">
               🎯 Vencedor da Final
             </div>
           )}
           <SuspensionBanner match={match} />
           <div className="flex gap-1.5 w-full">
-            {!isLiveSuspended && isPenShootout ? (
+            {isPenShootout ? (
               <>
                 <OddsButton
                   match={match}
@@ -10828,7 +11543,7 @@ export default function Home({
                   variant="worldcup"
                 />
               </>
-            ) : !isLiveSuspended ? (
+            ) : (
               isObviousLiveResult ? (
                 <button
                   className="flex-1 flex flex-col items-center py-3 px-2 rounded-2xl text-xs border border-amber-200 bg-amber-50"
@@ -10871,9 +11586,9 @@ export default function Home({
                   />
                 </>
               )
-            ) : null}
+            )}
           </div>
-          {!isLiveSuspended && !isPenShootout && !match.hasRealOdds && (
+          {!isPenShootout && !match.hasRealOdds && (
             <div className="flex items-center justify-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
               <span className="text-[9px] font-semibold tracking-wide text-zinc-500">
@@ -10900,8 +11615,8 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-                const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
+                const { leagueLogo, flagUrl: fUrl } =
+                  getCompetitionDisplayAssets(match);
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
                     <div className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -10973,7 +11688,7 @@ export default function Home({
                     {homeFlag ? (
                       <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : homeBadge?.src ? (
-                      <img src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[13px] font-black leading-tight truncate flex-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
@@ -10987,7 +11702,7 @@ export default function Home({
                     {awayFlag ? (
                       <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : awayBadge?.src ? (
-                      <img src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[12px] font-semibold leading-tight truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
@@ -11018,19 +11733,19 @@ export default function Home({
                 onPointerMove={stopLiveCardOpen}
                 onPointerUp={stopLiveCardOpen}
               >
-                {isPenShootout && !isLiveSuspended && (
+                {isPenShootout && (
                   <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">
                     🎯 Vencedor da Final
                   </div>
                 )}
                 <SuspensionBanner match={match} />
                 <div className="flex gap-1.5 w-full">
-                  {!isLiveSuspended && isPenShootout ? (
+                  {isPenShootout ? (
                     <>
                       <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                       <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                     </>
-                  ) : !isLiveSuspended ? (
+                  ) : (
                     sport === "formula1" ? (
                       /* F1 live: race winner driver buttons */
                       <div className="flex gap-1 flex-wrap w-full">
@@ -11063,7 +11778,7 @@ export default function Home({
                         <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                       </>
                     )
-                  ) : null}
+                  )}
                 </div>
               </div>
             )}
@@ -11107,12 +11822,10 @@ export default function Home({
       className={`${compact ? "w-[46px] h-[46px]" : "w-[54px] h-[54px]"} rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden ${badgePadded ? "p-1.5" : ""}`}
     >
       {badge ? (
-        <img
+        <StableImage
           src={badge}
           alt={name}
           className={`w-full h-full ${badgeFit === "contain" ? "object-contain" : "object-cover"}`}
-          loading="lazy"
-          decoding="async"
         />
       ) : isSelection ? (
         <span
@@ -11207,7 +11920,7 @@ export default function Home({
         );
       }
       // ── Standard sports: 1X2 ────────────────────────────────────────────────
-      return canShowOdds ? (
+      return canShowOdds || isSuspendedMatch ? (
         <div
           className="flex flex-col gap-1 sm:w-[280px] sm:shrink-0"
           onClick={stopCardOpen}
@@ -11219,74 +11932,73 @@ export default function Home({
           onPointerUp={stopCardOpen}
         >
           <SuspensionBanner match={match} />
-          {!isSuspendedMatch && (
-            <>
-              {/* ── 1X2 ─────────────────────────────────────────────── */}
-              <div className="flex gap-1 w-full">
+          <>
+            {/* ── 1X2 ─────────────────────────────────────────────── */}
+            <div className="flex gap-1 w-full">
+              <OddsButton
+                match={match}
+                selection="home"
+                odd={match.odds.home}
+                market="result"
+                label="1"
+                grow
+                variant="worldcup"
+              />
+              {hasDraw && (
                 <OddsButton
                   match={match}
-                  selection="home"
-                  odd={match.odds.home}
+                  selection="draw"
+                  odd={match.odds.draw}
                   market="result"
-                  label="1"
+                  label="X"
                   grow
                   variant="worldcup"
                 />
-                {hasDraw && (
-                  <OddsButton
-                    match={match}
-                    selection="draw"
-                    odd={match.odds.draw}
-                    market="result"
-                    label="X"
-                    grow
-                    variant="worldcup"
-                  />
-                )}
+              )}
+              <OddsButton
+                match={match}
+                selection="away"
+                odd={match.odds.away}
+                market="result"
+                label="2"
+                grow
+                variant="worldcup"
+              />
+            </div>
+            {!match.hasRealOdds && !isSuspendedMatch && (
+              <div className="flex items-center justify-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-[9px] font-semibold tracking-wide text-zinc-600">
+                  EST.
+                </span>
+              </div>
+            )}
+            {/* ── MMA: "vai até o limite" + total de rounds, alongside the
+                standard moneyline above (real PulseScore odds, no synthetic
+                model) ── */}
+            {sport === "mma" && match.mmaExtra?.toDistance && (
+              <div className="flex gap-1 w-full mt-1">
                 <OddsButton
                   match={match}
-                  selection="away"
-                  odd={match.odds.away}
-                  market="result"
-                  label="2"
+                  selection="yes"
+                  odd={match.mmaExtra.toDistance.yes}
+                  market="mma_distance"
+                  label="Vai ao Limite"
+                  grow
+                  variant="worldcup"
+                />
+                <OddsButton
+                  match={match}
+                  selection="no"
+                  odd={match.mmaExtra.toDistance.no}
+                  market="mma_distance"
+                  label="Não Vai ao Limite"
                   grow
                   variant="worldcup"
                 />
               </div>
-              {!match.hasRealOdds && (
-                <div className="flex items-center justify-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  <span className="text-[9px] font-semibold tracking-wide text-zinc-600">
-                    EST.
-                  </span>
-                </div>
-              )}
-              {/* ── MMA: "vai até o limite" + total de rounds, alongside the
-                  standard moneyline above (real PulseScore odds, no synthetic
-                  model) ── */}
-              {sport === "mma" && match.mmaExtra?.toDistance && (
-                <div className="flex gap-1 w-full mt-1">
-                  <OddsButton
-                    match={match}
-                    selection="yes"
-                    odd={match.mmaExtra.toDistance.yes}
-                    market="mma_distance"
-                    label="Vai ao Limite"
-                    grow
-                    variant="worldcup"
-                  />
-                  <OddsButton
-                    match={match}
-                    selection="no"
-                    odd={match.mmaExtra.toDistance.no}
-                    market="mma_distance"
-                    label="Não Vai ao Limite"
-                    grow
-                    variant="worldcup"
-                  />
-                </div>
-              )}
-              {sport === "mma" &&
+            )}
+            {sport === "mma" &&
                 (match.mmaExtra?.totalRoundsLines?.length ?? 0) > 0 &&
                 (() => {
                   const mid = match.mmaExtra!.totalRoundsLines![
@@ -11372,8 +12084,7 @@ export default function Home({
                     </div>
                   );
                 })}
-            </>
-          )}
+          </>
         </div>
       ) : null;
     };
@@ -11394,8 +12105,8 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const leagueLogo = getLeagueLogo(match.league, match.country, match.home);
-              const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
+              const { leagueLogo, flagUrl } =
+                getCompetitionDisplayAssets(match);
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
                   <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -11448,7 +12159,7 @@ export default function Home({
                     {homeFlag ? (
                       <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : homeBadge?.src ? (
-                      <img src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={homeBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${homeBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
@@ -11458,7 +12169,7 @@ export default function Home({
                     {awayFlag ? (
                       <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
                     ) : awayBadge?.src ? (
-                      <img src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} loading="lazy" />
+                      <StableImage src={awayBadge.src} alt="" className={`w-4 h-4 rounded-full shrink-0 bg-white ${awayBadge.fit === "contain" ? "object-contain p-[1px]" : "object-cover"}`} />
                     ) : null}
                     <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
@@ -13196,16 +13907,24 @@ export default function Home({
                         (Number(mk?.totalGoals?.over35 ?? 0) > 1.01) ||
                         (Number(mk?.totalGoals?.over45 ?? 0) > 1.01) ||
                         (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.away ?? 0) > 1.01) ||
                         (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.away ?? 0) > 1.01) ||
                         (Number(mk?.toWinBothHalves?.home ?? 0) > 1.01) ||
+                        (Number(mk?.toWinBothHalves?.away ?? 0) > 1.01) ||
                         (Number(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
-                        (Number(mk?.exactGoals?.g0 ?? 0) > 1.01);
+                        (Number(mk?.exactGoals?.g0 ?? 0) > 1.01) ||
+                        Object.values((mk?.teamGoals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
                       if (hasGols) baseTabs.push({ key: "gols", label: "Gols" });
                       const hasEspeciais =
                         (Number(mk?.btts1H?.yes ?? 0) > 1.01) ||
                         (Number(mk?.highestScoringHalf?.first ?? 0) > 1.01) ||
                         (Number(mk?.teamGoals?.homeOver05 ?? 0) > 1.01) ||
-                        (Number(mk?.teamGoals?.awayOver05 ?? 0) > 1.01);
+                        (Number(mk?.teamGoals?.awayOver05 ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.home ?? 0) > 1.01) ||
+                        (Number(mk?.winToNil?.away ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.home ?? 0) > 1.01) ||
+                        (Number(mk?.cleanSheet?.away ?? 0) > 1.01);
                       if (hasEspeciais) baseTabs.push({ key: "especiais", label: "Especiais" });
                       const hasHandicap =
                         (Number(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
@@ -13218,6 +13937,8 @@ export default function Home({
                         ((Number(mk?.halfTime?.home ?? 0) > 1.01) ||
                           (Number(mk?.halfTime?.draw ?? 0) > 1.01) ||
                           (Number(mk?.halfTime?.away ?? 0) > 1.01) ||
+                          (Number(mk?.firstHalfTotal?.over ?? 0) > 1.01) ||
+                          (Number(mk?.firstHalfTotal?.under ?? 0) > 1.01) ||
                           (Number(mk?.firstGoal?.home ?? 0) > 1.01) ||
                           (Number(mk?.drawNoBet?.home ?? 0) > 1.01));
                       if (has1Tempo) baseTabs.push({ key: "1tempo", label: "1º Tempo" });
@@ -14780,22 +15501,24 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
-                    {m._total1H && m.totalGoals.over15 > 0 && (
-                      <MarketGroup title={`Total 1º Tempo — ${m._total1H}`}>
+                    {m.firstHalfTotal &&
+                      (Number(m.firstHalfTotal.over ?? 0) > 0 ||
+                        Number(m.firstHalfTotal.under ?? 0) > 0) && (
+                      <MarketGroup title={`Total 1º Tempo — ${m.firstHalfTotal.line}`}>
                         <MarketOddsBtn
                           match={match}
-                          sel={`b-h1-pts-o-${m._total1H}`}
-                          odd={m.totalGoals.over15}
+                          sel={`b-h1-pts-o-${m.firstHalfTotal.line}`}
+                          odd={m.firstHalfTotal.over}
                           market="totais"
-                          label={`Mais de ${m._total1H}`}
+                          label={`Mais de ${m.firstHalfTotal.line}`}
                           suspKey="totalGoals"
                         />
                         <MarketOddsBtn
                           match={match}
-                          sel={`b-h1-pts-u-${m._total1H}`}
-                          odd={m.totalGoals.under15}
+                          sel={`b-h1-pts-u-${m.firstHalfTotal.line}`}
+                          odd={m.firstHalfTotal.under}
                           market="totais"
-                          label={`Menos de ${m._total1H}`}
+                          label={`Menos de ${m.firstHalfTotal.line}`}
                           suspKey="totalGoals"
                         />
                       </MarketGroup>
@@ -15969,7 +16692,8 @@ export default function Home({
                 !isLateGame &&
                 (modalTab === "placar" || modalTab === "todos") &&
                 m &&
-                m.correctScore && (
+                m.correctScore &&
+                Object.keys(m.correctScore).length > 0 && (
                   <div>
                     <MarketAccordionSection
                       title="Placar Exato"
@@ -16000,7 +16724,7 @@ export default function Home({
                 !isLateGame &&
                 modalTab === "placar" &&
                 m &&
-                !m.correctScore &&
+                (!m.correctScore || Object.keys(m.correctScore).length === 0) &&
                 !m.winningMargin && (
                   <div className="text-center text-zinc-600 py-6 text-sm">
                     Mercado não disponível para esta partida.
@@ -16682,91 +17406,126 @@ export default function Home({
                           />
                         </MarketGroup>
                       )}
-                    {!isLateGame && m.asianTotals && m.asianTotals.o225 > 0 && (
+                    {!isLateGame &&
+                      m.asianTotals &&
+                      Object.values(m.asianTotals).some((v) => Number(v ?? 0) > 0) && (
                       <>
-                        <MarketGroup title="Total Asiático — 0.5">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o05"
-                            odd={m.asianTotals.o05}
-                            market="asiatico"
-                            label="Mais de 0.5"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u05"
-                            odd={m.asianTotals.u05}
-                            market="asiatico"
-                            label="Menos de 0.5"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 2.25">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o225"
-                            odd={m.asianTotals.o225}
-                            market="asiatico"
-                            label="Mais de 2.25"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u225"
-                            odd={m.asianTotals.u225}
-                            market="asiatico"
-                            label="Menos de 2.25"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 2.75">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o275"
-                            odd={m.asianTotals.o275}
-                            market="asiatico"
-                            label="Mais de 2.75"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u275"
-                            odd={m.asianTotals.u275}
-                            market="asiatico"
-                            label="Menos de 2.75"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 4.5">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o45"
-                            odd={m.asianTotals.o45}
-                            market="asiatico"
-                            label="Mais de 4.5"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u45"
-                            odd={m.asianTotals.u45}
-                            market="asiatico"
-                            label="Menos de 4.5"
-                          />
-                        </MarketGroup>
-                        <MarketGroup title="Total Asiático — 5.5">
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-o55"
-                            odd={m.asianTotals.o55}
-                            market="asiatico"
-                            label="Mais de 5.5"
-                          />
-                          <MarketOddsBtn
-                            match={match}
-                            sel="at-u55"
-                            odd={m.asianTotals.u55}
-                            market="asiatico"
-                            label="Menos de 5.5"
-                          />
-                        </MarketGroup>
+                        {(m.asianTotals.o05 > 0 || m.asianTotals.u05 > 0) && (
+                          <MarketGroup title="Total Asiático — 0.5">
+                            {m.asianTotals.o05 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o05"
+                                odd={m.asianTotals.o05}
+                                market="asiatico"
+                                label="Mais de 0.5"
+                              />
+                            )}
+                            {m.asianTotals.u05 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u05"
+                                odd={m.asianTotals.u05}
+                                market="asiatico"
+                                label="Menos de 0.5"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o225 > 0 || m.asianTotals.u225 > 0) && (
+                          <MarketGroup title="Total Asiático — 2.25">
+                            {m.asianTotals.o225 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o225"
+                                odd={m.asianTotals.o225}
+                                market="asiatico"
+                                label="Mais de 2.25"
+                              />
+                            )}
+                            {m.asianTotals.u225 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u225"
+                                odd={m.asianTotals.u225}
+                                market="asiatico"
+                                label="Menos de 2.25"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o275 > 0 || m.asianTotals.u275 > 0) && (
+                          <MarketGroup title="Total Asiático — 2.75">
+                            {m.asianTotals.o275 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o275"
+                                odd={m.asianTotals.o275}
+                                market="asiatico"
+                                label="Mais de 2.75"
+                              />
+                            )}
+                            {m.asianTotals.u275 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u275"
+                                odd={m.asianTotals.u275}
+                                market="asiatico"
+                                label="Menos de 2.75"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o45 > 0 || m.asianTotals.u45 > 0) && (
+                          <MarketGroup title="Total Asiático — 4.5">
+                            {m.asianTotals.o45 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o45"
+                                odd={m.asianTotals.o45}
+                                market="asiatico"
+                                label="Mais de 4.5"
+                              />
+                            )}
+                            {m.asianTotals.u45 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u45"
+                                odd={m.asianTotals.u45}
+                                market="asiatico"
+                                label="Menos de 4.5"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
+                        {(m.asianTotals.o55 > 0 || m.asianTotals.u55 > 0) && (
+                          <MarketGroup title="Total Asiático — 5.5">
+                            {m.asianTotals.o55 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-o55"
+                                odd={m.asianTotals.o55}
+                                market="asiatico"
+                                label="Mais de 5.5"
+                              />
+                            )}
+                            {m.asianTotals.u55 > 0 && (
+                              <MarketOddsBtn
+                                match={match}
+                                sel="at-u55"
+                                odd={m.asianTotals.u55}
+                                market="asiatico"
+                                label="Menos de 5.5"
+                              />
+                            )}
+                          </MarketGroup>
+                        )}
                       </>
                     )}
-                    {!m.drawNoBet && !m.asianHandicap && !m.europeanHandicap && !m.asianTotals && (
+                    {!m.drawNoBet &&
+                      !m.asianHandicap &&
+                      !m.europeanHandicap &&
+                      !Object.values(m.asianTotals ?? {}).some((v) => Number(v ?? 0) > 0) && (
                       <div className="text-center text-zinc-600 py-6 text-sm">
                         Mercado não disponível para esta partida.
                       </div>
@@ -19599,6 +20358,12 @@ export default function Home({
                   setSelectedLeague={setSelectedLeague}
                   selectedCountry={selectedCountry}
                   setSelectedCountry={setSelectedCountry}
+                  catalogBySport={catalogBySport}
+                  competitionCatalogByRegion={competitionCatalogByRegion}
+                  catalogLoadingSport={catalogLoadingSport}
+                  competitionLoadingKey={competitionLoadingKey}
+                  ensureSportCatalog={ensureSportCatalog}
+                  ensureCompetitionCatalog={ensureCompetitionCatalog}
                 />
               </div>
             </motion.div>
@@ -19625,6 +20390,12 @@ export default function Home({
               setSelectedLeague={setSelectedLeague}
               selectedCountry={selectedCountry}
               setSelectedCountry={setSelectedCountry}
+              catalogBySport={catalogBySport}
+              competitionCatalogByRegion={competitionCatalogByRegion}
+              catalogLoadingSport={catalogLoadingSport}
+              competitionLoadingKey={competitionLoadingKey}
+              ensureSportCatalog={ensureSportCatalog}
+              ensureCompetitionCatalog={ensureCompetitionCatalog}
             />
           </div>
         </aside>
@@ -19712,6 +20483,15 @@ export default function Home({
                           <Activity size={11} />
                           Stats
                         </button>
+                        {(expandedMatch.sport ?? "football") === "football" && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "odds" ? "markets" : "odds")}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "odds" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          >
+                            <BarChart3 size={11} />
+                            Todos Merc.
+                          </button>
+                        )}
                         {(expandedMatch.sport ?? "football") === "football" && (
                           <button
                             onClick={() => setMatchViewTab(matchViewTab === "yesterday" ? "markets" : "yesterday")}
@@ -22800,21 +23580,14 @@ export default function Home({
                 });
                 // Top 3 featured: pick from major-league matches first,
                 // fall back to first 3 if fewer than 3 major-league matches exist.
-                const _FEATURED_KW = [
-                  "champions league","premier league","la liga","bundesliga",
-                  "serie a","ligue 1","primeira liga","liga portugal","eredivisie",
-                  "super lig","süper lig","liga mx","mls","brasileirao","brasileirão",
-                  "campeonato brasileiro","libertadores","copa america","copa del rey",
-                  "coppa italia","fa cup","dfb pokal","nations league","world cup",
-                  "copa do mundo","nba","nhl","mlb","wimbledon","roland garros",
-                  "us open","australian open","atp finals","wta finals",
-                  "atp 1000","masters 1000","rolex masters","champions trophy",
-                ];
-                const _isMajorLeague = (lg: string) => {
-                  const l = (lg ?? "").toLowerCase();
-                  return _FEATURED_KW.some((k) => l.includes(k));
-                };
-                const _majorPool = visibleUpcoming.filter((m) => _isMajorLeague(m.league ?? ""));
+                const _majorPool = [...visibleUpcoming]
+                  .filter((m) => leaguePriorityIndex(m.league ?? "") !== Number.MAX_SAFE_INTEGER)
+                  .sort(
+                    (a, b) =>
+                      leaguePriorityIndex(a.league ?? "") -
+                        leaguePriorityIndex(b.league ?? "") ||
+                      String(a.league ?? "").localeCompare(String(b.league ?? ""), "pt-BR"),
+                  );
                 const featuredUpcoming = _majorPool.length >= 3
                   ? _majorPool.slice(0, 3)
                   : visibleUpcoming.slice(0, 3);
@@ -25678,21 +26451,23 @@ export default function Home({
             )}
 
             {!expandedMatch && activeTab === "casino" && (() => {
-              const hasMore = casinoGames.length < casinoTotal;
+              const hasMore = casinoCategory !== "Favoritos" && casinoGames.length < casinoTotal;
 
-              // Real, backend-verified pills only (routes/casino.ts's
-              // NAME_KEYWORD_CATEGORIES comment) — Megaways/Jackpots/Compre
-              // Bônus/Rodadas Grátis aren't offered since Palace Casino's
-              // catalog carries no reliable signal for them.
+              // Lobby by player intent rather than raw provider grouping.
               const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3x3 }[] = [
                 { key: "Todos", label: "Todos", icon: Grid3x3 },
                 { key: "Populares", label: "Populares", icon: Flame },
                 { key: "Novos", label: "Novos", icon: Sparkles },
                 { key: "Slots", label: "Slots", icon: Dices },
                 { key: "Ao Vivo", label: "Ao Vivo", icon: Radio },
-                { key: "baccarat", label: "Baccarat", icon: CreditCard },
+                { key: "jogos-rapidos", label: "Jogos Rápidos", icon: Zap },
+                { key: "crash", label: "Crash", icon: Activity },
+                { key: "jackpots", label: "Jackpots", icon: Gift },
                 { key: "blackjack", label: "Blackjack", icon: Crown },
                 { key: "roulette", label: "Roleta", icon: CircleDot },
+                { key: "baccarat", label: "Bacará", icon: CreditCard },
+                { key: "game-shows", label: "Game Shows", icon: Trophy },
+                { key: "Favoritos", label: "Favoritos", icon: Star },
               ];
 
               const handleBannerClick = (banner: CasinoBanner) => {
@@ -25755,6 +26530,32 @@ export default function Home({
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
                   className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
                 >
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={casinoFavoriteGames[casinoGameStorageKey(game)] ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleCasinoFavorite(game);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleCasinoFavorite(game);
+                    }}
+                    className="absolute top-2 right-2 z-10 inline-flex items-center justify-center h-8 w-8 rounded-full bg-black/55 backdrop-blur border border-white/10 hover:border-yellow-400/70"
+                  >
+                    <Star
+                      size={15}
+                      className={
+                        casinoFavoriteGames[casinoGameStorageKey(game)]
+                          ? "text-yellow-300 fill-yellow-300"
+                          : "text-white/80"
+                      }
+                    />
+                  </span>
                   {casinoLoadingGame === game.id ? (
                     <RefreshCw className="animate-spin text-zinc-400" size={28} />
                   ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
@@ -25791,9 +26592,9 @@ export default function Home({
 
               const activeCategoryChip = CASINO_CATEGORY_CHIPS.find((c) => c.key === casinoCategory);
               const slotsHeading =
-                casinoCategory === "Todos" || casinoCategory === "Populares" || casinoCategory === "Novos"
-                  ? "Slots"
-                  : (activeCategoryChip?.label ?? "Slots");
+                casinoCategory === "Todos"
+                  ? "Todos os Jogos"
+                  : (activeCategoryChip?.label ?? "Jogos");
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">

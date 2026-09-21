@@ -408,17 +408,21 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
     `);
 
     // Cross-reference against the in-memory live/upcoming state for team
-    // names and (football only) a real-time "PulseScore real price or
-    // synthetic estimate" indicator — event_runtime_states is DB-persisted
-    // canonical tracking (Fase 0, multi-provider/multi-sport) and stores
-    // neither team names nor PulseScore pricing. liveMatchState and the
-    // upcoming-matches cache (both routes/matches.ts) are keyed by the
-    // exact same id string as this table's event_id for every provider, so
-    // a single lookup against each works regardless of sport — pré-jogo
-    // fixtures (not yet live) only ever show up in the upcoming snapshot.
+    // names — event_runtime_states is DB-persisted canonical tracking
+    // (Fase 0, multi-provider/multi-sport) and stores no team names.
+    // liveMatchState and the upcoming-matches cache (both routes/matches.ts)
+    // are keyed by the exact same id string as this table's event_id for
+    // every provider, so a single lookup against each works regardless of
+    // sport — pré-jogo fixtures (not yet live) only ever show up in the
+    // upcoming snapshot.
+    // The real-time "PulseScore real price or synthetic estimate" indicator
+    // this used to compute here (GOAL API/PulseScore-football only) is gone
+    // now that both providers are removed (2026-09-20, user decision) —
+    // pulse_score_price_status is kept in the response shape, always null,
+    // for frontend compatibility.
     const upcomingById = new Map(getUpcomingMatchesSnapshot().map((m) => [m.id, m]));
     const events = rows.rows.map((row: any) => {
-      let pulseScorePriceStatus: "real" | "estimated" | null = null;
+      const pulseScorePriceStatus: "real" | "estimated" | null = null;
       let homeTeam: string | null = null;
       let awayTeam: string | null = null;
       const eventId = typeof row.event_id === "string" ? row.event_id : "";
@@ -426,17 +430,11 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
       if (live) {
         homeTeam = live.home;
         awayTeam = live.away;
-        if (row.sport === "football" && eventId.startsWith("goalapi-football-")) {
-          pulseScorePriceStatus = live._priceSource === "pulsescore" ? "real" : "estimated";
-        }
       } else {
         const upcoming = eventId ? upcomingById.get(eventId) : undefined;
         if (upcoming) {
           homeTeam = upcoming.home;
           awayTeam = upcoming.away;
-          if (row.sport === "football" && eventId.startsWith("goalapi-football-")) {
-            pulseScorePriceStatus = upcoming._priceSource === "pulsescore" ? "real" : "estimated";
-          }
         }
       }
       return { ...row, pulse_score_price_status: pulseScorePriceStatus, home_team: homeTeam, away_team: awayTeam };
@@ -445,58 +443,11 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
     // Pré-jogo (not yet live) fixtures never get a event_runtime_states row
     // at all — syncLiveCompetitionCatalog (which populates that table) is
     // only ever called with livePart/promotedTennis from buildLivePayload,
-    // never from the upcoming-matches builder. Per user request, surface
-    // pré-jogo football fixtures that already have a real PulseScore price
-    // here too, as read-only synthetic rows (no DB row exists to back an
-    // override for these — the Override action isn't wired for them).
-    const knownIds = new Set(events.map((e: any) => e.event_id));
-    const upcomingRows = getUpcomingMatchesSnapshot()
-      .filter(
-        (m) =>
-          m.sport === "football" &&
-          m._priceSource === "pulsescore" &&
-          !knownIds.has(m.id) &&
-          (sport === "" || sport === "football") &&
-          (state === "" || state === "SCHEDULED") &&
-          (search === "" ||
-            m.league.toLowerCase().includes(search) ||
-            m.country.toLowerCase().includes(search) ||
-            m.id.toLowerCase().includes(search) ||
-            m.home.toLowerCase().includes(search) ||
-            m.away.toLowerCase().includes(search)),
-      )
-      .map((m) => ({
-        event_id: m.id,
-        sport: "football",
-        provider: "goalapi",
-        provider_event_id: m.id.startsWith("goalapi-football-") ? m.id.slice("goalapi-football-".length) : m.id,
-        state: "SCHEDULED",
-        visibility_status: "VISIBLE",
-        feed_health: "healthy",
-        trading_status: "automatic",
-        suspension_reason: null,
-        last_provider_update_at: null,
-        last_internal_update_at: null,
-        updated_at: new Date().toISOString(),
-        competition_id: null,
-        competition_name: m.league,
-        competition_country: m.country,
-        hidden_by_admin: null,
-        force_suspend: null,
-        force_cashout_disable: null,
-        override_priority: null,
-        override_state: null,
-        override_visibility_status: null,
-        override_trading_status: null,
-        override_note: null,
-        updated_by: null,
-        override_updated_at: null,
-        pulse_score_price_status: "real" as const,
-        home_team: m.home,
-        away_team: m.away,
-      }));
-
-    res.json({ events: [...events, ...upcomingRows] });
+    // never from the upcoming-matches builder. This used to also surface
+    // pré-jogo football fixtures with a real PulseScore price as read-only
+    // synthetic rows; GOAL API and PulseScore are both removed (2026-09-20,
+    // user decision), so that set is always empty now.
+    res.json({ events });
   } catch (err) {
     logger.error({ err }, "Admin event runtime list error");
     res.status(500).json({ error: "Erro ao carregar runtime dos eventos" });
