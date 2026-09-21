@@ -14116,6 +14116,56 @@ export default function Home({
         .replace(/^no\b/i, "Não")
         .replace(/^draw\b/i, "Empate");
     };
+    const formatExtraAllOddsMarketTitle = (
+      market: AllOddsMarket,
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+    ) => {
+      const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
+      if (bucket === "gols") {
+        if (/away team goals/.test(marketText)) {
+          return "Gols da Equipa Visitante — Acima / Abaixo";
+        }
+        if (/home team goals/.test(marketText)) {
+          return "Gols da Equipa da Casa — Acima / Abaixo";
+        }
+        if (/(odd\/even|odd even|impar|par)/.test(marketText)) {
+          return "Total de Gols — Ímpar / Par";
+        }
+        if (/both teams to score/.test(marketText)) {
+          return "Ambas as Equipas Marcam";
+        }
+        if (/goals over\/under|goals over under/.test(marketText)) {
+          return "Gols Acima / Abaixo";
+        }
+      }
+      if (bucket === "escanteios") {
+        if (/handicap/.test(marketText)) return "Handicap de Cantos";
+        if (/home/.test(marketText)) return "Cantos da Casa — Acima / Abaixo";
+        if (/away/.test(marketText)) return "Cantos do Visitante — Acima / Abaixo";
+        return "Cantos — Acima / Abaixo";
+      }
+      if (bucket === "cartoes") {
+        if (/home/.test(marketText)) return "Cartões da Casa — Acima / Abaixo";
+        if (/away/.test(marketText)) return "Cartões do Visitante — Acima / Abaixo";
+        return "Cartões — Acima / Abaixo";
+      }
+      if (bucket === "handicap") {
+        return "Handicap";
+      }
+      if (bucket === "asiatico") {
+        if (/draw no bet|empate anulado/.test(marketText)) {
+          return "Empate Anulado";
+        }
+        if (/handicap/.test(marketText)) {
+          return "Handicap Asiático";
+        }
+        if (/total/.test(marketText)) {
+          return "Total Asiático";
+        }
+        return "Asiático";
+      }
+      return market.name || market.group || "Mercado";
+    };
     const renderInlineExtraAllOdds = (
       sections: typeof extraAllOddsSections,
       bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
@@ -14126,11 +14176,9 @@ export default function Home({
           {sections.map((section) => (
             <div key={`inline-${bucket}-${section.section}`} className="space-y-2">
               {section.markets.map(({ market, originalIndex }) => (
-                <div
+                <MarketGroup
                   key={`inline-${bucket}-${section.section}-${originalIndex}`}
-                  className={`grid gap-2 ${
-                    market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"
-                  }`}
+                  title={formatExtraAllOddsMarketTitle(market, bucket)}
                 >
                   {market.choices.map((choice, choiceIndex) => (
                     <MarketOddsBtn
@@ -14142,7 +14190,7 @@ export default function Home({
                       label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
                     />
                   ))}
-                </div>
+                </MarketGroup>
               ))}
             </div>
           ))}
