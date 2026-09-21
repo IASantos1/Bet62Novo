@@ -13876,6 +13876,20 @@ export default function Home({
                   : // Regular time — all markets, but only popular markets after 85'
                     (() => {
                       const mk = match.markets;
+                      const hasExtraBucket = (
+                        bucket:
+                          | "gols"
+                          | "escanteios"
+                          | "cartoes"
+                          | "handicap"
+                          | "asiatico",
+                      ) =>
+                        extraAllOddsSections.some((section) =>
+                          section.markets.some(
+                            ({ market }) =>
+                              classifyExtraAllOddsBucket(market) === bucket,
+                          ),
+                        );
                       const baseTabs: Array<{ key: string; label: string; icon?: string }> = [
                         { key: "todos", label: "Todos" },
                       ];
@@ -13901,7 +13915,8 @@ export default function Home({
                         (Number(mk?.toWinBothHalves?.away ?? 0) > 1.01) ||
                         (Number(mk?.goalOddEven?.odd ?? 0) > 1.01) ||
                         (Number(mk?.exactGoals?.g0 ?? 0) > 1.01) ||
-                        Object.values((mk?.teamGoals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
+                        Object.values((mk?.teamGoals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01) ||
+                        hasExtraBucket("gols");
                       if (hasGols) baseTabs.push({ key: "gols", label: "Gols" });
                       const hasEspeciais =
                         (Number(mk?.btts1H?.yes ?? 0) > 1.01) ||
@@ -13917,7 +13932,8 @@ export default function Home({
                         (Number(mk?.handicap?.homeMinusOne ?? 0) > 1.01) ||
                         (Number(mk?.handicap?.homeMinusOneHalf ?? 0) > 1.01) ||
                         (Number(mk?.handicap?.awayPlusOne ?? 0) > 1.01) ||
-                        (Number(mk?.handicap?.awayPlusOneHalf ?? 0) > 1.01);
+                        (Number(mk?.handicap?.awayPlusOneHalf ?? 0) > 1.01) ||
+                        hasExtraBucket("handicap");
                       if (hasHandicap) baseTabs.push({ key: "handicap", label: "Handicap" });
                       const has1Tempo =
                         show1tempo &&
@@ -13947,18 +13963,21 @@ export default function Home({
                         Object.values(mk?.corners ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
                         (mk?.homeCorners?.over ?? 0) > 1.01 ||
                         (mk?.awayCorners?.over ?? 0) > 1.01 ||
-                        (mk?.cornersHandicap?.home ?? 0) > 1.01;
+                        (mk?.cornersHandicap?.home ?? 0) > 1.01 ||
+                        hasExtraBucket("escanteios");
                       if (hasEscanteios) baseTabs.push({ key: "escanteios", label: "Escanteios" });
                       const hasCartoes =
                         Object.values(mk?.cards ?? {}).some((v: any) => (Number(v) ?? 0) > 1.01) ||
                         (mk?.homeCards?.over ?? 0) > 1.01 ||
-                        (mk?.awayCards?.over ?? 0) > 1.01;
+                        (mk?.awayCards?.over ?? 0) > 1.01 ||
+                        hasExtraBucket("cartoes");
                       if (hasCartoes) baseTabs.push({ key: "cartoes", label: "Cartões" });
                       const hasAsiatico =
                         (Number(mk?.drawNoBet?.home ?? 0) > 1.01) ||
                         (Number(mk?.asianHandicap?.home ?? 0) > 1.01) ||
                         (Number(mk?.europeanHandicap?.home ?? 0) > 1.01) ||
-                        Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01);
+                        Object.values((mk?.asianTotals ?? {}) as any).some((v: any) => (Number(v) ?? 0) > 1.01) ||
+                        hasExtraBucket("asiatico");
                       if (hasAsiatico) baseTabs.push({ key: "asiatico", label: "Asiático" });
                       const hasBetBuilder = hasResult || hasDupla || hasGols || hasHandicap || has1Tempo || hasEspeciais;
                       if (hasBetBuilder) {
@@ -14064,52 +14083,68 @@ export default function Home({
     const extraCardsSections = getExtraAllOddsSectionsForBucket("cartoes");
     const extraHandicapSections = getExtraAllOddsSectionsForBucket("handicap");
     const extraAsianSections = getExtraAllOddsSectionsForBucket("asiatico");
+    const formatExtraAllOddsChoiceLabel = (
+      market: AllOddsMarket,
+      choice: { name: string; label: string; odds: number },
+      bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
+    ) => {
+      const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
+      const choiceName = normalizeAllOddsText(choice.name ?? "");
+      const choiceLabel = String(choice.label ?? "").trim();
+      const lineMatch = choiceLabel.match(/(\d+(?:[.,]\d+)?)/);
+      const line = lineMatch?.[1]?.replace(",", ".");
+      if (bucket === "gols" && /(odd\/even|odd even|impar|par)/.test(marketText)) {
+        if (choiceName.includes("odd") || /^home$/i.test(choiceLabel) || /^odd$/i.test(choiceLabel)) {
+          return "Ímpar";
+        }
+        if (choiceName.includes("even") || /^par$/i.test(choiceLabel) || /^even$/i.test(choiceLabel)) {
+          return "Par";
+        }
+      }
+      if (/^over\b/i.test(choiceLabel)) {
+        if (/away team goals/.test(marketText) && line) return `Fora +${line}`;
+        if (/home team goals/.test(marketText) && line) return `Casa +${line}`;
+        return line ? `Mais ${line}` : choiceLabel.replace(/^over\b/i, "Mais");
+      }
+      if (/^under\b/i.test(choiceLabel)) {
+        if (/away team goals/.test(marketText) && line) return `Fora -${line}`;
+        if (/home team goals/.test(marketText) && line) return `Casa -${line}`;
+        return line ? `Menos ${line}` : choiceLabel.replace(/^under\b/i, "Menos");
+      }
+      return choiceLabel
+        .replace(/^yes\b/i, "Sim")
+        .replace(/^no\b/i, "Não")
+        .replace(/^draw\b/i, "Empate");
+    };
     const renderInlineExtraAllOdds = (
       sections: typeof extraAllOddsSections,
       bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
     ) => {
       if (!isFootball || allOddsLoading || sections.length === 0) return null;
       return (
-        <div>
+        <div className="space-y-2">
           {sections.map((section) => (
-            <MarketAccordionSection
-              key={`inline-${bucket}-${section.section}`}
-              title={
-                section.section === "Outros"
-                  ? "Mercados Adicionais"
-                  : section.section
-              }
-              defaultOpen={false}
-              count={section.markets.length}
-            >
-              <div className="space-y-3">
-                {section.markets.map(({ market, originalIndex }) => {
-                  const title =
-                    market.group &&
-                    market.group !== market.name &&
-                    market.group !== section.section
-                      ? `${market.group} — ${market.name}`
-                      : market.name;
-                  return (
-                    <MarketGroup
-                      key={`inline-${bucket}-${section.section}-${originalIndex}`}
-                      title={title}
-                    >
-                      {market.choices.map((choice, choiceIndex) => (
-                        <MarketOddsBtn
-                          key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                          match={match}
-                          sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                          odd={choice.odds}
-                          market={`all-${bucket}-${originalIndex}`}
-                          label={choice.label}
-                        />
-                      ))}
-                    </MarketGroup>
-                  );
-                })}
-              </div>
-            </MarketAccordionSection>
+            <div key={`inline-${bucket}-${section.section}`} className="space-y-2">
+              {section.markets.map(({ market, originalIndex }) => (
+                <div
+                  key={`inline-${bucket}-${section.section}-${originalIndex}`}
+                  className={`grid gap-2 ${
+                    market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"
+                  }`}
+                >
+                  {market.choices.map((choice, choiceIndex) => (
+                    <MarketOddsBtn
+                      key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                      match={match}
+                      sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                      odd={choice.odds}
+                      market={`all-${bucket}-${originalIndex}`}
+                      label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           ))}
         </div>
       );
