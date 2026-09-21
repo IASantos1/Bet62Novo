@@ -1715,12 +1715,6 @@ function isLeagueUniversallyBlocked(name: string): boolean {
   if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return true;
   if (/\b(under[ -]?\d{2})\b/.test(lower)) return true;
   if (
-    /\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(
-      lower,
-    )
-  )
-    return true;
-  if (
     /\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(
       lower,
     )
@@ -1754,6 +1748,66 @@ function footballLeagueAllowedStrict(
   return prio < 100;
 }
 
+const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
+const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
+
+function isMajorWomensLeague(name: string): boolean {
+  const lower = String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!lower) return false;
+  return [
+    "women's champions league",
+    "womens champions league",
+    "uefa women's champions league",
+    "uefa womens champions league",
+    "women's euro",
+    "womens euro",
+    "euro women",
+    "euro feminina",
+    "world cup women",
+    "women's world cup",
+    "womens world cup",
+    "liga f",
+    "super league women",
+    "wsl",
+    "nwsl",
+    "libertadores feminina",
+    "libertadores femenina",
+    "copa america femenina",
+    "copa america feminina",
+    "brasileirao feminino",
+    "brasileirao feminina",
+    "campeonato brasileiro feminino",
+  ].some((pattern) => lower.includes(pattern));
+}
+
+function footballCompetitionVisibilityBand(
+  countryRaw: string,
+  leagueDisplayName: string,
+): "blocked" | "preferred" | "fallback" {
+  if (!leagueDisplayName) return "blocked";
+  if (isVirtualFootballLeague(leagueDisplayName)) return "blocked";
+  if (isWomensLeague(leagueDisplayName)) {
+    return isMajorWomensLeague(leagueDisplayName) ||
+      isIntlTournamentName(leagueDisplayName)
+      ? "preferred"
+      : "blocked";
+  }
+  if (isLeagueUniversallyBlocked(leagueDisplayName)) return "blocked";
+  if (isBlockedLeague(leagueDisplayName)) return "blocked";
+
+  const countryKey = normalizeCountryKey(countryRaw);
+  const key = `${countryKey}: ${leagueDisplayName}`.toLowerCase();
+  const prio = leaguePriority(key, countryKey);
+  if (prio >= 100) return "blocked";
+  if (isIntlTournamentName(leagueDisplayName)) return "preferred";
+  return prio < FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX
+    ? "preferred"
+    : "fallback";
+}
+
 function leaguePriority(name: string, country?: string): number {
   const lowerRaw = name.toLowerCase();
   const lower = lowerRaw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1762,17 +1816,12 @@ function leaguePriority(name: string, country?: string): number {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-  // ── Block youth / women / reserve / amateur / futsal leagues universally ──────
-  // These keywords in the league name ALWAYS indicate a non-main competition.
+  // ── Block youth / reserve / amateur / futsal leagues universally ─────────────
+  // Women's football is handled separately by footballCompetitionVisibilityBand():
+  // only the biggest competitions survive, everything else stays blocked there.
   // Pattern must precede parent-league match (e.g. "liga mx u21" ⊃ "liga mx").
   if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return 999; // U17, U20, U21, U23…
   if (/\b(under[ -]?\d{2})\b/.test(lower)) return 999; // Under-21, Under 23…
-  if (
-    /\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(
-      lower,
-    )
-  )
-    return 999;
   if (
     /\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(
       lower,
@@ -7908,10 +7957,8 @@ function isBlockedLeague(name: string): boolean {
   return false;
 }
 
-/** Returns true for women's football leagues — blocked outright per user
- * request (2026-09-10), same as isBlockedLeague's youth leagues. Was
- * previously "kept but flagged for frontend" (isWomens tag on
- * UpcomingMatch); now filtered out at the source instead. */
+/** Detect women's football competitions so visibility can be limited to a
+ * tiny explicit allowlist of major tournaments only. */
 function isWomensLeague(name: string): boolean {
   return /women|feminine|féminin|feminino|femminile|frauen|femenin|damall|nwsl|wsl/i.test(
     name,
@@ -8079,20 +8126,27 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
   try {
     const mrdoge = getMrDogeClient();
     const startDate = new Date().toISOString().slice(0, 10);
-    const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const endDate = getUpcomingFetchEndDate();
     const matches = await mrdoge.matches.listAll({
       sports: ["soccer"],
       status: ["upcoming"],
       startDate,
       endDate,
     });
+    const eligibleMatches = matches.filter(
+      (match) =>
+        footballCompetitionVisibilityBand(
+          match.region.name,
+          match.competition.name,
+        ) === "preferred",
+    );
     const oddsByMatchId = await fetchMrDogePrematchOdds(
       mrdoge,
-      matches,
+      eligibleMatches,
       [...MRDOGE_SOCCER_BET_TYPES],
     );
     let withRealOdds = 0;
-    const built = matches.map((m): UpcomingMatch => {
+    const built = eligibleMatches.map((m): UpcomingMatch => {
       const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
       const odds = oddsByMatchId.get(m.id);
       const moneyline = extractMrDogeSoccerMoneyline(odds);
@@ -8166,11 +8220,23 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
     // GET /upcoming's own filter (routes/matches.ts) hides any match
     // without hasRealOdds/a nonzero price — this is the number that
     // actually survives to the frontend, distinct from `matches.length`.
+    const visible = built.filter(
+      (match) =>
+        footballCompetitionVisibilityBand(
+          match.country ?? "",
+          match.league ?? "",
+        ) === "preferred",
+    );
     logger.info(
-      { fixtures: matches.length, withRealOdds },
+      {
+        fixtures: matches.length,
+        eligibleFixtures: eligibleMatches.length,
+        withRealOdds,
+        visible: visible.length,
+      },
       "[mrdoge] football upcoming built",
     );
-    return built;
+    return visible;
   } catch (err) {
     logger.error({ err }, "[mrdoge] football upcoming fetch failed");
     return [];
@@ -8283,7 +8349,7 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
     try {
       const mrdoge = getMrDogeClient();
       const startDate = new Date().toISOString().slice(0, 10);
-      const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const endDate = getUpcomingFetchEndDate();
       const matches = await mrdoge.matches.listAll({
         sports: [mrDogeSport],
         status: ["upcoming"],
@@ -8683,10 +8749,40 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const allUpcoming = _allUpcomingCache;
 
   if (CONFIG.MRDOGE_API_KEY) {
+    const liveOddsTargets = getMrDogeLiveMatches().filter((m) => !!m.stats?.sport);
+    const nonFootballTargets = liveOddsTargets
+      .filter((m) => m.stats?.sport !== "soccer")
+      .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) }));
+    const footballOddsPreferredTargets = liveOddsTargets
+      .filter((m) => m.stats?.sport === "soccer")
+      .filter(
+        (m) =>
+          footballCompetitionVisibilityBand(
+            m.region.name,
+            m.competition.name,
+          ) === "preferred",
+      )
+      .map((m) => ({ matchId: m.id, sport: "soccer" }));
+    const footballOddsFallbackTargets =
+      footballOddsPreferredTargets.length > 0
+        ? []
+        : liveOddsTargets
+            .filter((m) => m.stats?.sport === "soccer")
+            .filter(
+              (m) =>
+                footballCompetitionVisibilityBand(
+                  m.region.name,
+                  m.competition.name,
+                ) === "fallback",
+            )
+            .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT)
+            .map((m) => ({ matchId: m.id, sport: "soccer" }));
     syncMrDogeOddsSubscriptions(
-      getMrDogeLiveMatches()
-        .filter((m) => !!m.stats?.sport)
-        .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) })),
+      [
+        ...footballOddsPreferredTargets,
+        ...footballOddsFallbackTargets,
+        ...nonFootballTargets,
+      ],
     );
   }
 
@@ -8711,6 +8807,26 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
+  const footballPreferredLive = footballLive.filter(
+    (match) =>
+      footballCompetitionVisibilityBand(
+        match.country ?? "",
+        match.league ?? "",
+      ) === "preferred",
+  );
+  const footballFallbackLive = footballLive
+    .filter(
+      (match) =>
+        footballCompetitionVisibilityBand(
+          match.country ?? "",
+          match.league ?? "",
+        ) === "fallback",
+    )
+    .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT);
+  const footballVisibleLive =
+    footballPreferredLive.length > 0
+      ? footballPreferredLive
+      : footballFallbackLive;
   // PropLine removed 2026-09-20 (user decision); Mr. Doge is basketball,
   // hockey, baseball, and volleyball's real live source again as of the
   // same day.
@@ -8772,7 +8888,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
   const livePart = mergeStickyLive([
-    ...footballLive,
+    ...footballVisibleLive,
     ...tennisLive,
     ...basketballLive,
     ...hockeyLive,
@@ -8983,7 +9099,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // in "Em Breve" and then vanish at kickoff instead of entering "Ao Vivo".
   // Keep all live football fixtures visible now; suspended/interrupted odds
   // are handled at market/button level, not by hiding the match itself.
-  const isVisibleFootballFixture = (_m: LiveMatchState): boolean => true;
+  const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
+    m.sport !== "football" ||
+    footballVisibleLive.some((visible) => String(visible.id) === String(m.id));
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -9999,6 +10117,55 @@ function waitMs(ms: number): Promise<void> {
 }
 
 const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
+const UPCOMING_MONTH_EDGE_DAY = 21;
+const UPCOMING_NEXT_MONTH_VISIBLE_DAY = 8;
+
+function getLisbonDateParts(nowMs = Date.now()): {
+  year: number;
+  month: number;
+  day: number;
+} {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(nowMs));
+  const map: Record<string, string> = {};
+  for (const part of parts) map[part.type] = part.value;
+  return {
+    year: parseInt(map["year"] ?? "1970", 10),
+    month: parseInt(map["month"] ?? "1", 10),
+    day: parseInt(map["day"] ?? "1", 10),
+  };
+}
+
+function getUpcomingVisibilityWindowEndMs(nowMs = Date.now()): number {
+  const defaultEndMs =
+    nowMs + UPCOMING_DEFAULT_PRIORITY_DAYS * 24 * 60 * 60 * 1000;
+  const { year, month, day } = getLisbonDateParts(nowMs);
+  if (day < UPCOMING_MONTH_EDGE_DAY) return defaultEndMs;
+  const nextMonthYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const lisbonEndOffsetHours = lisbonOffsetHours();
+  const nextMonthEdgeEndMs =
+    Date.UTC(
+      nextMonthYear,
+      nextMonth - 1,
+      UPCOMING_NEXT_MONTH_VISIBLE_DAY,
+      23 - lisbonEndOffsetHours,
+      59,
+      59,
+      999,
+    );
+  return Math.max(defaultEndMs, nextMonthEdgeEndMs);
+}
+
+function getUpcomingFetchEndDate(nowMs = Date.now()): string {
+  return new Date(getUpcomingVisibilityWindowEndMs(nowMs))
+    .toISOString()
+    .slice(0, 10);
+}
 
 router.get("/catalog", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "");
@@ -10201,19 +10368,14 @@ router.get("/upcoming", async (req: Request, res: Response) => {
         return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
       })() &&
       (() => {
-        // Default view: ALL matches (any sport / any league) shown up to
-        // UPCOMING_DEFAULT_PRIORITY_DAYS (7 days) ahead. This replaces the
-        // previous "only priority football leagues had a cap; everything else
-        // could stretch to the full fetched window" behaviour — user request
-        // 2026-08-13: filtering on the prematch tab should default to 7 days.
-        // ?range=month lifts this cap so all cached fixtures are included.
+        // Default view keeps at least 7 days ahead, but once we're late in
+        // the current month (day 21+) it stretches just enough to surface
+        // the opening fixtures of the next month too (up to day 8), per the
+        // user's prematch-window request.
         if (range === "month") return true;
         const kickoffMs = parseUpcomingKickoffMs(m);
         if (kickoffMs == null) return true;
-        const daysAhead = Math.floor(
-          (kickoffMs - now) / (24 * 60 * 60 * 1000),
-        );
-        return daysAhead <= UPCOMING_DEFAULT_PRIORITY_DAYS;
+        return kickoffMs <= getUpcomingVisibilityWindowEndMs(now);
       })(),
   );
   res.json({ matches: filtered });
