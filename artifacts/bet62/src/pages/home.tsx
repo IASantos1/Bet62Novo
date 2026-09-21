@@ -52,7 +52,6 @@ import {
   CreditCard,
   Crown,
   SortAsc,
-  BarChart3,
   ChevronLeft,
   CircleDot,
 } from "lucide-react";
@@ -7543,7 +7542,7 @@ export default function Home({
       return;
     const minute = getDisplayMinute(expandedMatch);
     if (minute < 85) return;
-    const allowedLateTabs = new Set(["todos", "resultado", "gols", "handicap"]);
+    const allowedLateTabs = new Set(["todos", "resultado", "gols", "handicap", "mercados"]);
     if (!allowedLateTabs.has(modalTab)) {
       setModalTab("todos");
       setTimeout(() => scrollTabIntoView("todos", "instant"), 0);
@@ -7766,7 +7765,11 @@ export default function Home({
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (matchViewTab !== "odds" || !expandedMatch) return;
+    const shouldLoadAllOdds =
+      !!expandedMatch &&
+      (((matchViewTab === "markets" && modalTab === "mercados") ||
+        matchViewTab === "odds"));
+    if (!shouldLoadAllOdds || !expandedMatch) return;
     const sport = expandedMatch.sport ?? "football";
     if (sport !== "football") {
       setAllOddsData([]);
@@ -7804,7 +7807,14 @@ export default function Home({
     return () => {
       cancelled = true;
     };
-  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]);
+  }, [matchViewTab, modalTab, expandedMatch?.id, getProviderMatchId]);
+
+  useEffect(() => {
+    if (matchViewTab !== "odds") return;
+    setMatchViewTab("markets");
+    setModalTab("mercados");
+    setTimeout(() => scrollTabIntoView("mercados", "instant"), 0);
+  }, [matchViewTab, scrollTabIntoView]);
 
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
@@ -13888,6 +13898,8 @@ export default function Home({
                       const baseTabs: Array<{ key: string; label: string; icon?: string }> = [
                         { key: "todos", label: "Todos" },
                       ];
+                      const hasAllMarketsTab =
+                        (match.sport ?? "football") === "football";
                       const hasResult = (match.odds?.home ?? 0) > 1.01 || (match.odds?.draw ?? 0) > 1.01 || (match.odds?.away ?? 0) > 1.01;
                       if (hasResult) baseTabs.push({ key: "resultado", label: "Resultado" });
                       const hasDupla =
@@ -13974,8 +13986,17 @@ export default function Home({
                         const idx = baseTabs.findIndex((t) => t.key === "resultado");
                         baseTabs.splice(idx >= 0 ? idx : 1, 0, { key: "betbuilder", label: "Bet Builder", icon: "🧩" });
                       }
+                      if (hasAllMarketsTab) {
+                        const idx = baseTabs.findIndex((t) => t.key === "gols");
+                        baseTabs.splice(idx >= 0 ? idx + 1 : baseTabs.length, 0, {
+                          key: "mercados",
+                          label: "Mercados",
+                        });
+                      }
                       if (isLateGame) {
-                        return baseTabs.filter((t) => ["todos", "resultado", "gols", "handicap"].includes(t.key));
+                        return baseTabs.filter((t) =>
+                          ["todos", "resultado", "gols", "handicap", "mercados"].includes(t.key),
+                        );
                       }
                       return baseTabs;
                     })();
@@ -14098,6 +14119,249 @@ export default function Home({
                       {tab.label}
                     </button>
                   ))}
+                </div>
+              )}
+
+              {modalTab === "mercados" && (
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                    📊 Todos os Mercados
+                  </div>
+                  {allOddsLoading || !allOddsData ? (
+                    <div className="flex items-center justify-center py-12">
+                      <RefreshCw
+                        className="animate-spin text-blue-400"
+                        size={28}
+                      />
+                    </div>
+                  ) : allOddsData.length === 0 ? (
+                    <div className="text-center text-zinc-500 py-8">
+                      <div className="text-2xl mb-2">📭</div>
+                      <div className="text-sm font-medium">
+                        Mercados indisponíveis
+                      </div>
+                      <div className="text-xs text-zinc-600 mt-1">
+                        Odds não disponíveis para este jogo
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <Search
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                          size={15}
+                        />
+                        <Input
+                          value={allOddsQuery}
+                          onChange={(e) => setAllOddsQuery(e.target.value)}
+                          placeholder="Pesquisar mercados, grupos ou opções"
+                          className="pl-9 h-10 bg-zinc-950/70 border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
+                          {selectedAllOddsSections.length} secções
+                        </div>
+                        <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
+                          {selectedAllOddsSections.reduce(
+                            (acc, section) => acc + section.markets.length,
+                            0,
+                          )}{" "}
+                          mercados
+                        </div>
+                        <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-[10px] font-black text-red-400">
+                          {selectedAllOddsSections.reduce(
+                            (acc, section) => acc + section.selectedCount,
+                            0,
+                          )}{" "}
+                          selecionados
+                        </div>
+                        {allOddsQuery.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setAllOddsQuery("")}
+                            className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400 hover:text-white"
+                          >
+                            Limpar busca
+                          </button>
+                        )}
+                      </div>
+                      {selectedAllOddsSections.length === 0 ? (
+                        <div className="text-center text-zinc-500 py-10">
+                          <div className="text-2xl mb-2">🔎</div>
+                          <div className="text-sm font-medium">
+                            Nenhum mercado encontrado
+                          </div>
+                          <div className="text-xs text-zinc-600 mt-1">
+                            Tenta outro nome de mercado, grupo ou opção
+                          </div>
+                        </div>
+                      ) : (
+                        selectedAllOddsSections.map((section) => {
+                          const isSectionOpen = allOddsQuery.trim()
+                            ? true
+                            : (allOddsSectionOpen[section.section] ??
+                              ["Principal", "Golos", "Jogadores"].includes(
+                                section.section,
+                              ));
+                          return (
+                            <div key={section.section} className="space-y-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setAllOddsSectionOpen((prev) => ({
+                                    ...prev,
+                                    [section.section]: !isSectionOpen,
+                                  }))
+                                }
+                                className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left ${
+                                  section.hasSelection
+                                    ? "border-red-500/25 bg-red-500/5"
+                                    : "border-zinc-800 bg-zinc-950/60"
+                                }`}
+                              >
+                                <div className="h-px flex-1 bg-zinc-800" />
+                                <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.18em]">
+                                  {section.section}
+                                </div>
+                                <div className="rounded-full bg-zinc-800 px-2 py-0.5 text-[9px] font-black text-zinc-300">
+                                  {section.markets.length}
+                                </div>
+                                {section.selectedCount > 0 && (
+                                  <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black text-red-400">
+                                    {section.selectedCount}
+                                  </div>
+                                )}
+                                <div className="text-zinc-500">
+                                  {isSectionOpen ? (
+                                    <ChevronUp size={14} />
+                                  ) : (
+                                    <ChevronDown size={14} />
+                                  )}
+                                </div>
+                                <div className="h-px flex-1 bg-zinc-800" />
+                              </button>
+                              {isSectionOpen &&
+                                section.markets.map(
+                                  ({
+                                    market,
+                                    originalIndex,
+                                    featured,
+                                    hasSelection,
+                                    selectedCount,
+                                    choices,
+                                  }) => (
+                                    <div
+                                      key={`${section.section}-${originalIndex}`}
+                                      className={`rounded-lg border p-3 ${
+                                        hasSelection
+                                          ? "bg-red-500/[0.04] border-red-500/20 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.08)]"
+                                          : featured
+                                            ? "bg-zinc-950/90 border-zinc-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.08)]"
+                                            : "bg-zinc-950/60 border-zinc-800"
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between gap-3 mb-2">
+                                        <div className="min-w-0">
+                                          {market.group &&
+                                            market.group !== market.name &&
+                                            market.group !==
+                                              section.section && (
+                                              <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
+                                                {market.group}
+                                              </div>
+                                            )}
+                                          <div
+                                            className={`text-[10px] font-black uppercase tracking-wider ${featured ? "text-zinc-200" : "text-zinc-400"}`}
+                                          >
+                                            {market.name}
+                                          </div>
+                                        </div>
+                                        <div className="shrink-0 flex items-center gap-1.5">
+                                          {hasSelection && (
+                                            <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-red-400">
+                                              {selectedCount} no boleto
+                                            </div>
+                                          )}
+                                          {featured && (
+                                            <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-red-400">
+                                              Destaque
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div
+                                        className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}
+                                      >
+                                        {choices.map((choice) => (
+                                          <button
+                                            key={choice.ci}
+                                            onClick={() => {
+                                              const slip = bets.find(
+                                                (b) =>
+                                                  b.matchId === match.id &&
+                                                  b.market === choice.marketKey,
+                                              );
+                                              if (!slip) {
+                                                setBets((prev) => [
+                                                  ...prev.filter(
+                                                    (b) =>
+                                                      !(
+                                                        b.matchId === match.id &&
+                                                        (
+                                                          b.market ?? ""
+                                                        ).startsWith(
+                                                          `all_${originalIndex}_`,
+                                                        )
+                                                      ),
+                                                  ),
+                                                  {
+                                                    matchId: match.id,
+                                                    matchTitle: `${match.home} — ${match.away}`,
+                                                    odd: choice.odds,
+                                                    market: choice.marketKey,
+                                                    selection: `${market.name}: ${choice.label}`,
+                                                    label: choice.label,
+                                                  },
+                                                ]);
+                                              } else {
+                                                setBets((prev) =>
+                                                  prev.filter(
+                                                    (b) =>
+                                                      !(
+                                                        b.matchId === match.id &&
+                                                        b.market === choice.marketKey
+                                                      ),
+                                                  ),
+                                                );
+                                              }
+                                            }}
+                                            className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
+                                              choice.isSelected
+                                                ? "bg-red-600 border-red-500 text-white"
+                                                : featured
+                                                  ? "bg-zinc-800/90 border-zinc-600 text-zinc-100 hover:border-red-500/50 hover:text-white"
+                                                  : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
+                                            }`}
+                                          >
+                                            <span className="text-[10px] text-inherit opacity-70 mb-0.5">
+                                              {choice.label}
+                                            </span>
+                                            <span className="font-black text-base tabular-nums">
+                                              {choice.odds.toFixed(2)}
+                                            </span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ),
+                                )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -20535,15 +20799,6 @@ export default function Home({
                         </button>
                         {(expandedMatch.sport ?? "football") === "football" && (
                           <button
-                            onClick={() => setMatchViewTab(matchViewTab === "odds" ? "markets" : "odds")}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "odds" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
-                          >
-                            <BarChart3 size={11} />
-                            Todos Merc.
-                          </button>
-                        )}
-                        {(expandedMatch.sport ?? "football") === "football" && (
-                          <button
                             onClick={() => setMatchViewTab(matchViewTab === "yesterday" ? "markets" : "yesterday")}
                             className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "yesterday" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
                           >
@@ -22110,255 +22365,6 @@ export default function Home({
                           </div>
                         );
                       })()}
-                  </div>
-                )}
-
-                {/* All Odds Markets panel */}
-                {matchViewTab === "odds" && (
-                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
-                      📊 Todos os Mercados
-                    </div>
-                    {allOddsLoading || !allOddsData ? (
-                      <div className="flex items-center justify-center py-12">
-                        <RefreshCw
-                          className="animate-spin text-blue-400"
-                          size={28}
-                        />
-                      </div>
-                    ) : allOddsData.length === 0 ? (
-                      <div className="text-center text-zinc-500 py-8">
-                        <div className="text-2xl mb-2">📭</div>
-                        <div className="text-sm font-medium">
-                          Mercados indisponíveis
-                        </div>
-                        <div className="text-xs text-zinc-600 mt-1">
-                          Odds não disponíveis para este jogo
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="relative">
-                          <Search
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-                            size={15}
-                          />
-                          <Input
-                            value={allOddsQuery}
-                            onChange={(e) => setAllOddsQuery(e.target.value)}
-                            placeholder="Pesquisar mercados, grupos ou opções"
-                            className="pl-9 h-10 bg-zinc-950/70 border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
-                          />
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
-                            {selectedAllOddsSections.length} secções
-                          </div>
-                          <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
-                            {selectedAllOddsSections.reduce(
-                              (acc, section) => acc + section.markets.length,
-                              0,
-                            )}{" "}
-                            mercados
-                          </div>
-                          <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-[10px] font-black text-red-400">
-                            {selectedAllOddsSections.reduce(
-                              (acc, section) => acc + section.selectedCount,
-                              0,
-                            )}{" "}
-                            selecionados
-                          </div>
-                          {allOddsQuery.trim() && (
-                            <button
-                              type="button"
-                              onClick={() => setAllOddsQuery("")}
-                              className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400 hover:text-white"
-                            >
-                              Limpar busca
-                            </button>
-                          )}
-                        </div>
-                        {selectedAllOddsSections.length === 0 ? (
-                          <div className="text-center text-zinc-500 py-10">
-                            <div className="text-2xl mb-2">🔎</div>
-                            <div className="text-sm font-medium">
-                              Nenhum mercado encontrado
-                            </div>
-                            <div className="text-xs text-zinc-600 mt-1">
-                              Tenta outro nome de mercado, grupo ou opção
-                            </div>
-                          </div>
-                        ) : (
-                          selectedAllOddsSections.map((section) => {
-                            const isSectionOpen = allOddsQuery.trim()
-                              ? true
-                              : (allOddsSectionOpen[section.section] ??
-                                ["Principal", "Golos", "Jogadores"].includes(
-                                  section.section,
-                                ));
-                            return (
-                              <div key={section.section} className="space-y-3">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setAllOddsSectionOpen((prev) => ({
-                                      ...prev,
-                                      [section.section]: !isSectionOpen,
-                                    }))
-                                  }
-                                  className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left ${
-                                    section.hasSelection
-                                      ? "border-red-500/25 bg-red-500/5"
-                                      : "border-zinc-800 bg-zinc-950/60"
-                                  }`}
-                                >
-                                  <div className="h-px flex-1 bg-zinc-800" />
-                                  <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.18em]">
-                                    {section.section}
-                                  </div>
-                                  <div className="rounded-full bg-zinc-800 px-2 py-0.5 text-[9px] font-black text-zinc-300">
-                                    {section.markets.length}
-                                  </div>
-                                  {section.selectedCount > 0 && (
-                                    <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black text-red-400">
-                                      {section.selectedCount}
-                                    </div>
-                                  )}
-                                  <div className="text-zinc-500">
-                                    {isSectionOpen ? (
-                                      <ChevronUp size={14} />
-                                    ) : (
-                                      <ChevronDown size={14} />
-                                    )}
-                                  </div>
-                                  <div className="h-px flex-1 bg-zinc-800" />
-                                </button>
-                                {isSectionOpen &&
-                                  section.markets.map(
-                                    ({
-                                      market,
-                                      originalIndex,
-                                      featured,
-                                      hasSelection,
-                                      selectedCount,
-                                      choices,
-                                    }) => (
-                                      <div
-                                        key={`${section.section}-${originalIndex}`}
-                                        className={`rounded-lg border p-3 ${
-                                          hasSelection
-                                            ? "bg-red-500/[0.04] border-red-500/20 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.08)]"
-                                            : featured
-                                              ? "bg-zinc-950/90 border-zinc-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.08)]"
-                                              : "bg-zinc-950/60 border-zinc-800"
-                                        }`}
-                                      >
-                                        <div className="flex items-start justify-between gap-3 mb-2">
-                                          <div className="min-w-0">
-                                            {market.group &&
-                                              market.group !== market.name &&
-                                              market.group !==
-                                                section.section && (
-                                                <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
-                                                  {market.group}
-                                                </div>
-                                              )}
-                                            <div
-                                              className={`text-[10px] font-black uppercase tracking-wider ${featured ? "text-zinc-200" : "text-zinc-400"}`}
-                                            >
-                                              {market.name}
-                                            </div>
-                                          </div>
-                                          <div className="shrink-0 flex items-center gap-1.5">
-                                            {hasSelection && (
-                                              <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-red-400">
-                                                {selectedCount} no boleto
-                                              </div>
-                                            )}
-                                            {featured && (
-                                              <div className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-red-400">
-                                                Destaque
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div
-                                          className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}
-                                        >
-                                          {choices.map((choice) => (
-                                            <button
-                                              key={choice.ci}
-                                              onClick={() => {
-                                                const slip = bets.find(
-                                                  (b) =>
-                                                    b.matchId ===
-                                                      expandedMatch.id &&
-                                                    b.market ===
-                                                      choice.marketKey,
-                                                );
-                                                if (!slip) {
-                                                  setBets((prev) => [
-                                                    ...prev.filter(
-                                                      (b) =>
-                                                        !(
-                                                          b.matchId ===
-                                                            expandedMatch.id &&
-                                                          (
-                                                            b.market ?? ""
-                                                          ).startsWith(
-                                                            `all_${originalIndex}_`,
-                                                          )
-                                                        ),
-                                                    ),
-                                                    {
-                                                      matchId: expandedMatch.id,
-                                                      matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
-                                                      odd: choice.odds,
-                                                      market: choice.marketKey,
-                                                      selection: `${market.name}: ${choice.label}`,
-                                                      label: choice.label,
-                                                    },
-                                                  ]);
-                                                } else {
-                                                  setBets((prev) =>
-                                                    prev.filter(
-                                                      (b) =>
-                                                        !(
-                                                          b.matchId ===
-                                                            expandedMatch.id &&
-                                                          b.market ===
-                                                            choice.marketKey
-                                                        ),
-                                                    ),
-                                                  );
-                                                }
-                                              }}
-                                              className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
-                                                choice.isSelected
-                                                  ? "bg-red-600 border-red-500 text-white"
-                                                  : featured
-                                                    ? "bg-zinc-800/90 border-zinc-600 text-zinc-100 hover:border-red-500/50 hover:text-white"
-                                                    : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
-                                              }`}
-                                            >
-                                              <span className="text-[10px] text-inherit opacity-70 mb-0.5">
-                                                {choice.label}
-                                              </span>
-                                              <span className="font-black text-base tabular-nums">
-                                                {choice.odds.toFixed(2)}
-                                              </span>
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ),
-                                  )}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
 
