@@ -9506,8 +9506,91 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
       payload.matches.length === 0
         ? (getLivePayloadFallback() ?? payload)
         : payload;
-    const match =
+    let match =
       effectivePayload.matches.find((m) => String(m.id) === id) ?? null;
+
+    if (
+      forceFresh &&
+      match &&
+      String((match as any).sport ?? "football") === "football"
+    ) {
+      try {
+        const rawId = extractProviderMatchId(id);
+        if (rawId) {
+          const odds = await getMrDogeClient().odds.list({
+            matchId: rawId,
+            betTypes: [...MRDOGE_SOCCER_BET_TYPES],
+          });
+          const btts = extractMrDogeSoccerBtts(odds);
+          const extended = extractMrDogeSoccerExtendedMarkets(odds);
+          const enrichedMarkets = zerofillAdvancedMarkets();
+          Object.assign(
+            enrichedMarkets.totalGoals,
+            totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)),
+          );
+          if (btts) enrichedMarkets.bothTeamsScore = btts;
+          if (extended.doubleChance)
+            enrichedMarkets.doubleChance = extended.doubleChance;
+          if (extended.drawNoBet) enrichedMarkets.drawNoBet = extended.drawNoBet;
+          if (extended.asianHandicap)
+            enrichedMarkets.asianHandicap = extended.asianHandicap;
+          if (extended.halfTime) enrichedMarkets.halfTime = extended.halfTime;
+          if (extended.secondHalf)
+            enrichedMarkets.secondHalf = extended.secondHalf;
+          if (extended.htft) enrichedMarkets.htft = extended.htft;
+          if (extended.correctScore)
+            enrichedMarkets.correctScore = extended.correctScore;
+          if (extended.europeanHandicap)
+            enrichedMarkets.europeanHandicap = extended.europeanHandicap;
+          if (extended.asianTotals) {
+            enrichedMarkets.asianTotals = {
+              o05: 0,
+              u05: 0,
+              o45: 0,
+              u45: 0,
+              o55: 0,
+              u55: 0,
+              o225: 0,
+              u225: 0,
+              o275: 0,
+              u275: 0,
+              ...extended.asianTotals,
+            };
+          }
+          if (extended.teamGoals) {
+            enrichedMarkets.teamGoals = {
+              ...(enrichedMarkets.teamGoals ?? {}),
+              ...extended.teamGoals,
+            };
+          }
+          if (extended.winToNil) enrichedMarkets.winToNil = extended.winToNil;
+          if (extended.cleanSheet)
+            enrichedMarkets.cleanSheet = extended.cleanSheet;
+          if (extended.goalOddEven)
+            enrichedMarkets.goalOddEven = extended.goalOddEven;
+          if (extended.exactGoals) {
+            enrichedMarkets.exactGoals = {
+              g0: 0,
+              g1: 0,
+              g2: 0,
+              g3: 0,
+              g4: 0,
+              g5plus: 0,
+              ...extended.exactGoals,
+            };
+          }
+          match = {
+            ...match,
+            markets: {
+              ...(match as any).markets,
+              ...enrichedMarkets,
+            },
+          };
+        }
+      } catch (err) {
+        logger.warn({ err, id }, "[mrdoge] live-match fresh enrich failed");
+      }
+    }
 
     res.json({ match });
   } catch {

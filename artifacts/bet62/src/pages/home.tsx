@@ -7024,6 +7024,48 @@ export default function Home({
     return false;
   };
 
+  const countPlayableMarketOdds = (
+    value: unknown,
+    key?: string,
+  ): number => {
+    if (typeof value === "number") {
+      if (
+        key === "line" ||
+        key === "_spread" ||
+        key === "_total" ||
+        key === "_total1H" ||
+        key === "_spreadLine" ||
+        key === "currentSetNum"
+      ) {
+        return 0;
+      }
+      return Number.isFinite(value) && value > 1.01 ? 1 : 0;
+    }
+    if (Array.isArray(value)) {
+      return value.reduce(
+        (acc, item) => acc + countPlayableMarketOdds(item),
+        0,
+      );
+    }
+    if (value && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).reduce(
+        (acc, [childKey, childValue]) =>
+          acc + countPlayableMarketOdds(childValue, childKey),
+        0,
+      );
+    }
+    return 0;
+  };
+
+  const pickRicherMarkets = (
+    primary: Record<string, unknown> | undefined,
+    fallback: Record<string, unknown> | undefined,
+  ) => {
+    const primaryCount = countPlayableMarketOdds(primary);
+    const fallbackCount = countPlayableMarketOdds(fallback);
+    return primaryCount >= fallbackCount ? primary : fallback;
+  };
+
   const matchHasPlayableOdds = (match: Pick<Match, "hasRealOdds" | "odds" | "markets">): boolean =>
     !!(
       match.hasRealOdds ||
@@ -7097,7 +7139,10 @@ export default function Home({
   );
   const liveSnapshotKey = useCallback(() => "bet62_snapshot_live_v1", []);
   const matchSnapshotKey = useCallback(
-    (id: string) => `bet62_snapshot_match_v1:${id}`,
+    (
+      id: string,
+      scope: "generic" | "live" | "upcoming" = "generic",
+    ) => `bet62_snapshot_match_v2:${scope}:${id}`,
     [],
   );
   const LIVE_SNAPSHOT_MAX_AGE_MS = 20_000;
@@ -7150,6 +7195,10 @@ export default function Home({
         if (String(prev.id) !== String(updated.id)) return { ...updated };
         const anyUpdated = updated as any;
         const anyPrev = prev as any;
+        const richerMarkets = pickRicherMarkets(
+          anyUpdated.markets,
+          anyPrev.markets,
+        );
         return {
           ...anyUpdated,
           // tennisExtra is deliberately never included in the live list
@@ -7159,11 +7208,12 @@ export default function Home({
           // tick (this effect) overwrote it with the list's plain markets
           // shell right after that fetch populated it — tennis market
           // groups appearing then immediately disappearing.
-          markets: anyUpdated.markets
+          markets: richerMarkets
             ? {
-                ...anyUpdated.markets,
+                ...richerMarkets,
                 tennisExtra:
-                  anyUpdated.markets.tennisExtra ?? anyPrev.markets?.tennisExtra,
+                  (richerMarkets as any).tennisExtra ??
+                  anyPrev.markets?.tennisExtra,
               }
             : anyPrev.markets,
           events: anyUpdated.events ?? anyPrev.events,
@@ -7176,6 +7226,8 @@ export default function Home({
     if (!expandedMatch?.isLive) return;
     const id = String(expandedMatch.id);
     const isTennisMatch = expandedMatch.sport === "tennis";
+    const isFootballMatch =
+      (expandedMatch.sport ?? "football") === "football";
     // Tennis's tennisExtra (total sets, straight-sets/go-the-distance, exact
     // set score, etc.) is deliberately never included in the live list
     // payload — buildTennisLiveFromPulseScore only stashes a bare `markets`
@@ -7186,8 +7238,9 @@ export default function Home({
     // "markets" — silently hiding every tennisExtra-only market group.
     const hasMarkets = !!(expandedMatch as any).markets;
     const hasTennisExtra = !!(expandedMatch as any).markets?.tennisExtra;
-    if (hasMarkets && (!isTennisMatch || hasTennisExtra)) return;
-    const snap = readSnapshot(matchSnapshotKey(id));
+    if (!isFootballMatch && hasMarkets && (!isTennisMatch || hasTennisExtra))
+      return;
+    const snap = readSnapshot(matchSnapshotKey(id, "live"));
     const canUseSnap = !!(
       snap &&
       Date.now() - snap.savedAt < 10 * 60_000 &&
@@ -7200,7 +7253,7 @@ export default function Home({
     }
     if (liveExpandedFullFetchRef.current === id) return;
     liveExpandedFullFetchRef.current = id;
-    const qs = expandedMatch.sport === "tennis" ? "?fresh=1" : "";
+    const qs = "?fresh=1";
 
     let cancelled = false;
     let currentCtrl: AbortController | null = null;
@@ -7219,10 +7272,17 @@ export default function Home({
         .then((d) => {
           const m = d?.match as Match | null | undefined;
           if (!m) return false;
-          writeSnapshot(matchSnapshotKey(id), m as any);
+          writeSnapshot(matchSnapshotKey(id, "live"), m as any);
           setExpandedMatch((prev) => {
             if (!prev || String(prev.id) !== id) return prev;
-            return { ...(m as any) };
+            const richerMarkets = pickRicherMarkets(
+              (m as any).markets,
+              (prev as any).markets,
+            );
+            return {
+              ...(m as any),
+              markets: richerMarkets,
+            };
           });
           return isTennisMatch
             ? !!(m as any).markets?.tennisExtra
@@ -7260,7 +7320,7 @@ export default function Home({
   useEffect(() => {
     if (!expandedMatch || expandedMatch.isLive) return;
     const id = String(expandedMatch.id);
-    const snap = readSnapshot(matchSnapshotKey(id));
+    const snap = readSnapshot(matchSnapshotKey(id, "upcoming"));
     const canUseSnap = !!(
       snap &&
       Date.now() - snap.savedAt < 10 * 60_000 &&
@@ -7293,7 +7353,7 @@ export default function Home({
         .then((d) => {
           const m = d?.match as Match | null | undefined;
           if (!m) return false;
-          writeSnapshot(matchSnapshotKey(id), m as any);
+          writeSnapshot(matchSnapshotKey(id, "upcoming"), m as any);
           setUpcomingMatches((prev) =>
             prev.map((item) =>
               String(item.id) === id ? ({ ...m, isLive: false } as Match) : item,
@@ -8360,7 +8420,7 @@ export default function Home({
         const d = r.ok ? await r.json() : null;
         const match = d?.match as Match | null | undefined;
         if (!match) return;
-        writeSnapshot(matchSnapshotKey(id), match as any);
+        writeSnapshot(matchSnapshotKey(id, "live"), match as any);
         setLiveMatches((prev) =>
           prev.map((item) => {
             if (String(item.id) !== id) return item;
@@ -8840,7 +8900,7 @@ export default function Home({
       for (const id of ids) {
         if (ctrl.signal.aborted) return;
         if (livePrefetchingRef.current.has(id)) continue;
-        const snap = readSnapshot(matchSnapshotKey(id));
+        const snap = readSnapshot(matchSnapshotKey(id, "live"));
         const canUseSnap = !!(
           snap &&
           Date.now() - snap.savedAt < LIVE_SNAPSHOT_MAX_AGE_MS &&
@@ -8858,7 +8918,7 @@ export default function Home({
           );
           const d = r.ok ? await r.json() : null;
           const m = d?.match as Match | null | undefined;
-          if (m) writeSnapshot(matchSnapshotKey(id), m as any);
+          if (m) writeSnapshot(matchSnapshotKey(id, "live"), m as any);
         } catch {
         } finally {
           livePrefetchingRef.current.delete(id);
