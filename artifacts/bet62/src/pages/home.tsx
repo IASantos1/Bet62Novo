@@ -14171,6 +14171,7 @@ export default function Home({
       bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico",
     ) => {
       if (!isFootball || allOddsLoading || sections.length === 0) return null;
+      if (match.isLive && modalTab === "todos") return null;
       return (
         <div className="space-y-2">
           {sections.map((section) => {
@@ -14197,18 +14198,23 @@ export default function Home({
                     key={`inline-${bucket}-${section.section}-${groupIndex}`}
                     title={group.title}
                   >
-                    {group.items.flatMap(({ market, originalIndex }) =>
-                      market.choices.map((choice, choiceIndex) => (
-                        <MarketOddsBtn
-                          key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                          match={match}
-                          sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                          odd={choice.odds}
-                          market={`all-${bucket}-${originalIndex}`}
-                          label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
-                        />
-                      )),
-                    )}
+                    {group.items.map(({ market, originalIndex }) => (
+                      <div
+                        key={`all-row-${bucket}-${originalIndex}`}
+                        className="w-full flex gap-2"
+                      >
+                        {market.choices.map((choice, choiceIndex) => (
+                          <MarketOddsBtn
+                            key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                            match={match}
+                            sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                            odd={choice.odds}
+                            market={`all-${bucket}-${originalIndex}`}
+                            label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
+                          />
+                        ))}
+                      </div>
+                    ))}
                   </MarketGroup>
                 ))}
               </div>
