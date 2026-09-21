@@ -1,21 +1,63 @@
+import crypto from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   db,
   casinoGamesTable,
   casinoBannersTable,
+  usersTable,
 } from "@workspace/db";
 import { and, asc, count, desc, eq, ilike, inArray } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { logger } from "../lib/logger.js";
+import { applyBalanceDelta } from "../lib/ledger.js";
+import { bigBangBalanceChangeSignature, bigBangLaunchGame } from "../services/bigbang/client.js";
+import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 import { kvCache } from "../services/cache/kvCache.js";
 
 const router: IRouter = Router();
+const CASINO_SOURCE = "bigbang";
+const BIGBANG_BALANCE_SANDBOX = "100000.00";
+const BIGBANG_DEFAULT_LANGUAGE = "pt";
+const DEFAULT_CASINO_CURRENCY = "EUR";
 
-// SilentAPI and Palace Casino removed entirely 2026-09-20+ (explicit user
-// decision) — the casino catalog (casino_games table) is left in place but
-// every row was deactivated (isActive=false) as part of the removal, so
-// /games and /providers below now always return empty. The front-end pages
-// through the catalog 24 games at a time and never talks to either former
-// aggregator directly for listing.
+async function maybeSyncBigBangCatalog(): Promise<void> {
+  try {
+    await ensureBigBangCatalogFresh();
+  } catch (err) {
+    logger.warn({ err }, "[bigbang] catalog sync skipped/failed");
+  }
+}
+
+function parseBigBangUserId(raw: string): number | null {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function formatMoney(value: string | number): string {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(n)) throw Object.assign(new Error("Montante inválido"), { status: 400 });
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function bigBangKind(args: { type?: unknown; amount: number }): string {
+  const type = String(args.type ?? "").trim().toLowerCase();
+  if (type === "refund") return "casino_bigbang_refund";
+  if (type === "bet" || args.amount < 0) return "casino_bigbang_bet";
+  if (type === "win" || args.amount > 0) return "casino_bigbang_win";
+  if (type === "round") return "casino_bigbang_round";
+  return "casino_bigbang_close";
+}
+
+function safeHexEqual(a: string, b: string): boolean {
+  const left = Buffer.from(String(a), "utf8");
+  const right = Buffer.from(String(b), "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+// BigBang Casino is the current casino aggregator. The public catalog still
+// reads from casino_games so banners/admin keep working, but the rows are
+// synced from BigBang instead of a local JSON snapshot or a removed provider.
 const GAMES_CACHE_TTL_SECONDS = 300;
 const PROVIDERS_CACHE_TTL_SECONDS = 3600;
 const DEFAULT_LIMIT = 24;
@@ -62,6 +104,7 @@ function gameFamilyKey(name: string): string {
 const NAME_KEYWORD_CATEGORIES = new Set(["baccarat", "blackjack", "roulette"]);
 
 router.get("/games", async (req: Request, res: Response) => {
+  await maybeSyncBigBangCatalog();
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
   const category =
@@ -70,7 +113,7 @@ router.get("/games", async (req: Request, res: Response) => {
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
-  const cacheKey = `casino:games:v3:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
+  const cacheKey = `casino:games:v4:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -78,19 +121,10 @@ router.get("/games", async (req: Request, res: Response) => {
     return;
   }
 
-  // Palace Casino only — SilentAPI is suspended (kept as dormant code, not
-  // deleted, in case that decision changes again; explicitly filtered out
-  // here rather than relying on its catalog happening to be empty).
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, "palace"),
+    eq(casinoGamesTable.source, CASINO_SOURCE),
   ];
-  // ilike, not exact eq — the frontend's default-view provider filter
-  // ("Pragmatic") is a hardcoded substring, not necessarily Palace
-  // Casino's exact provider_name string (could be "Pragmatic Play",
-  // "PragmaticPlay", etc.) — an exact-match miss here would silently
-  // render an empty catalog instead of erroring, which is worse than a
-  // slightly loose match.
   if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
   if (category === "slots" || category === "ao vivo") {
@@ -144,6 +178,7 @@ const MAX_GROUPS_LIMIT = 30;
 // useful there); the front-end falls back to the flat /games list once a
 // search term is entered.
 router.get("/games/grouped", async (req: Request, res: Response) => {
+  await maybeSyncBigBangCatalog();
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(
@@ -151,7 +186,7 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
     Math.max(1, Number(req.query["limit"]) || DEFAULT_GROUPS_LIMIT),
   );
 
-  const cacheKey = `casino:games-grouped:v1:${provider || "*"}:${page}:${limit}`;
+  const cacheKey = `casino:games-grouped:v2:${provider || "*"}:${page}:${limit}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -161,14 +196,8 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
 
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, "palace"),
+    eq(casinoGamesTable.source, CASINO_SOURCE),
   ];
-  // ilike, not exact eq — the frontend's default-view provider filter
-  // ("Pragmatic") is a hardcoded substring, not necessarily Palace
-  // Casino's exact provider_name string (could be "Pragmatic Play",
-  // "PragmaticPlay", etc.) — an exact-match miss here would silently
-  // render an empty catalog instead of erroring, which is worse than a
-  // slightly loose match.
   if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
 
   const rows = await db
@@ -218,7 +247,8 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
 });
 
 router.get("/providers", async (_req: Request, res: Response) => {
-  const cacheKey = "casino:providers:v2";
+  await maybeSyncBigBangCatalog();
+  const cacheKey = "casino:providers:v3";
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -229,7 +259,7 @@ router.get("/providers", async (_req: Request, res: Response) => {
   const rows = await db
     .selectDistinct({ provider: casinoGamesTable.provider })
     .from(casinoGamesTable)
-    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, "palace")))
+    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, CASINO_SOURCE)))
     .orderBy(asc(casinoGamesTable.provider));
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });
@@ -324,16 +354,53 @@ router.get("/banners", async (req: Request, res: Response) => {
   res.send(payload);
 });
 
-// SilentAPI and Palace Casino both removed entirely (2026-09-20+, user
-// decision) — no casino aggregator remains, so every game-launch route
-// always reports the casino as unavailable. Kept registered (not deleted)
-// so the front-end's existing POST calls get a graceful JSON error instead
-// of a bare 404.
 router.post(
   "/launch",
   authMiddleware,
-  async (_req: AuthRequest, res: Response) => {
-    res.status(503).json({ error: "Cassino indisponível no momento." });
+  async (req: AuthRequest, res: Response) => {
+    const gameUid = String((req.body as { gameUid?: unknown })?.gameUid ?? "").trim();
+    if (!gameUid) {
+      res.status(400).json({ error: "gameUid é obrigatório." });
+      return;
+    }
+
+    await maybeSyncBigBangCatalog();
+
+    const [game] = await db
+      .select({
+        gameUid: casinoGamesTable.gameUid,
+        isActive: casinoGamesTable.isActive,
+      })
+      .from(casinoGamesTable)
+      .where(and(eq(casinoGamesTable.gameUid, gameUid), eq(casinoGamesTable.source, CASINO_SOURCE)))
+      .limit(1);
+
+    if (!game || !game.isActive) {
+      res.status(404).json({ error: "Jogo não encontrado." });
+      return;
+    }
+
+    const numericGameId = Number(game.gameUid);
+    if (!Number.isInteger(numericGameId) || numericGameId <= 0) {
+      res.status(500).json({ error: "Identificador do jogo inválido." });
+      return;
+    }
+
+    try {
+      const publicSiteUrlRaw = process.env["PUBLIC_SITE_URL"]?.trim();
+      const publicSiteUrl = publicSiteUrlRaw ? publicSiteUrlRaw.replace(/\/+$/, "") : "";
+      const launched = await bigBangLaunchGame({
+        gameId: numericGameId,
+        userToken: String(req.user!.id),
+        language: BIGBANG_DEFAULT_LANGUAGE,
+        returnUrl: publicSiteUrl ? `${publicSiteUrl}/casino` : undefined,
+      });
+      res.json({ url: launched.gameUrl, provider: launched.provider, sessionId: launched.sessionId });
+    } catch (err) {
+      logger.error({ err, gameUid, userId: req.user?.id }, "POST /api/casino/launch error");
+      const status = typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : 500;
+      res.status(status).json({ error: (err as Error).message || "Não foi possível iniciar o jogo." });
+    }
   },
 );
 
@@ -344,6 +411,154 @@ router.post(
     res.status(503).json({ error: "Cassino indisponível no momento." });
   },
 );
+
+router.get("/bigbang/user-data", async (req: Request, res: Response) => {
+  const username = String(req.query["username"] ?? "").trim();
+  const userId = parseBigBangUserId(username);
+  if (!userId) {
+    res.status(404).json({ error: "unknown user" });
+    return;
+  }
+
+  const [user] = await db
+    .select({ id: usersTable.id, balance: usersTable.balance })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+
+  if (!user) {
+    res.status(404).json({ error: "unknown user" });
+    return;
+  }
+
+  res.json({
+    username,
+    balance: formatMoney(user.balance),
+    currency: DEFAULT_CASINO_CURRENCY,
+  });
+});
+
+router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
+  const payload = (req.body ?? {}) as {
+    username?: unknown;
+    amount?: unknown;
+    game?: unknown;
+    game_category?: unknown;
+    transaction_id?: unknown;
+    signature?: unknown;
+    round_id?: unknown;
+    type?: unknown;
+    round_end?: unknown;
+    game_id?: unknown;
+    provider_id?: unknown;
+    sandbox?: unknown;
+  };
+
+  const username = String(payload.username ?? "").trim();
+  const userId = parseBigBangUserId(username);
+  const transactionId = String(payload.transaction_id ?? "").trim();
+  const game = String(payload.game ?? "").trim();
+  const gameCategory = String(payload.game_category ?? "").trim();
+  const signature = String(payload.signature ?? "").trim().toLowerCase();
+  const amountNum = Number(payload.amount);
+
+  if (!username || !transactionId || !game || !gameCategory || !signature || !Number.isFinite(amountNum)) {
+    res.status(400).json({ error: "invalid payload" });
+    return;
+  }
+  if (!userId) {
+    res.status(404).json({ error: "unknown user" });
+    return;
+  }
+
+  try {
+    const expected = bigBangBalanceChangeSignature({
+      username,
+      amount: payload.amount,
+      game,
+      game_category: gameCategory,
+      transaction_id: transactionId,
+    });
+    if (!safeHexEqual(expected, signature)) {
+      res.status(401).json({ error: "bad signature" });
+      return;
+    }
+  } catch (err) {
+    logger.error({ err }, "POST /api/casino/bigbang/balance-change signature error");
+    res.status(503).json({ error: "wallet unavailable" });
+    return;
+  }
+
+  if (payload.sandbox === true) {
+    res.json({ status: "ok", balance: BIGBANG_BALANCE_SANDBOX });
+    return;
+  }
+
+  try {
+    const result = await (db as typeof db & {
+      transaction: <T>(cb: (tx: typeof db) => Promise<T>) => Promise<T>;
+    }).transaction(async (tx) => {
+      const [user] = await tx
+        .select({ id: usersTable.id, balance: usersTable.balance })
+        .from(usersTable)
+        .where(eq(usersTable.id, userId))
+        .limit(1);
+
+      if (!user) {
+        throw Object.assign(new Error("unknown user"), { status: 404 });
+      }
+
+      const applied = await applyBalanceDelta(tx, {
+        userId,
+        amount: formatMoney(amountNum),
+        kind: bigBangKind({ type: payload.type, amount: amountNum }),
+        idempotencyKey: `casino:bigbang:${transactionId}`,
+        refType: "bigbang_transaction",
+        refId: transactionId,
+        metadata: {
+          username,
+          roundId: payload.round_id ?? null,
+          type: payload.type ?? null,
+          roundEnd: Boolean(payload.round_end),
+          game,
+          gameCategory,
+          gameId: payload.game_id ?? null,
+          providerId: payload.provider_id ?? null,
+        },
+        enforceNonNegative: amountNum < 0,
+      });
+
+      const [updatedUser] = await tx
+        .select({ balance: usersTable.balance })
+        .from(usersTable)
+        .where(eq(usersTable.id, userId))
+        .limit(1);
+
+      return {
+        balance: updatedUser?.balance ?? user.balance,
+        duplicate: !applied,
+      };
+    });
+
+    res.json({
+      status: "ok",
+      balance: formatMoney(result.balance),
+      ...(result.duplicate ? { duplicate: true } : {}),
+    });
+  } catch (err) {
+    const status = typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : 500;
+    if (status === 400) {
+      res.status(400).json({ error: "insufficient balance" });
+      return;
+    }
+    if (status === 404) {
+      res.status(404).json({ error: "unknown user" });
+      return;
+    }
+    logger.error({ err, userId, transactionId }, "POST /api/casino/bigbang/balance-change error");
+    res.status(500).json({ error: "wallet unavailable" });
+  }
+});
 
 // Palace Casino's own webhook config may still point at this URL after
 // removal — always answer BAD_TOKEN (100), the exact same response this

@@ -4,6 +4,7 @@ import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
+import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 import { startMrDogeLiveSync } from "../services/mrdoge/liveSync.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
@@ -50,6 +51,13 @@ server.listen(port, () => {
   // CONFIG.MRDOGE_API_KEY is unset.
   void startMrDogeLiveSync();
   setInterval(() => void startMrDogeLiveSync(), 30_000);
+
+  // BigBang casino catalog bootstrap. Public casino routes also self-heal by
+  // syncing on demand, but warming the catalog here avoids the first casino
+  // page view paying that sync latency after a fresh deploy/restart.
+  void ensureBigBangCatalogFresh().catch((err) => {
+    logger.warn({ err }, "[bigbang] initial catalog sync failed");
+  });
 
   // Background AI-agents cron (Risk / Odds / Payments / Compliance / ... + Orchestrator).
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY

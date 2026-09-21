@@ -484,7 +484,7 @@ type CasinoGame = {
   vendorCode: number | null;
   category: string;
   img: string | null;
-  source?: string; // "silentapi" (default) | "palace"
+  source?: string; // "bigbang" | legacy providers kept only for old rows
 };
 // Casino's default/first-page view is pinned to this provider (user
 // request, 2026-08-11: every game shown before picking a category/
@@ -9520,10 +9520,9 @@ export default function Home({
       }
       setCasinoLoadingGame(game.id);
       try {
-        // source="palace" games launch through a different aggregator with
-        // an unrelated request shape (provider_id + game_symbol, no
-        // balance sent — see routes/casino.ts's /palace/launch) than the
-        // default SilentAPI path (gameUid + our own balance).
+        // BigBang uses the generic /api/casino/launch path (gameUid only).
+        // Legacy Palace rows, if any still exist in old data, keep their
+        // former launch shape for backwards compatibility.
         const isPalace = game.source === "palace";
         const res = await fetch(
           isPalace ? "/api/casino/palace/launch" : "/api/casino/launch",

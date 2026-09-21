@@ -58,6 +58,7 @@ const AI_AGENTS_MODEL =
 // earlier bzzoiro/PulseScore market mapping did and shipped a
 // misclassified BTTS/corners market.
 const MRDOGE_API_KEY = process.env["MRDOGE_API_KEY"] ?? "";
+const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
@@ -75,6 +76,7 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
 
 export const CONFIG = {
   MRDOGE_API_KEY,
+  BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

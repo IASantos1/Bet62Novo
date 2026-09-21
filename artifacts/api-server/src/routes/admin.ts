@@ -28,6 +28,7 @@ import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { replayEngine } from "../lib/replayEngine.js";
 import { liveMatchState, buildUpcomingMatches } from "./matches.js";
+import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2148,18 +2149,20 @@ router.get(
 // across all three for a period gives the net change to *players'* balances;
 // GGR (house revenue) is the negative of that.
 const CASINO_LEDGER_KINDS = [
-  "casino_palace_bet",
-  "casino_palace_win",
-  "casino_palace_cancel",
-  // SilentAPI settles bet+win as one net-delta callback per round (see
-  // app.ts's /api/casino/callback), unlike Palace's three separate kinds —
-  // included here too so "allTime" GGR still covers whichever aggregator
-  // was active during any given period, not just the currently-active one.
-  "casino_round_settlement",
+  "casino_bigbang_bet",
+  "casino_bigbang_win",
+  "casino_bigbang_refund",
+  "casino_bigbang_round",
+  "casino_bigbang_close",
 ] as const;
 
 router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
+    try {
+      await ensureBigBangCatalogFresh();
+    } catch (err) {
+      logger.warn({ err }, "[bigbang] admin casino overview sync skipped/failed");
+    }
     const startOfToday = new Date();
     startOfToday.setUTCHours(0, 0, 0, 0);
 
@@ -2171,11 +2174,11 @@ router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) 
             active: sql<number>`count(*) filter (where ${casinoGamesTable.isActive})`,
           })
           .from(casinoGamesTable)
-          .where(eq(casinoGamesTable.source, "palace")),
+          .where(eq(casinoGamesTable.source, "bigbang")),
         db
           .select({ total: sql<number>`count(distinct ${casinoGamesTable.provider})` })
           .from(casinoGamesTable)
-          .where(and(eq(casinoGamesTable.source, "palace"), eq(casinoGamesTable.isActive, true))),
+          .where(and(eq(casinoGamesTable.source, "bigbang"), eq(casinoGamesTable.isActive, true))),
         db
           .select({ net: sum(ledgerEntriesTable.amount) })
           .from(ledgerEntriesTable)
@@ -2207,12 +2210,17 @@ router.get("/casino/overview", adminMiddleware, async (_req: AdminRequest, res) 
 
 router.get("/casino/games", adminMiddleware, async (req: AdminRequest, res) => {
   try {
+    try {
+      await ensureBigBangCatalogFresh();
+    } catch (err) {
+      logger.warn({ err }, "[bigbang] admin casino games sync skipped/failed");
+    }
     const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
     const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
     const page = Math.max(1, Number(req.query["page"]) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 30));
 
-    const conditions = [eq(casinoGamesTable.source, "palace")];
+    const conditions = [eq(casinoGamesTable.source, "bigbang")];
     if (provider && provider !== "Todos") conditions.push(eq(casinoGamesTable.provider, provider));
     if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
     const where = and(...conditions);
