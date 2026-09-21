@@ -3565,13 +3565,13 @@ function SidebarTreeContent({
           const regionKey = `${sportKey}:${region.id}`;
           const competitions = competitionCatalogByRegion?.[regionKey] ?? [];
           const isLoadingCompetitions = competitionLoadingKey === regionKey;
+          const isActive = selectedRegionId
+            ? selectedRegionId === String(region.id)
+            : selectedCountry === region.name;
           return (
             <div key={regionKey}>
               <button
                 onClick={() => {
-                  const isActive = selectedRegionId
-                    ? selectedRegionId === String(region.id)
-                    : selectedCountry === region.name;
                   setExpandedCountry(isActive ? null : regionKey);
                   setSelectedCountry?.(isActive ? null : region.name);
                   setSelectedRegionId?.(isActive ? null : String(region.id));
