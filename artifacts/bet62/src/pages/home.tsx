@@ -10568,33 +10568,37 @@ export default function Home({
       : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
     const oddInvalid = odd <= 0 || !Number.isFinite(odd);
     const suspendedBoxClass = isWCVariant
-      ? `${isDarkTheme ? "border-red-900/50 bg-red-950/30" : "border-red-200 bg-red-50"}`
-      : "bg-red-950/25 border-red-700/30 opacity-85";
-    const renderSuspendedOdd = () => (
+      ? `${isDarkTheme ? "border-zinc-700/70 bg-zinc-900/90" : "border-zinc-300 bg-zinc-100"}`
+      : "bg-zinc-900/70 border-zinc-700/40 opacity-90";
+    const renderBlockedOdd = (
+      blockedOdd: number | null,
+      blockedLabel = "Bloq.",
+      title = "Mercado temporariamente bloqueado",
+    ) => (
       <div
         className={`relative ${baseBoxClass} ${suspendedBoxClass} select-none`}
-        title="Mercado suspenso"
+        title={title}
         aria-disabled="true"
       >
         <span
-          className={`${isWCVariant ? "text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide text-red-300" : "text-[10px] leading-none text-red-200/80"}`}
+          className={`${isWCVariant ? `text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}` : "text-[10px] leading-none text-zinc-400/90"}`}
         >
           {label}
         </span>
         <span
-          className={`${isWCVariant ? "mt-1 text-sm font-black text-red-400" : "font-bold text-base leading-none text-red-300"} tabular-nums`}
+          className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-base leading-none text-white"} tabular-nums`}
         >
-          --
+          {blockedOdd != null && Number.isFinite(blockedOdd) && blockedOdd > 0 ? blockedOdd.toFixed(2) : "--"}
         </span>
         <span
-          className={`${isWCVariant ? "mt-0.5 text-[8px] font-black tracking-[0.18em] uppercase text-red-300/80" : "mt-0.5 text-[8px] font-black tracking-[0.16em] uppercase text-red-200/75"}`}
+          className={`${isWCVariant ? `mt-0.5 text-[8px] font-black tracking-[0.18em] uppercase ${isDarkTheme ? "text-amber-400/90" : "text-amber-700"}` : "mt-0.5 text-[8px] font-black tracking-[0.16em] uppercase text-amber-300/85"}`}
         >
-          Susp.
+          {blockedLabel}
         </span>
       </div>
     );
     if (oddInvalid) {
-      if (isSuspended) return renderSuspendedOdd();
+      if (isSuspended) return renderBlockedOdd(null, "Susp.", "Mercado suspenso");
       return (
         <div
           className={`relative ${baseBoxClass} ${
@@ -10634,7 +10638,7 @@ export default function Home({
         b.selection === selection,
     );
 
-    if (isSuspended) return renderSuspendedOdd();
+    if (isSuspended) return renderBlockedOdd(odd, "Susp.", "Mercado suspenso");
 
     // Football-only: this heuristic exists to hide football's "obvious
     // blowout" late-game prices (90-minute clock, goal-difference score).
@@ -10651,22 +10655,7 @@ export default function Home({
     // legitimate, bettable market in every sport, not just tennis —
     // hiding it just disables real markets.
     if (odd < 1.15 && market === "result" && match.sport === "football") {
-      return (
-        <div
-          className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white") : "bg-zinc-800/40 border-zinc-700/30"}`}
-        >
-          <span
-            className={`${isWCVariant ? "text-[10px] text-zinc-500" : "text-[10px] leading-none opacity-40"}`}
-          >
-            {label}
-          </span>
-          <span
-            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-600"} tabular-nums`}
-          >
-            --
-          </span>
-        </div>
-      );
+      return renderBlockedOdd(odd, "Bloq.", "Mercado bloqueado temporariamente");
     }
 
     const isObviousResult =
@@ -10756,9 +10745,7 @@ export default function Home({
     );
   };
 
-  // Returns a full-width suspension banner; null when result market not suspended.
-  // Always shows in red — grey mode removed (grey + odds visible was confusing).
-  // Gated exclusively on marketSuspension["result"] > now.
+  // Returns a compact live-incident badge; null when result market not suspended.
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
     const resultSuspended =
@@ -10768,31 +10755,40 @@ export default function Home({
     if (!resultSuspended) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
     let label = "SUSPENSO";
+    let toneClass = "bg-red-500/15 text-red-300 border-red-500/35";
     if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) {
-      label = "⚽ GOLO!";
+      label = "GOLO";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("VAR")) {
-      label = "🎥 REVISÃO VAR";
+      label = "VAR";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("PENAL")) {
-      label = "🎯 PENÁLTI";
+      label = "PENÁLTI";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("CHANCE")) {
       label = "GRANDE CHANCE";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("MATCH POINT")) {
-      label = "🎾 MATCH POINT!";
+      label = "MATCH POINT";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("SET POINT")) {
-      label = "🎾 SET POINT!";
+      label = "SET POINT";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("BREAK POINT")) {
-      label = "🎾 BREAK POINT!";
+      label = "BREAK POINT";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     } else if (rawReason.includes("FIM DE SET")) {
-      label = "🎾 FIM DE SET!";
+      label = "FIM DE SET";
+      toneClass = "bg-amber-400/15 text-amber-300 border-amber-400/35";
     }
     return (
-      <button
-        disabled
-        className="w-full h-12 px-3 flex items-center justify-center rounded-md border font-black text-sm cursor-not-allowed select-none animate-pulse bg-red-950 border-red-800/50 text-red-200"
-        style={{ letterSpacing: "0.18em" }}
-      >
-        {label}
-      </button>
+      <div className="w-full mb-1 flex justify-center">
+        <span
+          className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] animate-pulse ${toneClass}`}
+        >
+          {label}
+        </span>
+      </div>
     );
   };
 
@@ -13420,21 +13416,21 @@ export default function Home({
         : false;
     const isSusp = globalSusp || perMarketSusp;
     if (isSusp) {
-      // Show a locked placeholder so section headers don't look empty
       return (
-        <div className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-60 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/60" : "border-zinc-200 bg-white"}`}>
+        <div
+          className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-75 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/85" : "border-zinc-300 bg-zinc-100"}`}
+          title="Mercado suspenso"
+          aria-disabled="true"
+        >
           <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
             {cleanLabel}
           </span>
-          <svg
-            className="text-zinc-400"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-          >
-            <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" />
-          </svg>
+          <span className={`text-sm font-black leading-none tabular-nums ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+            {odd.toFixed(2)}
+          </span>
+          <span className="mt-1 text-[8px] font-black tracking-[0.16em] uppercase text-amber-400">
+            Susp.
+          </span>
         </div>
       );
     }
@@ -20068,12 +20064,14 @@ export default function Home({
       >
         <div className="flex items-center justify-between px-4 h-16 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-4">
-            <button
-              className="lg:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <Menu size={24} />
-            </button>
+            {activeTab !== "casino" && (
+              <button
+                className="lg:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors"
+                onClick={() => setSidebarOpen(true)}
+              >
+                <Menu size={24} />
+              </button>
+            )}
             <div className="font-black text-2xl tracking-tighter italic">
               <span className="text-white">BET</span>
               <span className="text-red-600">62</span>
@@ -20295,27 +20293,29 @@ export default function Home({
             <Dices size={17} />
             <span className="text-[8.5px] font-semibold">Casino</span>
           </button>
-          <button
-            aria-label="Boletim"
-            {...makeTap(() => setBetSlipOpenMobile(true))}
-            className="flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors text-zinc-500"
-          >
-            <span className="relative w-7 h-7 rounded-full b62-gradient-cta flex items-center justify-center">
-              <Ticket size={14} className="text-white" />
-              {bets.length > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-black text-[9px] font-black flex items-center justify-center">
-                  {bets.length}
-                </span>
-              )}
-            </span>
-            <span className="text-[8.5px] font-semibold">Boletim</span>
-          </button>
+          {activeTab !== "casino" && (
+            <button
+              aria-label="Boletim"
+              {...makeTap(() => setBetSlipOpenMobile(true))}
+              className="flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors text-zinc-500"
+            >
+              <span className="relative w-7 h-7 rounded-full b62-gradient-cta flex items-center justify-center">
+                <Ticket size={14} className="text-white" />
+                {bets.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-black text-[9px] font-black flex items-center justify-center">
+                    {bets.length}
+                  </span>
+                )}
+              </span>
+              <span className="text-[8.5px] font-semibold">Boletim</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* MOBILE SIDEBAR OVERLAY */}
       <AnimatePresence>
-        {sidebarOpen && (
+        {sidebarOpen && activeTab !== "casino" && (
           <>
             <motion.div
               initial={{ opacity: 0 }}
@@ -20376,27 +20376,77 @@ export default function Home({
         {/* DESKTOP LEFT SIDEBAR — always visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
           <div className="p-3">
-            <SidebarTreeContent
-              selectedSport={selectedSport}
-              setSelectedSport={setSelectedSport}
-              setActiveTab={setActiveTab}
-              expandedSport={sidebarExpandedSport}
-              setExpandedSport={setSidebarExpandedSport}
-              expandedCountry={sidebarExpandedCountry}
-              setExpandedCountry={setSidebarExpandedCountry}
-              compact
-              topLeagues={sidebarTopLeagues}
-              selectedLeague={selectedLeague}
-              setSelectedLeague={setSelectedLeague}
-              selectedCountry={selectedCountry}
-              setSelectedCountry={setSelectedCountry}
-              catalogBySport={catalogBySport}
-              competitionCatalogByRegion={competitionCatalogByRegion}
-              catalogLoadingSport={catalogLoadingSport}
-              competitionLoadingKey={competitionLoadingKey}
-              ensureSportCatalog={ensureSportCatalog}
-              ensureCompetitionCatalog={ensureCompetitionCatalog}
-            />
+            {activeTab === "casino" ? (
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-500/10 to-transparent p-3">
+                  <div className="flex items-center gap-2 text-violet-300 text-[11px] font-black uppercase tracking-[0.18em]">
+                    <Gift size={14} />
+                    Promoções
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-300 leading-relaxed">
+                    Destaques, campanhas e atalhos rápidos do casino numa coluna própria.
+                  </p>
+                  <button
+                    {...makeTap(() => selectMainTab("promos", fetchCashback))}
+                    className="mt-3 w-full rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-wide py-2"
+                  >
+                    Ver Promoções
+                  </button>
+                </div>
+                {[...casinoTopBanners.slice(0, 1), ...casinoMiddleBanners.slice(0, 2)].map((banner) => (
+                  <button
+                    key={banner.id}
+                    onClick={() => {
+                      if (banner.linkUrl) {
+                        window.open(banner.linkUrl, "_blank", "noopener,noreferrer");
+                        return;
+                      }
+                      if (banner.games[0]) launchCasinoGame(banner.games[0]);
+                    }}
+                    className="group overflow-hidden rounded-2xl border border-zinc-800 hover:border-violet-500/50 bg-zinc-900 text-left"
+                  >
+                    <img
+                      src={banner.imageUrl}
+                      alt={banner.title}
+                      className="h-28 w-full object-cover"
+                      loading="lazy"
+                    />
+                    <div className="p-3">
+                      <div className="text-[11px] font-black uppercase tracking-[0.16em] text-white">
+                        {banner.title}
+                      </div>
+                      {banner.subtitle && (
+                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                          {banner.subtitle}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <SidebarTreeContent
+                selectedSport={selectedSport}
+                setSelectedSport={setSelectedSport}
+                setActiveTab={setActiveTab}
+                expandedSport={sidebarExpandedSport}
+                setExpandedSport={setSidebarExpandedSport}
+                expandedCountry={sidebarExpandedCountry}
+                setExpandedCountry={setSidebarExpandedCountry}
+                compact
+                topLeagues={sidebarTopLeagues}
+                selectedLeague={selectedLeague}
+                setSelectedLeague={setSelectedLeague}
+                selectedCountry={selectedCountry}
+                setSelectedCountry={setSelectedCountry}
+                catalogBySport={catalogBySport}
+                competitionCatalogByRegion={competitionCatalogByRegion}
+                catalogLoadingSport={catalogLoadingSport}
+                competitionLoadingKey={competitionLoadingKey}
+                ensureSportCatalog={ensureSportCatalog}
+                ensureCompetitionCatalog={ensureCompetitionCatalog}
+              />
+            )}
           </div>
         </aside>
 
@@ -26600,7 +26650,7 @@ export default function Home({
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="mb-4">
                     <h2 className="b62-font-display text-2xl font-extrabold uppercase tracking-tight flex items-center gap-2">
-                      <Dices className="text-violet-400" /> Cassino
+                      <Dices className="text-violet-400" /> Casino
                     </h2>
                   </div>
 
@@ -27921,7 +27971,7 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        {(() => {
+        {activeTab !== "casino" && (() => {
           const showDesktopPitchTracker = !!(
             expandedMatch &&
             expandedMatch.isLive &&
@@ -27967,7 +28017,7 @@ export default function Home({
           live selection count and opens this same overlay, so the pill
           was a redundant second indicator stacked above it. */}
       <AnimatePresence>
-        {betSlipOpenMobile && (
+        {betSlipOpenMobile && activeTab !== "casino" && (
           <motion.div
             key="betslip-fullscreen"
             initial={{ y: "100%" }}
@@ -28395,7 +28445,7 @@ export default function Home({
           </div>
           <iframe
             src={casinoLaunchUrl}
-            title="Cassino"
+            title="Casino"
             className="flex-1 w-full border-0"
             allow="autoplay; fullscreen"
           />
