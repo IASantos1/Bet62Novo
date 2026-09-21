@@ -1,0 +1,10 @@
+node_modules
+.git
+.next
+dist
+coverage
+tmp
+*.log
+.DS_Store
+artifacts/*/node_modules
+lib/*/node_modules

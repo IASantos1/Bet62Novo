@@ -487,13 +487,20 @@ type CasinoGame = {
   img: string | null;
   source?: string; // "bigbang" | legacy providers kept only for old rows
 };
-// Casino's default/first-page view is pinned to this provider (user
-// request, 2026-08-11: every game shown before picking a category/
-// searching should be Pragmatic Play). A bare substring, not the exact
-// Palace Casino provider_name string — /api/casino/games matches it with
-// ilike specifically so this doesn't have to be byte-perfect (see
-// routes/casino.ts's provider filter comment).
-const CASINO_DEFAULT_PROVIDER = "Pragmatic";
+const CASINO_FAVORITES_STORAGE_KEY = "bet62_casino_favorites_v1";
+
+function casinoGameStorageKey(game: Pick<CasinoGame, "id" | "provider" | "source">): string {
+  return `${game.source ?? "bigbang"}:${game.provider}:${game.id}`;
+}
+
+function normalizeCasinoSearchText(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
 type CasinoBanner = {
   id: number;
   title: string;
@@ -5069,12 +5076,14 @@ export default function Home({
   const [casinoTotal, setCasinoTotal] = useState(0);
   const [casinoLoadingPage, setCasinoLoadingPage] = useState(false);
   const CASINO_PAGE_SIZE = 24;
-  // Category pill ("Todos"/"Populares"/"Novos"/"Slots"/"Ao Vivo"/"Baccarat"/
-  // "Blackjack"/"Roulette" — see CASINO_CATEGORY_CHIPS) and sort dropdown
+  // Category pill ("Populares"/"Novos"/"Slots"/"Ao Vivo"/"Jogos Rápidos"/
+  // "Crash"/"Jackpots"/"Blackjack"/"Roleta"/"Bacará"/"Game Shows"/
+  // "Favoritos" — see CASINO_CATEGORY_CHIPS) and sort dropdown
   // ("popular"/"new"/"az") driving the flat "Slots" grid below. Both map
   // directly to /api/casino/games's category/sort query params.
-  const [casinoCategory, setCasinoCategory] = useState("Todos");
+  const [casinoCategory, setCasinoCategory] = useState("Populares");
   const [casinoSort, setCasinoSort] = useState<"popular" | "new" | "az">("popular");
+  const [casinoFavoriteGames, setCasinoFavoriteGames] = useState<Record<string, CasinoGame>>({});
   // "Jogos Populares" showcase row — own isolated state/effect (fetched once
   // per tab open, top 10 by popularity), never touches the main grid's
   // casinoGames/casinoPage so scrolling/filtering the grid can't affect it.
@@ -9292,36 +9301,80 @@ export default function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(CASINO_FAVORITES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as CasinoGame[];
+      if (!Array.isArray(parsed)) return;
+      setCasinoFavoriteGames(
+        parsed.reduce<Record<string, CasinoGame>>((acc, game) => {
+          if (!game?.id || !game?.provider) return acc;
+          acc[casinoGameStorageKey(game)] = game;
+          return acc;
+        }, {}),
+      );
+    } catch {
+      // Non-critical local preference.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        CASINO_FAVORITES_STORAGE_KEY,
+        JSON.stringify(Object.values(casinoFavoriteGames)),
+      );
+    } catch {
+      // Non-critical local preference.
+    }
+  }, [casinoFavoriteGames]);
+
+  const toggleCasinoFavorite = useCallback((game: CasinoGame) => {
+    setCasinoFavoriteGames((prev) => {
+      const key = casinoGameStorageKey(game);
+      if (prev[key]) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: game };
+    });
+  }, []);
+
+  const favoriteCasinoGames = useMemo(() => Object.values(casinoFavoriteGames), [casinoFavoriteGames]);
+
   // "Jogos Populares" showcase row — near-static (popularity doesn't churn
   // minute to minute), fetch once the first time the tab is opened. The
-  // named headline titles are searched for individually and shown first
-  // (real catalog matches only, same curated-search pattern as
-  // homeCasinoPreview above — no fabricated entries); popularity-sorted
-  // games fill the rest of the row, skipping anything already included.
-  // Both fetches are pinned to Pragmatic Play (CASINO_DEFAULT_PROVIDER) —
-  // user request, 2026-08-11: every game on the casino's first/default
-  // view should be Pragmatic Play. Titles among featuredTitles that turn
-  // out not to be a real Pragmatic Play game in the catalog (e.g. "Wanted
-  // Dead or a Wild" is Hacksaw Gaming, not Pragmatic) simply won't match
-  // here and get silently dropped — no manual curation needed, the
-  // provider filter self-corrects against whatever's actually real.
+  // row intentionally mixes providers/titles that feel like a real casino
+  // lobby instead of pinning everything to a single vendor.
   useEffect(() => {
     if (activeTab !== "casino" || casinoPopular.length > 0) return;
     setCasinoPopularLoading(true);
     const featuredTitles = [
       "Sweet Bonanza",
       "Gates of Olympus",
-      "Sugar Rush 1000",
       "Big Bass Bonanza",
+      "Starlight Princess",
+      "Sugar Rush",
       "Wanted Dead or a Wild",
-      "Book of Gold Multichance",
-      "Fruit Party 2",
+      "Book of Dead",
+      "Reactoonz",
+      "Starburst",
+      "Bonanza Megaways",
+      "Crazy Time",
+      "Lightning Roulette",
+      "MONOPOLY Live",
+      "XXXtreme Lightning Roulette",
+      "Lightning Blackjack",
+      "Infinite Blackjack",
+      "Dream Catcher",
     ];
     Promise.all(
       featuredTitles.map((title) =>
-        fetch(
-          `/api/casino/games?search=${encodeURIComponent(title)}&provider=${encodeURIComponent(CASINO_DEFAULT_PROVIDER)}&limit=1`,
-        )
+        fetch(`/api/casino/games?search=${encodeURIComponent(title)}&limit=1`)
           .then((r) => r.json())
           .then((data) => (Array.isArray(data?.games) ? data.games[0] : null))
           .catch(() => null),
@@ -9337,15 +9390,13 @@ export default function Home({
           seen.add(key);
           featured.push(g);
         }
-        return fetch(
-          `/api/casino/games?sort=popular&provider=${encodeURIComponent(CASINO_DEFAULT_PROVIDER)}&limit=10`,
-        )
+        return fetch(`/api/casino/games?sort=popular&limit=18`)
           .then((r) => r.json())
           .then((data) => {
             const rest: CasinoGame[] = Array.isArray(data?.games)
               ? data.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
               : [];
-            setCasinoPopular([...featured, ...rest].slice(0, 10));
+            setCasinoPopular([...featured, ...rest].slice(0, 18));
           })
           .catch(() => setCasinoPopular(featured));
       })
@@ -9468,39 +9519,50 @@ export default function Home({
     };
   }, [activeTab]);
 
-  // "Populares"/"Novos" are sort-order pills, not real category filters
-  // (Palace Casino's category field is only ever "Slots"/"Ao Vivo" — see
-  // routes/casino.ts's NAME_KEYWORD_CATEGORIES comment); everything else
-  // maps straight to the category query param. The sort dropdown only
-  // applies once neither of those two pills is selected.
+  // "Populares"/"Novos" are primarily sort-order views, while the rest of
+  // the lobby maps to backend intent categories (slots, ao vivo, jogos
+  // rápidos, crash, jackpots, blackjack, roleta, bacará, game shows).
   const casinoGridParams = useCallback(
     (page: number): URLSearchParams => {
       const params = new URLSearchParams({ page: String(page), limit: String(CASINO_PAGE_SIZE) });
-      const isDefaultView = casinoCategory === "Todos" || casinoCategory === "Populares" || casinoCategory === "Novos";
       if (casinoCategory === "Populares") params.set("sort", "popular");
       else if (casinoCategory === "Novos") params.set("sort", "new");
       else {
         params.set("sort", casinoSort);
-        if (casinoCategory !== "Todos") params.set("category", casinoCategory);
+        if (casinoCategory !== "Todos" && casinoCategory !== "Favoritos") {
+          params.set("category", casinoCategory);
+        }
       }
       if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
-      // Casino's default view (no category pill picked away from Todos/
-      // Populares/Novos, no search) is pinned to Pragmatic Play — see
-      // CASINO_DEFAULT_PROVIDER. Not applied once the user searches or
-      // picks an explicit different category (Slots/Ao Vivo/Baccarat/
-      // Blackjack/Roulette) — those are the user actively asking to see
-      // something else, not "the first page" anymore.
-      if (isDefaultView && !casinoSearchDebounced) params.set("provider", CASINO_DEFAULT_PROVIDER);
       return params;
     },
     [casinoCategory, casinoSort, casinoSearchDebounced],
   );
+
+  const filteredFavoriteCasinoGames = useMemo(() => {
+    const searchNeedle = normalizeCasinoSearchText(casinoSearchDebounced);
+    const rows = favoriteCasinoGames.filter((game) => {
+      if (!searchNeedle) return true;
+      return normalizeCasinoSearchText(`${game.name} ${game.provider}`).includes(searchNeedle);
+    });
+    if (casinoSort === "az") {
+      return [...rows].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    }
+    return rows;
+  }, [favoriteCasinoGames, casinoSearchDebounced, casinoSort]);
 
   // Flat "Slots" grid — the casino tab's single browsing view, driven by
   // category pill + sort dropdown + search box. Any of the three changing
   // resets to page 1; "Carregar mais jogos" (loadMoreCasinoGames) advances.
   useEffect(() => {
     if (activeTab !== "casino") return;
+    if (casinoCategory === "Favoritos") {
+      setCasinoPage(1);
+      setCasinoGames(filteredFavoriteCasinoGames);
+      setCasinoTotal(filteredFavoriteCasinoGames.length);
+      setCasinoLoadingPage(false);
+      return;
+    }
     setCasinoPage(1);
     setCasinoGames([]);
     setCasinoLoadingPage(true);
@@ -9512,9 +9574,10 @@ export default function Home({
       })
       .catch(() => {})
       .finally(() => setCasinoLoadingPage(false));
-  }, [activeTab, casinoGridParams]);
+  }, [activeTab, casinoCategory, casinoGridParams, filteredFavoriteCasinoGames]);
 
   const loadMoreCasinoGames = useCallback(() => {
+    if (casinoCategory === "Favoritos") return;
     const nextPage = casinoPage + 1;
     setCasinoLoadingPage(true);
     fetch(`/api/casino/games?${casinoGridParams(nextPage)}`)
@@ -9528,7 +9591,7 @@ export default function Home({
       })
       .catch(() => {})
       .finally(() => setCasinoLoadingPage(false));
-  }, [casinoPage, casinoGridParams]);
+  }, [casinoCategory, casinoPage, casinoGridParams]);
 
   // Real-time stream for pending ticket states, with fetch fallback if SSE drops.
   useEffect(() => {
@@ -26388,21 +26451,23 @@ export default function Home({
             )}
 
             {!expandedMatch && activeTab === "casino" && (() => {
-              const hasMore = casinoGames.length < casinoTotal;
+              const hasMore = casinoCategory !== "Favoritos" && casinoGames.length < casinoTotal;
 
-              // Real, backend-verified pills only (routes/casino.ts's
-              // NAME_KEYWORD_CATEGORIES comment) — Megaways/Jackpots/Compre
-              // Bônus/Rodadas Grátis aren't offered since Palace Casino's
-              // catalog carries no reliable signal for them.
+              // Lobby by player intent rather than raw provider grouping.
               const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3x3 }[] = [
                 { key: "Todos", label: "Todos", icon: Grid3x3 },
                 { key: "Populares", label: "Populares", icon: Flame },
                 { key: "Novos", label: "Novos", icon: Sparkles },
                 { key: "Slots", label: "Slots", icon: Dices },
                 { key: "Ao Vivo", label: "Ao Vivo", icon: Radio },
-                { key: "baccarat", label: "Baccarat", icon: CreditCard },
+                { key: "jogos-rapidos", label: "Jogos Rápidos", icon: Zap },
+                { key: "crash", label: "Crash", icon: Activity },
+                { key: "jackpots", label: "Jackpots", icon: Gift },
                 { key: "blackjack", label: "Blackjack", icon: Crown },
                 { key: "roulette", label: "Roleta", icon: CircleDot },
+                { key: "baccarat", label: "Bacará", icon: CreditCard },
+                { key: "game-shows", label: "Game Shows", icon: Trophy },
+                { key: "Favoritos", label: "Favoritos", icon: Star },
               ];
 
               const handleBannerClick = (banner: CasinoBanner) => {
@@ -26465,6 +26530,32 @@ export default function Home({
                   style={{ "--shine-delay": `${shineDelay(String(game.id))}s` } as React.CSSProperties}
                   className={`${sizeClass} casino-card-shine aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors flex flex-col items-center justify-center overflow-hidden relative disabled:opacity-60 disabled:cursor-wait snap-start`}
                 >
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={casinoFavoriteGames[casinoGameStorageKey(game)] ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleCasinoFavorite(game);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleCasinoFavorite(game);
+                    }}
+                    className="absolute top-2 right-2 z-10 inline-flex items-center justify-center h-8 w-8 rounded-full bg-black/55 backdrop-blur border border-white/10 hover:border-yellow-400/70"
+                  >
+                    <Star
+                      size={15}
+                      className={
+                        casinoFavoriteGames[casinoGameStorageKey(game)]
+                          ? "text-yellow-300 fill-yellow-300"
+                          : "text-white/80"
+                      }
+                    />
+                  </span>
                   {casinoLoadingGame === game.id ? (
                     <RefreshCw className="animate-spin text-zinc-400" size={28} />
                   ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
@@ -26501,9 +26592,9 @@ export default function Home({
 
               const activeCategoryChip = CASINO_CATEGORY_CHIPS.find((c) => c.key === casinoCategory);
               const slotsHeading =
-                casinoCategory === "Todos" || casinoCategory === "Populares" || casinoCategory === "Novos"
-                  ? "Slots"
-                  : (activeCategoryChip?.label ?? "Slots");
+                casinoCategory === "Todos"
+                  ? "Todos os Jogos"
+                  : (activeCategoryChip?.label ?? "Jogos");
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">

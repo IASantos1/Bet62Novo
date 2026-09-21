@@ -3,17 +3,19 @@ import { CONFIG } from "../../lib/config.js";
 
 const BIGBANG_BASE_URL = "https://api.bigbangcasino.bet/api/v1";
 
-type BigBangEnvelope<T> =
-  | {
-      success: true;
-      data?: T;
-      game_url?: string;
-      session_id?: string;
-      provider?: string;
-      demo?: boolean;
-      pagination?: { total?: number; limit?: number; offset?: number };
-    }
-  | { success: false; error?: { code?: number; message?: string } };
+type BigBangOkEnvelope<T> = {
+  success: true;
+  data?: T;
+  game_url?: string;
+  session_id?: string;
+  provider?: string;
+  demo?: boolean;
+  pagination?: { total?: number; limit?: number; offset?: number };
+};
+
+type BigBangErrorEnvelope = { success: false; error?: { code?: number; message?: string } };
+
+type BigBangEnvelope<T> = BigBangOkEnvelope<T> | BigBangErrorEnvelope;
 
 export type BigBangGame = {
   id: number;
@@ -64,20 +66,24 @@ async function parseBigBangResponse<T>(resp: Response): Promise<BigBangEnvelope<
   }))) as BigBangEnvelope<T>;
 }
 
-function assertBigBangOk<T>(resp: Response, payload: BigBangEnvelope<T>): void {
+function assertBigBangOk<T>(
+  resp: Response,
+  payload: BigBangEnvelope<T>,
+): asserts payload is BigBangOkEnvelope<T> {
   if (!resp.ok || payload.success === false) {
+    const errorCode = payload && "error" in payload ? payload.error?.code : undefined;
     const message =
       payload && "error" in payload
         ? (payload.error?.message ?? `BigBang respondeu ${resp.status}`)
         : `BigBang respondeu ${resp.status}`;
-    throw Object.assign(new Error(message), { status: resp.status || payload?.error?.code || 502 });
+    throw Object.assign(new Error(message), { status: resp.status || errorCode || 502 });
   }
 }
 
 async function bigBangFetch<T>(
   path: string,
   init?: RequestInit,
-): Promise<BigBangEnvelope<T>> {
+): Promise<BigBangOkEnvelope<T>> {
   const apiKey = requireApiKey();
   let authMode = "header";
   let resp = await fetch(buildBigBangUrl(path, false), {

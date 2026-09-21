@@ -97,17 +97,155 @@ function gameFamilyKey(name: string): string {
 // for Baccarat/Blackjack/Roulette.
 const NAME_KEYWORD_CATEGORIES = new Set(["baccarat", "blackjack", "roulette"]);
 
+const GAME_SHOW_KEYWORDS = [
+  "crazy time",
+  "monopoly live",
+  "monopoly big baller",
+  "dream catcher",
+  "deal or no deal",
+  "mega ball",
+  "funky time",
+  "football studio",
+];
+
+const JACKPOT_KEYWORDS = [
+  "jackpot",
+  "mega moolah",
+  "hall of gods",
+  "divine fortune",
+  "megabucks",
+];
+
+const FAST_GAME_KEYWORDS = [
+  "crash",
+  "aviator",
+  "jetx",
+  "spaceman",
+  "mines",
+  "plinko",
+  "keno",
+  "dice",
+  "limbo",
+  "hilo",
+];
+
+const CURATED_POPULAR_TITLES = [
+  "sweet bonanza",
+  "gates of olympus",
+  "big bass bonanza",
+  "starlight princess",
+  "sugar rush",
+  "wanted dead or a wild",
+  "book of dead",
+  "reactoonz",
+  "starburst",
+  "gonzos quest",
+  "bonanza megaways",
+  "buffalo king megaways",
+  "crazy time",
+  "lightning roulette",
+  "xxtreme lightning roulette",
+  "monopoly live",
+  "monopoly big baller",
+  "lightning blackjack",
+  "infinite blackjack",
+  "baccarat",
+  "dream catcher",
+];
+
+function normalizeCasinoText(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasCasinoKeyword(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => text.includes(normalizeCasinoText(keyword)));
+}
+
+type CasinoBrowseRow = {
+  id: string;
+  name: string;
+  provider: string;
+  vendorCode: number | null;
+  category: string;
+  img: string | null;
+  source: string;
+  popularity: number;
+  createdAt: Date;
+};
+
+function inferCasinoBrowseTags(game: Pick<CasinoBrowseRow, "name" | "category">): Set<string> {
+  const tags = new Set<string>();
+  const category = normalizeCasinoText(game.category);
+  const name = normalizeCasinoText(game.name);
+
+  if (category) tags.add(category);
+  if (category === "crash") tags.add("jogos-rapidos");
+  if (NAME_KEYWORD_CATEGORIES.has("baccarat") && name.includes("baccarat")) tags.add("baccarat");
+  if (NAME_KEYWORD_CATEGORIES.has("blackjack") && name.includes("blackjack")) tags.add("blackjack");
+  if (NAME_KEYWORD_CATEGORIES.has("roulette") && name.includes("roulette")) tags.add("roulette");
+  if (hasCasinoKeyword(name, GAME_SHOW_KEYWORDS)) {
+    tags.add("game-shows");
+    tags.add("ao vivo");
+  }
+  if (hasCasinoKeyword(name, JACKPOT_KEYWORDS)) tags.add("jackpots");
+  if (hasCasinoKeyword(name, FAST_GAME_KEYWORDS)) tags.add("jogos-rapidos");
+  return tags;
+}
+
+function curatedPopularPriority(name: string): number {
+  const normalized = normalizeCasinoText(name);
+  const index = CURATED_POPULAR_TITLES.findIndex((title) =>
+    normalized.includes(normalizeCasinoText(title)),
+  );
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+function matchesCasinoBrowseCategory(
+  game: Pick<CasinoBrowseRow, "name" | "category">,
+  category: string,
+): boolean {
+  if (!category || category === "todos" || category === "populares" || category === "novos") {
+    return true;
+  }
+  return inferCasinoBrowseTags(game).has(category);
+}
+
+function compareCasinoBrowseRows(
+  left: CasinoBrowseRow,
+  right: CasinoBrowseRow,
+  sort: string,
+): number {
+  if (sort === "new") {
+    return right.createdAt.getTime() - left.createdAt.getTime() || left.name.localeCompare(right.name);
+  }
+  if (sort === "az") {
+    return left.name.localeCompare(right.name, "pt-BR");
+  }
+
+  return (
+    curatedPopularPriority(left.name) - curatedPopularPriority(right.name) ||
+    right.popularity - left.popularity ||
+    left.name.localeCompare(right.name, "pt-BR")
+  );
+}
+
 router.get("/games", async (req: Request, res: Response) => {
   await maybeSyncBigBangCatalog();
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
-  const category =
-    typeof req.query["category"] === "string" ? req.query["category"].trim().toLowerCase() : "";
+  const category = normalizeCasinoText(
+    typeof req.query["category"] === "string" ? req.query["category"].trim() : "",
+  );
   const sort = typeof req.query["sort"] === "string" ? req.query["sort"].trim().toLowerCase() : "popular";
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
-  const cacheKey = `casino:games:v4:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
+  const cacheKey = `casino:games:v5:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -121,42 +259,33 @@ router.get("/games", async (req: Request, res: Response) => {
   ];
   if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
   if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
-  if (category === "slots" || category === "ao vivo") {
-    conditions.push(ilike(casinoGamesTable.category, category));
-  } else if (NAME_KEYWORD_CATEGORIES.has(category)) {
-    conditions.push(ilike(casinoGamesTable.name, `%${category}%`));
-  }
-  // "todos" / "populares" / "novos" / "" carry no extra WHERE — they only
-  // affect the ORDER BY below.
   const where = and(...conditions);
 
-  const orderBy =
-    sort === "new"
-      ? [desc(casinoGamesTable.createdAt), asc(casinoGamesTable.name)]
-      : sort === "az"
-        ? [asc(casinoGamesTable.name)]
-        : [desc(casinoGamesTable.popularity), asc(casinoGamesTable.name)];
+  const rows: CasinoBrowseRow[] = await db
+    .select({
+      id: casinoGamesTable.gameUid,
+      name: casinoGamesTable.name,
+      provider: casinoGamesTable.provider,
+      vendorCode: casinoGamesTable.vendorCode,
+      category: casinoGamesTable.category,
+      img: casinoGamesTable.img,
+      source: casinoGamesTable.source,
+      popularity: casinoGamesTable.popularity,
+      createdAt: casinoGamesTable.createdAt,
+    })
+    .from(casinoGamesTable)
+    .where(where);
 
-  const [games, [{ total }]] = await Promise.all([
-    db
-      .select({
-        id: casinoGamesTable.gameUid,
-        name: casinoGamesTable.name,
-        provider: casinoGamesTable.provider,
-        vendorCode: casinoGamesTable.vendorCode,
-        category: casinoGamesTable.category,
-        img: casinoGamesTable.img,
-        source: casinoGamesTable.source,
-      })
-      .from(casinoGamesTable)
-      .where(where)
-      .orderBy(...orderBy)
-      .limit(limit)
-      .offset((page - 1) * limit),
-    db.select({ total: count() }).from(casinoGamesTable).where(where),
-  ]);
+  const filtered = rows
+    .filter((row) => matchesCasinoBrowseCategory(row, category))
+    .sort((left, right) => compareCasinoBrowseRows(left, right, sort));
 
-  const payload = JSON.stringify({ page, limit, total: Number(total), games });
+  const total = filtered.length;
+  const games = filtered
+    .slice((page - 1) * limit, page * limit)
+    .map(({ popularity: _popularity, createdAt: _createdAt, ...game }) => game);
+
+  const payload = JSON.stringify({ page, limit, total, games });
   await kvCache.set(cacheKey, payload, GAMES_CACHE_TTL_SECONDS);
   res.setHeader("Content-Type", "application/json");
   res.send(payload);

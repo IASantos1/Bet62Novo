@@ -80,7 +80,9 @@ export async function syncBigBangCatalog(force = false): Promise<{
       .from(casinoGamesTable)
       .where(eq(casinoGamesTable.source, "bigbang"));
 
-    const existingByUid = new Map(existing.map((row) => [row.gameUid, row]));
+    const existingByUid = new Map<string, (typeof existing)[number]>(
+      existing.map((row) => [row.gameUid, row]),
+    );
     const inserts: CasinoGameInsert[] = [];
     let updated = 0;
 
