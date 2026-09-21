@@ -858,6 +858,20 @@ type MatchCatalogCompetition = {
   eventCount: number;
 };
 
+type MatchCatalogDiagnostic = {
+  code:
+    | "ok"
+    | "partial_window"
+    | "empty_window"
+    | "not_configured"
+    | "unsupported_sport"
+    | "provider_error";
+  message: string;
+  startDate?: string;
+  endDate?: string;
+  eventCount?: number;
+};
+
 const UPCOMING_MIN_TOTAL = 3;
 const UPCOMING_MIN_TEAM_RATIO = 0.9;
 const UPCOMING_MIN_ANY_ODDS_RATIO = 0.35;
@@ -875,6 +889,19 @@ function mrDogeCatalogDateWindow(range: string): {
   const days = range === "month" ? 30 : 15;
   const endDate = new Date(
     Date.now() + days * 24 * 60 * 60 * 1000,
+  ).toISOString().slice(0, 10);
+  return { startDate, endDate };
+}
+
+function mrDogeLateCatalogDateWindow(): {
+  startDate: string;
+  endDate: string;
+} {
+  const startDate = new Date(
+    Date.now() + 8 * 24 * 60 * 60 * 1000,
+  ).toISOString().slice(0, 10);
+  const endDate = new Date(
+    Date.now() + 15 * 24 * 60 * 60 * 1000,
   ).toISOString().slice(0, 10);
   return { startDate, endDate };
 }
@@ -10179,23 +10206,49 @@ router.get("/catalog", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "");
   const range = String(req.query["range"] ?? "default");
   const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
+  const { startDate, endDate } = mrDogeCatalogDateWindow(range);
 
   if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport) {
-    res.json({ sport, provider: "mrdoge", regions: [] as MatchCatalogRegion[] });
+    const diagnostic: MatchCatalogDiagnostic = !CONFIG.MRDOGE_API_KEY
+      ? {
+          code: "not_configured",
+          message: "O catálogo MrDoge não está configurado neste ambiente.",
+        }
+      : {
+          code: "unsupported_sport",
+          message: "Este desporto não está disponível no catálogo MrDoge.",
+        };
+    res.json({
+      sport,
+      provider: "mrdoge",
+      regions: [] as MatchCatalogRegion[],
+      diagnostic,
+    });
     return;
   }
 
   try {
     const mrdoge = getMrDogeClient();
-    const { startDate, endDate } = mrDogeCatalogDateWindow(range);
-    const regions = await mrdoge.regions.list({
-      sports: [mrdogeSport],
-      status: ["live", "upcoming"],
-      startDate,
-      endDate,
-      locale: "pt-BR",
-      timezone: "Europe/Lisbon",
-    });
+    const lateWindow = mrDogeLateCatalogDateWindow();
+    const [regions, lateMatches] = await Promise.all([
+      mrdoge.regions.list({
+        sports: [mrdogeSport],
+        status: ["live", "upcoming"],
+        startDate,
+        endDate,
+        locale: "pt-BR",
+        timezone: "Europe/Lisbon",
+      }),
+      mrdoge.matches.list({
+        sports: [mrdogeSport],
+        status: ["upcoming"],
+        startDate: lateWindow.startDate,
+        endDate: lateWindow.endDate,
+        limit: 1,
+        locale: "pt-BR",
+        timezone: "Europe/Lisbon",
+      }),
+    ]);
 
     const normalized = [...regions]
       .map(
@@ -10214,11 +10267,48 @@ router.get("/catalog", async (req: Request, res: Response) => {
           a.name.localeCompare(b.name, "pt-BR"),
       );
 
+    const eventCount = normalized.reduce((total, region) => total + region.eventCount, 0);
+    const diagnostic: MatchCatalogDiagnostic = eventCount === 0
+      ? {
+          code: "empty_window",
+          message: "A MrDoge não publicou partidas para este desporto nesta janela.",
+          startDate,
+          endDate,
+          eventCount: 0,
+        }
+      : lateMatches.data.length === 0
+        ? {
+            code: "partial_window",
+            message: "Há partidas próximas, mas a MrDoge ainda não publicou jogos entre o 8.º e o 15.º dia.",
+            startDate: lateWindow.startDate,
+            endDate: lateWindow.endDate,
+            eventCount,
+          }
+        : {
+          code: "ok",
+          message: eventCount === 1
+            ? "1 partida disponível na janela consultada."
+            : `${eventCount} partidas disponíveis na janela consultada.`,
+          startDate,
+          endDate,
+          eventCount,
+        };
+
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({ sport, provider: "mrdoge", regions: normalized });
+    res.json({ sport, provider: "mrdoge", regions: normalized, diagnostic });
   } catch (err) {
     logger.warn({ err, sport }, "[mrdoge] catalog regions failed");
-    res.status(200).json({ sport, provider: "mrdoge", regions: [] as MatchCatalogRegion[] });
+    res.status(200).json({
+      sport,
+      provider: "mrdoge",
+      regions: [] as MatchCatalogRegion[],
+      diagnostic: {
+        code: "provider_error",
+        message: "Não foi possível consultar o catálogo MrDoge agora.",
+        startDate,
+        endDate,
+      } satisfies MatchCatalogDiagnostic,
+    });
   }
 });
 
@@ -10227,15 +10317,32 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
   const range = String(req.query["range"] ?? "default");
   const regionId = Number(req.query["regionId"] ?? 0);
   const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
+  const { startDate, endDate } = mrDogeCatalogDateWindow(range);
 
   if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport || !Number.isFinite(regionId) || regionId <= 0) {
-    res.json({ sport, regionId, provider: "mrdoge", competitions: [] as MatchCatalogCompetition[] });
+    res.json({
+      sport,
+      regionId,
+      provider: "mrdoge",
+      competitions: [] as MatchCatalogCompetition[],
+      diagnostic: {
+        code: !CONFIG.MRDOGE_API_KEY
+          ? "not_configured"
+          : !mrdogeSport
+            ? "unsupported_sport"
+            : "provider_error",
+        message: !CONFIG.MRDOGE_API_KEY
+          ? "O catálogo MrDoge não está configurado neste ambiente."
+          : !mrdogeSport
+            ? "Este desporto não está disponível no catálogo MrDoge."
+            : "A região selecionada é inválida.",
+      } satisfies MatchCatalogDiagnostic,
+    });
     return;
   }
 
   try {
     const mrdoge = getMrDogeClient();
-    const { startDate, endDate } = mrDogeCatalogDateWindow(range);
     const competitions = await mrdoge.competitions.list({
       sports: [mrdogeSport],
       regionIds: [regionId],
@@ -10262,8 +10369,25 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
           a.name.localeCompare(b.name, "pt-BR"),
       );
 
+    const eventCount = normalized.reduce((total, competition) => total + competition.eventCount, 0);
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({ sport, regionId, provider: "mrdoge", competitions: normalized });
+    res.json({
+      sport,
+      regionId,
+      provider: "mrdoge",
+      competitions: normalized,
+      diagnostic: {
+        code: eventCount > 0 ? "ok" : "empty_window",
+        message: eventCount > 0
+          ? eventCount === 1
+            ? "1 partida disponível na janela consultada."
+            : `${eventCount} partidas disponíveis na janela consultada.`
+          : "A MrDoge não publicou partidas para esta região nesta janela.",
+        startDate,
+        endDate,
+        eventCount,
+      } satisfies MatchCatalogDiagnostic,
+    });
   } catch (err) {
     logger.warn({ err, sport, regionId }, "[mrdoge] catalog competitions failed");
     res.status(200).json({
@@ -10271,6 +10395,12 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
       regionId,
       provider: "mrdoge",
       competitions: [] as MatchCatalogCompetition[],
+      diagnostic: {
+        code: "provider_error",
+        message: "Não foi possível consultar as competições MrDoge agora.",
+        startDate,
+        endDate,
+      } satisfies MatchCatalogDiagnostic,
     });
   }
 });

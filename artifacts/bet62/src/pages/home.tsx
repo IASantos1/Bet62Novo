@@ -3405,6 +3405,20 @@ type SidebarCatalogCompetition = {
   eventCount: number;
 };
 
+type SidebarCatalogDiagnostic = {
+  code:
+    | "ok"
+    | "partial_window"
+    | "empty_window"
+    | "not_configured"
+    | "unsupported_sport"
+    | "provider_error";
+  message: string;
+  startDate?: string;
+  endDate?: string;
+  eventCount?: number;
+};
+
 const MRDOGE_CATALOG_SPORTS = new Set([
   "football",
   "tennis",
@@ -3432,6 +3446,7 @@ type SidebarTreeContentProps = {
   selectedCountry?: string | null;
   setSelectedCountry?: (c: string | null) => void;
   catalogBySport?: Record<string, SidebarCatalogRegion[]>;
+  catalogDiagnosticBySport?: Record<string, SidebarCatalogDiagnostic | undefined>;
   competitionCatalogByRegion?: Record<string, SidebarCatalogCompetition[]>;
   catalogLoadingSport?: string | null;
   competitionLoadingKey?: string | null;
@@ -3455,6 +3470,7 @@ function SidebarTreeContent({
   selectedCountry,
   setSelectedCountry,
   catalogBySport,
+  catalogDiagnosticBySport,
   competitionCatalogByRegion,
   catalogLoadingSport,
   competitionLoadingKey,
@@ -3496,11 +3512,41 @@ function SidebarTreeContent({
     fallbackCountry?: string,
   ) {
     const regions = catalogBySport?.[sportKey] ?? [];
+    const diagnostic = catalogDiagnosticBySport?.[sportKey];
     const showDynamic = dynamicSportKeys.has(sportKey) && regions.length > 0;
+    const diagnosticNotice = diagnostic && diagnostic.code !== "ok" ? (
+      <div className="mb-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2">
+        <div className="text-[11px] font-semibold text-zinc-300">
+          Catálogo MrDoge
+        </div>
+        <div
+          className={`mt-1 text-[11px] leading-relaxed ${
+            diagnostic.code === "provider_error" || diagnostic.code === "not_configured"
+              ? "text-amber-400"
+              : "text-zinc-500"
+          }`}
+        >
+          {diagnostic.message}
+        </div>
+        {diagnostic.startDate && diagnostic.endDate && (
+          <div className="mt-1 text-[10px] text-zinc-600">
+            Janela: {diagnostic.startDate} → {diagnostic.endDate}
+          </div>
+        )}
+      </div>
+    ) : null;
+    if (dynamicSportKeys.has(sportKey) && diagnostic && regions.length === 0) {
+      return (
+        <div className="ml-2 mt-0.5 border-l border-zinc-800 pl-3 pr-2 py-2">
+          {diagnosticNotice}
+        </div>
+      );
+    }
     if (!showDynamic) return null;
 
     return (
       <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+        {diagnosticNotice}
         {regions.map((region) => {
           const regionKey = `${sportKey}:${region.id}`;
           const competitions = competitionCatalogByRegion?.[regionKey] ?? [];
@@ -5992,6 +6038,9 @@ export default function Home({
   const [catalogBySport, setCatalogBySport] = useState<
     Record<string, SidebarCatalogRegion[]>
   >({});
+  const [catalogDiagnosticBySport, setCatalogDiagnosticBySport] = useState<
+    Record<string, SidebarCatalogDiagnostic | undefined>
+  >({});
   const [competitionCatalogByRegion, setCompetitionCatalogByRegion] =
     useState<Record<string, SidebarCatalogCompetition[]>>({});
   const [catalogLoadingSport, setCatalogLoadingSport] = useState<string | null>(
@@ -6085,6 +6134,7 @@ export default function Home({
 
   useEffect(() => {
     setCatalogBySport({});
+    setCatalogDiagnosticBySport({});
     setCompetitionCatalogByRegion({});
     setCatalogLoadingSport(null);
     setCompetitionLoadingKey(null);
@@ -6094,6 +6144,7 @@ export default function Home({
     async (sport: string) => {
       if (!MRDOGE_CATALOG_SPORTS.has(sport)) return;
       if ((catalogBySport[sport] ?? []).length > 0) return;
+      if (catalogDiagnosticBySport[sport]) return;
       if (catalogLoadingSport === sport) return;
 
       setCatalogLoadingSport(sport);
@@ -6101,20 +6152,40 @@ export default function Home({
         const params = new URLSearchParams({ sport });
         if (upcomingRange === "month") params.set("range", "month");
         const r = await fetch(`/api/matches/catalog?${params.toString()}`);
-        const data = r.ok ? await r.json() : { regions: [] };
+        const data = r.ok
+          ? await r.json()
+          : {
+              regions: [],
+              diagnostic: {
+                code: "provider_error",
+                message: "Não foi possível carregar o catálogo agora.",
+              },
+            };
         const regions = Array.isArray(data?.regions)
           ? (data.regions as SidebarCatalogRegion[])
           : [];
+        if (data?.diagnostic) {
+          setCatalogDiagnosticBySport((prev) => ({
+            ...prev,
+            [sport]: data.diagnostic as SidebarCatalogDiagnostic,
+          }));
+        }
         setCatalogBySport((prev) =>
           (prev[sport] ?? []).length > 0 ? prev : { ...prev, [sport]: regions },
         );
       } catch {
-        /* keep fallback sidebar */
+        setCatalogDiagnosticBySport((prev) => ({
+          ...prev,
+          [sport]: {
+            code: "provider_error",
+            message: "Não foi possível carregar o catálogo agora.",
+          },
+        }));
       } finally {
         setCatalogLoadingSport((prev) => (prev === sport ? null : prev));
       }
     },
-    [catalogBySport, catalogLoadingSport, upcomingRange],
+    [catalogBySport, catalogDiagnosticBySport, catalogLoadingSport, upcomingRange],
   );
 
   const ensureCompetitionCatalog = useCallback(
@@ -20559,6 +20630,7 @@ export default function Home({
                   selectedCountry={selectedCountry}
                   setSelectedCountry={setSelectedCountry}
                   catalogBySport={catalogBySport}
+                  catalogDiagnosticBySport={catalogDiagnosticBySport}
                   competitionCatalogByRegion={competitionCatalogByRegion}
                   catalogLoadingSport={catalogLoadingSport}
                   competitionLoadingKey={competitionLoadingKey}
@@ -20640,6 +20712,7 @@ export default function Home({
                 selectedCountry={selectedCountry}
                 setSelectedCountry={setSelectedCountry}
                 catalogBySport={catalogBySport}
+                catalogDiagnosticBySport={catalogDiagnosticBySport}
                 competitionCatalogByRegion={competitionCatalogByRegion}
                 catalogLoadingSport={catalogLoadingSport}
                 competitionLoadingKey={competitionLoadingKey}
