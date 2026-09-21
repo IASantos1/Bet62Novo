@@ -13,6 +13,7 @@ COPY lib/api-client-react/package.json lib/api-client-react/package.json
 COPY lib/api-zod/package.json lib/api-zod/package.json
 COPY lib/db/package.json lib/db/package.json
 COPY scripts/package.json scripts/package.json
+COPY scripts/preinstall.cjs scripts/preinstall.cjs
 
 RUN pnpm install --frozen-lockfile
 
@@ -37,6 +38,7 @@ COPY lib/api-client-react/package.json lib/api-client-react/package.json
 COPY lib/api-zod/package.json lib/api-zod/package.json
 COPY lib/db/package.json lib/db/package.json
 COPY scripts/package.json scripts/package.json
+COPY scripts/preinstall.cjs scripts/preinstall.cjs
 
 RUN pnpm install --frozen-lockfile --prod=false
 
