@@ -181,11 +181,9 @@ app.post(
 // longer exist; the providers themselves are no longer configured to send
 // to them either.
 //
-// SilentAPI's casino wallet callback (/api/casino/callback) removed the
-// same way (user decision) — the route no longer exists here; the
-// dead-stub launch/callback routes for both former casino aggregators
-// (SilentAPI, Palace Casino) live in routes/casino.ts instead, since
-// Palace Casino's callback isn't a raw-body/HMAC route like this one was.
+// The old casino aggregator callbacks were removed the same way (user
+// decision). The current BigBang casino callbacks live in routes/casino.ts
+// and use normal JSON parsing there — no raw-body route is needed here.
 
 app.use(
   (pinoHttp as any)({

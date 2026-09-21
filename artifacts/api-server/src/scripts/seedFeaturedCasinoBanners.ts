@@ -1,18 +1,18 @@
 // Seeds the hero ("top") casino banners for the 4 headline titles the
 // user asked for by name (Sweet Bonanza 1000, Gates of Olympus 1000, Big
 // Bass Splash, Aviator). Each banner reuses the matching game's own
-// catalog artwork (already licensed via
-// Palace Casino for display) rather than a fabricated promotional image —
+// catalog artwork (already licensed via the current BigBang catalog feed
+// for display) rather than a fabricated promotional image —
 // there is no separate marketing-creative asset for these titles, and
 // inventing one would mean shipping an image the aggregator never
 // provided. Subtitles are deliberately generic (no copied multiplier/RTP
 // numbers from the competitor reference) since those figures weren't
-// verified against our own Palace Casino integration and would be a false
+// verified against our own BigBang integration and would be a false
 // claim on a real-money site if wrong; admin/casino/banners/ai-generate
 // (routes/admin.ts) is the sanctioned way to add real marketing copy.
 //
 // A title only gets a banner if it's actually found, active, in the
-// current Palace Casino catalog — titles not present in the catalog are
+// current BigBang catalog — titles not present in the catalog are
 // skipped with a warning, never inserted as a dangling/broken banner.
 //
 // Run with: pnpm --filter @workspace/api-server run seed:featured-banners
@@ -44,7 +44,7 @@ async function main() {
       .where(
         and(
           eq(casinoGamesTable.isActive, true),
-          eq(casinoGamesTable.source, "palace"),
+          eq(casinoGamesTable.source, "bigbang"),
           ilike(casinoGamesTable.name, `%${item.search}%`),
         ),
       )
@@ -53,8 +53,8 @@ async function main() {
 
     if (!game || !game.img) {
       console.warn(
-        `Skipping "${item.search}" — not found (or no artwork) in the active Palace Casino catalog. ` +
-          `Run seed:palace-casino first, or check the exact title with the catalog provider.`,
+        `Skipping "${item.search}" — not found (or no artwork) in the active BigBang catalog. ` +
+          `Run casino:sync-bigbang first, or check the exact title with the catalog provider.`,
       );
       continue;
     }
@@ -91,8 +91,7 @@ async function main() {
   // title is no longer in FEATURED (e.g. "Wanted Dead or a Wild", swapped
   // out for "Aviator") — otherwise re-running after changing the list
   // above would leave the old title's banner behind instead of replacing
-  // it, same stale-row problem seedPalaceCasinoGames.ts's own cleanup
-  // guards against.
+  // it, same stale-row problem a catalog re-sync would otherwise expose.
   const keptTitles = FEATURED.map((f) => f.title);
   const deactivated = await db
     .update(casinoBannersTable)

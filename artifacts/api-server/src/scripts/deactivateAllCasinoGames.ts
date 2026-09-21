@@ -1,6 +1,6 @@
-// Deactivates every row in casino_games (isActive=false) — run once as part
-// of removing the SilentAPI + Palace Casino integrations entirely
-// (2026-09-20+, user decision). The catalog table itself is left in place
+// Deactivates every row in casino_games (isActive=false) — maintenance
+// helper kept for emergency catalog takedowns or provider transitions. The
+// catalog table itself is left in place
 // (no rows deleted, no schema change) so historical game metadata and any
 // downstream references (e.g. casino_banners.gameIds) stay valid; the
 // /games, /games/grouped, /providers and /banners routes in routes/casino.ts

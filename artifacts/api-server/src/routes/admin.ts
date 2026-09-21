@@ -2143,11 +2143,10 @@ router.get(
 );
 
 // ── Casino admin: overview / catalog / transactions ─────────────────────────
-// Kinds recorded by the Palace Casino wallet callback (routes/casino.ts) —
-// bet/win amounts are already signed (bet negative, win positive), and a
-// cancel row is the exact reversal of its original bet, so summing `amount`
-// across all three for a period gives the net change to *players'* balances;
-// GGR (house revenue) is the negative of that.
+// Kinds recorded by the BigBang seamless-wallet callback (routes/casino.ts).
+// Bet amounts are negative, wins/refunds positive, so summing `amount`
+// across these rows gives the net change to *players'* balances; GGR (house
+// revenue) is the negative of that.
 const CASINO_LEDGER_KINDS = [
   "casino_bigbang_bet",
   "casino_bigbang_win",

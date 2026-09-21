@@ -90,17 +90,11 @@ function gameFamilyKey(name: string): string {
 }
 
 // Category pills the front-end offers ("Todos", "Populares", "Novos",
-// "Slots", "Ao Vivo", "Baccarat", "Blackjack", "Roulette"). Palace Casino's
-// own category field only ever carries "Slots" or "Ao Vivo" (see
-// PalaceCasinoGame.category in services/palaceCasino/client.ts) — there is
-// no richer taxonomy (Megaways, Jackpots, Bonus Buy, Free Spins) available
-// from the aggregator, so those pills are intentionally NOT offered here
-// rather than shipping a filter that would silently return nothing or an
-// incomplete/wrong subset for a real-money catalog. Baccarat/Blackjack/
-// Roulette aren't a Palace Casino category either, but the game type is
-// reliably embedded in the title for every table game we've seen in the
-// catalog, so a name match is a genuine (not approximated) filter for
-// those three specifically.
+// "Slots", "Ao Vivo", "Baccarat", "Blackjack", "Roulette"). BigBang's raw
+// feed doesn't expose the exact same richer browse taxonomy the UI has used
+// historically, so the DB-normalized category keeps only the categories we
+// can assert from the provider feed itself plus a safe title-keyword match
+// for Baccarat/Blackjack/Roulette.
 const NAME_KEYWORD_CATEGORIES = new Set(["baccarat", "blackjack", "roulette"]);
 
 router.get("/games", async (req: Request, res: Response) => {
@@ -560,10 +554,8 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
   }
 });
 
-// Palace Casino's own webhook config may still point at this URL after
-// removal — always answer BAD_TOKEN (100), the exact same response this
-// route already gave whenever PALACE_CASINO_CALLBACK_TOKEN was unset, so a
-// stray delivery gets a graceful, expected rejection instead of a 404.
+// Legacy Palace callback stub kept only so an old upstream webhook config
+// fails gracefully instead of spamming 404s after the provider switch.
 router.post("/palace/callback", async (_req: Request, res: Response) => {
   res.status(200).json({ result: 100, resultado: 100, status: "ERROR" });
 });
