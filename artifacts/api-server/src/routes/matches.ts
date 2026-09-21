@@ -569,9 +569,9 @@ export type LiveMatchState = {
   _suspensionReason?: string;
   // Feed health warning (must not be treated as a market suspension)
   _feedWarning?: string;
-  // League ID (football only) — currently unpopulated; no provider feeds it
-  // since the StatPal integration that used to set it was removed.
+  // Stable MrDoge catalog identifiers when that provider supplies the match.
   leagueId?: string;
+  regionId?: string;
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
@@ -795,6 +795,7 @@ export type UpcomingMatch = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   leagueId?: string;
+  regionId?: string;
   isWomens?: boolean;
   /** Football only — true when the league is in the curated priority allowlist
    * (footballLeagueAllowedStrict). Drives ordering/tiering; the default
@@ -8230,7 +8231,9 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
           ...extended.exactGoals,
         };
       }
-      if (moneyline != null) withRealOdds++;
+      const hasRealOdds =
+        moneyline != null || hasPlayableMarketOdds(markets);
+      if (hasRealOdds) withRealOdds++;
       return {
         id: mrDogeMatchId("football", m),
         home: m.homeTeam.name,
@@ -8241,11 +8244,13 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
         regionFlagUrl: mrDogeRegionFlag(m.region.id),
         league: m.competition.name,
+        leagueId: String(m.competition.id),
         country: m.region.name,
+        regionId: String(m.region.id),
         date,
         time,
         sport: "football",
-        hasRealOdds: moneyline != null,
+        hasRealOdds,
         odds: moneyline ?? { home: 0, draw: 0, away: 0 },
         markets,
       };
@@ -8344,6 +8349,8 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
         ...extended.exactGoals,
       };
     }
+    const hasRealOdds =
+      moneyline != null || hasPlayableMarketOdds(markets);
     return {
       id: mrDogeMatchId("football", m),
       home: m.homeTeam.name,
@@ -8354,13 +8361,15 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
       regionFlagUrl: mrDogeRegionFlag(m.region.id),
       league: m.competition.name,
+      leagueId: String(m.competition.id),
       country: m.region.name,
+      regionId: String(m.region.id),
       sport: "football",
       homeScore: stats?.homeScore ?? 0,
       awayScore: stats?.awayScore ?? 0,
       minute: stats?.clock?.minute ?? 0,
       status,
-      hasRealOdds: moneyline != null,
+      hasRealOdds,
       odds: moneyline ?? { home: 0, draw: 0, away: 0 },
       markets,
       events: buildMrDogeTimelineEvents(m),
@@ -8404,7 +8413,9 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
           awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
           regionFlagUrl: mrDogeRegionFlag(m.region.id),
           league: m.competition.name,
+          leagueId: String(m.competition.id),
           country: m.region.name,
+          regionId: String(m.region.id),
           date,
           time,
           sport: bet62Sport,
@@ -8449,7 +8460,9 @@ function buildMrDogeLiveMatches(
       awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
       regionFlagUrl: mrDogeRegionFlag(m.region.id),
       league: m.competition.name,
+      leagueId: String(m.competition.id),
       country: m.region.name,
+      regionId: String(m.region.id),
       sport: bet62Sport,
       homeScore,
       awayScore,
@@ -8961,7 +8974,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         !!m.hasRealOdds ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0;
+        (m.odds?.away ?? 0) > 0 ||
+        hasPlayableMarketOdds(m.markets);
       // Tennis always has computed odds even without a real bookmaker price — allow all.
       if (m.sport !== "tennis" && !hasVisibleOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
@@ -9036,7 +9050,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       home: m.home,
       away: m.away,
       league: m.league,
+      leagueId: m.leagueId,
       country: m.country,
+      regionId: m.regionId,
       sport: m.sport,
       homeScore: 0,
       awayScore: 0,
@@ -10411,6 +10427,34 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
   }
 });
 
+function hasPlayableMarketOdds(
+  value: unknown,
+  key?: string,
+): boolean {
+  if (typeof value === "number") {
+    if (
+      key === "line" ||
+      key === "_spread" ||
+      key === "_total" ||
+      key === "_total1H" ||
+      key === "_spreadLine" ||
+      key === "currentSetNum"
+    ) {
+      return false;
+    }
+    return Number.isFinite(value) && value > 1.01;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasPlayableMarketOdds(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).some(
+      ([childKey, childValue]) => hasPlayableMarketOdds(childValue, childKey),
+    );
+  }
+  return false;
+}
+
 router.get("/upcoming", async (req: Request, res: Response) => {
   res.setHeader(
     "Cache-Control",
@@ -10500,7 +10544,8 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ((m.hasRealOdds ?? false) ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0) &&
+        (m.odds?.away ?? 0) > 0 ||
+        hasPlayableMarketOdds(m.markets)) &&
       !isPlaceholderTeamName(m.home) &&
       !isPlaceholderTeamName(m.away) &&
       !finishedMatchResults.has(String(m.id)) &&

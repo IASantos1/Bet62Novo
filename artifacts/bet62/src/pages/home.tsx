@@ -3388,7 +3388,13 @@ const OTHER_SPORTS: {
   },
 ];
 
-type TopLeagueEntry = { league: string; country: string; sport: string };
+type TopLeagueEntry = {
+  league: string;
+  country: string;
+  sport: string;
+  leagueId?: string;
+  regionId?: string;
+};
 
 type SidebarCatalogRegion = {
   id: number;
@@ -3443,8 +3449,12 @@ type SidebarTreeContentProps = {
   topLeagues?: TopLeagueEntry[];
   selectedLeague?: string | null;
   setSelectedLeague?: (l: string | null) => void;
+  selectedLeagueId?: string | null;
+  setSelectedLeagueId?: (id: string | null) => void;
   selectedCountry?: string | null;
   setSelectedCountry?: (c: string | null) => void;
+  selectedRegionId?: string | null;
+  setSelectedRegionId?: (id: string | null) => void;
   catalogBySport?: Record<string, SidebarCatalogRegion[]>;
   catalogDiagnosticBySport?: Record<string, SidebarCatalogDiagnostic | undefined>;
   competitionCatalogByRegion?: Record<string, SidebarCatalogCompetition[]>;
@@ -3467,8 +3477,12 @@ function SidebarTreeContent({
   topLeagues,
   selectedLeague,
   setSelectedLeague,
+  selectedLeagueId,
+  setSelectedLeagueId,
   selectedCountry,
   setSelectedCountry,
+  selectedRegionId,
+  setSelectedRegionId,
   catalogBySport,
   catalogDiagnosticBySport,
   competitionCatalogByRegion,
@@ -3555,16 +3569,20 @@ function SidebarTreeContent({
             <div key={regionKey}>
               <button
                 onClick={() => {
-                  const isActive = selectedCountry === region.name;
+                  const isActive = selectedRegionId
+                    ? selectedRegionId === String(region.id)
+                    : selectedCountry === region.name;
                   setExpandedCountry(isActive ? null : regionKey);
                   setSelectedCountry?.(isActive ? null : region.name);
+                  setSelectedRegionId?.(isActive ? null : String(region.id));
                   setSelectedLeague?.(null);
+                  setSelectedLeagueId?.(null);
                   setSelectedSport(sportKey);
                   setActiveTab("sports");
                   if (!isActive) ensureCompetitionCatalog?.(sportKey, region);
                   onClose?.();
                 }}
-                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === region.name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === regionKey ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${isActive ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === regionKey ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
               >
                 {region.flagUrl ? (
                   <StableImage
@@ -3592,7 +3610,9 @@ function SidebarTreeContent({
                     </div>
                   )}
                   {competitions.map((competition) => {
-                    const active = selectedLeague === competition.name;
+                    const active = selectedLeagueId
+                      ? selectedLeagueId === String(competition.id)
+                      : selectedLeague === competition.name;
                     const logo = getLeagueLogo(
                       competition.name,
                       region.name,
@@ -3606,7 +3626,11 @@ function SidebarTreeContent({
                           setSelectedLeague?.(
                             active ? null : competition.name,
                           );
+                          setSelectedLeagueId?.(
+                            active ? null : String(competition.id),
+                          );
                           setSelectedCountry?.(null);
+                          setSelectedRegionId?.(null);
                           setSelectedSport(sportKey);
                           setActiveTab("sports");
                           onClose?.();
@@ -3648,7 +3672,9 @@ function SidebarTreeContent({
                           key={`${regionKey}:${league}`}
                           onClick={() => {
                             setSelectedLeague?.(active ? null : league);
+                            setSelectedLeagueId?.(null);
                             setSelectedCountry?.(null);
+                            setSelectedRegionId?.(null);
                             setSelectedSport(sportKey);
                             setActiveTab("sports");
                             onClose?.();
@@ -3704,12 +3730,18 @@ function SidebarTreeContent({
                         : l.sport === "baseball"
                           ? "⚾"
                           : "⚽");
-              const active = selectedLeague === l.league;
+              const active = l.leagueId && selectedLeagueId
+                ? selectedLeagueId === l.leagueId
+                : selectedLeague === l.league;
               return (
                 <button
-                  key={l.league}
+                  key={`${l.sport}:${l.leagueId ?? l.country}:${l.league}`}
                   onClick={() => {
                     setSelectedLeague(active ? null : l.league);
+                    setSelectedLeagueId?.(active ? null : l.leagueId ?? null);
+                    setSelectedCountry?.(null);
+                    setSelectedRegionId?.(null);
+                    setSelectedSport(l.sport || "football");
                     setActiveTab("sports");
                     onClose?.();
                   }}
@@ -3733,7 +3765,9 @@ function SidebarTreeContent({
         onClick={() => {
           go("all");
           setSelectedLeague?.(null);
+          setSelectedLeagueId?.(null);
           setSelectedCountry?.(null);
+          setSelectedRegionId?.(null);
         }}
         className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" && !selectedLeague && !selectedCountry ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
       >
@@ -3769,7 +3803,9 @@ function SidebarTreeContent({
                       const isActive = selectedCountry === name;
                       setExpandedCountry(isActive ? null : name);
                       setSelectedCountry?.(isActive ? null : name);
+                      setSelectedRegionId?.(null);
                       setSelectedLeague?.(null);
+                      setSelectedLeagueId?.(null);
                       setSelectedSport("football");
                       setActiveTab("sports");
                       onClose?.();
@@ -3793,7 +3829,9 @@ function SidebarTreeContent({
                             key={league}
                             onClick={() => {
                               setSelectedLeague?.(active ? null : league);
+                              setSelectedLeagueId?.(null);
                               setSelectedCountry?.(null);
+                              setSelectedRegionId?.(null);
                               setSelectedSport("football");
                               setActiveTab("sports");
                               onClose?.();
@@ -3856,6 +3894,9 @@ function SidebarTreeContent({
                       key={league}
                       onClick={() => {
                         setSelectedLeague?.(active ? null : league);
+                        setSelectedLeagueId?.(null);
+                        setSelectedCountry?.(null);
+                        setSelectedRegionId?.(null);
                         setSelectedSport(key);
                         setActiveTab("sports");
                         onClose?.();
@@ -4104,7 +4145,9 @@ type Match = {
   stadium?: string;
   referee?: string;
   league: string;
+  leagueId?: string;
   country?: string;
+  regionId?: string;
   time?: string;
   date?: string;
   sport?: string;
@@ -5195,7 +5238,11 @@ export default function Home({
   const [betFundingMode, setBetFundingMode] = useState<"balance" | "freebet">(
     "balance",
   );
+  const [selectedSport, setSelectedSport] = useState<string>("all");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   // No native app exists yet — the "download for iOS/Android" banner
   // advertised a nonexistent app, so it's disabled at the source instead of
   // deleting all its JSX/positioning logic (which would need to be re-added
@@ -5356,15 +5403,30 @@ export default function Home({
   // guards on those effects), so this doesn't do new work on other tabs.
   const liveTabLists = useMemo(() => {
     const filterBySport = (m: Match) => {
-      const bySport =
+      const byLiveSport =
         liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
+      const bySelectedSport =
+        selectedSport === "all" || (m.sport ?? "football") === selectedSport;
+      const byCountry =
+        selectedRegionId && m.regionId
+          ? String(m.regionId) === selectedRegionId
+          : countryMatchesFilter(
+              m.country,
+              selectedCountry ?? undefined,
+              m.league,
+            );
+      const byLeague =
+        !selectedLeague ||
+        (selectedLeagueId && m.leagueId
+          ? String(m.leagueId) === selectedLeagueId
+          : leagueMatchesFilter(m.league, selectedLeague));
       const q = liveSearchQuery.trim().toLowerCase();
       const bySearch =
         !q ||
         m.home.toLowerCase().includes(q) ||
         m.away.toLowerCase().includes(q) ||
         (m.league ?? "").toLowerCase().includes(q);
-      return bySport && bySearch;
+      return byLiveSport && bySelectedSport && byCountry && byLeague && bySearch;
     };
     const actualLive = liveMatches.filter(
       (m) => {
@@ -5429,7 +5491,18 @@ export default function Home({
     }) as typeof emBreve;
     return { actualLive, emBreveWithFillers };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveMatches, upcomingMatches, fillerMatches, liveSportFilter, liveSearchQuery]);
+  }, [
+    liveMatches,
+    upcomingMatches,
+    fillerMatches,
+    liveSportFilter,
+    liveSearchQuery,
+    selectedSport,
+    selectedCountry,
+    selectedLeague,
+    selectedRegionId,
+    selectedLeagueId,
+  ]);
 
   const [upcomingLoading, setUpcomingLoading] = useState(() => {
     try {
@@ -5445,7 +5518,6 @@ export default function Home({
     } catch {}
     return true;
   });
-  const [selectedSport, setSelectedSport] = useState<string>("all");
   const [upcomingSearchQuery, setUpcomingSearchQuery] = useState<string>("");
   const [showAllLeagues, setShowAllLeagues] = useState<boolean>(false);
   // "default" = today (all leagues) + big leagues up to 7 days ahead.
@@ -6034,7 +6106,6 @@ export default function Home({
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<
     string | null
   >(null);
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [catalogBySport, setCatalogBySport] = useState<
     Record<string, SidebarCatalogRegion[]>
   >({});
@@ -6098,26 +6169,29 @@ export default function Home({
     "Tunisian Ligue Professionnelle 1",
   ];
   const normalizeLeaguePriorityKey = (value: string) =>
-    String(value ?? "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
+    normalizeLeagueFilterName(value);
   const leaguePriorityIndex = (league: string) => {
     const normalizedLeague = normalizeLeaguePriorityKey(league);
-    const index = PRIORITY_LEAGUES.findIndex((entry) =>
-      normalizedLeague.includes(normalizeLeaguePriorityKey(entry)),
-    );
+    const index = PRIORITY_LEAGUES.findIndex((entry) => {
+      const normalizedEntry = normalizeLeaguePriorityKey(entry);
+      return (
+        normalizedLeague === normalizedEntry ||
+        normalizedLeague.startsWith(`${normalizedEntry} `)
+      );
+    });
     return index === -1 ? Number.MAX_SAFE_INTEGER : index;
   };
   const sidebarTopLeagues = (() => {
     const leagueMap = new Map<string, TopLeagueEntry>();
     [...liveMatches, ...upcomingMatches].forEach((m) => {
-      if (!leagueMap.has(m.league)) {
-        leagueMap.set(m.league, {
+      const key = `${m.sport ?? "football"}:${m.leagueId ?? m.country ?? ""}:${m.league}`;
+      if (!leagueMap.has(key)) {
+        leagueMap.set(key, {
           league: m.league,
           country: m.country || "",
           sport: m.sport || "football",
+          leagueId: m.leagueId ? String(m.leagueId) : undefined,
+          regionId: m.regionId ? String(m.regionId) : undefined,
         });
       }
     });
@@ -8185,7 +8259,9 @@ export default function Home({
           home: string;
           away: string;
           league: string;
+          leagueId?: string;
           country?: string;
+          regionId?: string;
           time?: string;
           date?: string;
           sport?: string;
@@ -8257,7 +8333,7 @@ export default function Home({
     }
     if (activeTab !== "sports" && activeTab !== "live") return;
     fetchUpcoming(!canUseSnap);
-    const id = setInterval(() => fetchUpcoming(false), 15_000);
+    const id = setInterval(() => fetchUpcoming(false), 30_000);
     return () => clearInterval(id);
   }, [
     fetchUpcoming,
@@ -8279,7 +8355,9 @@ export default function Home({
     home: string;
     away: string;
     league: string;
+    leagueId?: string;
     country?: string;
+    regionId?: string;
     sport?: string;
     status?: string;
     homeTeamId?: string;
@@ -20667,8 +20745,12 @@ export default function Home({
                   topLeagues={sidebarTopLeagues}
                   selectedLeague={selectedLeague}
                   setSelectedLeague={setSelectedLeague}
+                  selectedLeagueId={selectedLeagueId}
+                  setSelectedLeagueId={setSelectedLeagueId}
                   selectedCountry={selectedCountry}
                   setSelectedCountry={setSelectedCountry}
+                  selectedRegionId={selectedRegionId}
+                  setSelectedRegionId={setSelectedRegionId}
                   catalogBySport={catalogBySport}
                   catalogDiagnosticBySport={catalogDiagnosticBySport}
                   competitionCatalogByRegion={competitionCatalogByRegion}
@@ -20749,8 +20831,12 @@ export default function Home({
                 topLeagues={sidebarTopLeagues}
                 selectedLeague={selectedLeague}
                 setSelectedLeague={setSelectedLeague}
+                selectedLeagueId={selectedLeagueId}
+                setSelectedLeagueId={setSelectedLeagueId}
                 selectedCountry={selectedCountry}
                 setSelectedCountry={setSelectedCountry}
+                selectedRegionId={selectedRegionId}
+                setSelectedRegionId={setSelectedRegionId}
                 catalogBySport={catalogBySport}
                 catalogDiagnosticBySport={catalogDiagnosticBySport}
                 competitionCatalogByRegion={competitionCatalogByRegion}
@@ -23197,7 +23283,9 @@ export default function Home({
                           onClick={() => {
                             setSelectedSport("football");
                             setSelectedLeague(null);
+                            setSelectedLeagueId(null);
                             setSelectedCountry(null);
+                            setSelectedRegionId(null);
                             setUpcomingSearchQuery("");
                             selectMainTab("sports");
                           }}
@@ -23230,7 +23318,9 @@ export default function Home({
                               onClick={() => {
                                 setSelectedSport("football");
                                 setSelectedLeague(null);
+                                setSelectedLeagueId(null);
                                 setSelectedCountry(null);
+                                setSelectedRegionId(null);
                                 setUpcomingSearchQuery("");
                                 selectMainTab("sports");
                               }}
@@ -23508,25 +23598,21 @@ export default function Home({
                       return true;
                     }),
                   ];
-                  // Filter by country across all sports, preferring the explicit match country.
-                  if (selectedCountry) {
-                    const seen2 = new Set<string>();
-                    return combined
-                      .filter((m) =>
-                        countryMatchesFilter(
-                          m.country,
-                          selectedCountry,
-                          m.league,
-                        ),
+                  // Country and league are independent constraints. The old
+                  // early return made country silently override league when
+                  // both states survived a navigation path.
+                  const countryFiltered = selectedCountry
+                    ? combined.filter((m) =>
+                        selectedRegionId && m.regionId
+                          ? String(m.regionId) === selectedRegionId
+                          : countryMatchesFilter(
+                              m.country,
+                              selectedCountry,
+                              m.league,
+                            ),
                       )
-                      .filter((m) => {
-                        const k = String(m.id);
-                        if (seen2.has(k)) return false;
-                        seen2.add(k);
-                        return true;
-                      });
-                  }
-                  if (!selectedLeague) return combined;
+                    : combined;
+                  if (!selectedLeague) return countryFiltered;
                   // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
                   const _mlPats: Array<{ p: string[]; label: string }> = [
                     {
@@ -23652,8 +23738,11 @@ export default function Home({
                     return best;
                   };
                   const seen = new Set<string>();
-                  return combined
+                  return countryFiltered
                     .filter((m) => {
+                      if (selectedLeagueId && m.leagueId) {
+                        return String(m.leagueId) === selectedLeagueId;
+                      }
                       const ml = _fml(m.league, m.country);
                       return (
                         (ml && ml.label === selectedLeague) ||
@@ -23718,15 +23807,25 @@ export default function Home({
                   { key: "formula1", emoji: "🏎️", label: "Fórmula 1" },
                   { key: "handball", emoji: "🤾", label: "Handebol" },
                 ];
-                // Limit matches per sport group to top N by default (highest-priority leagues first
-                // since the backend already sorts by league priority). Toggle shows all.
-                const _PER_SPORT_LIMIT = 20;
+                // Limit league groups, not an arbitrary number of matches.
+                // This keeps every game from each visible league together and
+                // makes the "Ver todas as ligas" control match its behaviour.
+                const _PER_SPORT_LEAGUE_LIMIT = 20;
                 const _shouldLimit = !showAllLeagues && selectedSport === "all" && !selectedLeague && !upcomingSearchQuery;
                 const sportGroups = SPORT_GROUPS.map((g) => {
                   const all = listUpcoming.filter((m) => {
                     return (m.sport ?? "football") === g.key;
                   });
-                  const matches = _shouldLimit ? all.slice(0, _PER_SPORT_LIMIT) : all;
+                  const visibleLeagueKeys = new Set<string>();
+                  const matches = _shouldLimit
+                    ? all.filter((m) => {
+                        const leagueKey = `${normalizeCountryFilterName(m.country ?? "")}:${normalizeLeagueFilterName(m.league ?? "")}`;
+                        if (visibleLeagueKeys.has(leagueKey)) return true;
+                        if (visibleLeagueKeys.size >= _PER_SPORT_LEAGUE_LIMIT) return false;
+                        visibleLeagueKeys.add(leagueKey);
+                        return true;
+                      })
+                    : all;
                   return { ...g, matches, totalCount: all.length };
                 }).filter((g) => g.matches.length > 0);
 
@@ -23828,7 +23927,12 @@ export default function Home({
                           return (
                             <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                               <button
-                                {...makeTap(() => setSelectedLeague(null))}
+                                {...makeTap(() => {
+                                  setSelectedLeague(null);
+                                  setSelectedLeagueId(null);
+                                  setSelectedCountry(null);
+                                  setSelectedRegionId(null);
+                                })}
                                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLabel ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                               >
                                 <span className="shrink-0">🎾</span>
@@ -23841,9 +23945,12 @@ export default function Home({
                                 return (
                                   <button
                                     key={i}
-                                    {...makeTap(() =>
-                                      setSelectedLeague(active ? null : label),
-                                    )}
+                                    {...makeTap(() => {
+                                      setSelectedLeague(active ? null : label);
+                                      setSelectedLeagueId(null);
+                                      setSelectedCountry(null);
+                                      setSelectedRegionId(null);
+                                    })}
                                     className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                                     title={sub ? `${main}, ${sub}` : main}
                                   >
@@ -24142,7 +24249,12 @@ export default function Home({
                           <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                             {chips.length >= 2 && (
                               <button
-                                {...makeTap(() => setSelectedLeague(null))}
+                                {...makeTap(() => {
+                                  setSelectedLeague(null);
+                                  setSelectedLeagueId(null);
+                                  setSelectedCountry(null);
+                                  setSelectedRegionId(null);
+                                })}
                                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                               >
                                 <svg
@@ -24194,9 +24306,12 @@ export default function Home({
                               return (
                                 <button
                                   key={i}
-                                  {...makeTap(() =>
-                                    setSelectedLeague(active ? null : c.label),
-                                  )}
+                                  {...makeTap(() => {
+                                    setSelectedLeague(active ? null : c.label);
+                                    setSelectedLeagueId(null);
+                                    setSelectedCountry(null);
+                                    setSelectedRegionId(null);
+                                  })}
                                   className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                                 >
                                   {c.logo ? (
