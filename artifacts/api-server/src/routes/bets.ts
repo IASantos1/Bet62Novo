@@ -1041,8 +1041,23 @@ function currentOddForSelection(
           q2?: { home?: number; away?: number };
           q3?: { home?: number; away?: number };
           q4?: { home?: number; away?: number };
+          q1Total?: { line?: number; over?: number; under?: number };
+          q2Total?: { line?: number; over?: number; under?: number };
+          q3Total?: { line?: number; over?: number; under?: number };
+          q4Total?: { line?: number; over?: number; under?: number };
+          q1Spread?: { line?: number; home?: number; away?: number };
+          q2Spread?: { line?: number; home?: number; away?: number };
+          q3Spread?: { line?: number; home?: number; away?: number };
+          q4Spread?: { line?: number; home?: number; away?: number };
+          firstHalf?: { home?: number; away?: number };
+          firstHalfTotal?: { line?: number; over?: number; under?: number };
           teamTotalHome?: { line?: number; over?: number; under?: number };
           teamTotalAway?: { line?: number; over?: number; under?: number };
+          anyQuarter?: { home?: number; away?: number };
+          allQuarters?: { home?: number; away?: number };
+          firstPoint?: { home?: number; away?: number };
+          nextPoint?: { home?: number; away?: number };
+          nextThree?: { home?: number; away?: number };
           totalsRange?: Array<{ line?: number; over?: number; under?: number }>;
         }
       | undefined;
@@ -1070,11 +1085,20 @@ function currentOddForSelection(
       return Number.isFinite(out) ? (out as number) : null;
     }
 
-    const ptsH1 = s.match(/^b-h1-pts-([ou])-(\d+(?:\.\d+)?)$/);
+    const ptsH1 = s.match(/^(?:b-h1-pts|b-fht)-([ou])-(\d+(?:\.\d+)?)$/);
     if (ptsH1) {
       const dir = ptsH1[1]!;
       const line = Number(ptsH1[2]);
       if (!Number.isFinite(line)) return null;
+      const extraFirstHalfTotal = bx?.firstHalfTotal;
+      if (
+        extraFirstHalfTotal &&
+        Number.isFinite(extraFirstHalfTotal.line) &&
+        Math.abs((extraFirstHalfTotal.line as number) - line) < 1e-9
+      ) {
+        const out = dir === "o" ? extraFirstHalfTotal.over : extraFirstHalfTotal.under;
+        return Number.isFinite(out) ? (out as number) : null;
+      }
       if (mTotal1H != null && Math.abs(line - mTotal1H) < 1e-9) {
         return dir === "o"
           ? Number.isFinite(mk.totalGoals?.over15)
@@ -1085,6 +1109,28 @@ function currentOddForSelection(
             : null;
       }
       return null;
+    }
+
+    const qTotal = s.match(/^b-q([1-4])t-([ou])-(\d+(?:\.\d+)?)$/);
+    if (qTotal) {
+      const qKey = `q${qTotal[1]}Total` as
+        | "q1Total"
+        | "q2Total"
+        | "q3Total"
+        | "q4Total";
+      const dir = qTotal[2]!;
+      const line = Number(qTotal[3]);
+      if (!Number.isFinite(line)) return null;
+      const obj = bx?.[qKey];
+      if (
+        !obj ||
+        !Number.isFinite(obj.line) ||
+        Math.abs((obj.line as number) - line) > 1e-9
+      ) {
+        return null;
+      }
+      const out = dir === "o" ? obj.over : obj.under;
+      return Number.isFinite(out) ? (out as number) : null;
     }
 
     const sp = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
@@ -1105,6 +1151,28 @@ function currentOddForSelection(
           : null;
       }
       return null;
+    }
+
+    const qSpread = s.match(/^b-q([1-4])s-(home|away)-(-?\d+(?:\.\d+)?)$/);
+    if (qSpread) {
+      const qKey = `q${qSpread[1]}Spread` as
+        | "q1Spread"
+        | "q2Spread"
+        | "q3Spread"
+        | "q4Spread";
+      const side = qSpread[2]!;
+      const line = Number(qSpread[3]);
+      if (!Number.isFinite(line)) return null;
+      const obj = bx?.[qKey];
+      if (
+        !obj ||
+        !Number.isFinite(obj.line) ||
+        Math.abs((obj.line as number) - line) > 1e-9
+      ) {
+        return null;
+      }
+      const out = side === "home" ? obj.home : obj.away;
+      return Number.isFinite(out) ? (out as number) : null;
     }
 
     const tt = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
@@ -1129,6 +1197,40 @@ function currentOddForSelection(
       const side = s.endsWith("home") ? "home" : "away";
       const qKey = `q${qNum}` as "q1" | "q2" | "q3" | "q4";
       const out = bx?.[qKey]?.[side];
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+
+    if (s === "b-fh-home") {
+      const out = bx?.firstHalf?.home ?? mk.halfTime?.home;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+    if (s === "b-fh-away") {
+      const out = bx?.firstHalf?.away ?? mk.halfTime?.away;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+    if (s === "b-anyq-home" || s === "b-anyq-away") {
+      const out =
+        s.endsWith("home") ? bx?.anyQuarter?.home : bx?.anyQuarter?.away;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+    if (s === "b-allq-home" || s === "b-allq-away") {
+      const out =
+        s.endsWith("home") ? bx?.allQuarters?.home : bx?.allQuarters?.away;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+    if (s === "b-first-point-home" || s === "b-first-point-away") {
+      const out =
+        s.endsWith("home") ? bx?.firstPoint?.home : bx?.firstPoint?.away;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+    if (s === "b-next-point-home" || s === "b-next-point-away") {
+      const out =
+        s.endsWith("home") ? bx?.nextPoint?.home : bx?.nextPoint?.away;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+    if (s === "b-next-three-home" || s === "b-next-three-away") {
+      const out =
+        s.endsWith("home") ? bx?.nextThree?.home : bx?.nextThree?.away;
       return Number.isFinite(out) ? (out as number) : null;
     }
 

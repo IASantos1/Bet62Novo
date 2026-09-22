@@ -1784,6 +1784,14 @@ export function normalizeSettlementSelectionKey(selection: string): string {
     const m = s.match(/^b-q([1-4])t-([ou])-([\d.]+)$/);
     s = `q${m![1]}t-${m![2]}-${m![3]}`;
   }
+  // Basketball first-half winner / total aliases from the frontend's
+  // dedicated basketball layout.
+  else if (s === "b-fh-home") s = "h1-home";
+  else if (s === "b-fh-away") s = "h1-away";
+  else if (/^b-fht-([ou])-([\d.]+)$/.test(s)) {
+    const m = s.match(/^b-fht-([ou])-([\d.]+)$/);
+    s = `b-h1-pts-${m![1]}-${m![2]}`;
+  }
   // Basketball quarter spreads — line accepts an optional leading "-" (see
   // the qSpread regex's own comment above for why).
   else if (/^b-q([1-4])s-(home|away)-(-?[\d.]+)$/.test(s)) {
