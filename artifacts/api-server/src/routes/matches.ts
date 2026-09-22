@@ -10539,33 +10539,70 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   }
   const UPCOMING_POST_KICKOFF_GRACE_MS = 30 * 60 * 1000;
   const now = Date.now();
-  const filtered = matches.filter(
-    (m) =>
-      ((m.hasRealOdds ?? false) ||
+  const rejectionCounts: Record<string, number> = {};
+  const reject = (reason: string): false => {
+    rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1;
+    return false;
+  };
+  const visibilityWindowEndMs = getUpcomingVisibilityWindowEndMs(now);
+  const filtered = matches.filter((m) => {
+    if (
+      !(
+        (m.hasRealOdds ?? false) ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
         (m.odds?.away ?? 0) > 0 ||
-        hasPlayableMarketOdds(m.markets)) &&
-      !isPlaceholderTeamName(m.home) &&
-      !isPlaceholderTeamName(m.away) &&
-      !finishedMatchResults.has(String(m.id)) &&
-      !liveIds.has(String(m.id)) &&
-      !liveIdentityKeys.has(normalizeUpcomingVisibilityKey(m)) &&
-      (() => {
+        hasPlayableMarketOdds(m.markets)
+      )
+    ) {
+      return reject("no_playable_odds");
+    }
+    if (isPlaceholderTeamName(m.home) || isPlaceholderTeamName(m.away)) {
+      return reject("placeholder_team");
+    }
+    if (finishedMatchResults.has(String(m.id))) return reject("finished_cache");
+    if (liveIds.has(String(m.id))) return reject("same_live_id");
+    if (liveIdentityKeys.has(normalizeUpcomingVisibilityKey(m))) {
+      return reject("same_live_identity");
+    }
+    const kickoffMs = parseUpcomingKickoffMs(m);
+    if (
+      kickoffMs != null &&
+      now - kickoffMs > UPCOMING_POST_KICKOFF_GRACE_MS
+    ) {
+      return reject("past_kickoff");
+    }
+    // Default view keeps 15 days ahead, but once we're late in the
+    // current month (day 21+) it stretches just enough to surface the
+    // opening fixtures of the next month too (up to day 8).
+    if (
+      range !== "month" &&
+      kickoffMs != null &&
+      kickoffMs > visibilityWindowEndMs
+    ) {
+      return reject("outside_visibility_window");
+    }
+    return true;
+  });
+  (globalThis as any).__upcomingVisibilityDebug = {
+    updatedAt: now,
+    sport,
+    range,
+    input: matches.length,
+    visible: filtered.length,
+    rejectionCounts,
+    visibilityWindowEnd: new Date(visibilityWindowEndMs).toISOString(),
+    samples: matches.slice(0, 5).map((m) => ({
+      id: m.id,
+      date: m.date,
+      time: m.time,
+      kickoff: (() => {
         const kickoffMs = parseUpcomingKickoffMs(m);
-        if (kickoffMs == null) return true;
-        return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
-      })() &&
-      (() => {
-        // Default view keeps 15 days ahead, but once we're late in the
-        // current month (day 21+) it stretches just enough to surface the
-        // opening fixtures of the next month too (up to day 8).
-        if (range === "month") return true;
-        const kickoffMs = parseUpcomingKickoffMs(m);
-        if (kickoffMs == null) return true;
-        return kickoffMs <= getUpcomingVisibilityWindowEndMs(now);
+        return kickoffMs == null ? null : new Date(kickoffMs).toISOString();
       })(),
-  );
+      hasRealOdds: m.hasRealOdds,
+    })),
+  };
   res.json({ matches: filtered });
 });
 
