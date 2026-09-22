@@ -13,6 +13,26 @@ let loggedMissingKey = false;
 const desiredMatchIds = new Set<string>();
 const activeMatchIds = new Set<string>();
 
+export function getGoalApiLiveSyncStatus(): {
+  connected: boolean;
+  authenticated: boolean;
+  starting: boolean;
+  desiredSubscriptions: number;
+  activeSubscriptions: number;
+  desiredMatchIdsSample: string[];
+  activeMatchIdsSample: string[];
+} {
+  return {
+    connected: socket?.readyState === WebSocket.OPEN,
+    authenticated,
+    starting,
+    desiredSubscriptions: desiredMatchIds.size,
+    activeSubscriptions: activeMatchIds.size,
+    desiredMatchIdsSample: [...desiredMatchIds].slice(0, 20),
+    activeMatchIdsSample: [...activeMatchIds].slice(0, 20),
+  };
+}
+
 function normalizeGoalApiClock(
   data: Record<string, unknown>,
 ): Pick<

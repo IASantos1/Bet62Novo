@@ -2078,6 +2078,7 @@ const FOOTBALL_V2_ID_PREFIX = "football-v2-";
 const FOOTBALL_PROVIDER_CONFIG = getSportProviderConfig("football");
 const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
 const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
+const FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
 const FOOTBALL_V2_PAGE_LIMIT = 30;
 const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
 const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
@@ -2089,6 +2090,10 @@ let footballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
 const footballV2AllOddsCache = new Map<
   string,
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const footballV2AllOddsInFlight = new Map<
+  string,
+  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
 >();
 const footballV2RecentVisibleUpcoming = new Map<
   string,
@@ -2481,6 +2486,36 @@ function mapPulseScoreMarketToAllOdds(
     group: pulseScoreAllOddsGroup(market),
     choices,
   };
+}
+
+function buildFootballV2AllOddsMarkets(
+  event: PulseScoreEvent | null | undefined,
+): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  return (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => mapPulseScoreMarketToAllOdds(market))
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+}
+
+function primeFootballV2AllOddsCache(
+  eventId: string | number | undefined,
+  event: PulseScoreEvent | null | undefined,
+): void {
+  const normalizedId = String(eventId ?? "").trim();
+  if (!normalizedId || !event) return;
+  const markets = buildFootballV2AllOddsMarkets(event);
+  if (markets.length === 0) return;
+  footballV2AllOddsCache.set(normalizedId, {
+    builtAt: Date.now(),
+    markets,
+  });
 }
 
 function setPulseScoreTotalGoalsLine(
@@ -3194,6 +3229,9 @@ async function loadPulseScoreFootballPrematchEvents(): Promise<PulseScoreEvent[]
       { query: { page, limit: FOOTBALL_V2_PAGE_LIMIT } },
     );
     const batch = Array.isArray(response.events) ? response.events : [];
+    for (const event of batch) {
+      primeFootballV2AllOddsCache(event.eventId, event);
+    }
     events.push(...batch);
     if (!response.hasNextPage || batch.length === 0) break;
     page += 1;
@@ -3214,6 +3252,9 @@ async function loadPulseScoreFootballLiveEvents(): Promise<PulseScoreEvent[]> {
       { query: { page, limit: FOOTBALL_V2_PAGE_LIMIT } },
     );
     const batch = Array.isArray(response.events) ? response.events : [];
+    for (const event of batch) {
+      primeFootballV2AllOddsCache(event.eventId, event);
+    }
     events.push(...batch);
     if (!response.hasNextPage || batch.length === 0) break;
     page += 1;
@@ -3408,32 +3449,48 @@ async function getFootballV2AllOdds(
     choices: Array<{ name: string; label: string; odds: number }>;
   }>
 > {
+  const now = Date.now();
   const cached = footballV2AllOddsCache.get(eventId);
-  if (cached && Date.now() - cached.builtAt < FOOTBALL_V2_ALL_ODDS_TTL_MS) {
+  if (cached && now - cached.builtAt < FOOTBALL_V2_ALL_ODDS_TTL_MS) {
     return cached.markets;
   }
+  const existingRequest = footballV2AllOddsInFlight.get(eventId);
+  if (existingRequest) return existingRequest;
   const client = getPulseScoreClient();
-  if (!client.isConfigured()) return [];
-  const liveEvent = await client.getLiveEventById(
-    FOOTBALL_PROVIDER_CONFIG.bookmaker,
-    eventId,
-  );
-  const prematchEvent =
-    liveEvent ??
-    (await client.getEventById(
-      FOOTBALL_PROVIDER_CONFIG.bookmaker,
-      FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
-      eventId,
-    ));
-  const markets = (Array.isArray(prematchEvent?.markets) ? prematchEvent.markets : [])
-    .map((market) => mapPulseScoreMarketToAllOdds(market))
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-  footballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
-  return markets;
+  if (!client.isConfigured()) {
+    return cached?.markets ?? [];
+  }
+  const request = (async () => {
+    try {
+      const liveEvent = await client.getLiveEventById(
+        FOOTBALL_PROVIDER_CONFIG.bookmaker,
+        eventId,
+      );
+      const prematchEvent =
+        liveEvent ??
+        (await client.getEventById(
+          FOOTBALL_PROVIDER_CONFIG.bookmaker,
+          FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
+          eventId,
+        ));
+      const markets = buildFootballV2AllOddsMarkets(prematchEvent);
+      footballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
+      return markets;
+    } catch (err) {
+      if (cached && now - cached.builtAt < FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS) {
+        logger.warn(
+          { err, eventId },
+          "[football-v2] all-odds fetch failed — serving stale cache",
+        );
+        return cached.markets;
+      }
+      throw err;
+    } finally {
+      footballV2AllOddsInFlight.delete(eventId);
+    }
+  })();
+  footballV2AllOddsInFlight.set(eventId, request);
+  return request;
 }
 
 function mrDogeNoVigHomeProb(
