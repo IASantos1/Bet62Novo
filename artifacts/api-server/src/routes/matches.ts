@@ -27,7 +27,10 @@ import type {
   PulseScoreMarket,
   PulseScoreSelection,
 } from "../providers/pulsescore/schema.js";
-import { getSportProviderConfig } from "../sportsbook/config/providerMatrix.js";
+import {
+  getSportProviderConfig,
+  type Bet62Sport,
+} from "../sportsbook/config/providerMatrix.js";
 import { syncGoalApiLiveSubscriptions } from "../services/goalApi/liveSync.js";
 import {
   listGoalApiFootballStates,
@@ -2076,6 +2079,8 @@ export function filterFootballMarketsByTier(
 
 const FOOTBALL_V2_ID_PREFIX = "football-v2-";
 const FOOTBALL_PROVIDER_CONFIG = getSportProviderConfig("football");
+const TENNIS_V2_ID_PREFIX = "tennis-v2-";
+const TENNIS_PROVIDER_CONFIG = getSportProviderConfig("tennis");
 const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
 const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
 const FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
@@ -2083,10 +2088,14 @@ const FOOTBALL_V2_PAGE_LIMIT = 30;
 const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
 const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
 const FOOTBALL_V2_UPCOMING_RETENTION_MS = 20 * 60_000;
+const TENNIS_V2_PAGE_LIMIT = 30;
 
 let footballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
   null;
 let footballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
+let tennisV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
+  null;
+let tennisV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
 const footballV2AllOddsCache = new Map<
   string,
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
@@ -2143,12 +2152,24 @@ function useFootballV2Live(): boolean {
   return useFootballV2Odds() && useFootballV2State();
 }
 
+function useTennisV2(): boolean {
+  return (
+    CONFIG.USE_PULSESCORE &&
+    TENNIS_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
+    TENNIS_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
+  );
+}
+
 function footballV2MatchId(providerId: string): string {
   return `${FOOTBALL_V2_ID_PREFIX}${providerId}`;
 }
 
 function isFootballV2MatchId(matchId: string): boolean {
   return String(matchId ?? "").startsWith(FOOTBALL_V2_ID_PREFIX);
+}
+
+function tennisV2MatchId(providerId: string): string {
+  return `${TENNIS_V2_ID_PREFIX}${providerId}`;
 }
 
 function normalizeFootballToken(value: string | undefined): string {
@@ -3438,6 +3459,315 @@ async function getFootballV2LiveCached(
       footballV2LiveInFlight = null;
     });
   return footballV2LiveInFlight;
+}
+
+function pulseScoreTennisMoneyline(
+  event: PulseScoreEvent | null | undefined,
+): { home: number; draw: number; away: number } | null {
+  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
+    if (!market || market.isActive === false) continue;
+    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+    const raw = normalizeFootballToken(market.rawName ?? "");
+    if (
+      canonical !== "match result" &&
+      canonical !== "match winner" &&
+      !raw.includes("match result") &&
+      !raw.includes("match winner")
+    ) {
+      continue;
+    }
+    const home = pulseScoreSelectionOdd(findPulseScoreSelection(market, "home"));
+    const away = pulseScoreSelectionOdd(findPulseScoreSelection(market, "away"));
+    if (home > 1.01 && away > 1.01) {
+      return { home, draw: 0, away };
+    }
+  }
+  return null;
+}
+
+function parseTennisSetPairsFromText(text: string | undefined): Array<[number, number]> {
+  const input = String(text ?? "").trim();
+  if (!input) return [];
+  const pairs: Array<[number, number]> = [];
+  const regex = /(\d{1,2})\s*[-:]\s*(\d{1,2})/g;
+  for (const match of input.matchAll(regex)) {
+    const home = parseInt(match[1] ?? "", 10);
+    const away = parseInt(match[2] ?? "", 10);
+    if (Number.isFinite(home) && Number.isFinite(away)) {
+      pairs.push([home, away]);
+    }
+  }
+  return pairs;
+}
+
+function readNumericField(
+  record: Record<string, unknown>,
+  candidates: string[],
+): number | null {
+  for (const key of candidates) {
+    const value = record[key];
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function readTextField(
+  record: Record<string, unknown>,
+  candidates: string[],
+): string {
+  for (const key of candidates) {
+    const value = String(record[key] ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function parsePulseScoreTennisLiveExtra(
+  event: PulseScoreEvent | null | undefined,
+): {
+  sets: Array<[number, number]>;
+  currentPoints?: [number | string, number | string];
+  serving?: [boolean, boolean];
+} {
+  const sources: Array<Record<string, unknown>> = [];
+  if (event?.moreInfo && typeof event.moreInfo === "object") {
+    sources.push(event.moreInfo as Record<string, unknown>);
+  }
+  if (event?.statistics && typeof event.statistics === "object") {
+    sources.push(event.statistics as Record<string, unknown>);
+  }
+  const sets: Array<[number, number]> = [];
+  for (const source of sources) {
+    for (let setNo = 1; setNo <= 5; setNo += 1) {
+      const home = readNumericField(source, [
+        `set${setNo}Home`,
+        `set${setNo}_home`,
+        `homeSet${setNo}`,
+        `home_set_${setNo}`,
+        `s${setNo}h`,
+      ]);
+      const away = readNumericField(source, [
+        `set${setNo}Away`,
+        `set${setNo}_away`,
+        `awaySet${setNo}`,
+        `away_set_${setNo}`,
+        `s${setNo}a`,
+      ]);
+      if (home == null || away == null) continue;
+      sets[setNo - 1] = [home, away];
+    }
+    if (sets.length > 0) break;
+  }
+  if (sets.length === 0) {
+    const textCandidates = [
+      String(event?.score?.info ?? ""),
+      ...sources.map((source) =>
+        readTextField(source, [
+          "scoreInfo",
+          "score_info",
+          "sets",
+          "setScores",
+          "set_scores",
+          "scoreboard",
+        ]),
+      ),
+    ].filter(Boolean);
+    for (const text of textCandidates) {
+      const parsed = parseTennisSetPairsFromText(text);
+      if (parsed.length > 0) {
+        sets.push(...parsed);
+        break;
+      }
+    }
+  }
+
+  let currentPoints: [number | string, number | string] | undefined;
+  for (const source of sources) {
+    const home = source["currentPointsHome"] ?? source["homePoints"] ?? source["pointHome"] ?? source["point_home"];
+    const away = source["currentPointsAway"] ?? source["awayPoints"] ?? source["pointAway"] ?? source["point_away"];
+    if (home != null || away != null) {
+      currentPoints = [home as number | string, away as number | string];
+      break;
+    }
+    const combined = readTextField(source, [
+      "currentPoints",
+      "current_points",
+      "gameScore",
+      "game_score",
+      "points",
+    ]);
+    const match = combined.match(/([0-9ADad]{1,2})\s*[-:]\s*([0-9ADad]{1,2})/);
+    if (match) {
+      currentPoints = [match[1]!, match[2]!];
+      break;
+    }
+  }
+
+  let serving: [boolean, boolean] | undefined;
+  for (const source of sources) {
+    const server = readTextField(source, [
+      "serving",
+      "server",
+      "servingSide",
+      "serving_side",
+    ]).toLowerCase();
+    if (!server) continue;
+    if (server.includes("home") || server.includes("1")) {
+      serving = [true, false];
+      break;
+    }
+    if (server.includes("away") || server.includes("2")) {
+      serving = [false, true];
+      break;
+    }
+  }
+
+  return {
+    sets: sets.filter(Boolean),
+    ...(currentPoints ? { currentPoints } : {}),
+    ...(serving ? { serving } : {}),
+  };
+}
+
+function buildTennisMatchFromPulseScore(
+  event: PulseScoreEvent,
+  kind: "upcoming" | "live",
+): UpcomingMatch | LiveMatchState | null {
+  const providerId = String(event.eventId ?? "").trim();
+  if (!providerId) return null;
+  const moneyline = pulseScoreTennisMoneyline(event);
+  const pHome = mrDogeNoVigHomeProb(
+    moneyline ? { home: moneyline.home, away: moneyline.away } : null,
+  );
+  const fallbackOdds = moneyline ?? mrDogeTwoWayOddsFromProb(pHome);
+  const { country, league } = splitPulseScoreLeague(event.league, event.country);
+  const { date, time } = toLisbonDateTime(event.startTime);
+  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, unknown>;
+  const liveExtra = parsePulseScoreTennisLiveExtra(event);
+  const sets = liveExtra.sets ?? [];
+  const inPlayNow = !!liveExtra.currentPoints || !!liveExtra.serving;
+  const completedSets = inPlayNow && sets.length > 0 ? sets.slice(0, -1) : sets;
+  const homeSetsWon = completedSets.filter(([home, away]) => home > away).length;
+  const awaySetsWon = completedSets.filter(([home, away]) => away > home).length;
+  if (kind === "live" && sets.length > 0) {
+    markets.tennisExtra = computeLiveTennisExtras(
+      pHome,
+      sets,
+      homeSetsWon,
+      awaySetsWon,
+      Math.max(1, homeSetsWon + awaySetsWon + 1),
+      liveExtra.currentPoints,
+      liveExtra.serving,
+    );
+  } else {
+    markets.tennisExtra = computeTennisExtras(pHome);
+  }
+  if (kind === "upcoming") {
+    return {
+      id: tennisV2MatchId(providerId),
+      home: String(event.home ?? "").trim(),
+      away: String(event.away ?? "").trim(),
+      league: String(league ?? "").trim(),
+      country: String(country ?? "").trim(),
+      date,
+      time,
+      sport: "tennis",
+      hasRealOdds: !!moneyline,
+      odds: fallbackOdds,
+      markets: markets as AdvancedMarkets,
+    };
+  }
+  return {
+    id: tennisV2MatchId(providerId),
+    home: String(event.home ?? "").trim(),
+    away: String(event.away ?? "").trim(),
+    league: String(league ?? "").trim(),
+    country: String(country ?? "").trim(),
+    sport: "tennis",
+    homeScore: homeSetsWon || Number(event.score?.home ?? 0) || 0,
+    awayScore: awaySetsWon || Number(event.score?.away ?? 0) || 0,
+    minute: 0,
+    status:
+      String(event.matchClock?.period ?? "").trim() ||
+      (sets.length > 0 ? `Set ${Math.max(1, homeSetsWon + awaySetsWon + 1)}` : "LIVE"),
+    hasRealOdds: !!moneyline,
+    odds: fallbackOdds,
+    markets: markets as AdvancedMarkets,
+    events: [],
+    date,
+    time,
+    _liveExtra: {
+      ...(sets.length > 0 ? { sets } : {}),
+      ...(liveExtra.currentPoints ? { currentPoints: liveExtra.currentPoints } : {}),
+      ...(liveExtra.serving ? { serving: liveExtra.serving } : {}),
+    },
+  };
+}
+
+async function loadPulseScoreEventsForSport(
+  sport: Bet62Sport,
+  kind: "upcoming" | "live",
+  limit = TENNIS_V2_PAGE_LIMIT,
+): Promise<PulseScoreEvent[]> {
+  const providerConfig = getSportProviderConfig(sport);
+  if (!CONFIG.USE_PULSESCORE) return [];
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) return [];
+  const events: PulseScoreEvent[] = [];
+  let page = 1;
+  const maxPages = kind === "live" ? 20 : 50;
+  while (page <= maxPages) {
+    const response =
+      kind === "live"
+        ? await client.listLiveEventsPage(providerConfig.bookmaker, providerConfig.pulseScoreSport, {
+            query: { page, limit },
+          })
+        : await client.listPrematchEventsPage(providerConfig.bookmaker, providerConfig.pulseScoreSport, {
+            query: { page, limit },
+          });
+    const batch = Array.isArray(response.events) ? response.events : [];
+    events.push(...batch);
+    if (!response.hasNextPage || batch.length === 0) break;
+    page += 1;
+  }
+  return events;
+}
+
+async function buildTennisUpcomingFromV2(): Promise<UpcomingMatch[]> {
+  const events = await loadPulseScoreEventsForSport("tennis", "upcoming");
+  return events
+    .map((event) => buildTennisMatchFromPulseScore(event, "upcoming"))
+    .filter(Boolean) as UpcomingMatch[];
+}
+
+async function buildTennisLiveFromV2(): Promise<LiveMatchState[]> {
+  const events = await loadPulseScoreEventsForSport("tennis", "live");
+  return events
+    .map((event) => buildTennisMatchFromPulseScore(event, "live"))
+    .filter(Boolean) as LiveMatchState[];
+}
+
+async function getTennisV2LiveCached(
+  forceFresh = false,
+): Promise<LiveMatchState[]> {
+  if (
+    !forceFresh &&
+    tennisV2LiveCache &&
+    Date.now() - tennisV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
+  ) {
+    return tennisV2LiveCache.matches;
+  }
+  if (!forceFresh && tennisV2LiveInFlight) return tennisV2LiveInFlight;
+  tennisV2LiveInFlight = buildTennisLiveFromV2()
+    .then((matches) => {
+      tennisV2LiveCache = { builtAt: Date.now(), matches };
+      return matches;
+    })
+    .finally(() => {
+      tennisV2LiveInFlight = null;
+    });
+  return tennisV2LiveInFlight;
 }
 
 async function getFootballV2AllOdds(
@@ -10140,6 +10470,12 @@ async function rebuildUpcomingCache(): Promise<void> {
     let tennis: UpcomingMatch[] = [];
     try {
       const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (useTennisV2()) {
+        tennisCandidates.push({
+          provider: "v2",
+          matches: await buildTennisUpcomingFromV2(),
+        });
+      }
       if (CONFIG.MRDOGE_API_KEY) {
         tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
       }
@@ -10342,6 +10678,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // api-tennis removed 2026-09-20 (user decision); Mr. Doge is tennis's
   // real live source again as of the same day.
   const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+  if (useTennisV2()) {
+    tennisCandidates.push({
+      provider: "v2",
+      matches: await getTennisV2LiveCached(),
+    });
+  }
   if (CONFIG.MRDOGE_API_KEY) {
     tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisLiveFromMrDoge() });
   }
@@ -11561,6 +11903,12 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let tennis: UpcomingMatch[] = [];
   try {
     const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (useTennisV2()) {
+      tennisCandidates.push({
+        provider: "v2",
+        matches: await buildTennisUpcomingFromV2(),
+      });
+    }
     if (CONFIG.MRDOGE_API_KEY) {
       tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
     }

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { CONFIG } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
 import type { GoalApiWebhookPayload } from "../providers/goalApi/schema.js";
+import { SPORT_PROVIDER_MATRIX } from "../sportsbook/config/providerMatrix.js";
 import { getGoalApiLiveSyncStatus } from "../services/goalApi/liveSync.js";
 import {
   getRecentGoalApiWebhooks,
@@ -71,6 +72,47 @@ router.get("/provider-webhooks/goal/status", (_req: Request, res: Response) => {
       })),
     },
     webhooks: getRecentGoalApiWebhooks(),
+  });
+});
+
+router.get("/provider-matrix/status", (_req: Request, res: Response) => {
+  const sports = Object.values(SPORT_PROVIDER_MATRIX).map((config) => {
+    const pulsescoreEnabled = CONFIG.USE_PULSESCORE;
+    const goalApiEnabled = CONFIG.USE_GOAL_API;
+    const matchStateReady =
+      config.matchStateProvider === "goal-api"
+        ? goalApiEnabled
+        : config.matchStateProvider === "pulsescore"
+          ? pulsescoreEnabled
+          : !!CONFIG.MRDOGE_API_KEY;
+    const oddsReady =
+      config.oddsProvider === "pulsescore"
+        ? pulsescoreEnabled
+        : !!CONFIG.MRDOGE_API_KEY;
+    return {
+      sport: config.sport,
+      bookmaker: config.bookmaker,
+      transport: config.transport,
+      pulseScoreSport: config.pulseScoreSport,
+      matchStateProvider: config.matchStateProvider,
+      oddsProvider: config.oddsProvider,
+      enabled: matchStateReady && oddsReady,
+      readiness: {
+        pulsescore: pulsescoreEnabled,
+        goalApi: goalApiEnabled,
+        mrdoge: !!CONFIG.MRDOGE_API_KEY,
+      },
+    };
+  });
+  res.json({
+    sports,
+    env: {
+      USE_PULSESCORE: CONFIG.USE_PULSESCORE,
+      USE_GOAL_API: CONFIG.USE_GOAL_API,
+      FOOTBALL_MATCH_STATE_PROVIDER: CONFIG.FOOTBALL_MATCH_STATE_PROVIDER,
+      FOOTBALL_ODDS_PROVIDER: CONFIG.FOOTBALL_ODDS_PROVIDER,
+      hasMrDogeKey: !!CONFIG.MRDOGE_API_KEY,
+    },
   });
 });
 
