@@ -32,13 +32,27 @@ const AI_AGENTS_MODEL =
 
 // ── BET62 Live + Match Tracker + Streaming ──
 //
-// This section originally documented StatScore/StatPal/PulseScore/
-// SportScore as the odds/tracker/stats architecture — all removed by
-// explicit user decision (last of them, PulseScore, on 2026-09-20, along
-// with GOAL API/PropLine/api-tennis.com).
+// Goal API is the authoritative football state/event/statistics source.
+// PropLine is the authoritative odds and multi-sport source. Both clients
+// live in the API server; the browser only sees the normalized Bet62 routes.
+const GOAL_API_KEY = process.env["GOAL_API_KEY"] ?? "";
+const GOAL_API_BASE_URL =
+  process.env["GOAL_API_BASE_URL"]?.trim() || "https://api.goal-api.com/v1";
+const GOAL_API_WS_URL =
+  process.env["GOAL_API_WS_URL"]?.trim() || "wss://api.goal-api.com/ws";
+const PROPLINE_API_KEY = process.env["PROPLINE_API_KEY"] ?? "";
+const PROPLINE_BASE_URL =
+  process.env["PROPLINE_BASE_URL"]?.trim() || "https://api.prop-line.com";
+const PROPLINE_WS_URL = process.env["PROPLINE_WS_URL"]?.trim() || "";
+const SPORTS_API_TIMEOUT_MS = Number(process.env["SPORTS_API_TIMEOUT_MS"] ?? "5000");
+const SPORTS_API_LIVE_CACHE_MS = Number(process.env["SPORTS_API_LIVE_CACHE_MS"] ?? "3000");
+const SPORTS_API_ODDS_CACHE_MS = Number(process.env["SPORTS_API_ODDS_CACHE_MS"] ?? "5000");
+
+// Mr. Doge remains available only as a legacy compatibility module while
+// deployments migrate; it is deliberately not selected by the match routes.
+// The old comments below document the SDK for the isolated compatibility code.
 //
-// Mr. Doge (api.mrdoge.co, @mrdoge/node) — new provider (2026-09-20+, user
-// decision), real matches/stats/odds via a JSON-RPC WebSocket protocol
+// Mr. Doge (api.mrdoge.co, @mrdoge/node) — legacy provider
 // (matches.subscribeLive pushes deltas for every live match matching a
 // sports filter in ONE connection, rather than one poll per sport). Auth
 // is a Bearer-style `sk_live_...` key passed to the SDK constructor, not a
@@ -75,6 +89,15 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
+  GOAL_API_KEY,
+  GOAL_API_BASE_URL,
+  GOAL_API_WS_URL,
+  PROPLINE_API_KEY,
+  PROPLINE_BASE_URL,
+  PROPLINE_WS_URL,
+  SPORTS_API_TIMEOUT_MS: Number.isFinite(SPORTS_API_TIMEOUT_MS) && SPORTS_API_TIMEOUT_MS > 0 ? SPORTS_API_TIMEOUT_MS : 5_000,
+  SPORTS_API_LIVE_CACHE_MS: Number.isFinite(SPORTS_API_LIVE_CACHE_MS) && SPORTS_API_LIVE_CACHE_MS > 0 ? SPORTS_API_LIVE_CACHE_MS : 3_000,
+  SPORTS_API_ODDS_CACHE_MS: Number.isFinite(SPORTS_API_ODDS_CACHE_MS) && SPORTS_API_ODDS_CACHE_MS > 0 ? SPORTS_API_ODDS_CACHE_MS : 5_000,
   MRDOGE_API_KEY,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,

@@ -43,6 +43,14 @@ import {
   extractMrDogeBaseballLiveExtra,
   extractMrDogeVolleyballLiveExtra,
 } from "../services/mrdoge/common.js";
+import {
+  getGoalFootballMatches,
+  getPropLineMatches,
+  projectBet62Odds,
+  providerMatchHasFreshOdds,
+  type ProviderMatch,
+} from "../services/providers/bet62.js";
+import { getGoalFixtureResource } from "../services/goal/client.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
@@ -54,6 +62,8 @@ const router: IRouter = Router();
 function extractProviderMatchId(rawId: string): string {
   return String(rawId ?? "")
     .replace(/^[a-z]+-v\d+-/i, "")
+    .replace(/^goalapi-[a-z_]+-/i, "")
+    .replace(/^propline-[a-z_]+-/i, "")
     .replace(/^mrdoge-[a-z_]+-/i, "")
     .replace(/^sportmonks-[a-z_]+-/i, "");
 }
@@ -130,6 +140,58 @@ function mapMrDogeMarketToAllOdds(market: Market): {
     group: mrDogeAllOddsGroup(market),
     choices,
   };
+}
+
+function mapProviderMarketsToAllOdds(value: unknown): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  if (!Array.isArray(value)) return [];
+  const selectionKey = (selection: string): string =>
+    selection
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const groups = new Map<string, {
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const row = candidate as Record<string, unknown>;
+    const market = String(row["market"] ?? "Mercado");
+    const period = String(row["period"] ?? "");
+    const line = row["line"] == null ? "" : String(row["line"]);
+    const key = `${market}|${period}|${line}`;
+    const item = groups.get(key) ?? {
+      name: [market, period, line].filter(Boolean).join(" · "),
+      group: /total|goal|score/i.test(market)
+        ? "Golos"
+        : /spread|handicap/i.test(market)
+          ? "Handicap"
+          : "Principal",
+      choices: [],
+    };
+    const selection = String(row["selection"] ?? "");
+    const odds = Number(row["odds"] ?? row["oddsDecimal"] ?? 0);
+    if (selection && Number.isFinite(odds) && odds > 1.001) {
+      const normalizedSelection = selectionKey(selection);
+      const existing = item.choices.find(
+        (choice) => selectionKey(choice.name) === normalizedSelection,
+      );
+      if (!existing) {
+        item.choices.push({ name: selection, label: selection, odds });
+      } else if (odds > existing.odds) {
+        existing.odds = odds;
+      }
+    }
+    groups.set(key, item);
+  }
+  return [...groups.values()].filter((item) => item.choices.length > 0);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -6479,7 +6541,11 @@ export async function ensureFinishedMatchResult(
   // fallback needed here since finalizeStaleLiveMatch already persists the
   // full record (including extras.basketball.quarters/
   // extras.volleyball.sets, same shape read back below) up front.
-  if (/^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(matchId)) {
+  if (
+    /^(?:pulsescore-(?:football|tennis|basketball|volleyball)|goalapi-football|propline-[a-z0-9_-]+)-.+$/i.test(
+      matchId,
+    )
+  ) {
     const cached = finishedMatchResults.get(matchId);
     if (
       cached &&
@@ -8051,15 +8117,186 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   };
 }
 
+function providerMatchId(match: ProviderMatch): string {
+  return `${match.provider === "goal_api" ? "goalapi" : "propline"}-${match.sport}-${match.id}`;
+}
+
+function providerDateTime(kickoff?: string): { date: string; time: string } {
+  if (!kickoff) return { date: "", time: "" };
+  const timestamp = Date.parse(kickoff);
+  if (!Number.isFinite(timestamp)) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(timestamp));
+  const values: Record<string, string> = {};
+  for (const part of parts) values[part.type] = part.value;
+  return {
+    date: `${values["day"] ?? "01"}.${values["month"] ?? "01"}.${values["year"] ?? "1970"}`,
+    time: `${values["hour"] === "24" ? "00" : values["hour"] ?? "00"}:${values["minute"] ?? "00"}`,
+  };
+}
+
+function providerMatchStats(match: ProviderMatch): LiveMatchState["matchStats"] {
+  const rows: Array<{ name: string; home: string; away: string }> = [];
+  for (const item of match.statistics) {
+    const name = String(item["name"] ?? item["statistic"] ?? item["type"] ?? "").trim();
+    const home = item["home"] ?? item["homeValue"] ?? item["home_value"];
+    const away = item["away"] ?? item["awayValue"] ?? item["away_value"];
+    if (name && (home != null || away != null)) {
+      rows.push({ name, home: String(home ?? "-"), away: String(away ?? "-") });
+    }
+  }
+  return rows.length ? [{ title: "Estatísticas", rows }] : undefined;
+}
+
+function providerEvents(match: ProviderMatch): LiveMatchState["events"] {
+  return match.events.map((event) => ({
+    type: event.type,
+    team: event.team,
+    minute: event.minute,
+    player: event.player,
+    playerId: event.playerId,
+    detail: event.detail,
+  }));
+}
+
+function applyProviderProjection(
+  markets: AdvancedMarkets,
+  match: ProviderMatch,
+): { odds: { home: number; draw: number; away: number }; hasRealOdds: boolean; updatedAt?: number } {
+  const projection = projectBet62Odds(
+    match.odds,
+    { home: match.home, away: match.away },
+    match.isLive ? 6 * 60 * 60_000 : 15 * 60_000,
+  );
+  if (projection.markets["totalGoals"]) {
+    markets.totalGoals = { ...markets.totalGoals, ...(projection.markets["totalGoals"] as Partial<AdvancedMarkets["totalGoals"]>) };
+  }
+  for (const [key, value] of Object.entries(projection.markets)) {
+    if (key !== "totalGoals") Object.assign(markets as unknown as Record<string, unknown>, { [key]: value });
+  }
+  return {
+    odds: projection.moneyline ?? { home: 0, draw: 0, away: 0 },
+    hasRealOdds: providerMatchHasFreshOdds(match),
+    updatedAt: projection.freshestAt,
+  };
+}
+
+function buildProviderUpcoming(match: ProviderMatch): UpcomingMatch {
+  const { date, time } = providerDateTime(match.kickoffUtc);
+  const markets = zerofillAdvancedMarkets();
+  const projected = applyProviderProjection(markets, match);
+  return {
+    id: providerMatchId(match),
+    home: match.home,
+    away: match.away,
+    homeTeamId: match.homeTeamId,
+    awayTeamId: match.awayTeamId,
+    league: match.league,
+    country: match.country,
+    leagueId: match.leagueId,
+    date,
+    time,
+    sport: match.sport,
+    hasRealOdds: projected.hasRealOdds,
+    odds: projected.odds,
+    markets,
+    providerStatusText: match.status,
+  };
+}
+
+function buildProviderLive(match: ProviderMatch): LiveMatchState {
+  const markets = zerofillAdvancedMarkets();
+  const projected = applyProviderProjection(markets, match);
+  return {
+    id: providerMatchId(match),
+    home: match.home,
+    away: match.away,
+    homeTeamId: match.homeTeamId,
+    awayTeamId: match.awayTeamId,
+    league: match.league,
+    country: match.country,
+    sport: match.sport,
+    homeScore: match.homeScore,
+    awayScore: match.awayScore,
+    minute: match.minute,
+    status: match.status,
+    hasRealOdds: projected.hasRealOdds,
+    odds: projected.odds,
+    markets,
+    events: providerEvents(match),
+    matchStats: providerMatchStats(match),
+    _commentary: match.commentary,
+    _oddsUpdatedAt: projected.updatedAt,
+    _liveExtra: {
+      firstGoal: match.events.find((event) => /goal|score/i.test(event.type))?.team ?? "none",
+    },
+  };
+}
+
+async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
+  const goalRequest = getGoalFootballMatches({
+    from: new Date().toISOString().slice(0, 10),
+    to: getUpcomingFetchEndDate(),
+  }).then((matches) =>
+    matches
+      .filter((match) => !isBlockedLeague(match.league) && !isVirtualFootballLeague(match.league))
+      .map(buildProviderUpcoming)
+      .filter((match) => match.hasRealOdds),
+  ).catch(() => [] as UpcomingMatch[]);
+  const fallbackRequest = buildPropLineUpcoming("football");
+  const projected = await Promise.race([
+    goalRequest,
+    waitMs(6_000).then(() => [] as UpcomingMatch[]),
+  ]);
+  if (projected.length > 0) return projected;
+  logger.warn("[providers] Goal API football upcoming unavailable; using PropLine fallback");
+  return fallbackRequest;
+}
+
+async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
+  const matches = await getGoalFootballMatches({ live: true });
+  return matches
+    .filter((match) => !isBlockedLeague(match.league) && !isVirtualFootballLeague(match.league))
+    .map(buildProviderLive);
+}
+
+function proplineDateRange(): { from: string; to: string } {
+  return {
+    from: new Date().toISOString(),
+    to: new Date(Date.now() + 31 * 24 * 60 * 60_000).toISOString(),
+  };
+}
+
+async function buildPropLineUpcoming(sport: string): Promise<UpcomingMatch[]> {
+  const range = proplineDateRange();
+  const matches = await getPropLineMatches({ sport, ...range });
+  return matches.map(buildProviderUpcoming).filter((match) => match.hasRealOdds);
+}
+
+async function buildPropLineLive(sport: string): Promise<LiveMatchState[]> {
+  const matches = await getPropLineMatches({ sport, live: true });
+  const ordered = [...matches].sort(
+    (a, b) =>
+      Number(providerMatchHasFreshOdds(b)) - Number(providerMatchHasFreshOdds(a)) ||
+      b.odds.length - a.odds.length,
+  );
+  const visibleLimit =
+    sport === "tennis" || sport === "table-tennis" ? 24 : Number.POSITIVE_INFINITY;
+  const visible = ordered.slice(0, visibleLimit);
+  return visible.map(buildProviderLive);
+}
+
 // ─── Match builders ────────────────────────────────────────────────────────────
 
-// GOAL API removed 2026-09-20 (user decision) — football has no other real
-// data source, so this always returns empty. Kept as a thin named wrapper
-// (rather than deleted outright) so predictions.ts's dynamic
-// import("./matches.js") (see its by-matchId upcoming lookup) doesn't need
-// to change.
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return [];
+  return buildFootballUpcomingFromGoalApi();
 }
 
 // Prematch odds.list is a one-shot HTTP/WS call per match, NOT a
@@ -8635,16 +8872,9 @@ async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
-    // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
-    // real data source again as of the same day (fixtures only — see
-    // buildFootballUpcomingFromMrDoge's own comment on odds).
     let football: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
-      }
-      football = chooseUpcomingProvider("football", candidates);
+      football = await buildFootballUpcomingFromGoalApi();
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
@@ -8653,37 +8883,17 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       football = _lastGoodFootballUpcoming;
     }
-    // api-tennis.com removed 2026-09-20 (user decision); Mr. Doge is
-    // tennis's real data source again as of the same day (fixtures only).
     let tennis: UpcomingMatch[] = [];
     try {
-      const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.MRDOGE_API_KEY) {
-        tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
-      }
-      tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+      tennis = await buildPropLineUpcoming("tennis");
+      _lastGoodTennisUpcoming = tennis;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
     }
     _lastGoodTennisUpcoming = tennis;
-    // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
-    // (football and tennis excluded from PropLine's scope per user decision
-    // — each gets its own separate, dedicated provider later).
-    // bzzoiro candidate removed 2026-09-18 (being retired — see config.ts's
-    // BZZOIRO_* removal plan): PropLine is basketball/hockey's sole real
-    // source again, same as before bzzoiro was added alongside it.
-    // PropLine removed 2026-09-20 (user decision): basketball, hockey,
-    // volleyball and mma have no other real data source, so each stays at
-    // an empty candidates list — chooseUpcomingProvider already returns []
-    // for that (same path exercised historically when every provider was
-    // removed at once, per the buildLivePayload comment below).
     let basketball: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
-      }
-      basketball = chooseUpcomingProvider("basketball", candidates);
+      basketball = await buildPropLineUpcoming("basketball");
       _lastGoodBasketballUpcoming = basketball;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] basketball upcoming failed this cycle — keeping last good prematch list");
@@ -8691,11 +8901,7 @@ async function rebuildUpcomingCache(): Promise<void> {
     }
     let hockey: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildHockeyUpcomingFromMrDoge() });
-      }
-      hockey = chooseUpcomingProvider("hockey", candidates);
+      hockey = await buildPropLineUpcoming("hockey");
       _lastGoodHockeyUpcoming = hockey;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] hockey upcoming failed this cycle — keeping last good prematch list");
@@ -8703,11 +8909,7 @@ async function rebuildUpcomingCache(): Promise<void> {
     }
     let volleyball: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildVolleyballUpcomingFromMrDoge() });
-      }
-      volleyball = chooseUpcomingProvider("volleyball", candidates);
+      volleyball = await buildPropLineUpcoming("volleyball");
       _lastGoodVolleyballUpcoming = volleyball;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] volleyball upcoming failed this cycle — keeping last good prematch list");
@@ -8715,8 +8917,7 @@ async function rebuildUpcomingCache(): Promise<void> {
     }
     let mma: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      mma = chooseUpcomingProvider("mma", candidates);
+      mma = await buildPropLineUpcoming("mma");
       _lastGoodMmaUpcoming = mma;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] mma upcoming failed this cycle — keeping last good prematch list");
@@ -8748,58 +8949,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   }
   const allUpcoming = _allUpcomingCache;
 
-  if (CONFIG.MRDOGE_API_KEY) {
-    const liveOddsTargets = getMrDogeLiveMatches().filter((m) => !!m.stats?.sport);
-    const nonFootballTargets = liveOddsTargets
-      .filter((m) => m.stats?.sport !== "soccer")
-      .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) }));
-    const footballOddsPreferredTargets = liveOddsTargets
-      .filter((m) => m.stats?.sport === "soccer")
-      .filter(
-        (m) =>
-          footballCompetitionVisibilityBand(
-            m.region.name,
-            m.competition.name,
-          ) === "preferred",
-      )
-      .map((m) => ({ matchId: m.id, sport: "soccer" }));
-    const footballOddsFallbackTargets =
-      footballOddsPreferredTargets.length > 0
-        ? []
-        : liveOddsTargets
-            .filter((m) => m.stats?.sport === "soccer")
-            .filter(
-              (m) =>
-                footballCompetitionVisibilityBand(
-                  m.region.name,
-                  m.competition.name,
-                ) === "fallback",
-            )
-            .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT)
-            .map((m) => ({ matchId: m.id, sport: "soccer" }));
-    syncMrDogeOddsSubscriptions(
-      [
-        ...footballOddsPreferredTargets,
-        ...footballOddsFallbackTargets,
-        ...nonFootballTargets,
-      ],
-    );
-  }
-
-  // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
-  // All sports-data providers removed (2026-09-08) — every sport below runs
-  // with zero candidates, which chooseLiveProvider handles by returning [].
-  // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
-  // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
+  // ── REST provider path ───────────────────────────────────────────────────
+  // Goal API supplies football state; PropLine supplies odds and the other
+  // sports. The existing anti-flicker layer remains active below so a short
+  // provider outage does not erase the live board.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
-    // real live data source again as of the same day.
-    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildFootballLiveFromMrDoge() });
-    }
-    footballLiveRaw = chooseLiveProvider("football", candidates);
+    footballLiveRaw = await buildFootballLiveFromGoalApi();
   } catch (err) {
     logger.error(
       { err },
@@ -8827,38 +8983,48 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     footballPreferredLive.length > 0
       ? footballPreferredLive
       : footballFallbackLive;
-  // PropLine removed 2026-09-20 (user decision); Mr. Doge is basketball,
-  // hockey, baseball, and volleyball's real live source again as of the
-  // same day.
-  const basketballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (CONFIG.MRDOGE_API_KEY) {
-    basketballCandidates.push({ provider: "mrdoge", matches: await buildBasketballLiveFromMrDoge() });
-  }
-  const basketballLive = sportWithFallback("basketball", chooseLiveProvider("basketball", basketballCandidates));
-  const hockeyCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (CONFIG.MRDOGE_API_KEY) {
-    hockeyCandidates.push({ provider: "mrdoge", matches: await buildHockeyLiveFromMrDoge() });
-  }
-  const hockeyLive = sportWithFallback("hockey", chooseLiveProvider("hockey", hockeyCandidates));
-  const baseballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (CONFIG.MRDOGE_API_KEY) {
-    baseballCandidates.push({ provider: "mrdoge", matches: await buildBaseballLiveFromMrDoge() });
-  }
-  const baseballLive = sportWithFallback("baseball", chooseLiveProvider("baseball", baseballCandidates));
-  const volleyballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (CONFIG.MRDOGE_API_KEY) {
-    volleyballCandidates.push({ provider: "mrdoge", matches: await buildVolleyballLiveFromMrDoge() });
-  }
-  const volleyballLiveItems = sportWithFallback("volleyball", chooseLiveProvider("volleyball", volleyballCandidates));
-  // api-tennis removed 2026-09-20 (user decision); Mr. Doge is tennis's
-  // real live source again as of the same day.
-  const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (CONFIG.MRDOGE_API_KEY) {
-    tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisLiveFromMrDoge() });
-  }
-  const tennisLive = sportWithFallback("tennis", chooseLiveProvider("tennis", tennisCandidates));
-  // PropLine removed 2026-09-20 (user decision) — mma has no other source.
-  const mmaLive = sportWithFallback("mma", chooseLiveProvider("mma", []));
+  const [
+    footballOddsLiveRaw,
+    basketballLiveRaw,
+    hockeyLiveRaw,
+    baseballLiveRaw,
+    volleyballLiveRaw,
+    tennisLiveRaw,
+    mmaLiveRaw,
+    dartsLiveRaw,
+    cricketLiveRaw,
+    tableTennisLiveRaw,
+    snookerLiveRaw,
+  ] = await Promise.all([
+    buildPropLineLive("football"),
+    buildPropLineLive("basketball"),
+    buildPropLineLive("hockey"),
+    buildPropLineLive("baseball"),
+    buildPropLineLive("volleyball"),
+    buildPropLineLive("tennis"),
+    buildPropLineLive("mma"),
+    buildPropLineLive("darts"),
+    buildPropLineLive("cricket"),
+    buildPropLineLive("table-tennis"),
+    buildPropLineLive("snooker"),
+  ]);
+  const footballOddsLive = sportWithFallback("football-odds", footballOddsLiveRaw);
+  const footballWithOddsFallback = [
+    ...footballVisibleLive,
+    ...footballOddsLive.filter(
+      (candidate) =>
+        !footballVisibleLive.some(
+          (goalMatch) =>
+            liveMatchIdentityKey(goalMatch) === liveMatchIdentityKey(candidate),
+        ),
+    ),
+  ];
+  const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
+  const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
+  const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
+  const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
+  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
+  const mmaLive = sportWithFallback("mma", mmaLiveRaw);
   let handballLiveRaw: LiveMatchState[] = [];
   try {
   } catch (err) {
@@ -8868,19 +9034,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const handballLive = sportWithFallback("handball", handballLiveRaw);
-  let cricketLiveRaw: LiveMatchState[] = [];
-  try {
-  } catch (err) {
-    logger.error(
-      { err },
-      "[tri-fallback] cricket live failed this tick",
-    );
-  }
   const cricketLive = sportWithFallback("cricket", cricketLiveRaw);
+  const tableTennisLive = sportWithFallback("table-tennis", tableTennisLiveRaw);
+  const snookerLive = sportWithFallback("snooker", snookerLiveRaw);
   const boxingLive: LiveMatchState[] = [];
   const formula1Live: LiveMatchState[] = [];
-  // PropLine removed 2026-09-20 (user decision) — darts has no other source.
-  const dartsLive = sportWithFallback("darts", []);
+  const dartsLive = sportWithFallback("darts", dartsLiveRaw);
 
   // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
   // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
@@ -8888,7 +9047,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
   const livePart = mergeStickyLive([
-    ...footballVisibleLive,
+    ...footballWithOddsFallback,
     ...tennisLive,
     ...basketballLive,
     ...hockeyLive,
@@ -8897,6 +9056,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ...mmaLive,
     ...handballLive,
     ...cricketLive,
+    ...tableTennisLive,
+    ...snookerLive,
     ...boxingLive,
     ...formula1Live,
     ...dartsLive,
@@ -9101,7 +9262,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // are handled at market/button level, not by hiding the match itself.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     m.sport !== "football" ||
-    footballVisibleLive.some((visible) => String(visible.id) === String(m.id));
+    footballWithOddsFallback.some((visible) => String(visible.id) === String(m.id));
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -9145,11 +9306,31 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     };
   };
 
+  const sportOrder = new Map(
+    ["football", "tennis", "basketball", "baseball", "hockey", "volleyball"].map(
+      (sport, index) => [sport, index],
+    ),
+  );
+  const secondarySportCounts = new Map<string, number>();
   const dedupedLive = dedupeLiveMatchesByIdentity(
     filteredLive.map((match) =>
       applyOperationalDecision(match, liveDecisions.get(String(match.id))),
     ),
-  );
+  )
+    .filter((match) => match.hasRealOdds)
+    .sort(
+      (a, b) =>
+        (sportOrder.get(a.sport ?? "") ?? 99) -
+        (sportOrder.get(b.sport ?? "") ?? 99),
+    )
+    .filter((match) => {
+      if (sportOrder.has(match.sport ?? "")) return true;
+      const sport = match.sport ?? "other";
+      const count = secondarySportCounts.get(sport) ?? 0;
+      if (count >= 3) return false;
+      secondarySportCounts.set(sport, count + 1);
+      return true;
+    });
   const dedupedPrematch = dedupeLiveMatchesByIdentity(
     filteredPrematch.map((match) =>
       applyOperationalDecision(match, prematchDecisions.get(String(match.id))),
@@ -9628,93 +9809,6 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     let match =
       effectivePayload.matches.find((m) => String(m.id) === id) ?? null;
 
-    if (
-      forceFresh &&
-      match &&
-      String((match as any).sport ?? "football") === "football"
-    ) {
-      try {
-        const rawId = extractProviderMatchId(id);
-        if (rawId) {
-          const odds = await getMrDogeClient().odds.list({
-            matchId: rawId,
-            betTypes: [...MRDOGE_SOCCER_BET_TYPES],
-          });
-          const btts = extractMrDogeSoccerBtts(odds);
-          const extended = extractMrDogeSoccerExtendedMarkets(odds);
-          const enrichedMarkets = zerofillAdvancedMarkets();
-          Object.assign(
-            enrichedMarkets.totalGoals,
-            totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)),
-          );
-          if (btts) enrichedMarkets.bothTeamsScore = btts;
-          if (extended.doubleChance)
-            enrichedMarkets.doubleChance = extended.doubleChance;
-          if (extended.drawNoBet) enrichedMarkets.drawNoBet = extended.drawNoBet;
-          if (extended.asianHandicap)
-            enrichedMarkets.asianHandicap = extended.asianHandicap;
-          if (extended.halfTime) enrichedMarkets.halfTime = extended.halfTime;
-          if (extended.firstHalfTotal) {
-            enrichedMarkets.firstHalfTotal = extended.firstHalfTotal;
-            enrichedMarkets._total1H = extended.firstHalfTotal.line;
-          }
-          if (extended.secondHalf)
-            enrichedMarkets.secondHalf = extended.secondHalf;
-          if (extended.htft) enrichedMarkets.htft = extended.htft;
-          if (extended.correctScore)
-            enrichedMarkets.correctScore = extended.correctScore;
-          if (extended.europeanHandicap)
-            enrichedMarkets.europeanHandicap = extended.europeanHandicap;
-          if (extended.asianTotals) {
-            enrichedMarkets.asianTotals = {
-              o05: 0,
-              u05: 0,
-              o45: 0,
-              u45: 0,
-              o55: 0,
-              u55: 0,
-              o225: 0,
-              u225: 0,
-              o275: 0,
-              u275: 0,
-              ...extended.asianTotals,
-            };
-          }
-          if (extended.teamGoals) {
-            enrichedMarkets.teamGoals = {
-              ...(enrichedMarkets.teamGoals ?? {}),
-              ...extended.teamGoals,
-            };
-          }
-          if (extended.winToNil) enrichedMarkets.winToNil = extended.winToNil;
-          if (extended.cleanSheet)
-            enrichedMarkets.cleanSheet = extended.cleanSheet;
-          if (extended.goalOddEven)
-            enrichedMarkets.goalOddEven = extended.goalOddEven;
-          if (extended.exactGoals) {
-            enrichedMarkets.exactGoals = {
-              g0: 0,
-              g1: 0,
-              g2: 0,
-              g3: 0,
-              g4: 0,
-              g5plus: 0,
-              ...extended.exactGoals,
-            };
-          }
-          match = {
-            ...match,
-            markets: {
-              ...(match as any).markets,
-              ...enrichedMarkets,
-            },
-          };
-        }
-      } catch (err) {
-        logger.warn({ err, id }, "[mrdoge] live-match fresh enrich failed");
-      }
-    }
-
     res.json({ match });
   } catch {
     const fallback = getLivePayloadFallback();
@@ -9769,32 +9863,58 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
     "Cache-Control",
     "no-store, no-cache, must-revalidate, max-age=0",
   );
-  const id = extractProviderMatchId(String(req.params["id"] ?? ""));
-  const sport = String(req.query["sport"] ?? "football").toLowerCase();
-  if (!id || (sport !== "football" && sport !== "soccer")) {
+  const id = String(req.params["id"] ?? "");
+  if (!id) {
     res.json({ markets: [] });
     return;
   }
 
   try {
-    const cached = getMrDogeOdds(id);
-    const markets =
-      cached && cached.length > 0
-        ? cached
-        : await getMrDogeClient().odds.list({
-            matchId: id,
-            betTypes: [...MRDOGE_SOCCER_BET_TYPES],
-          });
-    res.json({
-      markets: markets
-        .map((market) => mapMrDogeMarketToAllOdds(market))
-        .filter(Boolean),
-    });
+    const live = await getLivePayloadCached(false);
+    let match: LiveMatchState | UpcomingMatch | null =
+      live.matches.find((item) => String(item.id) === id) ?? null;
+    if (!match) {
+      const upcoming = await getUpcomingAll();
+      const all = [
+        ...upcoming.football, ...upcoming.tennis, ...upcoming.basketball,
+        ...upcoming.hockey, ...upcoming.volleyball, ...upcoming.baseball,
+        ...upcoming.mma, ...upcoming.darts,
+      ];
+      match = all.find((item) => String(item.id) === id) ?? null;
+    }
+    const raw = (match?.markets as unknown as Record<string, unknown> | undefined)?.["_allOdds"];
+    res.json({ markets: mapProviderMarketsToAllOdds(raw) });
   } catch (err) {
-    logger.warn({ err, id, sport }, "[mrdoge] all-odds fetch failed");
+    logger.warn({ err, id }, "[providers] all-odds fetch failed");
     res.json({ markets: [] });
   }
 });
+
+async function sendPropLineSportOdds(
+  sport: keyof UpcomingTopCache,
+  res: Response,
+): Promise<void> {
+  const [upcoming, live] = await Promise.all([
+    getUpcomingAll(),
+    getLivePayloadCached(false),
+  ]);
+  const upcomingRows = Array.isArray(upcoming[sport])
+    ? upcoming[sport] as UpcomingMatch[]
+    : [];
+  const liveRows = live.matches.filter((match) => match.sport === sport);
+  res.json({ odds: [...liveRows, ...upcomingRows] });
+}
+
+router.get("/tennis-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("tennis", res));
+router.get("/basketball-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("basketball", res));
+router.get("/hockey-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("hockey", res));
+router.get("/mlb-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("baseball", res));
+router.get("/volleyball-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("volleyball", res));
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
@@ -10000,75 +10120,50 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // GET / handler). Same chooseUpcomingProvider quality gate
   // rebuildUpcomingCache already uses, for consistency between the two
   // caches.
-  // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
-  // real data source again as of the same day (see rebuildUpcomingCache's
-  // matching comment).
   let football: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
-    }
-    football = chooseUpcomingProvider("football", candidates);
+    football = await buildFootballUpcomingFromGoalApi();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
   let tennis: UpcomingMatch[] = [];
   try {
-    const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
-    }
-    tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+    tennis = await buildPropLineUpcoming("tennis");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
   }
-  // PropLine removed 2026-09-20 (user decision); Mr. Doge is basketball,
-  // hockey, baseball, and volleyball's real data source again as of the
-  // same day (fixtures only). mma and darts have no Mr. Doge equivalent
-  // (see lib/config.ts's MRDOGE_API_KEY comment) and stay empty.
   let basketball: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
-    }
-    basketball = chooseUpcomingProvider("basketball", candidates);
+    basketball = await buildPropLineUpcoming("basketball");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
   }
   let hockey: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildHockeyUpcomingFromMrDoge() });
-    }
-    hockey = chooseUpcomingProvider("hockey", candidates);
+    hockey = await buildPropLineUpcoming("hockey");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] hockey fetch failed");
   }
   let volleyball: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildVolleyballUpcomingFromMrDoge() });
-    }
-    volleyball = chooseUpcomingProvider("volleyball", candidates);
+    volleyball = await buildPropLineUpcoming("volleyball");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] volleyball fetch failed");
   }
   let baseball: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildBaseballUpcomingFromMrDoge() });
-    }
-    baseball = chooseUpcomingProvider("baseball", candidates);
+    baseball = await buildPropLineUpcoming("baseball");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] baseball fetch failed");
   }
   let mma: UpcomingMatch[] = [];
   let darts: UpcomingMatch[] = [];
+  try {
+    mma = await buildPropLineUpcoming("mma");
+    darts = await buildPropLineUpcoming("darts");
+  } catch (err) {
+    logger.error({ err }, "[refreshUpcomingTop] PropLine mma/darts fetch failed");
+  }
   rememberUpcomingFootballEligibility(football);
   rememberUpcomingEligibility([
     ...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma, ...darts,
@@ -10167,38 +10262,34 @@ function getUpcomingFetchEndDate(nowMs = Date.now()): string {
     .slice(0, 10);
 }
 
+function stableCatalogId(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) || 1;
+}
+
 router.get("/catalog", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "");
-  const range = String(req.query["range"] ?? "default");
-  const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
-
-  if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport) {
-    res.json({ sport, provider: "mrdoge", regions: [] as MatchCatalogRegion[] });
-    return;
-  }
-
   try {
-    const mrdoge = getMrDogeClient();
-    const { startDate, endDate } = mrDogeCatalogDateWindow(range);
-    const regions = await mrdoge.regions.list({
-      sports: [mrdogeSport],
-      status: ["live", "upcoming"],
-      startDate,
-      endDate,
-      locale: "pt-BR",
-      timezone: "Europe/Lisbon",
-    });
-
-    const normalized = [...regions]
-      .map(
-        (region): MatchCatalogRegion => ({
-          id: region.id,
-          name: region.name,
-          eventCount: region.eventCount ?? 0,
-          competitionCount: region.competitionCount ?? 0,
-          flagUrl: mrDogeRegionFlag(region.id),
-        }),
-      )
+    const matches = _allUpcomingCache.filter((match) => match.sport === sport);
+    const grouped = new Map<string, { events: number; leagues: Set<string> }>();
+    for (const match of matches) {
+      const country = match.country || "International";
+      const item = grouped.get(country) ?? { events: 0, leagues: new Set<string>() };
+      item.events++;
+      item.leagues.add(match.league);
+      grouped.set(country, item);
+    }
+    const normalized = [...grouped.entries()]
+      .map(([name, item]): MatchCatalogRegion => ({
+        id: stableCatalogId(name),
+        name,
+        eventCount: item.events,
+        competitionCount: item.leagues.size,
+      }))
       .sort(
         (a, b) =>
           b.eventCount - a.eventCount ||
@@ -10207,47 +10298,34 @@ router.get("/catalog", async (req: Request, res: Response) => {
       );
 
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({ sport, provider: "mrdoge", regions: normalized });
+    res.json({ sport, provider: "bet62", regions: normalized });
   } catch (err) {
-    logger.warn({ err, sport }, "[mrdoge] catalog regions failed");
-    res.status(200).json({ sport, provider: "mrdoge", regions: [] as MatchCatalogRegion[] });
+    logger.warn({ err, sport }, "[providers] catalog regions failed");
+    res.status(200).json({ sport, provider: "bet62", regions: [] as MatchCatalogRegion[] });
   }
 });
 
 router.get("/catalog/competitions", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "");
-  const range = String(req.query["range"] ?? "default");
   const regionId = Number(req.query["regionId"] ?? 0);
-  const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
-
-  if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport || !Number.isFinite(regionId) || regionId <= 0) {
-    res.json({ sport, regionId, provider: "mrdoge", competitions: [] as MatchCatalogCompetition[] });
+  if (!Number.isFinite(regionId) || regionId <= 0) {
+    res.json({ sport, regionId, provider: "bet62", competitions: [] as MatchCatalogCompetition[] });
     return;
   }
 
   try {
-    const mrdoge = getMrDogeClient();
-    const { startDate, endDate } = mrDogeCatalogDateWindow(range);
-    const competitions = await mrdoge.competitions.list({
-      sports: [mrdogeSport],
-      regionIds: [regionId],
-      status: ["live", "upcoming"],
-      startDate,
-      endDate,
-      limit: 200,
-      locale: "pt-BR",
-      timezone: "Europe/Lisbon",
-    });
-
-    const normalized = [...competitions]
-      .map(
-        (competition): MatchCatalogCompetition => ({
-          id: competition.id,
-          name: competition.name,
-          regionId: competition.regionId,
-          eventCount: competition.eventCount ?? 0,
-        }),
-      )
+    const matches = _allUpcomingCache
+      .filter((match) => match.sport === sport)
+      .filter((match) => stableCatalogId(match.country || "International") === regionId);
+    const grouped = new Map<string, number>();
+    for (const match of matches) grouped.set(match.league, (grouped.get(match.league) ?? 0) + 1);
+    const normalized = [...grouped.entries()]
+      .map(([name, eventCount]): MatchCatalogCompetition => ({
+        id: stableCatalogId(`${regionId}:${name}`),
+        name,
+        regionId,
+        eventCount,
+      }))
       .sort(
         (a, b) =>
           b.eventCount - a.eventCount ||
@@ -10255,13 +10333,13 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
       );
 
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({ sport, regionId, provider: "mrdoge", competitions: normalized });
+    res.json({ sport, regionId, provider: "bet62", competitions: normalized });
   } catch (err) {
-    logger.warn({ err, sport, regionId }, "[mrdoge] catalog competitions failed");
+    logger.warn({ err, sport, regionId }, "[providers] catalog competitions failed");
     res.status(200).json({
       sport,
       regionId,
-      provider: "mrdoge",
+      provider: "bet62",
       competitions: [] as MatchCatalogCompetition[],
     });
   }
@@ -13266,11 +13344,49 @@ router.get("/top-scorers/:leagueId", async (_req: Request, res: Response) => {
   res.json({ scorers: [] });
 });
 
-router.get("/lineups/:matchId", async (_req: Request, res: Response) => {
+router.get("/lineups/:matchId", async (req: Request, res: Response) => {
+  const matchId = String(req.params["matchId"] ?? "");
+  if (!matchId.startsWith("goalapi-")) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  const id = extractProviderMatchId(matchId);
+  const raw = await getGoalFixtureResource(id, "lineups");
+  const root = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+  const data = root["data"] && typeof root["data"] === "object"
+    ? root["data"] as Record<string, unknown>
+    : root;
+  const mapSide = (value: unknown) => {
+    const side = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+    const mapPlayers = (rows: unknown) => Array.isArray(rows)
+      ? rows.map((row) => {
+          const player = row && typeof row === "object" ? row as Record<string, unknown> : {};
+          return {
+            id: String(player["playerId"] ?? player["id"] ?? ""),
+            name: String(player["lineupPlayer"] ?? player["playerName"] ?? player["name"] ?? ""),
+            number: player["lineupNumber"] ?? player["number"] ?? null,
+            position: String(player["lineupPosition"] ?? player["position"] ?? ""),
+          };
+        }).filter((player) => player.name)
+      : [];
+    return {
+      starters: mapPlayers(side["startingLineups"] ?? side["starters"]),
+      bench: mapPlayers(side["substitutes"] ?? side["bench"]),
+      formation: side["formation"] ?? null,
+    };
+  };
   res.json({
-    confirmed: false,
-    home: { starters: [], bench: [] },
-    away: { starters: [], bench: [] },
+    confirmed: data["hasLineups"] === true,
+    home: mapSide(data["home"]),
+    away: mapSide(data["away"]),
   });
 });
 

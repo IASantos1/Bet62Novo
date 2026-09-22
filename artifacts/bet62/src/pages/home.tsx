@@ -5320,12 +5320,21 @@ export default function Home({
         (m.league ?? "").toLowerCase().includes(q);
       return bySport && bySearch;
     };
+    const liveSportPriority = new Map(
+      ["football", "tennis", "basketball", "baseball", "hockey", "volleyball"].map(
+        (sport, index) => [sport, index],
+      ),
+    );
     const actualLive = liveMatches.filter(
       (m) => {
         const s = String(m.status ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
         const isFinished = /final|fin|finished|ended|complete|full.?time|after.?extra|after.?penalt|retir|abandon|cancel|award|default|ft|aet|ap/.test(s);
         return m.startsIn === undefined && !isFinished && filterBySport(m);
       },
+    ).sort(
+      (a, b) =>
+        (liveSportPriority.get(a.sport ?? "football") ?? 99) -
+        (liveSportPriority.get(b.sport ?? "football") ?? 99),
     );
     // Dedup key: match id when every source actually has a stable one,
     // team-name pair otherwise — a bare team-name key alone would silently
@@ -6387,6 +6396,10 @@ export default function Home({
     const group = normalizeAllOddsText(market.group ?? "");
     const name = normalizeAllOddsText(market.name ?? "");
     const full = `${group} ${name}`.trim();
+    if (/^(h2h|moneyline|match winner)$/.test(name)) return true;
+    if (/^totals\s*·\s*(0\.5|1\.5|2\.5|3\.5|4\.5|5\.5|6\.5)$/.test(name)) {
+      return true;
+    }
     return [
       "resultado final",
       "match result",
@@ -7989,7 +8002,17 @@ export default function Home({
       fetch("/api/matches/tennis-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setTennisOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setTennisOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  Array.isArray(item?.players) &&
+                  item.players.length >= 2 &&
+                  Array.isArray(item?.matchOdds) &&
+                  item.matchOdds.length >= 2,
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -7997,7 +8020,15 @@ export default function Home({
       fetch("/api/matches/basketball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setBasketballOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setBasketballOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -8029,7 +8060,15 @@ export default function Home({
       fetch("/api/matches/volleyball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setVolleyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setVolleyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -8037,7 +8076,15 @@ export default function Home({
       fetch("/api/matches/hockey-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setHockeyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setHockeyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9049,7 +9096,17 @@ export default function Home({
       fetch("/api/matches/tennis-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setTennisOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setTennisOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  Array.isArray(item?.players) &&
+                  item.players.length >= 2 &&
+                  Array.isArray(item?.matchOdds) &&
+                  item.matchOdds.length >= 2,
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9057,7 +9114,15 @@ export default function Home({
       fetch("/api/matches/basketball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setBasketballOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setBasketballOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9065,7 +9130,15 @@ export default function Home({
       fetch("/api/matches/hockey-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setHockeyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setHockeyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9081,7 +9154,15 @@ export default function Home({
       fetch("/api/matches/volleyball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setVolleyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setVolleyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -13374,6 +13455,7 @@ export default function Home({
     market,
     label,
     suspKey,
+    allowWrap = false,
   }: {
     match: Match;
     sel: string;
@@ -13381,6 +13463,7 @@ export default function Home({
     market: string;
     label: string;
     suspKey?: string;
+    allowWrap?: boolean;
   }) => {
     if ((match.sport ?? "football") === "tennis" && sel === "draw") return null;
     if (odd <= 0) return null; // settled/impossible market line — hide completely
@@ -13391,6 +13474,7 @@ export default function Home({
       const stripped = n
         .replace(/\s*\((Women|Women's|Women’s|Men|Men's|Men’s|U-?\d{1,2})\)\s*$/i, "")
         .trim();
+      if (allowWrap) return stripped;
       const MAX = 14;
       if (stripped.length <= MAX) return stripped;
       return stripped.slice(0, MAX - 1).trimEnd() + "…";
@@ -13409,11 +13493,11 @@ export default function Home({
       const suspensionLabel = getLiveSuspensionLabel(match);
       return (
         <div
-          className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-75 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/85" : "border-zinc-300 bg-zinc-100"}`}
-          title="Mercado suspenso"
+          className={`flex-1 flex flex-col items-center justify-center min-w-0 ${allowWrap ? "min-h-[68px] h-auto py-2 px-2" : "h-[58px] px-1"} rounded-xl border opacity-75 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/85" : "border-zinc-300 bg-zinc-100"}`}
+          title={`${cleanLabel} — Mercado suspenso`}
           aria-disabled="true"
         >
-          <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
+          <span className={`text-[10px] text-zinc-500 mb-1 leading-tight text-center w-full px-0.5 ${allowWrap ? "whitespace-normal break-words line-clamp-2" : "truncate"}`}>
             {cleanLabel}
           </span>
           <span
@@ -13447,9 +13531,10 @@ export default function Home({
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${active ? isDarkTheme ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30" : "border-red-300 bg-red-50 ring-1 ring-red-200" : isDarkTheme ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
+        className={`flex-1 flex flex-col items-center justify-center min-w-0 ${allowWrap ? "min-h-[68px] h-auto py-2 px-2" : "h-[58px] px-1"} rounded-xl border transition-all ${active ? isDarkTheme ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30" : "border-red-300 bg-red-50 ring-1 ring-red-200" : isDarkTheme ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
+        title={cleanLabel}
       >
-        <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
+        <span className={`text-[10px] text-zinc-500 mb-1 leading-tight text-center w-full px-0.5 ${allowWrap ? "whitespace-normal break-words line-clamp-2" : "truncate"}`}>
           {cleanLabel}
         </span>
         <span
@@ -14101,7 +14186,9 @@ export default function Home({
       const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
       const choiceName = normalizeAllOddsText(choice.name ?? "");
       const choiceLabel = String(choice.label ?? "").trim();
-      const lineMatch = choiceLabel.match(/(\d+(?:[.,]\d+)?)/);
+      const lineMatch =
+        choiceLabel.match(/([-+]?\d+(?:[.,]\d+)?)/) ??
+        String(market.name ?? "").match(/·\s*([-+]?\d+(?:[.,]\d+)?)/);
       const line = lineMatch?.[1]?.replace(",", ".");
       if (bucket === "gols" && /(odd\/even|odd even|impar|par)/.test(marketText)) {
         if (choiceName.includes("odd") || /^home$/i.test(choiceLabel) || /^odd$/i.test(choiceLabel)) {
@@ -14120,6 +14207,13 @@ export default function Home({
         if (/away team goals/.test(marketText) && line) return `Fora -${line}`;
         if (/home team goals/.test(marketText) && line) return `Casa -${line}`;
         return line ? `Menos ${line}` : choiceLabel.replace(/^under\b/i, "Menos");
+      }
+      if (
+        (bucket === "handicap" || bucket === "asiatico") &&
+        line &&
+        !/[-+]?\d/.test(choiceLabel)
+      ) {
+        return `${choiceLabel} (${line})`;
       }
       return choiceLabel
         .replace(/^yes\b/i, "Sim")
@@ -14183,8 +14277,7 @@ export default function Home({
       sections: typeof extraAllOddsSections,
       bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) => {
-      if (!isFootball || allOddsLoading || sections.length === 0) return null;
-      if (match.isLive && modalTab === "todos") return null;
+      if (allOddsLoading || sections.length === 0) return null;
       return (
         <div className="space-y-2">
           {sections.map((section) => {
@@ -14214,7 +14307,7 @@ export default function Home({
                     {group.items.map(({ market, originalIndex }) => (
                       <div
                         key={`all-row-${bucket}-${originalIndex}`}
-                        className="w-full flex gap-2"
+                        className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2"
                       >
                         {market.choices.map((choice, choiceIndex) => (
                           <MarketOddsBtn
@@ -14224,6 +14317,7 @@ export default function Home({
                             odd={choice.odds}
                             market={`all-${bucket}-${originalIndex}`}
                             label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
+                            allowWrap
                           />
                         ))}
                       </div>

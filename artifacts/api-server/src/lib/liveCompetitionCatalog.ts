@@ -370,6 +370,10 @@ async function ensureRuntimeState(input: SeenLiveEventInput, competitionId: numb
 
     const newState = inferEventState(input);
 
+    if (prevState?.state === newState) {
+      return;
+    }
+
     // Validate state transition
     if (!validateEventLifecycle(prevState?.state, newState)) {
       logger.warn({

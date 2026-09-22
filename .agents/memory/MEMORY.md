@@ -7,3 +7,5 @@
 - [Settlement worker startup](settlement-worker-not-started.md) — startSettlementWorker() must be called in api/index.ts; was never called before, so no bets settled automatically.
 - [Settlement Statpal-only migration](settlement-statpal-only.md) — SportsAPI Pro removed; NHL/NBA/MLB now use Statpal-native scans; standalone worker guarded by ENABLE_STANDALONE_WORKER env var.
 - [Tennis settlement fixes](tennis-settlement-fixes.md) — 4 root causes fixed: isProviderManagedMatchId missing tennis-v1, no per-set scores in finishedMatchResults, scan only hit live feed, sc1-/ses- key format details.
+- [Goal API and PropLine roles](goal-propline-provider-roles.md) — Goal owns football state/resources; PropLine owns odds and multi-sport; provider plans allow high daily volume.
+- [PropLine tennis metadata](propline-tennis-metadata.md) — tennis odds events omit tournament/circuit fields; prioritize live quality by open market depth, not league names.
