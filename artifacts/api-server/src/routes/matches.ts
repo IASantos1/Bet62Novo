@@ -2081,16 +2081,21 @@ const FOOTBALL_V2_ID_PREFIX = "football-v2-";
 const FOOTBALL_PROVIDER_CONFIG = getSportProviderConfig("football");
 const TENNIS_V2_ID_PREFIX = "tennis-v2-";
 const TENNIS_PROVIDER_CONFIG = getSportProviderConfig("tennis");
+const BASKETBALL_V2_ID_PREFIX = "basketball-v2-";
+const BASKETBALL_PROVIDER_CONFIG = getSportProviderConfig("basketball");
 const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
 const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
 const FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
 const TENNIS_V2_ALL_ODDS_TTL_MS = 20_000;
 const TENNIS_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
+const BASKETBALL_V2_ALL_ODDS_TTL_MS = 20_000;
+const BASKETBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
 const FOOTBALL_V2_PAGE_LIMIT = 30;
 const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
 const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
 const FOOTBALL_V2_UPCOMING_RETENTION_MS = 20 * 60_000;
 const TENNIS_V2_PAGE_LIMIT = 30;
+const BASKETBALL_V2_PAGE_LIMIT = 30;
 
 let footballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
   null;
@@ -2098,6 +2103,9 @@ let footballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
 let tennisV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
   null;
 let tennisV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
+let basketballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
+  null;
+let basketballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
 const footballV2AllOddsCache = new Map<
   string,
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
@@ -2111,6 +2119,14 @@ const tennisV2AllOddsCache = new Map<
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
 >();
 const tennisV2AllOddsInFlight = new Map<
+  string,
+  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
+>();
+const basketballV2AllOddsCache = new Map<
+  string,
+  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const basketballV2AllOddsInFlight = new Map<
   string,
   Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
 >();
@@ -2170,6 +2186,14 @@ function useTennisV2(): boolean {
   );
 }
 
+function useBasketballV2(): boolean {
+  return (
+    CONFIG.USE_PULSESCORE &&
+    BASKETBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
+    BASKETBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
+  );
+}
+
 function footballV2MatchId(providerId: string): string {
   return `${FOOTBALL_V2_ID_PREFIX}${providerId}`;
 }
@@ -2184,6 +2208,14 @@ function tennisV2MatchId(providerId: string): string {
 
 function isTennisV2MatchId(matchId: string): boolean {
   return String(matchId ?? "").startsWith(TENNIS_V2_ID_PREFIX);
+}
+
+function basketballV2MatchId(providerId: string): string {
+  return `${BASKETBALL_V2_ID_PREFIX}${providerId}`;
+}
+
+function isBasketballV2MatchId(matchId: string): boolean {
+  return String(matchId ?? "").startsWith(BASKETBALL_V2_ID_PREFIX);
 }
 
 function normalizeFootballToken(value: string | undefined): string {
@@ -3927,6 +3959,713 @@ function primeTennisV2AllOddsCache(
   });
 }
 
+function emptyBasketballExtras(): NonNullable<AdvancedMarkets["basketballExtra"]> {
+  return {
+    q1: { home: 0, away: 0 },
+    q2: { home: 0, away: 0 },
+    q3: { home: 0, away: 0 },
+    q4: { home: 0, away: 0 },
+    teamTotalHome: { line: 0, over: 0, under: 0 },
+    teamTotalAway: { line: 0, over: 0, under: 0 },
+    totalsRange: [],
+  };
+}
+
+function pulseScoreSelectionMatchesTokens(
+  selection: PulseScoreSelection,
+  tokens: string[],
+): boolean {
+  const selectionToken = normalizeFootballToken(
+    [
+      selection.canonicalOutcome,
+      selection.name,
+      selection.rawName,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  return tokens.some((token) => {
+    const expected = normalizeFootballToken(token);
+    if (!expected) return false;
+    if (selectionToken === expected) return true;
+    return expected.length > 2 && selectionToken.includes(expected);
+  });
+}
+
+function findPulseScoreBasketballTeamSelection(
+  market: PulseScoreMarket,
+  event: PulseScoreEvent,
+  side: "home" | "away",
+): PulseScoreSelection | null {
+  const exact = findPulseScoreSelection(
+    market,
+    side,
+    side === "home" ? "1" : "2",
+    side === "home" ? "team1" : "team2",
+    side === "home" ? "home team" : "away team",
+    side === "home" ? event.home : event.away,
+  );
+  if (exact) return exact;
+  const tokens = [
+    side,
+    side === "home" ? "1" : "2",
+    side === "home" ? "team1" : "team2",
+    side === "home" ? "home team" : "away team",
+    side === "home" ? event.home : event.away,
+  ];
+  for (const selection of pulseScoreMarketSelections(market)) {
+    if (pulseScoreSelectionMatchesTokens(selection, tokens)) return selection;
+  }
+  return null;
+}
+
+function pulseScoreBasketballScope(
+  market: PulseScoreMarket,
+): "game" | "firstHalf" | "q1" | "q2" | "q3" | "q4" {
+  const text = normalizeFootballToken(
+    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
+  );
+  if (
+    text.includes("1st quarter") ||
+    text.includes("first quarter") ||
+    text.includes("quarter 1") ||
+    text.includes("q1")
+  ) {
+    return "q1";
+  }
+  if (
+    text.includes("2nd quarter") ||
+    text.includes("second quarter") ||
+    text.includes("quarter 2") ||
+    text.includes("q2")
+  ) {
+    return "q2";
+  }
+  if (
+    text.includes("3rd quarter") ||
+    text.includes("third quarter") ||
+    text.includes("quarter 3") ||
+    text.includes("q3")
+  ) {
+    return "q3";
+  }
+  if (
+    text.includes("4th quarter") ||
+    text.includes("fourth quarter") ||
+    text.includes("quarter 4") ||
+    text.includes("q4")
+  ) {
+    return "q4";
+  }
+  if (
+    text.includes("1st half") ||
+    text.includes("first half") ||
+    text.includes("half time") ||
+    text.includes("1 half")
+  ) {
+    return "firstHalf";
+  }
+  return "game";
+}
+
+function pulseScoreBasketballMarketSide(
+  market: PulseScoreMarket,
+  event: PulseScoreEvent,
+): "home" | "away" | null {
+  const text = normalizeFootballToken(
+    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
+  );
+  const homeName = normalizeFootballToken(event.home);
+  const awayName = normalizeFootballToken(event.away);
+  if (homeName && text.includes(homeName)) return "home";
+  if (awayName && text.includes(awayName)) return "away";
+  if (
+    text.includes("home team") ||
+    text.includes("team1") ||
+    text.includes("team 1") ||
+    text.includes("home")
+  ) {
+    return "home";
+  }
+  if (
+    text.includes("away team") ||
+    text.includes("team2") ||
+    text.includes("team 2") ||
+    text.includes("visitor") ||
+    text.includes("away")
+  ) {
+    return "away";
+  }
+  return null;
+}
+
+function parseBasketballQuarterPairsFromText(text: string): Array<[number, number]> {
+  const pairs: Array<[number, number]> = [];
+  if (!text.trim()) return pairs;
+  const seen = new Map<number, [number, number]>();
+  const patterns = [
+    /(?:q|quarter)\s*([1-4])\D{0,10}(\d+)\s*[-:]\s*(\d+)/gi,
+    /([1-4])(?:st|nd|rd|th)\s*quarter\D{0,10}(\d+)\s*[-:]\s*(\d+)/gi,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const quarter = Number(match[1] ?? 0);
+      const home = Number(match[2] ?? 0);
+      const away = Number(match[3] ?? 0);
+      if (!Number.isFinite(quarter) || quarter < 1 || quarter > 4) continue;
+      if (!Number.isFinite(home) || !Number.isFinite(away)) continue;
+      seen.set(quarter, [home, away]);
+    }
+  }
+  for (let quarter = 1; quarter <= 4; quarter += 1) {
+    const pair = seen.get(quarter);
+    if (pair) pairs.push(pair);
+  }
+  return pairs;
+}
+
+function parsePulseScoreBasketballLiveExtra(
+  event: PulseScoreEvent | null | undefined,
+): {
+  quarters?: Array<[number, number]>;
+  clockStr?: string;
+  clockSec?: number;
+  clockRunning?: boolean;
+} {
+  const sources: Array<Record<string, unknown>> = [];
+  if (event?.moreInfo && typeof event.moreInfo === "object") {
+    sources.push(event.moreInfo as Record<string, unknown>);
+  }
+  if (event?.statistics && typeof event.statistics === "object") {
+    sources.push(event.statistics as Record<string, unknown>);
+  }
+  const quarters: Array<[number, number]> = [];
+  for (const source of sources) {
+    for (let quarter = 1; quarter <= 4; quarter += 1) {
+      const home = readNumericField(source, [
+        `q${quarter}Home`,
+        `q${quarter}_home`,
+        `quarter${quarter}Home`,
+        `quarter${quarter}_home`,
+        `homeQuarter${quarter}`,
+        `home_quarter_${quarter}`,
+      ]);
+      const away = readNumericField(source, [
+        `q${quarter}Away`,
+        `q${quarter}_away`,
+        `quarter${quarter}Away`,
+        `quarter${quarter}_away`,
+        `awayQuarter${quarter}`,
+        `away_quarter_${quarter}`,
+      ]);
+      if (home == null || away == null) continue;
+      quarters[quarter - 1] = [home, away];
+    }
+    if (quarters.length > 0) break;
+  }
+  if (quarters.length === 0) {
+    const textCandidates = [
+      String(event?.score?.info ?? ""),
+      ...sources.map((source) =>
+        readTextField(source, [
+          "scoreInfo",
+          "score_info",
+          "quarters",
+          "quarterScores",
+          "quarter_scores",
+          "scoreboard",
+        ]),
+      ),
+    ].filter(Boolean);
+    for (const text of textCandidates) {
+      const parsed = parseBasketballQuarterPairsFromText(text);
+      if (parsed.length > 0) {
+        quarters.push(...parsed);
+        break;
+      }
+    }
+  }
+  const minute = Number(event?.matchClock?.minute ?? NaN);
+  const second = Number(event?.matchClock?.second ?? NaN);
+  const numericClockSec =
+    Number.isFinite(minute) && Number.isFinite(second)
+      ? Math.max(0, minute * 60 + second)
+      : null;
+  const sourceClockSec =
+    sources
+      .map((source) =>
+        readNumericField(source, [
+          "clockSeconds",
+          "clock_seconds",
+          "remainingSeconds",
+          "remaining_seconds",
+          "timeRemainingSeconds",
+          "time_remaining_seconds",
+        ]),
+      )
+      .find((value) => value != null) ?? null;
+  const clockStr =
+    Number.isFinite(minute) && Number.isFinite(second)
+      ? `${String(Math.max(0, minute)).padStart(2, "0")}:${String(Math.max(0, second)).padStart(2, "0")}`
+      : sources
+          .map((source) =>
+            readTextField(source, [
+              "clock",
+              "clockDisplay",
+              "clock_display",
+              "timeRemaining",
+              "time_remaining",
+            ]),
+          )
+          .find(Boolean);
+  return {
+    ...(quarters.length > 0 ? { quarters: quarters.filter(Boolean) } : {}),
+    ...(clockStr ? { clockStr } : {}),
+    ...(numericClockSec != null || sourceClockSec != null
+      ? { clockSec: numericClockSec ?? sourceClockSec ?? undefined }
+      : {}),
+    ...(event?.live != null ? { clockRunning: !!event.live } : {}),
+  };
+}
+
+function uniqueBasketballTotalsLines(
+  lines: Array<{ line: number; over: number; under: number }>,
+): Array<{ line: number; over: number; under: number }> {
+  const seen = new Set<string>();
+  return lines.filter((entry) => {
+    const key = `${entry.line}:${entry.over}:${entry.under}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueBasketballSpreads(
+  lines: Array<{ line: number; home: number; away: number }>,
+): Array<{ line: number; home: number; away: number }> {
+  const seen = new Set<string>();
+  return lines.filter((entry) => {
+    const key = `${entry.line}:${entry.home}:${entry.away}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function pickBalancedBasketballTotal(
+  lines: Array<{ line: number; over: number; under: number }>,
+): { line: number; over: number; under: number } | null {
+  const candidates = uniqueBasketballTotalsLines(lines).filter(
+    (entry) => entry.over > 1.01 && entry.under > 1.01,
+  );
+  if (candidates.length === 0) return null;
+  return candidates.sort((a, b) => {
+    const delta = Math.abs(a.over - a.under) - Math.abs(b.over - b.under);
+    if (delta !== 0) return delta;
+    return Math.abs(a.line) - Math.abs(b.line);
+  })[0]!;
+}
+
+function pickBalancedBasketballSpread(
+  lines: Array<{ line: number; home: number; away: number }>,
+): { line: number; home: number; away: number } | null {
+  const candidates = uniqueBasketballSpreads(lines).filter(
+    (entry) => entry.home > 1.01 && entry.away > 1.01,
+  );
+  if (candidates.length === 0) return null;
+  return candidates.sort((a, b) => {
+    const delta = Math.abs(a.home - a.away) - Math.abs(b.home - b.away);
+    if (delta !== 0) return delta;
+    return Math.abs(a.line) - Math.abs(b.line);
+  })[0]!;
+}
+
+function buildPulseScoreBasketballMarkets(
+  event: PulseScoreEvent | null | undefined,
+): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
+  const moneyline = { home: 0, draw: 0, away: 0 };
+  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, unknown>;
+  const basketballExtra = emptyBasketballExtras();
+  const matchTotals: Array<{ line: number; over: number; under: number }> = [];
+  const firstHalfTotals: Array<{ line: number; over: number; under: number }> =
+    [];
+  const quarterTotals: Record<
+    "q1" | "q2" | "q3" | "q4",
+    Array<{ line: number; over: number; under: number }>
+  > = {
+    q1: [],
+    q2: [],
+    q3: [],
+    q4: [],
+  };
+  const matchSpreads: Array<{ line: number; home: number; away: number }> = [];
+  const quarterSpreads: Record<
+    "q1" | "q2" | "q3" | "q4",
+    Array<{ line: number; home: number; away: number }>
+  > = {
+    q1: [],
+    q2: [],
+    q3: [],
+    q4: [],
+  };
+  const teamTotals = {
+    home: [] as Array<{ line: number; over: number; under: number }>,
+    away: [] as Array<{ line: number; over: number; under: number }>,
+  };
+
+  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
+    if (!market || market.isActive === false) continue;
+    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+    const raw = normalizeFootballToken(market.rawName ?? "");
+    const scope = pulseScoreBasketballScope(market);
+    const overSelection = findPulseScoreSelection(market, "over");
+    const underSelection = findPulseScoreSelection(market, "under");
+    const homeSelection = event
+      ? findPulseScoreBasketballTeamSelection(market, event, "home")
+      : null;
+    const awaySelection = event
+      ? findPulseScoreBasketballTeamSelection(market, event, "away")
+      : null;
+    const line = pulseScoreSelectionLine(
+      market,
+      overSelection ?? underSelection ?? homeSelection ?? awaySelection,
+    );
+    const home = pulseScoreSelectionOdd(homeSelection);
+    const away = pulseScoreSelectionOdd(awaySelection);
+    const over = pulseScoreSelectionOdd(overSelection);
+    const under = pulseScoreSelectionOdd(underSelection);
+    const isAnyQuarter =
+      canonical.includes("any quarter") || raw.includes("any quarter");
+    const isAllQuarters =
+      canonical.includes("all quarters") || raw.includes("all quarters");
+    const isFirstPoint =
+      canonical.includes("first point") ||
+      canonical.includes("first basket") ||
+      raw.includes("first point") ||
+      raw.includes("first basket");
+    const isNextPoint =
+      canonical.includes("next point") ||
+      canonical.includes("next basket") ||
+      raw.includes("next point") ||
+      raw.includes("next basket");
+    const isNextThree =
+      canonical.includes("next three") ||
+      canonical.includes("three pointer") ||
+      raw.includes("next three") ||
+      raw.includes("next 3");
+    const isTeamTotal =
+      canonical.includes("team total") ||
+      raw.includes("team total") ||
+      raw.includes("team points");
+    const isSpread =
+      canonical.includes("spread") ||
+      canonical.includes("handicap") ||
+      raw.includes("spread") ||
+      raw.includes("handicap");
+    const isTotal =
+      !isSpread &&
+      (canonical.includes("over under") ||
+        canonical.includes("total") ||
+        raw.includes("over under") ||
+        raw.includes("total")) &&
+      !isTeamTotal;
+
+    if (isAnyQuarter && home > 1.01 && away > 1.01) {
+      basketballExtra.anyQuarter = { home, away };
+      continue;
+    }
+    if (isAllQuarters && home > 1.01 && away > 1.01) {
+      basketballExtra.allQuarters = { home, away };
+      continue;
+    }
+    if (isFirstPoint && home > 1.01 && away > 1.01) {
+      basketballExtra.firstPoint = { home, away };
+      continue;
+    }
+    if (isNextPoint && home > 1.01 && away > 1.01) {
+      basketballExtra.nextPoint = { home, away };
+      continue;
+    }
+    if (isNextThree && home > 1.01 && away > 1.01) {
+      basketballExtra.nextThree = { home, away };
+      continue;
+    }
+    if (isTeamTotal && line != null && over > 1.01 && under > 1.01) {
+      const side = event ? pulseScoreBasketballMarketSide(market, event) : null;
+      if (side) teamTotals[side].push({ line, over, under });
+      continue;
+    }
+    if (isSpread && line != null && home > 1.01 && away > 1.01) {
+      const candidate = { line, home, away };
+      if (scope === "q1" || scope === "q2" || scope === "q3" || scope === "q4") {
+        quarterSpreads[scope].push(candidate);
+      } else if (scope === "game") {
+        matchSpreads.push(candidate);
+      }
+      continue;
+    }
+    if (isTotal && line != null && over > 1.01 && under > 1.01) {
+      const candidate = { line, over, under };
+      if (scope === "firstHalf") {
+        firstHalfTotals.push(candidate);
+      } else if (scope === "q1" || scope === "q2" || scope === "q3" || scope === "q4") {
+        quarterTotals[scope].push(candidate);
+      } else {
+        matchTotals.push(candidate);
+      }
+      continue;
+    }
+    if (home <= 1.01 || away <= 1.01) continue;
+    if (scope === "firstHalf") {
+      markets.halfTime = { home, draw: 0, away };
+      basketballExtra.firstHalf = { home, away };
+      continue;
+    }
+    if (scope === "q1") {
+      basketballExtra.q1 = { home, away };
+      continue;
+    }
+    if (scope === "q2") {
+      basketballExtra.q2 = { home, away };
+      continue;
+    }
+    if (scope === "q3") {
+      basketballExtra.q3 = { home, away };
+      continue;
+    }
+    if (scope === "q4") {
+      basketballExtra.q4 = { home, away };
+      continue;
+    }
+    const looksLikeMoneyline =
+      canonical.includes("moneyline") ||
+      canonical.includes("match winner") ||
+      canonical.includes("winner") ||
+      canonical.includes("result") ||
+      raw.includes("moneyline") ||
+      raw.includes("winner") ||
+      raw.includes("result");
+    if (looksLikeMoneyline || (moneyline.home === 0 && moneyline.away === 0)) {
+      moneyline.home = home;
+      moneyline.away = away;
+    }
+  }
+
+  const mainTotal = pickBalancedBasketballTotal(matchTotals);
+  if (mainTotal) {
+    markets.totalGoals.over25 = mainTotal.over;
+    markets.totalGoals.under25 = mainTotal.under;
+    markets._total = mainTotal.line;
+  }
+  basketballExtra.totalsRange = uniqueBasketballTotalsLines(matchTotals);
+
+  const firstHalfTotal = pickBalancedBasketballTotal(firstHalfTotals);
+  if (firstHalfTotal) {
+    markets.firstHalfTotal = firstHalfTotal;
+    markets.totalGoals.over15 = firstHalfTotal.over;
+    markets.totalGoals.under15 = firstHalfTotal.under;
+    markets._total1H = firstHalfTotal.line;
+    basketballExtra.firstHalfTotal = firstHalfTotal;
+  }
+
+  const mainSpread = pickBalancedBasketballSpread(matchSpreads);
+  if (mainSpread) {
+    markets.handicap.homeMinusOne = mainSpread.home;
+    markets.handicap.awayPlusOne = mainSpread.away;
+    markets._spread = mainSpread.line;
+    markets._spreadLine = mainSpread.line;
+  }
+
+  const q1Total = pickBalancedBasketballTotal(quarterTotals.q1);
+  if (q1Total) basketballExtra.q1Total = q1Total;
+  const q2Total = pickBalancedBasketballTotal(quarterTotals.q2);
+  if (q2Total) basketballExtra.q2Total = q2Total;
+  const q3Total = pickBalancedBasketballTotal(quarterTotals.q3);
+  if (q3Total) basketballExtra.q3Total = q3Total;
+  const q4Total = pickBalancedBasketballTotal(quarterTotals.q4);
+  if (q4Total) basketballExtra.q4Total = q4Total;
+
+  const q1Spread = pickBalancedBasketballSpread(quarterSpreads.q1);
+  if (q1Spread) basketballExtra.q1Spread = q1Spread;
+  const q2Spread = pickBalancedBasketballSpread(quarterSpreads.q2);
+  if (q2Spread) basketballExtra.q2Spread = q2Spread;
+  const q3Spread = pickBalancedBasketballSpread(quarterSpreads.q3);
+  if (q3Spread) basketballExtra.q3Spread = q3Spread;
+  const q4Spread = pickBalancedBasketballSpread(quarterSpreads.q4);
+  if (q4Spread) basketballExtra.q4Spread = q4Spread;
+
+  const homeTeamTotal = pickBalancedBasketballTotal(teamTotals.home);
+  if (homeTeamTotal) basketballExtra.teamTotalHome = homeTeamTotal;
+  const awayTeamTotal = pickBalancedBasketballTotal(teamTotals.away);
+  if (awayTeamTotal) basketballExtra.teamTotalAway = awayTeamTotal;
+
+  markets.basketballExtra = basketballExtra;
+  return { odds: moneyline, markets: markets as AdvancedMarkets };
+}
+
+function pulseScoreBasketballAllOddsGroup(market: PulseScoreMarket): string {
+  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+  const raw = normalizeFootballToken(market.rawName ?? "");
+  const period = normalizeFootballToken(market.period ?? "");
+  if (
+    period.includes("quarter") ||
+    period.includes("half") ||
+    raw.includes("quarter") ||
+    raw.includes("half")
+  ) {
+    return "Períodos";
+  }
+  if (
+    canonical.includes("team total") ||
+    raw.includes("team total") ||
+    raw.includes("team points")
+  ) {
+    return "Equipas";
+  }
+  if (
+    canonical.includes("spread") ||
+    canonical.includes("handicap") ||
+    raw.includes("spread") ||
+    raw.includes("handicap")
+  ) {
+    return "Handicap";
+  }
+  if (
+    canonical.includes("total") ||
+    canonical.includes("over under") ||
+    raw.includes("total") ||
+    raw.includes("over under")
+  ) {
+    return "Totais";
+  }
+  if (
+    raw.includes("first basket") ||
+    raw.includes("next basket") ||
+    raw.includes("any quarter") ||
+    raw.includes("all quarters")
+  ) {
+    return "Especiais";
+  }
+  return "Principal";
+}
+
+function buildBasketballV2AllOddsMarkets(
+  event: PulseScoreEvent | null | undefined,
+): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  return (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => {
+      const choices = pulseScoreMarketSelections(market).map((selection) => ({
+        name: String(
+          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
+        ).trim(),
+        label: pulseScoreSelectionLabel(market, selection),
+        odds: pulseScoreSelectionOdd(selection),
+      }));
+      if (choices.length === 0) return null;
+      const line = pulseScoreSelectionLine(
+        market,
+        pulseScoreMarketSelections(market)[0] ?? null,
+      );
+      const rawName = String(
+        market.rawName ?? market.canonicalMarket ?? "Mercado",
+      ).trim();
+      return {
+        name:
+          line != null && !rawName.includes(String(line))
+            ? `${rawName} ${formatPulseScoreLine(line)}`
+            : rawName,
+        group: pulseScoreBasketballAllOddsGroup(market),
+        choices,
+      };
+    })
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+}
+
+function primeBasketballV2AllOddsCache(
+  eventId: string | number | undefined,
+  event: PulseScoreEvent | null | undefined,
+): void {
+  const normalizedId = String(eventId ?? "").trim();
+  if (!normalizedId || !event) return;
+  const markets = buildBasketballV2AllOddsMarkets(event);
+  if (markets.length === 0) return;
+  basketballV2AllOddsCache.set(normalizedId, {
+    builtAt: Date.now(),
+    markets,
+  });
+}
+
+function buildBasketballMatchFromPulseScore(
+  event: PulseScoreEvent,
+  kind: "upcoming" | "live",
+): UpcomingMatch | LiveMatchState | null {
+  const providerId = String(event.eventId ?? "").trim();
+  if (!providerId) return null;
+  const eventData = buildPulseScoreBasketballMarkets(event);
+  const moneyline =
+    eventData.odds.home > 1.01 && eventData.odds.away > 1.01
+      ? { home: eventData.odds.home, away: eventData.odds.away }
+      : null;
+  const pHome = mrDogeNoVigHomeProb(moneyline);
+  const fallbackOdds = moneyline ?? mrDogeTwoWayOddsFromProb(pHome);
+  const { country, league } = splitPulseScoreLeague(event.league, event.country);
+  const { date, time } = toLisbonDateTime(event.startTime);
+  if (kind === "upcoming") {
+    return {
+      id: basketballV2MatchId(providerId),
+      home: String(event.home ?? "").trim(),
+      away: String(event.away ?? "").trim(),
+      league: String(league ?? "").trim(),
+      country: String(country ?? "").trim(),
+      date,
+      time,
+      sport: "basketball",
+      hasRealOdds: !!moneyline,
+      odds: {
+        home: fallbackOdds.home,
+        draw: 0,
+        away: fallbackOdds.away,
+      },
+      markets: eventData.markets,
+    };
+  }
+  const liveExtra = parsePulseScoreBasketballLiveExtra(event);
+  return {
+    id: basketballV2MatchId(providerId),
+    home: String(event.home ?? "").trim(),
+    away: String(event.away ?? "").trim(),
+    league: String(league ?? "").trim(),
+    country: String(country ?? "").trim(),
+    sport: "basketball",
+    homeScore: Number(event.score?.home ?? 0) || 0,
+    awayScore: Number(event.score?.away ?? 0) || 0,
+    minute: 0,
+    status:
+      String(event.matchClock?.period ?? event.score?.info ?? "").trim() ||
+      "LIVE",
+    hasRealOdds: !!moneyline,
+    odds: {
+      home: fallbackOdds.home,
+      draw: 0,
+      away: fallbackOdds.away,
+    },
+    markets: eventData.markets,
+    events: [],
+    date,
+    time,
+    _liveExtra: liveExtra,
+  };
+}
+
 function buildTennisMatchFromPulseScore(
   event: PulseScoreEvent,
   kind: "upcoming" | "live",
@@ -4030,6 +4769,11 @@ async function loadPulseScoreEventsForSport(
         primeTennisV2AllOddsCache(event.eventId, event);
       }
     }
+    if (sport === "basketball") {
+      for (const event of batch) {
+        primeBasketballV2AllOddsCache(event.eventId, event);
+      }
+    }
     events.push(...batch);
     if (!response.hasNextPage || batch.length === 0) break;
     page += 1;
@@ -4048,6 +4792,28 @@ async function buildTennisLiveFromV2(): Promise<LiveMatchState[]> {
   const events = await loadPulseScoreEventsForSport("tennis", "live");
   return events
     .map((event) => buildTennisMatchFromPulseScore(event, "live"))
+    .filter(Boolean) as LiveMatchState[];
+}
+
+async function buildBasketballUpcomingFromV2(): Promise<UpcomingMatch[]> {
+  const events = await loadPulseScoreEventsForSport(
+    "basketball",
+    "upcoming",
+    BASKETBALL_V2_PAGE_LIMIT,
+  );
+  return events
+    .map((event) => buildBasketballMatchFromPulseScore(event, "upcoming"))
+    .filter(Boolean) as UpcomingMatch[];
+}
+
+async function buildBasketballLiveFromV2(): Promise<LiveMatchState[]> {
+  const events = await loadPulseScoreEventsForSport(
+    "basketball",
+    "live",
+    BASKETBALL_V2_PAGE_LIMIT,
+  );
+  return events
+    .map((event) => buildBasketballMatchFromPulseScore(event, "live"))
     .filter(Boolean) as LiveMatchState[];
 }
 
@@ -4071,6 +4837,28 @@ async function getTennisV2LiveCached(
       tennisV2LiveInFlight = null;
     });
   return tennisV2LiveInFlight;
+}
+
+async function getBasketballV2LiveCached(
+  forceFresh = false,
+): Promise<LiveMatchState[]> {
+  if (
+    !forceFresh &&
+    basketballV2LiveCache &&
+    Date.now() - basketballV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
+  ) {
+    return basketballV2LiveCache.matches;
+  }
+  if (!forceFresh && basketballV2LiveInFlight) return basketballV2LiveInFlight;
+  basketballV2LiveInFlight = buildBasketballLiveFromV2()
+    .then((matches) => {
+      basketballV2LiveCache = { builtAt: Date.now(), matches };
+      return matches;
+    })
+    .finally(() => {
+      basketballV2LiveInFlight = null;
+    });
+  return basketballV2LiveInFlight;
 }
 
 async function getTennisV2AllOdds(
@@ -4123,6 +4911,65 @@ async function getTennisV2AllOdds(
     }
   })();
   tennisV2AllOddsInFlight.set(eventId, request);
+  return request;
+}
+
+async function getBasketballV2AllOdds(
+  eventId: string,
+): Promise<
+  Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>
+> {
+  const now = Date.now();
+  const cached = basketballV2AllOddsCache.get(eventId);
+  if (cached && now - cached.builtAt < BASKETBALL_V2_ALL_ODDS_TTL_MS) {
+    return cached.markets;
+  }
+  const existingRequest = basketballV2AllOddsInFlight.get(eventId);
+  if (existingRequest) return existingRequest;
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) {
+    return cached?.markets ?? [];
+  }
+  const request = (async () => {
+    try {
+      const liveEvent = await client.getLiveEventById(
+        BASKETBALL_PROVIDER_CONFIG.bookmaker,
+        eventId,
+      );
+      const prematchEvent =
+        liveEvent ??
+        (await client.getEventById(
+          BASKETBALL_PROVIDER_CONFIG.bookmaker,
+          BASKETBALL_PROVIDER_CONFIG.pulseScoreSport,
+          eventId,
+        ));
+      const markets = buildBasketballV2AllOddsMarkets(prematchEvent);
+      basketballV2AllOddsCache.set(eventId, {
+        builtAt: Date.now(),
+        markets,
+      });
+      return markets;
+    } catch (err) {
+      if (
+        cached &&
+        now - cached.builtAt < BASKETBALL_V2_ALL_ODDS_STALE_TTL_MS
+      ) {
+        logger.warn(
+          { err, eventId },
+          "[basketball-v2] all-odds fetch failed — serving stale cache",
+        );
+        return cached.markets;
+      }
+      throw err;
+    } finally {
+      basketballV2AllOddsInFlight.delete(eventId);
+    }
+  })();
+  basketballV2AllOddsInFlight.set(eventId, request);
   return request;
 }
 
@@ -10854,6 +11701,12 @@ async function rebuildUpcomingCache(): Promise<void> {
     let basketball: UpcomingMatch[] = [];
     try {
       const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+      if (useBasketballV2()) {
+        candidates.push({
+          provider: "v2",
+          matches: await buildBasketballUpcomingFromV2(),
+        });
+      }
       if (CONFIG.MRDOGE_API_KEY) {
         candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
       }
@@ -11012,6 +11865,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // hockey, baseball, and volleyball's real live source again as of the
   // same day.
   const basketballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+  if (useBasketballV2()) {
+    basketballCandidates.push({
+      provider: "v2",
+      matches: await getBasketballV2LiveCached(),
+    });
+  }
   if (CONFIG.MRDOGE_API_KEY) {
     basketballCandidates.push({ provider: "mrdoge", matches: await buildBasketballLiveFromMrDoge() });
   }
@@ -11964,7 +12823,7 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "football").toLowerCase();
   if (
     !id ||
-    !["football", "soccer", "tennis"].includes(sport)
+    !["football", "soccer", "tennis", "basketball"].includes(sport)
   ) {
     res.json({ markets: [] });
     return;
@@ -11990,6 +12849,24 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
       return;
     } catch (err) {
       logger.warn({ err, id, sport }, "[tennis-v2] all-odds fetch failed");
+      res.status(503).json({
+        markets: [],
+        error: "pulsescore_odds_temporarily_unavailable",
+      });
+      return;
+    }
+  }
+
+  if (
+    isBasketballV2MatchId(rawRouteId) &&
+    useBasketballV2() &&
+    sport === "basketball"
+  ) {
+    try {
+      res.json({ markets: await getBasketballV2AllOdds(id) });
+      return;
+    } catch (err) {
+      logger.warn({ err, id, sport }, "[basketball-v2] all-odds fetch failed");
       res.status(503).json({
         markets: [],
         error: "pulsescore_odds_temporarily_unavailable",
@@ -12297,6 +13174,12 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let basketball: UpcomingMatch[] = [];
   try {
     const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (useBasketballV2()) {
+      candidates.push({
+        provider: "v2",
+        matches: await buildBasketballUpcomingFromV2(),
+      });
+    }
     if (CONFIG.MRDOGE_API_KEY) {
       candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
     }
