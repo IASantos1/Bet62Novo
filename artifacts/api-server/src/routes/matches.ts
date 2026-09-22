@@ -56,8 +56,6 @@ import {
   buildMrDogeTimelineEvents,
   extractMrDogeTennisLiveExtra,
   extractMrDogeBasketballLiveExtra,
-  extractMrDogeIceHockeyLiveExtra,
-  extractMrDogeBaseballLiveExtra,
   extractMrDogeVolleyballLiveExtra,
 } from "../services/mrdoge/common.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
@@ -2226,9 +2224,13 @@ function useFootballV2Live(): boolean {
   return useFootballV2Odds() && useFootballV2State();
 }
 
+function isPulseScoreAvailable(): boolean {
+  return CONFIG.USE_PULSESCORE || getPulseScoreClient().isConfigured();
+}
+
 function useTennisV2(): boolean {
   return (
-    CONFIG.USE_PULSESCORE &&
+    isPulseScoreAvailable() &&
     TENNIS_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
     TENNIS_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
   );
@@ -2236,7 +2238,7 @@ function useTennisV2(): boolean {
 
 function useBasketballV2(): boolean {
   return (
-    CONFIG.USE_PULSESCORE &&
+    isPulseScoreAvailable() &&
     BASKETBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
     BASKETBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
   );
@@ -2244,7 +2246,7 @@ function useBasketballV2(): boolean {
 
 function useHockeyV2(): boolean {
   return (
-    CONFIG.USE_PULSESCORE &&
+    isPulseScoreAvailable() &&
     HOCKEY_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
     HOCKEY_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
   );
@@ -2252,7 +2254,7 @@ function useHockeyV2(): boolean {
 
 function useBaseballV2(): boolean {
   return (
-    CONFIG.USE_PULSESCORE &&
+    isPulseScoreAvailable() &&
     BASEBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
     BASEBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
   );
@@ -2260,7 +2262,7 @@ function useBaseballV2(): boolean {
 
 function useVolleyballV2(): boolean {
   return (
-    CONFIG.USE_PULSESCORE &&
+    isPulseScoreAvailable() &&
     VOLLEYBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
     VOLLEYBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
   );
@@ -6064,7 +6066,7 @@ async function loadPulseScoreEventsForSport(
   limit = TENNIS_V2_PAGE_LIMIT,
 ): Promise<PulseScoreEvent[]> {
   const providerConfig = getSportProviderConfig(sport);
-  if (!CONFIG.USE_PULSESCORE) return [];
+  if (!isPulseScoreAvailable()) return [];
   const client = getPulseScoreClient();
   if (!client.isConfigured()) return [];
   const events: PulseScoreEvent[] = [];
@@ -13027,11 +13029,8 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
 
 const buildTennisUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("tennis", "tennis");
 const buildBasketballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("basketball", "basketball");
-const buildHockeyUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("hockey", "ice_hockey");
-const buildBaseballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("baseball", "baseball");
-const buildVolleyballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("volleyball", "volleyball");
 
-/** Shared live-match shell for the 5 sports above — each caller does its own
+/** Shared live-match shell for the active MrDoge live sports below — each caller does its own
  * `m.stats?.sport === "..."` narrowing (same pattern as football) and hands
  * back just the score/status/extras that differ per sport. */
 function buildMrDogeLiveMatches(
@@ -13093,45 +13092,6 @@ async function buildBasketballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       awayScore: stats?.awayScore ?? 0,
       status: mrDogeGenericStatus(stats?.clock),
       liveExtra: extractMrDogeBasketballLiveExtra(stats),
-    };
-  });
-}
-
-async function buildHockeyLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("hockey", "ice_hockey", (m) => {
-    const stats = m.stats?.sport === "ice_hockey" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeIceHockeyLiveExtra(stats),
-    };
-  });
-}
-
-async function buildBaseballLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("baseball", "baseball", (m) => {
-    const stats = m.stats?.sport === "baseball" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeBaseballLiveExtra(stats),
-    };
-  });
-}
-
-async function buildVolleyballLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("volleyball", "volleyball", (m) => {
-    const stats = m.stats?.sport === "volleyball" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeVolleyballLiveExtra(stats),
     };
   });
 }
