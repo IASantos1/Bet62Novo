@@ -14,9 +14,16 @@ export type GoalApiFixture = {
   league_id?: string | number;
   league_name?: string;
   country_name?: string;
+  home_team_id?: string | number;
+  away_team_id?: string | number;
   home_team_name?: string;
   away_team_name?: string;
   status?: string;
+  match_status?: string;
+  match_live?: string | number | boolean;
+  matchDate?: string;
+  matchTime?: string;
+  kickoffUtc?: string;
   start_time?: string;
   score?: {
     home?: number | string;

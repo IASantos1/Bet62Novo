@@ -39,8 +39,10 @@ export type PulseScoreSport =
 export type PulseScoreSelection = {
   selectionId?: string;
   canonicalOutcome?: string;
+  name?: string;
   rawName: string;
   odds?: number;
+  line?: number | string | null;
   isActive?: boolean;
 };
 
@@ -85,6 +87,11 @@ export type PulseScoreListResponse = {
   limit?: number;
   totalPages?: number;
   hasNextPage?: boolean;
+  hasPrevPage?: boolean;
   sport?: string;
   events?: PulseScoreEvent[];
+};
+
+export type PulseScoreItemResponse<T> = {
+  data?: T | null;
 };

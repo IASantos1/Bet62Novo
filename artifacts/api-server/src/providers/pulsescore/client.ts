@@ -3,6 +3,7 @@ import { logger } from "../../lib/logger.js";
 import type {
   PulseScoreBookmaker,
   PulseScoreEvent,
+  PulseScoreItemResponse,
   PulseScoreListResponse,
   PulseScoreSport,
 } from "./schema.js";
@@ -43,6 +44,15 @@ export class PulseScoreClient {
     sport: PulseScoreSport,
     options: PulseScoreRequestOptions = {},
   ): Promise<PulseScoreEvent[]> {
+    const data = await this.listPrematchEventsPage(bookmaker, sport, options);
+    return Array.isArray(data?.events) ? data.events : [];
+  }
+
+  async listPrematchEventsPage(
+    bookmaker: PulseScoreBookmaker,
+    sport: PulseScoreSport,
+    options: PulseScoreRequestOptions = {},
+  ): Promise<PulseScoreListResponse> {
     const data = await this.request<PulseScoreListResponse>(
       bookmaker,
       `/${sport}/events`,
@@ -53,7 +63,7 @@ export class PulseScoreClient {
         },
       },
     );
-    return Array.isArray(data?.events) ? data.events : [];
+    return data ?? {};
   }
 
   async listLiveEvents(
@@ -61,6 +71,15 @@ export class PulseScoreClient {
     sport: PulseScoreSport,
     options: PulseScoreRequestOptions = {},
   ): Promise<PulseScoreEvent[]> {
+    const data = await this.listLiveEventsPage(bookmaker, sport, options);
+    return Array.isArray(data?.events) ? data.events : [];
+  }
+
+  async listLiveEventsPage(
+    bookmaker: PulseScoreBookmaker,
+    sport: PulseScoreSport,
+    options: PulseScoreRequestOptions = {},
+  ): Promise<PulseScoreListResponse> {
     const data = await this.request<PulseScoreListResponse>(
       bookmaker,
       "/live-events",
@@ -72,7 +91,7 @@ export class PulseScoreClient {
         },
       },
     );
-    return Array.isArray(data?.events) ? data.events : [];
+    return data ?? {};
   }
 
   async getEventById(
@@ -81,12 +100,25 @@ export class PulseScoreClient {
     eventId: string,
     options: PulseScoreRequestOptions = {},
   ): Promise<PulseScoreEvent | null> {
-    const data = await this.request<PulseScoreEvent>(
+    const data = await this.request<PulseScoreItemResponse<PulseScoreEvent>>(
       bookmaker,
       `/${sport}/events/${encodeURIComponent(eventId)}`,
       options,
     );
-    return data ?? null;
+    return data?.data ?? null;
+  }
+
+  async getLiveEventById(
+    bookmaker: PulseScoreBookmaker,
+    eventId: string,
+    options: PulseScoreRequestOptions = {},
+  ): Promise<PulseScoreEvent | null> {
+    const data = await this.request<PulseScoreItemResponse<PulseScoreEvent>>(
+      bookmaker,
+      `/live-events/events/${encodeURIComponent(eventId)}`,
+      options,
+    );
+    return data?.data ?? null;
   }
 
   private async request<T>(

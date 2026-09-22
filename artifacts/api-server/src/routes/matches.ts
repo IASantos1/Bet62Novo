@@ -19,6 +19,17 @@ import type { Match, Market } from "@mrdoge/node";
 import { getMrDogeClient } from "../services/mrdoge/client.js";
 import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
+import { getGoalApiClient } from "../providers/goalApi/client.js";
+import type { GoalApiFixture } from "../providers/goalApi/schema.js";
+import { getPulseScoreClient } from "../providers/pulsescore/client.js";
+import type {
+  PulseScoreEvent,
+  PulseScoreMarket,
+  PulseScoreSelection,
+} from "../providers/pulsescore/schema.js";
+import { getSportProviderConfig } from "../sportsbook/config/providerMatrix.js";
+import { upsertGoalApiFootballFixture } from "../sportsbook/live/liveStateStore.js";
+import { mergeFootballStateWithOdds } from "../sportsbook/merge/mergeFootballStateWithOdds.js";
 import {
   MRDOGE_SPORT_BY_BET62,
   mrDogeMatchId,
@@ -2055,6 +2066,1217 @@ export function filterFootballMarketsByTier(
   out.doubleChance = { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 };
   out.bothTeamsScore = { yes: 0, no: 0 };
   return out;
+}
+
+const FOOTBALL_V2_ID_PREFIX = "football-v2-";
+const FOOTBALL_PROVIDER_CONFIG = getSportProviderConfig("football");
+const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
+const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
+const FOOTBALL_V2_PAGE_LIMIT = 30;
+const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
+
+let footballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
+  null;
+let footballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
+const footballV2AllOddsCache = new Map<
+  string,
+  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+
+const TOTAL_GOALS_LINE_FIELD_MAP: Record<
+  string,
+  [keyof AdvancedMarkets["totalGoals"], keyof AdvancedMarkets["totalGoals"]]
+> = {
+  "0.5": ["over05", "under05"],
+  "1.5": ["over15", "under15"],
+  "2.5": ["over25", "under25"],
+  "3.5": ["over35", "under35"],
+  "4.5": ["over45", "under45"],
+  "5.5": ["over55", "under55"],
+  "6.5": ["over65", "under65"],
+};
+
+const ASIAN_TOTALS_LINE_FIELD_MAP: Record<
+  string,
+  [keyof NonNullable<AdvancedMarkets["asianTotals"]>, keyof NonNullable<AdvancedMarkets["asianTotals"]>]
+> = {
+  "0.5": ["o05", "u05"],
+  "2.25": ["o225", "u225"],
+  "2.75": ["o275", "u275"],
+  "4.5": ["o45", "u45"],
+  "5.5": ["o55", "u55"],
+};
+
+function useFootballV2Odds(): boolean {
+  return (
+    CONFIG.USE_PULSESCORE &&
+    CONFIG.FOOTBALL_ODDS_PROVIDER === FOOTBALL_PROVIDER_CONFIG.oddsProvider
+  );
+}
+
+function useFootballV2State(): boolean {
+  return (
+    CONFIG.USE_GOAL_API &&
+    CONFIG.FOOTBALL_MATCH_STATE_PROVIDER ===
+      FOOTBALL_PROVIDER_CONFIG.matchStateProvider
+  );
+}
+
+function useFootballV2Live(): boolean {
+  return useFootballV2Odds() && useFootballV2State();
+}
+
+function footballV2MatchId(providerId: string): string {
+  return `${FOOTBALL_V2_ID_PREFIX}${providerId}`;
+}
+
+function isFootballV2MatchId(matchId: string): boolean {
+  return String(matchId ?? "").startsWith(FOOTBALL_V2_ID_PREFIX);
+}
+
+function normalizeFootballToken(value: string | undefined): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeFootballIdentityChunk(value: string | undefined): string {
+  return normalizeFootballToken(value).replace(/\b(fc|cf|sc|ac|cd|club)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function parseIsoMinuteBucket(value: string | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return raw.slice(0, 16);
+  return new Date(Math.round(ms / 60_000) * 60_000).toISOString().slice(0, 16);
+}
+
+function footballProviderIdentityKey(
+  home: string | undefined,
+  away: string | undefined,
+  startTime?: string,
+): string {
+  return [
+    normalizeFootballIdentityChunk(home),
+    normalizeFootballIdentityChunk(away),
+    parseIsoMinuteBucket(startTime),
+  ].join("|");
+}
+
+function footballProviderFallbackIdentityKey(
+  home: string | undefined,
+  away: string | undefined,
+): string {
+  return [
+    normalizeFootballIdentityChunk(home),
+    normalizeFootballIdentityChunk(away),
+  ].join("|");
+}
+
+function prettifyFootballStatKey(key: string): string {
+  const cleaned = String(key ?? "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function parseGoalApiBool(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes" || text === "live";
+}
+
+function goalApiFixtureKickoffIso(
+  fixture: GoalApiFixture | null | undefined,
+): string | undefined {
+  const kickoff = String(
+    fixture?.kickoffUtc ?? fixture?.start_time ?? "",
+  ).trim();
+  if (kickoff) return kickoff;
+  const matchDate = String(fixture?.matchDate ?? "").trim();
+  const matchTime = String(fixture?.matchTime ?? "").trim();
+  if (matchDate && matchTime) return `${matchDate}T${matchTime}:00.000Z`;
+  return undefined;
+}
+
+function toLisbonDateTime(isoLike: string | undefined): {
+  date: string;
+  time: string;
+} {
+  const raw = String(isoLike ?? "").trim();
+  const ms = Date.parse(raw);
+  if (!raw || !Number.isFinite(ms)) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const out: Record<string, string> = {};
+  for (const part of parts) out[part.type] = part.value;
+  return {
+    date: `${out["year"] ?? "1970"}-${out["month"] ?? "01"}-${out["day"] ?? "01"}`,
+    time: `${out["hour"] ?? "00"}:${out["minute"] ?? "00"}`,
+  };
+}
+
+function splitPulseScoreLeague(
+  leagueRaw: string | undefined,
+  countryRaw?: string,
+): { country: string; league: string } {
+  const leagueText = String(leagueRaw ?? "").trim();
+  const countryText = String(countryRaw ?? "").trim();
+  if (leagueText.includes("||")) {
+    const [country, ...rest] = leagueText.split("||");
+    return {
+      country: String(country ?? "").trim() || countryText,
+      league: rest.join("||").trim(),
+    };
+  }
+  return {
+    country: countryText,
+    league: leagueText,
+  };
+}
+
+function isGoalApiLiveStatus(statusRaw: string | undefined): boolean {
+  const text = normalizeFootballToken(statusRaw);
+  return (
+    text === "ht" ||
+    text === "live" ||
+    text.includes("1st half") ||
+    text.includes("2nd half") ||
+    text.includes("half time") ||
+    text.includes("pen") ||
+    text.includes("extra time") ||
+    /^\d{1,3}(\+\d+)?$/.test(String(statusRaw ?? "").trim())
+  );
+}
+
+function isGoalApiFinishedStatus(statusRaw: string | undefined): boolean {
+  return isFinishedVisibilityStatus(statusRaw);
+}
+
+function goalApiFixtureIsLive(fixture: GoalApiFixture): boolean {
+  return (
+    parseGoalApiBool(fixture.match_live) ||
+    isGoalApiLiveStatus(
+      String(fixture.match_status ?? fixture.status ?? "").trim(),
+    )
+  );
+}
+
+function goalApiFixtureIsUpcoming(fixture: GoalApiFixture): boolean {
+  if (goalApiFixtureIsLive(fixture)) return false;
+  const statusText = String(fixture.match_status ?? fixture.status ?? "").trim();
+  if (isGoalApiFinishedStatus(statusText)) return false;
+  const kickoffMs = Date.parse(goalApiFixtureKickoffIso(fixture) ?? "");
+  return !Number.isFinite(kickoffMs) || kickoffMs >= Date.now() - 5 * 60_000;
+}
+
+function parseFootballMinuteValue(...values: unknown[]): number {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Math.max(0, Math.round(value));
+    }
+    const text = String(value ?? "").trim();
+    if (!text) continue;
+    const match = text.match(/(\d{1,3})(?:\+\d+)?/);
+    if (match) return Math.max(0, parseInt(match[1] ?? "0", 10));
+  }
+  return 0;
+}
+
+function footballPhaseFromStatus(statusRaw: string | undefined):
+  | "1H"
+  | "2H"
+  | "HT"
+  | "FT"
+  | "ET"
+  | "PEN"
+  | undefined {
+  const text = normalizeFootballToken(statusRaw);
+  if (!text) return undefined;
+  if (text === "ht" || text.includes("half time")) return "HT";
+  if (text.includes("pen")) return "PEN";
+  if (text.includes("extra time")) return "ET";
+  if (text.includes("2nd half")) return "2H";
+  if (text.includes("1st half")) return "1H";
+  if (text === "ft" || text.includes("full time") || text.includes("final")) {
+    return "FT";
+  }
+  if (/^\d{1,2}(\+\d+)?$/.test(String(statusRaw ?? "").trim())) {
+    return parseFootballMinuteValue(statusRaw) >= 46 ? "2H" : "1H";
+  }
+  return undefined;
+}
+
+function pulseScoreSelectionLine(
+  market: PulseScoreMarket,
+  selection: PulseScoreSelection | null,
+): number | null {
+  const raw =
+    selection?.line ??
+    market.line ??
+    null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pulseScoreSelectionOdd(
+  selection: PulseScoreSelection | null | undefined,
+): number {
+  const odd = Number(selection?.odds ?? 0);
+  return Number.isFinite(odd) && odd > 1.01 ? odd : 0;
+}
+
+function pulseScoreMarketSelections(
+  market: PulseScoreMarket,
+): PulseScoreSelection[] {
+  return Array.isArray(market.selections)
+    ? market.selections.filter(
+        (selection) =>
+          selection &&
+          selection.isActive !== false &&
+          pulseScoreSelectionOdd(selection) > 0,
+      )
+    : [];
+}
+
+function pulseScoreSelectionKey(selection: PulseScoreSelection): string {
+  return normalizeFootballToken(
+    selection.canonicalOutcome ??
+      selection.name ??
+      selection.rawName,
+  );
+}
+
+function findPulseScoreSelection(
+  market: PulseScoreMarket,
+  ...keys: string[]
+): PulseScoreSelection | null {
+  const expected = new Set(keys.map((key) => normalizeFootballToken(key)));
+  for (const selection of pulseScoreMarketSelections(market)) {
+    const token = pulseScoreSelectionKey(selection);
+    if (expected.has(token)) return selection;
+  }
+  return null;
+}
+
+function formatPulseScoreLine(line: number | string | null | undefined): string {
+  const parsed = Number(line);
+  if (Number.isFinite(parsed)) {
+    return Number.isInteger(parsed) ? String(parsed) : String(parsed);
+  }
+  return String(line ?? "").trim();
+}
+
+function pulseScoreSelectionLabel(
+  market: PulseScoreMarket,
+  selection: PulseScoreSelection,
+): string {
+  const outcome = normalizeFootballToken(selection.canonicalOutcome);
+  const raw =
+    String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "").trim() ||
+    "Selection";
+  const line = pulseScoreSelectionLine(market, selection);
+  if ((outcome === "over" || outcome === "under") && line != null) {
+    return `${raw} ${formatPulseScoreLine(line)}`.trim();
+  }
+  return raw;
+}
+
+function pulseScoreAllOddsGroup(market: PulseScoreMarket): string {
+  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+  const raw = normalizeFootballToken(market.rawName ?? "");
+  const period = normalizeFootballToken(market.period ?? "");
+  if (
+    canonical.includes("correct score") ||
+    raw.includes("correct score") ||
+    raw.includes("number of goals")
+  ) {
+    return "Placar";
+  }
+  if (
+    period.includes("half") ||
+    raw.includes("1st half") ||
+    raw.includes("2nd half") ||
+    canonical.includes("half time")
+  ) {
+    return "Tempos";
+  }
+  if (raw.includes("corner")) return "Cantos";
+  if (raw.includes("card")) return "Cartões";
+  if (
+    canonical.includes("asian") ||
+    canonical.includes("handicap") ||
+    canonical.includes("draw no bet") ||
+    raw.includes("asian") ||
+    raw.includes("handicap")
+  ) {
+    return "Asiático";
+  }
+  if (
+    canonical.includes("over under") ||
+    canonical.includes("odd even") ||
+    canonical.includes("teams to score") ||
+    raw.includes("goal")
+  ) {
+    return "Golos";
+  }
+  if (
+    canonical.includes("double chance") ||
+    canonical.includes("draw no bet") ||
+    raw.includes("double chance")
+  ) {
+    return "Especiais";
+  }
+  return "Principal";
+}
+
+function mapPulseScoreMarketToAllOdds(
+  market: PulseScoreMarket,
+): {
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+} | null {
+  const choices = pulseScoreMarketSelections(market).map((selection) => ({
+    name: String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "").trim(),
+    label: pulseScoreSelectionLabel(market, selection),
+    odds: pulseScoreSelectionOdd(selection),
+  }));
+  if (choices.length === 0) return null;
+  const line = pulseScoreSelectionLine(market, choices.length > 0 ? pulseScoreMarketSelections(market)[0] ?? null : null);
+  const rawName = String(
+    market.rawName ?? market.canonicalMarket ?? "Mercado",
+  ).trim();
+  const name =
+    line != null && !rawName.includes(String(line))
+      ? `${rawName} ${formatPulseScoreLine(line)}`
+      : rawName;
+  return {
+    name,
+    group: pulseScoreAllOddsGroup(market),
+    choices,
+  };
+}
+
+function setPulseScoreTotalGoalsLine(
+  target: AdvancedMarkets["totalGoals"],
+  line: number | null,
+  over: number,
+  under: number,
+): boolean {
+  if (line == null) return false;
+  const slots = TOTAL_GOALS_LINE_FIELD_MAP[String(line)];
+  if (!slots) return false;
+  target[slots[0]] = over;
+  target[slots[1]] = under;
+  return true;
+}
+
+function setPulseScoreAsianTotalsLine(
+  target: NonNullable<AdvancedMarkets["asianTotals"]>,
+  line: number | null,
+  over: number,
+  under: number,
+): boolean {
+  if (line == null) return false;
+  const slots = ASIAN_TOTALS_LINE_FIELD_MAP[String(line)];
+  if (!slots) return false;
+  target[slots[0]] = over;
+  target[slots[1]] = under;
+  return true;
+}
+
+function setPulseScoreTeamGoalLine(
+  target: NonNullable<AdvancedMarkets["teamGoals"]>,
+  side: "home" | "away",
+  line: number | null,
+  over: number,
+  under: number,
+): boolean {
+  if (line == null) return false;
+  const suffix =
+    line === 0.5 ? "05" : line === 1.5 ? "15" : line === 2.5 ? "25" : null;
+  if (!suffix) return false;
+  target[`${side}Over${suffix}` as keyof NonNullable<AdvancedMarkets["teamGoals"]>] =
+    over;
+  target[`${side}Under${suffix}` as keyof NonNullable<AdvancedMarkets["teamGoals"]>] =
+    under;
+  return true;
+}
+
+function parsePulseScoreHtftCode(
+  selection: PulseScoreSelection,
+): keyof NonNullable<AdvancedMarkets["htft"]> | null {
+  const outcome = normalizeFootballToken(selection.canonicalOutcome);
+  const raw = normalizeFootballToken(selection.rawName);
+  const compact = outcome || raw;
+  if (compact === "home home" || compact === "1 1" || compact === "11") {
+    return "hh";
+  }
+  if (compact === "home draw" || compact === "1 x" || compact === "1x") {
+    return "hd";
+  }
+  if (compact === "home away" || compact === "1 2" || compact === "12") {
+    return "ha";
+  }
+  if (compact === "draw home" || compact === "x 1" || compact === "x1") {
+    return "dh";
+  }
+  if (compact === "draw draw" || compact === "x x" || compact === "xx") {
+    return "dd";
+  }
+  if (compact === "draw away" || compact === "x 2" || compact === "x2") {
+    return "da";
+  }
+  if (compact === "away home" || compact === "2 1" || compact === "21") {
+    return "ah";
+  }
+  if (compact === "away draw" || compact === "2 x" || compact === "2x") {
+    return "ad";
+  }
+  if (compact === "away away" || compact === "2 2" || compact === "22") {
+    return "aa";
+  }
+  return null;
+}
+
+function buildGoalApiTimelineEvents(
+  fixture: GoalApiFixture | null | undefined,
+): Array<{
+  type: string;
+  team: string;
+  minute: number;
+  player: string;
+  playerId?: string;
+  detail?: string;
+}> {
+  if (!Array.isArray(fixture?.events)) return [];
+  return fixture.events
+    .map((event) => {
+      const record =
+        event && typeof event === "object"
+          ? (event as Record<string, unknown>)
+          : null;
+      if (!record) return null;
+      const type = String(
+        record["type"] ??
+          record["event"] ??
+          record["event_type"] ??
+          "event",
+      ).trim();
+      const player = String(
+        record["player"] ??
+          record["playerName"] ??
+          record["player_name"] ??
+          "",
+      ).trim();
+      const detail = String(
+        record["detail"] ??
+          record["description"] ??
+          record["reason"] ??
+          "",
+      ).trim();
+      const minute = parseFootballMinuteValue(
+        record["minute"],
+        record["time"],
+        record["elapsed"],
+      );
+      const teamValue = String(
+        record["team"] ??
+          record["teamName"] ??
+          record["team_name"] ??
+          record["side"] ??
+          "",
+      ).trim();
+      return {
+        type: type || "event",
+        team: teamValue || "neutral",
+        minute,
+        player,
+        detail: detail || undefined,
+        playerId:
+          record["playerId"] != null
+            ? String(record["playerId"])
+            : record["player_id"] != null
+              ? String(record["player_id"])
+              : undefined,
+      };
+    })
+    .filter(Boolean) as Array<{
+    type: string;
+    team: string;
+    minute: number;
+    player: string;
+    playerId?: string;
+    detail?: string;
+  }>;
+}
+
+function buildGoalApiMatchStats(
+  fixture: GoalApiFixture | null | undefined,
+): Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> | undefined {
+  const stats =
+    fixture?.statistics && typeof fixture.statistics === "object"
+      ? (fixture.statistics as Record<string, unknown>)
+      : null;
+  if (!stats) return undefined;
+  const rows = Object.entries(stats)
+    .map(([key, value]) => {
+      if (!value || typeof value !== "object") return null;
+      const record = value as Record<string, unknown>;
+      const home =
+        record["home"] ??
+        record["homeValue"] ??
+        record["team1"] ??
+        record["value_home"];
+      const away =
+        record["away"] ??
+        record["awayValue"] ??
+        record["team2"] ??
+        record["value_away"];
+      if (home == null && away == null) return null;
+      return {
+        name: prettifyFootballStatKey(key),
+        home: String(home ?? "-"),
+        away: String(away ?? "-"),
+      };
+    })
+    .filter(Boolean) as Array<{ name: string; home: string; away: string }>;
+  return rows.length > 0 ? [{ title: "Estatísticas", rows }] : undefined;
+}
+
+function buildPulseScoreFootballMarkets(
+  event: PulseScoreEvent | null,
+): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
+  const moneyline = { home: 0, draw: 0, away: 0 };
+  const markets = zerofillAdvancedMarkets();
+  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
+    if (!market || market.isActive === false) continue;
+    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+    const raw = normalizeFootballToken(market.rawName ?? "");
+    const period = normalizeFootballToken(market.period ?? "");
+    const home = pulseScoreSelectionOdd(findPulseScoreSelection(market, "home"));
+    const draw = pulseScoreSelectionOdd(findPulseScoreSelection(market, "draw"));
+    const away = pulseScoreSelectionOdd(findPulseScoreSelection(market, "away"));
+    const yes = pulseScoreSelectionOdd(findPulseScoreSelection(market, "yes"));
+    const no = pulseScoreSelectionOdd(findPulseScoreSelection(market, "no"));
+    const odd = pulseScoreSelectionOdd(findPulseScoreSelection(market, "odd"));
+    const even = pulseScoreSelectionOdd(findPulseScoreSelection(market, "even"));
+    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
+    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
+    const line = pulseScoreSelectionLine(
+      market,
+      pulseScoreMarketSelections(market)[0] ?? null,
+    );
+
+    if (canonical === "match result") {
+      if (period.includes("first half")) {
+        markets.halfTime = { home, draw, away };
+      } else if (period.includes("second half")) {
+        markets.secondHalf = { home, draw, away };
+      } else {
+        moneyline.home = home;
+        moneyline.draw = draw;
+        moneyline.away = away;
+      }
+      continue;
+    }
+
+    if (canonical === "double chance") {
+      markets.doubleChance = {
+        homeOrDraw: pulseScoreSelectionOdd(
+          findPulseScoreSelection(market, "home draw", "1x"),
+        ),
+        awayOrDraw: pulseScoreSelectionOdd(
+          findPulseScoreSelection(market, "away draw", "x2"),
+        ),
+        homeOrAway: pulseScoreSelectionOdd(
+          findPulseScoreSelection(market, "home away", "12"),
+        ),
+      };
+      continue;
+    }
+
+    if (canonical === "both teams to score") {
+      if (period.includes("first half")) {
+        markets.btts1H = { yes, no };
+      } else if (period.includes("second half")) {
+        markets.btts2H = { yes, no };
+      } else {
+        markets.bothTeamsScore = { yes, no };
+      }
+      continue;
+    }
+
+    if (canonical === "half time full time") {
+      const htft: NonNullable<AdvancedMarkets["htft"]> = {
+        hh: 0,
+        hd: 0,
+        ha: 0,
+        dh: 0,
+        dd: 0,
+        da: 0,
+        ah: 0,
+        ad: 0,
+        aa: 0,
+      };
+      for (const selection of pulseScoreMarketSelections(market)) {
+        const code = parsePulseScoreHtftCode(selection);
+        if (!code) continue;
+        htft[code] = pulseScoreSelectionOdd(selection);
+      }
+      markets.htft = htft;
+      continue;
+    }
+
+    if (canonical === "draw no bet") {
+      markets.drawNoBet = { home, away };
+      continue;
+    }
+
+    if (canonical === "correct score") {
+      const target =
+        period.includes("first half")
+          ? (markets.htCorrectScore ??= {})
+          : period.includes("second half")
+            ? (markets.h2CorrectScore ??= {})
+            : (markets.correctScore ??= {});
+      for (const selection of pulseScoreMarketSelections(market)) {
+        const label = String(
+          selection.rawName ?? selection.name ?? "",
+        ).trim();
+        if (!label) continue;
+        target[label.replace(/\s+/g, "")] = pulseScoreSelectionOdd(selection);
+      }
+      continue;
+    }
+
+    if (
+      canonical === "odd even" ||
+      raw.includes("odd even") ||
+      raw.includes("odd/even")
+    ) {
+      markets.goalOddEven = { odd, even };
+      continue;
+    }
+
+    if (canonical === "asian handicap" || raw.includes("asian handicap")) {
+      if (raw.includes("corner")) {
+        markets.cornersHandicap = { line: line ?? 0, home, away };
+      } else {
+        markets.asianHandicap = { line: line ?? 0, home, away };
+      }
+      continue;
+    }
+
+    if (canonical === "handicap" || raw.includes("handicap")) {
+      if (draw > 0) {
+        markets.europeanHandicap = {
+          line: line ?? 0,
+          home,
+          draw,
+          away,
+        };
+      } else if (line === 1) {
+        markets.handicap = {
+          homeMinusOne: home,
+          awayPlusOne: away,
+          homeMinusOneHalf: markets.handicap.homeMinusOneHalf,
+          awayPlusOneHalf: markets.handicap.awayPlusOneHalf,
+        };
+      } else if (line === 1.5) {
+        markets.handicap = {
+          homeMinusOne: markets.handicap.homeMinusOne,
+          awayPlusOne: markets.handicap.awayPlusOne,
+          homeMinusOneHalf: home,
+          awayPlusOneHalf: away,
+        };
+      }
+      continue;
+    }
+
+    if (canonical === "next goal" || raw.includes("next goal") || raw.includes("first goal")) {
+      markets.firstGoal = {
+        home,
+        away,
+        noGoal: pulseScoreSelectionOdd(
+          findPulseScoreSelection(market, "none", "no goal", "draw"),
+        ),
+      };
+      continue;
+    }
+
+    if (
+      canonical === "team totals" ||
+      raw.includes("team goals") ||
+      raw.includes("team total") ||
+      raw.includes("home team goals") ||
+      raw.includes("away team goals")
+    ) {
+      const side: "home" | "away" | null =
+        raw.includes("home") || raw.includes("casa")
+          ? "home"
+          : raw.includes("away") || raw.includes("fora")
+            ? "away"
+            : null;
+      if (side && over > 0 && under > 0) {
+        if (raw.includes("corner")) {
+          if (side === "home") {
+            markets.homeCorners = { line: line ?? 0, over, under };
+          } else {
+            markets.awayCorners = { line: line ?? 0, over, under };
+          }
+        } else if (raw.includes("card")) {
+          if (side === "home") {
+            markets.homeCards = { line: line ?? 0, over, under };
+          } else {
+            markets.awayCards = { line: line ?? 0, over, under };
+          }
+        } else if (markets.teamGoals) {
+          setPulseScoreTeamGoalLine(markets.teamGoals, side, line, over, under);
+        }
+      }
+      continue;
+    }
+
+    if (
+      canonical === "over under" ||
+      raw.includes("over under") ||
+      raw.includes("over/under")
+    ) {
+      if (!(over > 0 && under > 0)) continue;
+      if (raw.includes("corner")) {
+        if (line === 8.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o85: over, u85: under };
+        else if (line === 9.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o95: over, u95: under };
+        else if (line === 10.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o105: over, u105: under };
+        continue;
+      }
+      if (raw.includes("card")) {
+        if (line === 3.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o35: over, u35: under };
+        else if (line === 4.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o45: over, u45: under };
+        continue;
+      }
+      if (period.includes("first half")) {
+        markets.firstHalfTotal = { line: line ?? 0, over, under };
+        markets._total1H = line ?? 0;
+        continue;
+      }
+      if (canonical.includes("asian") || raw.includes("asian")) {
+        markets.asianTotals = {
+          o05: 0,
+          u05: 0,
+          o45: 0,
+          u45: 0,
+          o55: 0,
+          u55: 0,
+          o225: 0,
+          u225: 0,
+          o275: 0,
+          u275: 0,
+          ...(markets.asianTotals ?? {}),
+        };
+        setPulseScoreAsianTotalsLine(markets.asianTotals, line, over, under);
+        continue;
+      }
+      setPulseScoreTotalGoalsLine(markets.totalGoals, line, over, under);
+    }
+  }
+  return { odds: moneyline, markets };
+}
+
+function buildFootballMatchFromProviders(
+  fixture: GoalApiFixture | null,
+  oddsEvent: PulseScoreEvent | null,
+  kind: "live" | "upcoming",
+): LiveMatchState | UpcomingMatch | null {
+  const merged = mergeFootballStateWithOdds(fixture, oddsEvent);
+  if (!merged && !fixture && !oddsEvent) return null;
+  const fallbackHome = String(
+    fixture?.home_team_name ?? oddsEvent?.home ?? "",
+  ).trim();
+  const fallbackAway = String(
+    fixture?.away_team_name ?? oddsEvent?.away ?? "",
+  ).trim();
+  if (!fallbackHome || !fallbackAway) return null;
+  const eventData = buildPulseScoreFootballMarkets(oddsEvent);
+  const providerId = String(
+    oddsEvent?.eventId ??
+      fixture?.id ??
+      footballProviderIdentityKey(
+        fallbackHome,
+        fallbackAway,
+        goalApiFixtureKickoffIso(fixture) ?? oddsEvent?.startTime,
+      ),
+  ).trim();
+  if (!providerId) return null;
+  const leagueParts = splitPulseScoreLeague(
+    merged?.league ?? oddsEvent?.league,
+    merged?.country ?? oddsEvent?.country,
+  );
+  const country = String(
+    fixture?.country_name ??
+      leagueParts.country ??
+      merged?.country ??
+      "",
+  ).trim();
+  const league = String(
+    fixture?.league_name ??
+      leagueParts.league ??
+      merged?.league ??
+      "",
+  ).trim();
+  const tier = footballMarketTier(league, country);
+  const filteredMarkets = filterFootballMarketsByTier(eventData.markets, tier);
+  const kickoffFallback = String(
+    oddsEvent?.startTime ?? merged?.startTime ?? "",
+  ).trim();
+  const kickoffIso =
+    goalApiFixtureKickoffIso(fixture) ??
+    (kickoffFallback || undefined);
+  const { date, time } = toLisbonDateTime(kickoffIso);
+  const hasRealOdds =
+    (eventData.odds.home > 1.01 &&
+      eventData.odds.draw > 1.01 &&
+      eventData.odds.away > 1.01) ||
+    hasPlayableMarketOdds(filteredMarkets);
+
+  if (kind === "upcoming") {
+    const match: UpcomingMatch = {
+      id: footballV2MatchId(providerId),
+      home: fallbackHome,
+      away: fallbackAway,
+      league,
+      country,
+      date,
+      time,
+      sport: "football",
+      hasRealOdds,
+      odds: eventData.odds,
+      markets: filteredMarkets,
+      isPriorityLeague:
+        footballCompetitionVisibilityBand(country, league) === "preferred",
+      status: String(
+        fixture?.match_status ??
+          fixture?.status ??
+          oddsEvent?.matchClock?.period ??
+          "",
+      ).trim() || undefined,
+    };
+    return match;
+  }
+
+  const statusText = String(
+    fixture?.match_status ??
+      fixture?.status ??
+      oddsEvent?.matchClock?.period ??
+      (oddsEvent?.live ? "LIVE" : ""),
+  ).trim();
+  const minute = parseFootballMinuteValue(
+    oddsEvent?.matchClock?.minute,
+    fixture?.match_status,
+    fixture?.status,
+  );
+  const liveMatch: LiveMatchState = {
+    id: footballV2MatchId(providerId),
+    home: fallbackHome,
+    away: fallbackAway,
+    league,
+    country,
+    sport: "football",
+    matchTier: tier,
+    homeScore: Number(merged?.score.home ?? fixture?.score?.home ?? oddsEvent?.score?.home ?? 0) || 0,
+    awayScore: Number(merged?.score.away ?? fixture?.score?.away ?? oddsEvent?.score?.away ?? 0) || 0,
+    minute,
+    status:
+      statusText ||
+      (fixture && goalApiFixtureIsLive(fixture) ? "LIVE" : ""),
+    hasRealOdds,
+    odds: eventData.odds,
+    markets: filteredMarkets,
+    events: buildGoalApiTimelineEvents(fixture),
+    date,
+    time,
+    matchStats: buildGoalApiMatchStats(fixture),
+    _liveExtra: {
+      phase: footballPhaseFromStatus(statusText),
+      clockSec: minute > 0 ? minute * 60 : undefined,
+      clockRunning: fixture ? goalApiFixtureIsLive(fixture) : false,
+    },
+  };
+  return liveMatch;
+}
+
+function indexGoalApiFootballFixtures(fixtures: GoalApiFixture[]): {
+  byIdentity: Map<string, GoalApiFixture>;
+  byFallback: Map<string, GoalApiFixture>;
+  pairedIds: Set<string>;
+} {
+  const byIdentity = new Map<string, GoalApiFixture>();
+  const byFallback = new Map<string, GoalApiFixture>();
+  for (const fixture of fixtures) {
+    const identity = footballProviderIdentityKey(
+      fixture.home_team_name,
+      fixture.away_team_name,
+      goalApiFixtureKickoffIso(fixture),
+    );
+    const fallback = footballProviderFallbackIdentityKey(
+      fixture.home_team_name,
+      fixture.away_team_name,
+    );
+    if (identity && !byIdentity.has(identity)) byIdentity.set(identity, fixture);
+    if (fallback && !byFallback.has(fallback)) byFallback.set(fallback, fixture);
+  }
+  return { byIdentity, byFallback, pairedIds: new Set<string>() };
+}
+
+function getGoalApiFixtureForPulseScoreEvent(
+  indexes: ReturnType<typeof indexGoalApiFootballFixtures>,
+  oddsEvent: PulseScoreEvent,
+): GoalApiFixture | null {
+  const exactKey = footballProviderIdentityKey(
+    oddsEvent.home,
+    oddsEvent.away,
+    oddsEvent.startTime,
+  );
+  const fallbackKey = footballProviderFallbackIdentityKey(
+    oddsEvent.home,
+    oddsEvent.away,
+  );
+  const exact = indexes.byIdentity.get(exactKey) ?? null;
+  if (exact) {
+    indexes.pairedIds.add(String(exact.id));
+    return exact;
+  }
+  const fallback = indexes.byFallback.get(fallbackKey) ?? null;
+  if (fallback) {
+    indexes.pairedIds.add(String(fallback.id));
+    return fallback;
+  }
+  return null;
+}
+
+async function loadPulseScoreFootballPrematchEvents(): Promise<PulseScoreEvent[]> {
+  if (!useFootballV2Odds()) return [];
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) return [];
+  const events: PulseScoreEvent[] = [];
+  let page = 1;
+  while (page <= 50) {
+    const response = await client.listPrematchEventsPage(
+      FOOTBALL_PROVIDER_CONFIG.bookmaker,
+      FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
+      { query: { page, limit: FOOTBALL_V2_PAGE_LIMIT } },
+    );
+    const batch = Array.isArray(response.events) ? response.events : [];
+    events.push(...batch);
+    if (!response.hasNextPage || batch.length === 0) break;
+    page += 1;
+  }
+  return events;
+}
+
+async function loadPulseScoreFootballLiveEvents(): Promise<PulseScoreEvent[]> {
+  if (!useFootballV2Odds()) return [];
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) return [];
+  const events: PulseScoreEvent[] = [];
+  let page = 1;
+  while (page <= 20) {
+    const response = await client.listLiveEventsPage(
+      FOOTBALL_PROVIDER_CONFIG.bookmaker,
+      FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
+      { query: { page, limit: FOOTBALL_V2_PAGE_LIMIT } },
+    );
+    const batch = Array.isArray(response.events) ? response.events : [];
+    events.push(...batch);
+    if (!response.hasNextPage || batch.length === 0) break;
+    page += 1;
+  }
+  return events;
+}
+
+function listIsoDatesInclusive(endDate: string): string[] {
+  const dates: string[] = [];
+  const start = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    return dates;
+  }
+  for (
+    let cursor = start.getTime();
+    cursor <= end.getTime();
+    cursor += 24 * 60 * 60 * 1000
+  ) {
+    dates.push(new Date(cursor).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+async function loadGoalApiFootballFixturesInWindow(
+  endDate: string,
+): Promise<GoalApiFixture[]> {
+  if (!useFootballV2State()) return [];
+  const client = getGoalApiClient();
+  if (!client.isConfigured()) return [];
+  const dates = listIsoDatesInclusive(endDate);
+  const fixtures: GoalApiFixture[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < dates.length; i += FOOTBALL_V2_GOAL_DATE_BATCH) {
+    const batch = dates.slice(i, i + FOOTBALL_V2_GOAL_DATE_BATCH);
+    const settled = await Promise.allSettled(
+      batch.map((date) => client.listFixturesByDate(date)),
+    );
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      for (const fixture of result.value) {
+        const id = String(fixture.id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        upsertGoalApiFootballFixture(fixture);
+        fixtures.push(fixture);
+      }
+    }
+  }
+  return fixtures;
+}
+
+async function loadGoalApiLiveFootballFixtures(): Promise<GoalApiFixture[]> {
+  if (!useFootballV2State()) return [];
+  const client = getGoalApiClient();
+  if (!client.isConfigured()) return [];
+  const fixtures = await client.listLiveFixtures();
+  for (const fixture of fixtures) upsertGoalApiFootballFixture(fixture);
+  return fixtures;
+}
+
+async function buildFootballUpcomingFromV2(): Promise<UpcomingMatch[]> {
+  const [fixtures, oddsEvents] = await Promise.all([
+    loadGoalApiFootballFixturesInWindow(getUpcomingFetchEndDate()),
+    loadPulseScoreFootballPrematchEvents(),
+  ]);
+  const indexes = indexGoalApiFootballFixtures(
+    fixtures.filter((fixture) => goalApiFixtureIsUpcoming(fixture)),
+  );
+  const matches = oddsEvents
+    .map((oddsEvent) =>
+      buildFootballMatchFromProviders(
+        getGoalApiFixtureForPulseScoreEvent(indexes, oddsEvent),
+        oddsEvent,
+        "upcoming",
+      ),
+    )
+    .filter(Boolean) as UpcomingMatch[];
+  return matches
+    .filter(
+      (match) =>
+        footballCompetitionVisibilityBand(match.country, match.league) !==
+        "blocked",
+    )
+    .sort((a, b) => {
+      const aMs = parseUpcomingKickoffMs(a) ?? Number.MAX_SAFE_INTEGER;
+      const bMs = parseUpcomingKickoffMs(b) ?? Number.MAX_SAFE_INTEGER;
+      return aMs - bMs;
+    });
+}
+
+async function buildFootballLiveFromV2(): Promise<LiveMatchState[]> {
+  const [fixtures, oddsEvents] = await Promise.all([
+    loadGoalApiLiveFootballFixtures(),
+    loadPulseScoreFootballLiveEvents(),
+  ]);
+  const indexes = indexGoalApiFootballFixtures(fixtures);
+  const fromOdds = oddsEvents
+    .map((oddsEvent) =>
+      buildFootballMatchFromProviders(
+        getGoalApiFixtureForPulseScoreEvent(indexes, oddsEvent),
+        oddsEvent,
+        "live",
+      ),
+    )
+    .filter(Boolean) as LiveMatchState[];
+  const fixtureOnly = fixtures
+    .filter((fixture) => !indexes.pairedIds.has(String(fixture.id)))
+    .map((fixture) =>
+      buildFootballMatchFromProviders(fixture, null, "live"),
+    )
+    .filter(Boolean) as LiveMatchState[];
+  return [...fromOdds, ...fixtureOnly].filter(
+    (match) =>
+      footballCompetitionVisibilityBand(match.country, match.league) !==
+      "blocked",
+  );
+}
+
+async function getFootballV2LiveCached(
+  forceFresh = false,
+): Promise<LiveMatchState[]> {
+  if (
+    !forceFresh &&
+    footballV2LiveCache &&
+    Date.now() - footballV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
+  ) {
+    return footballV2LiveCache.matches;
+  }
+  if (!forceFresh && footballV2LiveInFlight) return footballV2LiveInFlight;
+  footballV2LiveInFlight = buildFootballLiveFromV2()
+    .then((matches) => {
+      footballV2LiveCache = { builtAt: Date.now(), matches };
+      return matches;
+    })
+    .finally(() => {
+      footballV2LiveInFlight = null;
+    });
+  return footballV2LiveInFlight;
+}
+
+async function getFootballV2AllOdds(
+  eventId: string,
+): Promise<
+  Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>
+> {
+  const cached = footballV2AllOddsCache.get(eventId);
+  if (cached && Date.now() - cached.builtAt < FOOTBALL_V2_ALL_ODDS_TTL_MS) {
+    return cached.markets;
+  }
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) return [];
+  const liveEvent = await client.getLiveEventById(
+    FOOTBALL_PROVIDER_CONFIG.bookmaker,
+    eventId,
+  );
+  const prematchEvent =
+    liveEvent ??
+    (await client.getEventById(
+      FOOTBALL_PROVIDER_CONFIG.bookmaker,
+      FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
+      eventId,
+    ));
+  const markets = (Array.isArray(prematchEvent?.markets) ? prematchEvent.markets : [])
+    .map((market) => mapPulseScoreMarketToAllOdds(market))
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+  footballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
+  return markets;
 }
 
 function mrDogeNoVigHomeProb(
@@ -8843,6 +10065,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
     // real live data source again as of the same day.
     const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
+    if (useFootballV2Live()) {
+      candidates.push({ provider: "v2", matches: await getFootballV2LiveCached() });
+    }
     if (CONFIG.MRDOGE_API_KEY) {
       candidates.push({ provider: "mrdoge", matches: await buildFootballLiveFromMrDoge() });
     }
@@ -9684,7 +10909,8 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     if (
       forceFresh &&
       match &&
-      String((match as any).sport ?? "football") === "football"
+      String((match as any).sport ?? "football") === "football" &&
+      !isFootballV2MatchId(id)
     ) {
       try {
         const rawId = extractProviderMatchId(id);
@@ -9821,11 +11047,26 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
     "Cache-Control",
     "no-store, no-cache, must-revalidate, max-age=0",
   );
-  const id = extractProviderMatchId(String(req.params["id"] ?? ""));
+  const rawRouteId = String(req.params["id"] ?? "");
+  const id = extractProviderMatchId(rawRouteId);
   const sport = String(req.query["sport"] ?? "football").toLowerCase();
   if (!id || (sport !== "football" && sport !== "soccer")) {
     res.json({ markets: [] });
     return;
+  }
+
+  if (isFootballV2MatchId(rawRouteId) && useFootballV2Odds()) {
+    try {
+      res.json({ markets: await getFootballV2AllOdds(id) });
+      return;
+    } catch (err) {
+      logger.warn({ err, id, sport }, "[football-v2] all-odds fetch failed");
+      res.status(503).json({
+        markets: [],
+        error: "pulsescore_odds_temporarily_unavailable",
+      });
+      return;
+    }
   }
 
   try {
@@ -10086,8 +11327,17 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   let football: UpcomingMatch[] = [];
   try {
     const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
+    if (useFootballV2Odds() || useFootballV2State()) {
+      candidates.push({
+        provider: "v2",
+        matches: await buildFootballUpcomingFromV2(),
+      });
+    }
     if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
+      candidates.push({
+        provider: "mrdoge",
+        matches: await buildFootballUpcomingFromMrDoge(),
+      });
     }
     football = chooseUpcomingProvider("football", candidates);
     workingCache.football = football;

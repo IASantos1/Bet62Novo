@@ -31,6 +31,27 @@ export class GoalApiClient {
     return Array.isArray(data.data) ? data.data : [];
   }
 
+  async listLiveFixtures(
+    options: GoalApiRequestOptions = {},
+  ): Promise<GoalApiFixtureList> {
+    const data = await this.request<GoalApiEnvelope<GoalApiFixtureList>>(
+      "/fixtures/live",
+      options,
+    );
+    return Array.isArray(data.data) ? data.data : [];
+  }
+
+  async listFixturesByDate(
+    date: string,
+    options: GoalApiRequestOptions = {},
+  ): Promise<GoalApiFixtureList> {
+    const data = await this.request<GoalApiEnvelope<GoalApiFixtureList>>(
+      `/fixtures/date/${encodeURIComponent(date)}`,
+      options,
+    );
+    return Array.isArray(data.data) ? data.data : [];
+  }
+
   async getFixtureById(
     fixtureId: string | number,
     options: GoalApiRequestOptions = {},
