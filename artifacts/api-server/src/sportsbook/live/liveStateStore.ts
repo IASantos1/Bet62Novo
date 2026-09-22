@@ -6,6 +6,7 @@ import type {
 export type GoalApiFootballState = {
   fixtureId: string;
   updatedAt: number;
+  source: "rest" | "webhook" | "websocket";
   payload: GoalApiFixture | GoalApiWebhookPayload;
 };
 
@@ -30,13 +31,47 @@ function pushRecentWebhook(
   }
 }
 
-export function upsertGoalApiFootballFixture(fixture: GoalApiFixture): void {
+function mergeGoalApiPayload(
+  current: GoalApiFixture | GoalApiWebhookPayload | undefined,
+  incoming: GoalApiFixture | GoalApiWebhookPayload,
+  source: GoalApiFootballState["source"],
+): GoalApiFixture | GoalApiWebhookPayload {
+  if (!current || typeof current !== "object") return incoming;
+  const currentRecord = current as Record<string, unknown>;
+  const incomingRecord = incoming as Record<string, unknown>;
+  const mergedBase =
+    source === "rest"
+      ? { ...incomingRecord, ...currentRecord }
+      : { ...currentRecord, ...incomingRecord };
+  const currentScore =
+    currentRecord["score"] && typeof currentRecord["score"] === "object"
+      ? (currentRecord["score"] as Record<string, unknown>)
+      : null;
+  const incomingScore =
+    incomingRecord["score"] && typeof incomingRecord["score"] === "object"
+      ? (incomingRecord["score"] as Record<string, unknown>)
+      : null;
+  if (currentScore || incomingScore) {
+    mergedBase["score"] =
+      source === "rest"
+        ? { ...(incomingScore ?? {}), ...(currentScore ?? {}) }
+        : { ...(currentScore ?? {}), ...(incomingScore ?? {}) };
+  }
+  return mergedBase as GoalApiFixture | GoalApiWebhookPayload;
+}
+
+export function upsertGoalApiFootballFixture(
+  fixture: GoalApiFixture,
+  source: GoalApiFootballState["source"] = "rest",
+): void {
   const fixtureId = String(fixture.id ?? "");
   if (!fixtureId) return;
+  const current = footballStateByFixtureId.get(fixtureId);
   footballStateByFixtureId.set(fixtureId, {
     fixtureId,
     updatedAt: Date.now(),
-    payload: fixture,
+    source,
+    payload: mergeGoalApiPayload(current?.payload, fixture, source),
   });
 }
 
@@ -47,10 +82,12 @@ export function recordGoalApiWebhook(payload: GoalApiWebhookPayload): void {
       : null;
   const fixtureId = String(payload.fixtureId ?? fixture?.id ?? "");
   if (fixtureId) {
+    const current = footballStateByFixtureId.get(fixtureId);
     footballStateByFixtureId.set(fixtureId, {
       fixtureId,
       updatedAt: Date.now(),
-      payload: fixture ?? payload,
+      source: "webhook",
+      payload: mergeGoalApiPayload(current?.payload, fixture ?? payload, "webhook"),
     });
   }
   pushRecentWebhook(payload, fixtureId || undefined);
@@ -68,4 +105,8 @@ export function getRecentGoalApiWebhooks(): Array<{
   fixtureId?: string;
 }> {
   return [...recentGoalApiWebhooks];
+}
+
+export function listGoalApiFootballStates(): GoalApiFootballState[] {
+  return [...footballStateByFixtureId.values()];
 }

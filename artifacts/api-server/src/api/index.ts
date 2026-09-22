@@ -5,6 +5,7 @@ import { logger } from "../lib/logger.js";
 import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
+import { startGoalApiLiveSync } from "../services/goalApi/liveSync.js";
 import { startMrDogeLiveSync } from "../services/mrdoge/liveSync.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
@@ -51,6 +52,13 @@ server.listen(port, () => {
   // CONFIG.MRDOGE_API_KEY is unset.
   void startMrDogeLiveSync();
   setInterval(() => void startMrDogeLiveSync(), 30_000);
+
+  // Goal API football live-state websocket. Unlike MrDoge's all-sports feed,
+  // Goal API subscriptions are per football fixture, so routes/matches.ts keeps
+  // the desired subscription set fresh and this startup loop only ensures the
+  // transport is connected/reconnected.
+  void startGoalApiLiveSync();
+  setInterval(() => void startGoalApiLiveSync(), 30_000);
 
   // BigBang casino catalog bootstrap. Public casino routes also self-heal by
   // syncing on demand, but warming the catalog here avoids the first casino

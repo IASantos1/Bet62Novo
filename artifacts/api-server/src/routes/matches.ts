@@ -28,7 +28,11 @@ import type {
   PulseScoreSelection,
 } from "../providers/pulsescore/schema.js";
 import { getSportProviderConfig } from "../sportsbook/config/providerMatrix.js";
-import { upsertGoalApiFootballFixture } from "../sportsbook/live/liveStateStore.js";
+import { syncGoalApiLiveSubscriptions } from "../services/goalApi/liveSync.js";
+import {
+  listGoalApiFootballStates,
+  upsertGoalApiFootballFixture,
+} from "../sportsbook/live/liveStateStore.js";
 import { mergeFootballStateWithOdds } from "../sportsbook/merge/mergeFootballStateWithOdds.js";
 import {
   MRDOGE_SPORT_BY_BET62,
@@ -838,6 +842,8 @@ export type UpcomingMatch = {
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
+  allowNoOddsVisibility?: boolean;
+  oddsTemporarilyUnavailable?: boolean;
 };
 
 type ProviderQualitySnapshot = {
@@ -2074,6 +2080,8 @@ const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
 const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
 const FOOTBALL_V2_PAGE_LIMIT = 30;
 const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
+const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
+const FOOTBALL_V2_UPCOMING_RETENTION_MS = 20 * 60_000;
 
 let footballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
   null;
@@ -2081,6 +2089,10 @@ let footballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
 const footballV2AllOddsCache = new Map<
   string,
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const footballV2RecentVisibleUpcoming = new Map<
+  string,
+  { expiresAt: number; match: UpcomingMatch }
 >();
 
 const TOTAL_GOALS_LINE_FIELD_MAP: Record<
@@ -3068,6 +3080,107 @@ function getGoalApiFixtureForPulseScoreEvent(
   return null;
 }
 
+function hasPlayableUpcomingOdds(match: UpcomingMatch): boolean {
+  return (
+    (match.hasRealOdds ?? false) ||
+    (match.odds?.home ?? 0) > 0 ||
+    (match.odds?.draw ?? 0) > 0 ||
+    (match.odds?.away ?? 0) > 0 ||
+    hasPlayableMarketOdds(match.markets)
+  );
+}
+
+function footballV2UpcomingRetentionKey(
+  fixture: GoalApiFixture | null | undefined,
+): string {
+  if (!fixture) return "";
+  const exact = footballProviderIdentityKey(
+    fixture.home_team_name,
+    fixture.away_team_name,
+    goalApiFixtureKickoffIso(fixture),
+  );
+  if (exact.replace(/\|/g, "").length > 0) return exact;
+  return footballProviderFallbackIdentityKey(
+    fixture.home_team_name,
+    fixture.away_team_name,
+  );
+}
+
+function cleanupFootballV2UpcomingRetention(now = Date.now()): void {
+  for (const [key, entry] of footballV2RecentVisibleUpcoming.entries()) {
+    if (entry.expiresAt > now) continue;
+    footballV2RecentVisibleUpcoming.delete(key);
+  }
+}
+
+function getRetainedFootballV2UpcomingMatch(
+  fixture: GoalApiFixture | null | undefined,
+  now = Date.now(),
+): UpcomingMatch | null {
+  const key = footballV2UpcomingRetentionKey(fixture);
+  if (!key) return null;
+  const retained = footballV2RecentVisibleUpcoming.get(key);
+  if (!retained || retained.expiresAt <= now) return null;
+  return retained.match;
+}
+
+function rememberFootballV2UpcomingMatch(
+  fixture: GoalApiFixture | null | undefined,
+  match: UpcomingMatch,
+  now = Date.now(),
+): void {
+  const key = footballV2UpcomingRetentionKey(fixture);
+  if (!key) return;
+  footballV2RecentVisibleUpcoming.set(key, {
+    expiresAt: now + FOOTBALL_V2_UPCOMING_RETENTION_MS,
+    match,
+  });
+}
+
+function mergeGoalApiFixturePayload(
+  base: GoalApiFixture,
+  overlay: GoalApiFixture,
+): GoalApiFixture {
+  return {
+    ...base,
+    ...overlay,
+    score: {
+      ...(base.score ?? {}),
+      ...(overlay.score ?? {}),
+    },
+  };
+}
+
+function goalApiStatePayloadToFixture(payload: unknown): GoalApiFixture | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const fixtureId = String(record["id"] ?? record["fixtureId"] ?? "").trim();
+  if (!fixtureId) return null;
+  return {
+    ...(record as GoalApiFixture),
+    id: fixtureId,
+  };
+}
+
+function mergeGoalApiLiveFixturesWithStore(
+  fixtures: GoalApiFixture[],
+): GoalApiFixture[] {
+  const byId = new Map<string, GoalApiFixture>();
+  for (const fixture of fixtures) {
+    byId.set(String(fixture.id), fixture);
+  }
+  const now = Date.now();
+  for (const state of listGoalApiFootballStates()) {
+    if (now - state.updatedAt > FOOTBALL_V2_STATE_FRESH_MS) continue;
+    const fixture = goalApiStatePayloadToFixture(state.payload);
+    if (!fixture) continue;
+    const id = String(fixture.id);
+    const current = byId.get(id);
+    byId.set(id, current ? mergeGoalApiFixturePayload(current, fixture) : fixture);
+  }
+  return [...byId.values()].filter((fixture) => goalApiFixtureIsLive(fixture));
+}
+
 async function loadPulseScoreFootballPrematchEvents(): Promise<PulseScoreEvent[]> {
   if (!useFootballV2Odds()) return [];
   const client = getPulseScoreClient();
@@ -3157,29 +3270,67 @@ async function loadGoalApiLiveFootballFixtures(): Promise<GoalApiFixture[]> {
   if (!useFootballV2State()) return [];
   const client = getGoalApiClient();
   if (!client.isConfigured()) return [];
-  const fixtures = await client.listLiveFixtures();
-  for (const fixture of fixtures) upsertGoalApiFootballFixture(fixture);
-  return fixtures;
+  let fixtures: GoalApiFixture[] = [];
+  try {
+    fixtures = await client.listLiveFixtures();
+    for (const fixture of fixtures) upsertGoalApiFootballFixture(fixture);
+  } catch (err) {
+    logger.warn({ err }, "[football-v2] Goal API live REST failed — using stored live state");
+  }
+  const merged = mergeGoalApiLiveFixturesWithStore(fixtures);
+  syncGoalApiLiveSubscriptions(merged.map((fixture) => fixture.id));
+  return merged;
 }
 
 async function buildFootballUpcomingFromV2(): Promise<UpcomingMatch[]> {
+  cleanupFootballV2UpcomingRetention();
+  const now = Date.now();
   const [fixtures, oddsEvents] = await Promise.all([
     loadGoalApiFootballFixturesInWindow(getUpcomingFetchEndDate()),
     loadPulseScoreFootballPrematchEvents(),
   ]);
-  const indexes = indexGoalApiFootballFixtures(
-    fixtures.filter((fixture) => goalApiFixtureIsUpcoming(fixture)),
-  );
-  const matches = oddsEvents
-    .map((oddsEvent) =>
-      buildFootballMatchFromProviders(
-        getGoalApiFixtureForPulseScoreEvent(indexes, oddsEvent),
-        oddsEvent,
-        "upcoming",
-      ),
-    )
-    .filter(Boolean) as UpcomingMatch[];
-  return matches
+  const upcomingFixtures = fixtures.filter((fixture) => goalApiFixtureIsUpcoming(fixture));
+  const indexes = indexGoalApiFootballFixtures(upcomingFixtures);
+  const matches: UpcomingMatch[] = [];
+  const freshlyVisible: Array<{ fixture: GoalApiFixture; match: UpcomingMatch }> = [];
+
+  for (const oddsEvent of oddsEvents) {
+    const fixture = getGoalApiFixtureForPulseScoreEvent(indexes, oddsEvent);
+    const built = buildFootballMatchFromProviders(
+      fixture,
+      oddsEvent,
+      "upcoming",
+    );
+    if (!built) continue;
+    const match = built as UpcomingMatch;
+    if (!hasPlayableUpcomingOdds(match)) {
+      const retained = getRetainedFootballV2UpcomingMatch(fixture, now);
+      if (retained) {
+        match.id = retained.id;
+        match.allowNoOddsVisibility = true;
+        match.oddsTemporarilyUnavailable = true;
+      }
+    }
+    if (fixture && hasPlayableUpcomingOdds(match)) {
+      freshlyVisible.push({ fixture, match });
+    }
+    matches.push(match);
+  }
+
+  for (const fixture of upcomingFixtures) {
+    if (indexes.pairedIds.has(String(fixture.id))) continue;
+    const retained = getRetainedFootballV2UpcomingMatch(fixture, now);
+    if (!retained) continue;
+    const built = buildFootballMatchFromProviders(fixture, null, "upcoming");
+    if (!built) continue;
+    const match = built as UpcomingMatch;
+    match.id = retained.id;
+    match.allowNoOddsVisibility = true;
+    match.oddsTemporarilyUnavailable = true;
+    matches.push(match);
+  }
+
+  const visible = matches
     .filter(
       (match) =>
         footballCompetitionVisibilityBand(match.country, match.league) !==
@@ -3190,6 +3341,12 @@ async function buildFootballUpcomingFromV2(): Promise<UpcomingMatch[]> {
       const bMs = parseUpcomingKickoffMs(b) ?? Number.MAX_SAFE_INTEGER;
       return aMs - bMs;
     });
+  const visibleIds = new Set(visible.map((match) => match.id));
+  for (const entry of freshlyVisible) {
+    if (!visibleIds.has(entry.match.id)) continue;
+    rememberFootballV2UpcomingMatch(entry.fixture, entry.match, now);
+  }
+  return visible;
 }
 
 async function buildFootballLiveFromV2(): Promise<LiveMatchState[]> {
@@ -11819,7 +11976,8 @@ router.get("/upcoming", async (req: Request, res: Response) => {
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
         (m.odds?.away ?? 0) > 0 ||
-        hasPlayableMarketOdds(m.markets)
+        hasPlayableMarketOdds(m.markets) ||
+        m.allowNoOddsVisibility === true
       )
     ) {
       return reject("no_playable_odds");
