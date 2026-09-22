@@ -10060,6 +10060,29 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
   // real data source again as of the same day (see rebuildUpcomingCache's
   // matching comment).
+  // Publish each sport into a shared working cache as soon as its provider
+  // finishes. MrDoge prematch hydration can involve hundreds of odds.list
+  // calls (especially tennis); waiting for every sport before assigning
+  // upcomingTopCache made the route's 9s cold-start fallback return an empty
+  // list even after football was already ready.
+  const workingCache: UpcomingTopCache = upcomingTopCache ?? {
+    football: [],
+    tennis: [],
+    basketball: [],
+    hockey: [],
+    volleyball: [],
+    baseball: [],
+    mma: [],
+    darts: [],
+    boxing: [],
+    cricket: [],
+    handball: [],
+    formula1: [],
+    fetchedAt: 0,
+  };
+  workingCache.fetchedAt = 0;
+  upcomingTopCache = workingCache;
+
   let football: UpcomingMatch[] = [];
   try {
     const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
@@ -10067,6 +10090,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
     }
     football = chooseUpcomingProvider("football", candidates);
+    workingCache.football = football;
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
@@ -10077,6 +10101,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
     }
     tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+    workingCache.tennis = tennis;
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
   }
@@ -10091,6 +10116,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
     }
     basketball = chooseUpcomingProvider("basketball", candidates);
+    workingCache.basketball = basketball;
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
   }
@@ -10101,6 +10127,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       candidates.push({ provider: "mrdoge", matches: await buildHockeyUpcomingFromMrDoge() });
     }
     hockey = chooseUpcomingProvider("hockey", candidates);
+    workingCache.hockey = hockey;
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] hockey fetch failed");
   }
@@ -10111,6 +10138,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       candidates.push({ provider: "mrdoge", matches: await buildVolleyballUpcomingFromMrDoge() });
     }
     volleyball = chooseUpcomingProvider("volleyball", candidates);
+    workingCache.volleyball = volleyball;
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] volleyball fetch failed");
   }
@@ -10121,6 +10149,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
       candidates.push({ provider: "mrdoge", matches: await buildBaseballUpcomingFromMrDoge() });
     }
     baseball = chooseUpcomingProvider("baseball", candidates);
+    workingCache.baseball = baseball;
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] baseball fetch failed");
   }
@@ -10130,22 +10159,10 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   rememberUpcomingEligibility([
     ...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma, ...darts,
   ]);
-  upcomingTopCache = {
-    football,
-    tennis,
-    basketball,
-    hockey,
-    volleyball,
-    baseball,
-    mma,
-    darts,
-    boxing: [],
-    cricket: [],
-    handball: [],
-    formula1: [],
-    fetchedAt: Date.now(),
-  };
-  return upcomingTopCache;
+  workingCache.mma = mma;
+  workingCache.darts = darts;
+  workingCache.fetchedAt = Date.now();
+  return workingCache;
 }
 
 async function getUpcomingAll(): Promise<UpcomingTopCache> {
