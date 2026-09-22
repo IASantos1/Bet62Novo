@@ -59,6 +59,21 @@ const AI_AGENTS_MODEL =
 // misclassified BTTS/corners market.
 const MRDOGE_API_KEY = process.env["MRDOGE_API_KEY"] ?? "";
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
+const PULSESCORE_API_KEY = process.env["PULSESCORE_API_KEY"] ?? "";
+const PULSESCORE_BASE_URL =
+  process.env["PULSESCORE_BASE_URL"]?.trim() || "https://api.pulsescore.net";
+const GOAL_API_KEY = process.env["GOAL_API_KEY"] ?? "";
+const GOAL_API_BASE_URL =
+  process.env["GOAL_API_BASE_URL"]?.trim() || "https://api.goal-api.com/v1";
+const GOAL_API_WEBHOOK_SECRET = process.env["GOAL_API_WEBHOOK_SECRET"] ?? "";
+const USE_PULSESCORE =
+  (process.env["USE_PULSESCORE"] ?? "0").trim() === "1";
+const USE_GOAL_API =
+  (process.env["USE_GOAL_API"] ?? "0").trim() === "1";
+const FOOTBALL_MATCH_STATE_PROVIDER =
+  process.env["FOOTBALL_MATCH_STATE_PROVIDER"]?.trim() || "mrdoge";
+const FOOTBALL_ODDS_PROVIDER =
+  process.env["FOOTBALL_ODDS_PROVIDER"]?.trim() || "mrdoge";
 
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
@@ -77,6 +92,15 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
 export const CONFIG = {
   MRDOGE_API_KEY,
   BIGBANG_API_KEY,
+  PULSESCORE_API_KEY,
+  PULSESCORE_BASE_URL,
+  GOAL_API_KEY,
+  GOAL_API_BASE_URL,
+  GOAL_API_WEBHOOK_SECRET,
+  USE_PULSESCORE,
+  USE_GOAL_API,
+  FOOTBALL_MATCH_STATE_PROVIDER,
+  FOOTBALL_ODDS_PROVIDER,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
