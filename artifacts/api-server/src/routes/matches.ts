@@ -4285,8 +4285,80 @@ function buildPulseScoreBasketballMarkets(
   event: PulseScoreEvent | null | undefined,
 ): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
   const moneyline = { home: 0, draw: 0, away: 0 };
-  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, unknown>;
-  const basketballExtra = emptyBasketballExtras();
+  const syntheticBase =
+    event?.home && event?.away
+      ? (makeBasketballMarketsFromTeams(
+          String(event.home),
+          String(event.away),
+        ) as AdvancedMarkets & Record<string, unknown>)
+      : (zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, unknown>);
+  const markets = {
+    ...syntheticBase,
+    totalGoals: { ...(syntheticBase.totalGoals ?? zerofillAdvancedMarkets().totalGoals) },
+    handicap: { ...(syntheticBase.handicap ?? zerofillAdvancedMarkets().handicap) },
+    halfTime: { ...(syntheticBase.halfTime ?? zerofillAdvancedMarkets().halfTime) },
+    firstGoal: { ...(syntheticBase.firstGoal ?? zerofillAdvancedMarkets().firstGoal) },
+  } as AdvancedMarkets & Record<string, unknown>;
+  const basketballExtra: NonNullable<AdvancedMarkets["basketballExtra"]> = {
+    ...emptyBasketballExtras(),
+    ...(syntheticBase.basketballExtra
+      ? {
+          ...syntheticBase.basketballExtra,
+          q1: { ...syntheticBase.basketballExtra.q1 },
+          q2: { ...syntheticBase.basketballExtra.q2 },
+          q3: { ...syntheticBase.basketballExtra.q3 },
+          q4: { ...syntheticBase.basketballExtra.q4 },
+          ...(syntheticBase.basketballExtra.q1Total
+            ? { q1Total: { ...syntheticBase.basketballExtra.q1Total } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q2Total
+            ? { q2Total: { ...syntheticBase.basketballExtra.q2Total } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q3Total
+            ? { q3Total: { ...syntheticBase.basketballExtra.q3Total } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q4Total
+            ? { q4Total: { ...syntheticBase.basketballExtra.q4Total } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q1Spread
+            ? { q1Spread: { ...syntheticBase.basketballExtra.q1Spread } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q2Spread
+            ? { q2Spread: { ...syntheticBase.basketballExtra.q2Spread } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q3Spread
+            ? { q3Spread: { ...syntheticBase.basketballExtra.q3Spread } }
+            : {}),
+          ...(syntheticBase.basketballExtra.q4Spread
+            ? { q4Spread: { ...syntheticBase.basketballExtra.q4Spread } }
+            : {}),
+          teamTotalHome: { ...syntheticBase.basketballExtra.teamTotalHome },
+          teamTotalAway: { ...syntheticBase.basketballExtra.teamTotalAway },
+          ...(syntheticBase.basketballExtra.anyQuarter
+            ? { anyQuarter: { ...syntheticBase.basketballExtra.anyQuarter } }
+            : {}),
+          ...(syntheticBase.basketballExtra.allQuarters
+            ? { allQuarters: { ...syntheticBase.basketballExtra.allQuarters } }
+            : {}),
+          ...(syntheticBase.basketballExtra.firstPoint
+            ? { firstPoint: { ...syntheticBase.basketballExtra.firstPoint } }
+            : {}),
+          ...(syntheticBase.basketballExtra.nextPoint
+            ? { nextPoint: { ...syntheticBase.basketballExtra.nextPoint } }
+            : {}),
+          ...(syntheticBase.basketballExtra.nextThree
+            ? { nextThree: { ...syntheticBase.basketballExtra.nextThree } }
+            : {}),
+          ...(syntheticBase.basketballExtra.firstHalf
+            ? { firstHalf: { ...syntheticBase.basketballExtra.firstHalf } }
+            : {}),
+          ...(syntheticBase.basketballExtra.firstHalfTotal
+            ? { firstHalfTotal: { ...syntheticBase.basketballExtra.firstHalfTotal } }
+            : {}),
+          totalsRange: [...(syntheticBase.basketballExtra.totalsRange ?? [])],
+        }
+      : {}),
+  };
   const matchTotals: Array<{ line: number; over: number; under: number }> = [];
   const firstHalfTotals: Array<{ line: number; over: number; under: number }> =
     [];
@@ -4458,7 +4530,9 @@ function buildPulseScoreBasketballMarkets(
     markets.totalGoals.under25 = mainTotal.under;
     markets._total = mainTotal.line;
   }
-  basketballExtra.totalsRange = uniqueBasketballTotalsLines(matchTotals);
+  if (matchTotals.length > 0) {
+    basketballExtra.totalsRange = uniqueBasketballTotalsLines(matchTotals);
+  }
 
   const firstHalfTotal = pickBalancedBasketballTotal(firstHalfTotals);
   if (firstHalfTotal) {
