@@ -176,14 +176,13 @@ app.post(
   },
 );
 
-// GOAL API and PropLine webhooks removed 2026-09-20 (user decision, both
-// providers fully removed) — /api/webhooks/goal-api and /hooks/propline no
-// longer exist; the providers themselves are no longer configured to send
-// to them either.
+// Goal API + PropLine webhooks are not wired in this migration phase yet.
+// The current backend uses REST/bootstrap flows plus the normalized Bet62
+// routes, so there is no raw-body webhook endpoint to mount here for either
+// provider today.
 //
-// The old casino aggregator callbacks were removed the same way (user
-// decision). The current BigBang casino callbacks live in routes/casino.ts
-// and use normal JSON parsing there — no raw-body route is needed here.
+// The casino callbacks remain separate in routes/casino.ts and use normal
+// JSON parsing there, so no additional raw-body route is needed in app.ts.
 
 app.use(
   (pinoHttp as any)({

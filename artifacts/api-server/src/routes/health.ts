@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
+import { CONFIG } from "../lib/config.js";
 
 const router: IRouter = Router();
 
@@ -18,16 +19,28 @@ router.get("/version", (_req, res) => {
   res.json({ commit: process.env["RAILWAY_GIT_COMMIT_SHA"] ?? null });
 });
 
-// All sports-data providers removed (2026-09-08) — kept as a stub returning
-// empty flags/keys rather than 404, so any existing consumer of this
-// diagnostic route degrades gracefully instead of breaking.
-// Rota não validada (mesmo espírito que /version) para não tocar no
-// contrato zod gerado por orval.
+// Unvalidated operational route: reports the provider setup currently wired
+// into the Goal API + PropLine migration without forcing callers to know the
+// internal config module shape.
 router.get("/health-data-providers", (_req, res) => {
   const g = globalThis as any;
   res.json({
-    flags: {},
-    keys: {},
+    flags: {
+      goalApiEnabled: Boolean(CONFIG.GOAL_API_KEY),
+      propLineEnabled: Boolean(CONFIG.PROPLINE_API_KEY),
+      mrDogeLegacyEnabled: Boolean(CONFIG.MRDOGE_API_KEY),
+    },
+    keys: {
+      goalApi: Boolean(CONFIG.GOAL_API_KEY),
+      propLine: Boolean(CONFIG.PROPLINE_API_KEY),
+      mrDoge: Boolean(CONFIG.MRDOGE_API_KEY),
+    },
+    urls: {
+      goalApiBaseUrl: CONFIG.GOAL_API_BASE_URL,
+      goalApiWsUrl: CONFIG.GOAL_API_WS_URL,
+      propLineBaseUrl: CONFIG.PROPLINE_BASE_URL,
+      propLineWsUrl: CONFIG.PROPLINE_WS_URL || null,
+    },
     lastSuccessfulFetch: {},
     providerQualityDebug: g.__providerQualityDebug ?? null,
     livePayloadDebug: g.__livePayloadDebug ?? null,
