@@ -2206,22 +2206,28 @@ const ASIAN_TOTALS_LINE_FIELD_MAP: Record<
 };
 
 function useFootballV2Odds(): boolean {
+  const explicitPulseScore =
+    CONFIG.FOOTBALL_ODDS_PROVIDER === FOOTBALL_PROVIDER_CONFIG.oddsProvider;
   return (
-    CONFIG.USE_PULSESCORE &&
-    CONFIG.FOOTBALL_ODDS_PROVIDER === FOOTBALL_PROVIDER_CONFIG.oddsProvider
+    isPulseScoreAvailable() &&
+    (explicitPulseScore || !CONFIG.MRDOGE_API_KEY)
   );
+}
+
+function isGoalApiAvailable(): boolean {
+  return CONFIG.USE_GOAL_API || getGoalApiClient().isConfigured();
 }
 
 function useFootballV2State(): boolean {
   return (
-    CONFIG.USE_GOAL_API &&
+    isGoalApiAvailable() &&
     CONFIG.FOOTBALL_MATCH_STATE_PROVIDER ===
       FOOTBALL_PROVIDER_CONFIG.matchStateProvider
   );
 }
 
 function useFootballV2Live(): boolean {
-  return useFootballV2Odds() && useFootballV2State();
+  return useFootballV2Odds() && (useFootballV2State() || !CONFIG.MRDOGE_API_KEY);
 }
 
 function isPulseScoreAvailable(): boolean {
