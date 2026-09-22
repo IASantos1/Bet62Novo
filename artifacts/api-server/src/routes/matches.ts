@@ -2084,6 +2084,8 @@ const TENNIS_PROVIDER_CONFIG = getSportProviderConfig("tennis");
 const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
 const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
 const FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
+const TENNIS_V2_ALL_ODDS_TTL_MS = 20_000;
+const TENNIS_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
 const FOOTBALL_V2_PAGE_LIMIT = 30;
 const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
 const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
@@ -2101,6 +2103,14 @@ const footballV2AllOddsCache = new Map<
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
 >();
 const footballV2AllOddsInFlight = new Map<
+  string,
+  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
+>();
+const tennisV2AllOddsCache = new Map<
+  string,
+  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const tennisV2AllOddsInFlight = new Map<
   string,
   Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
 >();
@@ -2170,6 +2180,10 @@ function isFootballV2MatchId(matchId: string): boolean {
 
 function tennisV2MatchId(providerId: string): string {
   return `${TENNIS_V2_ID_PREFIX}${providerId}`;
+}
+
+function isTennisV2MatchId(matchId: string): boolean {
+  return String(matchId ?? "").startsWith(TENNIS_V2_ID_PREFIX);
 }
 
 function normalizeFootballToken(value: string | undefined): string {
@@ -3630,6 +3644,289 @@ function parsePulseScoreTennisLiveExtra(
   };
 }
 
+function pulseScoreTennisAllOddsGroup(market: PulseScoreMarket): string {
+  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+  const raw = normalizeFootballToken(market.rawName ?? "");
+  const period = normalizeFootballToken(market.period ?? "");
+  if (
+    raw.includes("correct score") ||
+    raw.includes("set score") ||
+    canonical.includes("correct score")
+  ) {
+    return "Placar";
+  }
+  if (
+    raw.includes("tie break") ||
+    raw.includes("odd even") ||
+    raw.includes("aces")
+  ) {
+    return "Especiais";
+  }
+  if (
+    raw.includes("handicap") ||
+    raw.includes("spread")
+  ) {
+    return "Handicap";
+  }
+  if (
+    raw.includes("total games") ||
+    raw.includes("total sets") ||
+    raw.includes("games over under") ||
+    canonical.includes("over under")
+  ) {
+    return "Golos";
+  }
+  if (
+    period.includes("set") ||
+    raw.includes("set winner")
+  ) {
+    return "Sets";
+  }
+  return "Principal";
+}
+
+function buildPulseScoreScoreList(
+  market: PulseScoreMarket,
+): Array<{ label: string; odds: number }> {
+  return pulseScoreMarketSelections(market).map((selection) => ({
+    label: pulseScoreSelectionLabel(market, selection),
+    odds: pulseScoreSelectionOdd(selection),
+  }));
+}
+
+function uniqueTennisTotalsLines(
+  lines: Array<{ line: number; over: number; under: number }>,
+): Array<{ line: number; over: number; under: number }> {
+  const seen = new Set<string>();
+  return lines.filter((entry) => {
+    const key = `${entry.line}:${entry.over}:${entry.under}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function applyPulseScoreTennisExtras(
+  baseExtras: AdvancedMarkets["tennisExtra"],
+  event: PulseScoreEvent,
+): AdvancedMarkets["tennisExtra"] {
+  const extras: AdvancedMarkets["tennisExtra"] = {
+    ...baseExtras,
+    totalGamesLines: [...(baseExtras.totalGamesLines ?? [])],
+  };
+  for (const market of Array.isArray(event.markets) ? event.markets : []) {
+    if (!market || market.isActive === false) continue;
+    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+    const raw = normalizeFootballToken(market.rawName ?? "");
+    const period = normalizeFootballToken(market.period ?? "");
+    const line = pulseScoreSelectionLine(
+      market,
+      pulseScoreMarketSelections(market)[0] ?? null,
+    );
+    const home = pulseScoreSelectionOdd(findPulseScoreSelection(market, "home"));
+    const away = pulseScoreSelectionOdd(findPulseScoreSelection(market, "away"));
+    const yes = pulseScoreSelectionOdd(findPulseScoreSelection(market, "yes"));
+    const no = pulseScoreSelectionOdd(findPulseScoreSelection(market, "no"));
+    const odd = pulseScoreSelectionOdd(findPulseScoreSelection(market, "odd"));
+    const even = pulseScoreSelectionOdd(findPulseScoreSelection(market, "even"));
+    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
+    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
+
+    if (
+      canonical === "match winner" ||
+      canonical === "match result" ||
+      raw.includes("match winner") ||
+      raw.includes("match result")
+    ) {
+      if (period.includes("first set") || period === "1st set") {
+        extras.firstSet = { home, away };
+      } else if (period.includes("second set") || period === "2nd set") {
+        extras.set2 = { home, away };
+      } else if (period.includes("third set") || period === "3rd set") {
+        extras.set3 = { home, away };
+      }
+      continue;
+    }
+
+    if (
+      (canonical === "over under" || raw.includes("total games")) &&
+      over > 0 &&
+      under > 0 &&
+      line != null
+    ) {
+      const total = { line, over, under };
+      if (period.includes("first set") || period === "1st set") {
+        extras.set1Games = total;
+      } else if (period.includes("second set") || period === "2nd set") {
+        extras.set2Games = total;
+      } else {
+        extras.totalGames = total;
+        extras.totalGamesLines = uniqueTennisTotalsLines([
+          ...(extras.totalGamesLines ?? []),
+          total,
+        ]);
+      }
+      continue;
+    }
+
+    if (
+      (canonical.includes("handicap") || raw.includes("handicap")) &&
+      home > 0 &&
+      away > 0 &&
+      line != null
+    ) {
+      if (period.includes("second set") || period === "2nd set") {
+        extras.gameHandicapSet2 = { line, home, away };
+      } else {
+        extras.gameHandicap = { line, home, away };
+      }
+      continue;
+    }
+
+    if ((canonical === "odd even" || raw.includes("odd even")) && odd > 0 && even > 0) {
+      if (period.includes("first set") || period === "1st set") {
+        extras.oddEven1st = { odd, even };
+      } else if (period.includes("second set") || period === "2nd set") {
+        extras.oddEven2nd = { odd, even };
+      } else {
+        extras.oddEvenGames = { odd, even };
+      }
+      continue;
+    }
+
+    if ((canonical.includes("tie break") || raw.includes("tie break")) && yes > 0 && no > 0) {
+      if (period.includes("first set") || period === "1st set") {
+        extras.tieBreak1st = { yes, no };
+      } else if (raw.includes("final set")) {
+        extras.finalSetTieBreakOrExtra = { yes, no };
+      } else {
+        extras.tieBreak = { yes, no };
+      }
+      continue;
+    }
+
+    if ((raw.includes("total tie break") || canonical.includes("total tie break")) && over > 0 && under > 0 && line != null) {
+      extras.totalTieBreaks = { line, over, under };
+      continue;
+    }
+
+    if ((raw.includes("total sets") || canonical.includes("total sets")) && over > 0 && under > 0 && line != null) {
+      extras.totalSets = { line, over, under };
+      continue;
+    }
+
+    if ((raw.includes("straight sets") || canonical.includes("straight sets")) && yes > 0 && no > 0) {
+      extras.straightSetsWinner = { yes, no };
+      continue;
+    }
+
+    if ((raw.includes("distance") || raw.includes("3 sets")) && yes > 0 && no > 0) {
+      extras.goTheDistance = { yes, no };
+      continue;
+    }
+
+    if ((raw.includes("highest set total") || canonical.includes("highest set total")) && over > 0 && under > 0 && line != null) {
+      extras.highestSetTotal = { line, over, under };
+      continue;
+    }
+
+    if ((raw.includes("sets scoring") || raw.includes("higher scoring set")) &&
+      pulseScoreSelectionOdd(findPulseScoreSelection(market, "first", "1st set")) > 0 &&
+      pulseScoreSelectionOdd(findPulseScoreSelection(market, "second", "2nd set")) > 0
+    ) {
+      extras.setsScoring = {
+        firstHigher: pulseScoreSelectionOdd(findPulseScoreSelection(market, "first", "1st set")),
+        secondHigher: pulseScoreSelectionOdd(findPulseScoreSelection(market, "second", "2nd set")),
+        equal: pulseScoreSelectionOdd(findPulseScoreSelection(market, "equal", "draw")),
+      };
+      continue;
+    }
+
+    if ((raw.includes("correct score") || raw.includes("set score")) && pulseScoreMarketSelections(market).length > 0) {
+      const scores = buildPulseScoreScoreList(market);
+      if (period.includes("first set") || period === "1st set") {
+        extras.score1st = scores;
+      } else if (period.includes("second set") || period === "2nd set") {
+        extras.score2nd = scores;
+      } else if (period.includes("third set") || period === "3rd set") {
+        extras.score3rd = scores;
+      }
+      continue;
+    }
+
+    if ((raw.includes("match score") || raw.includes("set match")) && pulseScoreMarketSelections(market).length > 0) {
+      const values = {
+        h11: pulseScoreSelectionOdd(findPulseScoreSelection(market, "2 0", "home 2 0")),
+        h12: pulseScoreSelectionOdd(findPulseScoreSelection(market, "2 1", "home 2 1")),
+        a21: pulseScoreSelectionOdd(findPulseScoreSelection(market, "1 2", "away 2 1")),
+        a22: pulseScoreSelectionOdd(findPulseScoreSelection(market, "0 2", "away 2 0")),
+      };
+      if (values.h11 || values.h12 || values.a21 || values.a22) {
+        extras.setMatch = values;
+      }
+      continue;
+    }
+
+    if ((raw.includes("aces") || canonical.includes("aces")) && over > 0 && under > 0 && line != null) {
+      if (raw.includes("home") || normalizeFootballToken(event.home).split(" ").some((part) => part && raw.includes(part))) {
+        extras.homeAces = { line, over, under };
+      } else if (raw.includes("away") || normalizeFootballToken(event.away).split(" ").some((part) => part && raw.includes(part))) {
+        extras.awayAces = { line, over, under };
+      }
+      continue;
+    }
+  }
+  extras.totalGamesLines = uniqueTennisTotalsLines(extras.totalGamesLines ?? []);
+  return extras;
+}
+
+function buildTennisV2AllOddsMarkets(
+  event: PulseScoreEvent | null | undefined,
+): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  return (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => {
+      const choices = pulseScoreMarketSelections(market).map((selection) => ({
+        name: String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "").trim(),
+        label: pulseScoreSelectionLabel(market, selection),
+        odds: pulseScoreSelectionOdd(selection),
+      }));
+      if (choices.length === 0) return null;
+      const line = pulseScoreSelectionLine(market, pulseScoreMarketSelections(market)[0] ?? null);
+      const rawName = String(market.rawName ?? market.canonicalMarket ?? "Mercado").trim();
+      return {
+        name:
+          line != null && !rawName.includes(String(line))
+            ? `${rawName} ${formatPulseScoreLine(line)}`
+            : rawName,
+        group: pulseScoreTennisAllOddsGroup(market),
+        choices,
+      };
+    })
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+}
+
+function primeTennisV2AllOddsCache(
+  eventId: string | number | undefined,
+  event: PulseScoreEvent | null | undefined,
+): void {
+  const normalizedId = String(eventId ?? "").trim();
+  if (!normalizedId || !event) return;
+  const markets = buildTennisV2AllOddsMarkets(event);
+  if (markets.length === 0) return;
+  tennisV2AllOddsCache.set(normalizedId, {
+    builtAt: Date.now(),
+    markets,
+  });
+}
+
 function buildTennisMatchFromPulseScore(
   event: PulseScoreEvent,
   kind: "upcoming" | "live",
@@ -3663,6 +3960,7 @@ function buildTennisMatchFromPulseScore(
   } else {
     markets.tennisExtra = computeTennisExtras(pHome);
   }
+  markets.tennisExtra = applyPulseScoreTennisExtras(markets.tennisExtra, event);
   if (kind === "upcoming") {
     return {
       id: tennisV2MatchId(providerId),
@@ -3727,6 +4025,11 @@ async function loadPulseScoreEventsForSport(
             query: { page, limit },
           });
     const batch = Array.isArray(response.events) ? response.events : [];
+    if (sport === "tennis") {
+      for (const event of batch) {
+        primeTennisV2AllOddsCache(event.eventId, event);
+      }
+    }
     events.push(...batch);
     if (!response.hasNextPage || batch.length === 0) break;
     page += 1;
@@ -3768,6 +4071,59 @@ async function getTennisV2LiveCached(
       tennisV2LiveInFlight = null;
     });
   return tennisV2LiveInFlight;
+}
+
+async function getTennisV2AllOdds(
+  eventId: string,
+): Promise<
+  Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>
+> {
+  const now = Date.now();
+  const cached = tennisV2AllOddsCache.get(eventId);
+  if (cached && now - cached.builtAt < TENNIS_V2_ALL_ODDS_TTL_MS) {
+    return cached.markets;
+  }
+  const existingRequest = tennisV2AllOddsInFlight.get(eventId);
+  if (existingRequest) return existingRequest;
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) {
+    return cached?.markets ?? [];
+  }
+  const request = (async () => {
+    try {
+      const liveEvent = await client.getLiveEventById(
+        TENNIS_PROVIDER_CONFIG.bookmaker,
+        eventId,
+      );
+      const prematchEvent =
+        liveEvent ??
+        (await client.getEventById(
+          TENNIS_PROVIDER_CONFIG.bookmaker,
+          TENNIS_PROVIDER_CONFIG.pulseScoreSport,
+          eventId,
+        ));
+      const markets = buildTennisV2AllOddsMarkets(prematchEvent);
+      tennisV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
+      return markets;
+    } catch (err) {
+      if (cached && now - cached.builtAt < TENNIS_V2_ALL_ODDS_STALE_TTL_MS) {
+        logger.warn(
+          { err, eventId },
+          "[tennis-v2] all-odds fetch failed — serving stale cache",
+        );
+        return cached.markets;
+      }
+      throw err;
+    } finally {
+      tennisV2AllOddsInFlight.delete(eventId);
+    }
+  })();
+  tennisV2AllOddsInFlight.set(eventId, request);
+  return request;
 }
 
 async function getFootballV2AllOdds(
@@ -11606,7 +11962,10 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
   const rawRouteId = String(req.params["id"] ?? "");
   const id = extractProviderMatchId(rawRouteId);
   const sport = String(req.query["sport"] ?? "football").toLowerCase();
-  if (!id || (sport !== "football" && sport !== "soccer")) {
+  if (
+    !id ||
+    !["football", "soccer", "tennis"].includes(sport)
+  ) {
     res.json({ markets: [] });
     return;
   }
@@ -11617,6 +11976,20 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
       return;
     } catch (err) {
       logger.warn({ err, id, sport }, "[football-v2] all-odds fetch failed");
+      res.status(503).json({
+        markets: [],
+        error: "pulsescore_odds_temporarily_unavailable",
+      });
+      return;
+    }
+  }
+
+  if (isTennisV2MatchId(rawRouteId) && useTennisV2() && sport === "tennis") {
+    try {
+      res.json({ markets: await getTennisV2AllOdds(id) });
+      return;
+    } catch (err) {
+      logger.warn({ err, id, sport }, "[tennis-v2] all-odds fetch failed");
       res.status(503).json({
         markets: [],
         error: "pulsescore_odds_temporarily_unavailable",
