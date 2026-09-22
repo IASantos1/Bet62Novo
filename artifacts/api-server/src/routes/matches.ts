@@ -2096,6 +2096,12 @@ const TENNIS_V2_ALL_ODDS_TTL_MS = 20_000;
 const TENNIS_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
 const BASKETBALL_V2_ALL_ODDS_TTL_MS = 20_000;
 const BASKETBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
+const HOCKEY_V2_ALL_ODDS_TTL_MS = 20_000;
+const HOCKEY_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
+const BASEBALL_V2_ALL_ODDS_TTL_MS = 20_000;
+const BASEBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
+const VOLLEYBALL_V2_ALL_ODDS_TTL_MS = 20_000;
+const VOLLEYBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
 const FOOTBALL_V2_PAGE_LIMIT = 30;
 const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
 const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
@@ -2145,6 +2151,30 @@ const basketballV2AllOddsCache = new Map<
   { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
 >();
 const basketballV2AllOddsInFlight = new Map<
+  string,
+  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
+>();
+const hockeyV2AllOddsCache = new Map<
+  string,
+  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const hockeyV2AllOddsInFlight = new Map<
+  string,
+  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
+>();
+const baseballV2AllOddsCache = new Map<
+  string,
+  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const baseballV2AllOddsInFlight = new Map<
+  string,
+  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
+>();
+const volleyballV2AllOddsCache = new Map<
+  string,
+  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
+>();
+const volleyballV2AllOddsInFlight = new Map<
   string,
   Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
 >();
@@ -4744,6 +4774,273 @@ function primeBasketballV2AllOddsCache(
   });
 }
 
+function pulseScoreHockeyAllOddsGroup(market: PulseScoreMarket): string {
+  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+  const raw = normalizeFootballToken(market.rawName ?? "");
+  const period = normalizeFootballToken(market.period ?? "");
+  if (
+    canonical.includes("correct score") ||
+    raw.includes("correct score")
+  ) {
+    return "Placar";
+  }
+  if (
+    period.includes("period") ||
+    raw.includes("period") ||
+    canonical.includes("period")
+  ) {
+    return "Períodos";
+  }
+  if (
+    canonical.includes("handicap") ||
+    canonical.includes("puck line") ||
+    raw.includes("handicap") ||
+    raw.includes("puck line")
+  ) {
+    return "Handicap";
+  }
+  if (
+    canonical.includes("total") ||
+    canonical.includes("over under") ||
+    raw.includes("goal") ||
+    raw.includes("shots on goal")
+  ) {
+    return "Totais";
+  }
+  return "Principal";
+}
+
+function pulseScoreBaseballAllOddsGroup(market: PulseScoreMarket): string {
+  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+  const raw = normalizeFootballToken(market.rawName ?? "");
+  const period = normalizeFootballToken(market.period ?? "");
+  if (
+    canonical.includes("correct score") ||
+    raw.includes("correct score")
+  ) {
+    return "Placar";
+  }
+  if (
+    period.includes("inning") ||
+    raw.includes("inning") ||
+    raw.includes("first 5") ||
+    raw.includes("f5")
+  ) {
+    return "Entradas";
+  }
+  if (
+    canonical.includes("handicap") ||
+    canonical.includes("run line") ||
+    raw.includes("handicap") ||
+    raw.includes("run line")
+  ) {
+    return "Handicap";
+  }
+  if (
+    canonical.includes("total") ||
+    canonical.includes("over under") ||
+    raw.includes("total")
+  ) {
+    return "Totais";
+  }
+  return "Principal";
+}
+
+function pulseScoreVolleyballAllOddsGroup(market: PulseScoreMarket): string {
+  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
+  const raw = normalizeFootballToken(market.rawName ?? "");
+  const period = normalizeFootballToken(market.period ?? "");
+  if (
+    canonical.includes("correct score") ||
+    raw.includes("correct score")
+  ) {
+    return "Placar";
+  }
+  if (
+    period.includes("set") ||
+    raw.includes("set") ||
+    canonical.includes("set winner")
+  ) {
+    return "Sets";
+  }
+  if (
+    canonical.includes("handicap") ||
+    raw.includes("handicap")
+  ) {
+    return "Handicap";
+  }
+  if (
+    canonical.includes("total") ||
+    canonical.includes("over under") ||
+    raw.includes("points")
+  ) {
+    return "Pontos";
+  }
+  return "Principal";
+}
+
+function buildHockeyV2AllOddsMarkets(
+  event: PulseScoreEvent | null | undefined,
+): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  return (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => {
+      const choices = pulseScoreMarketSelections(market).map((selection) => ({
+        name: String(
+          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
+        ).trim(),
+        label: pulseScoreSelectionLabel(market, selection),
+        odds: pulseScoreSelectionOdd(selection),
+      }));
+      if (choices.length === 0) return null;
+      const line = pulseScoreSelectionLine(
+        market,
+        pulseScoreMarketSelections(market)[0] ?? null,
+      );
+      const rawName = String(
+        market.rawName ?? market.canonicalMarket ?? "Mercado",
+      ).trim();
+      return {
+        name:
+          line != null && !rawName.includes(String(line))
+            ? `${rawName} ${formatPulseScoreLine(line)}`
+            : rawName,
+        group: pulseScoreHockeyAllOddsGroup(market),
+        choices,
+      };
+    })
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+}
+
+function primeHockeyV2AllOddsCache(
+  eventId: string | number | undefined,
+  event: PulseScoreEvent | null | undefined,
+): void {
+  const normalizedId = String(eventId ?? "").trim();
+  if (!normalizedId || !event) return;
+  const markets = buildHockeyV2AllOddsMarkets(event);
+  if (markets.length === 0) return;
+  hockeyV2AllOddsCache.set(normalizedId, {
+    builtAt: Date.now(),
+    markets,
+  });
+}
+
+function buildBaseballV2AllOddsMarkets(
+  event: PulseScoreEvent | null | undefined,
+): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  return (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => {
+      const choices = pulseScoreMarketSelections(market).map((selection) => ({
+        name: String(
+          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
+        ).trim(),
+        label: pulseScoreSelectionLabel(market, selection),
+        odds: pulseScoreSelectionOdd(selection),
+      }));
+      if (choices.length === 0) return null;
+      const line = pulseScoreSelectionLine(
+        market,
+        pulseScoreMarketSelections(market)[0] ?? null,
+      );
+      const rawName = String(
+        market.rawName ?? market.canonicalMarket ?? "Mercado",
+      ).trim();
+      return {
+        name:
+          line != null && !rawName.includes(String(line))
+            ? `${rawName} ${formatPulseScoreLine(line)}`
+            : rawName,
+        group: pulseScoreBaseballAllOddsGroup(market),
+        choices,
+      };
+    })
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+}
+
+function primeBaseballV2AllOddsCache(
+  eventId: string | number | undefined,
+  event: PulseScoreEvent | null | undefined,
+): void {
+  const normalizedId = String(eventId ?? "").trim();
+  if (!normalizedId || !event) return;
+  const markets = buildBaseballV2AllOddsMarkets(event);
+  if (markets.length === 0) return;
+  baseballV2AllOddsCache.set(normalizedId, {
+    builtAt: Date.now(),
+    markets,
+  });
+}
+
+function buildVolleyballV2AllOddsMarkets(
+  event: PulseScoreEvent | null | undefined,
+): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  return (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => {
+      const choices = pulseScoreMarketSelections(market).map((selection) => ({
+        name: String(
+          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
+        ).trim(),
+        label: pulseScoreSelectionLabel(market, selection),
+        odds: pulseScoreSelectionOdd(selection),
+      }));
+      if (choices.length === 0) return null;
+      const line = pulseScoreSelectionLine(
+        market,
+        pulseScoreMarketSelections(market)[0] ?? null,
+      );
+      const rawName = String(
+        market.rawName ?? market.canonicalMarket ?? "Mercado",
+      ).trim();
+      return {
+        name:
+          line != null && !rawName.includes(String(line))
+            ? `${rawName} ${formatPulseScoreLine(line)}`
+            : rawName,
+        group: pulseScoreVolleyballAllOddsGroup(market),
+        choices,
+      };
+    })
+    .filter(Boolean) as Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
+}
+
+function primeVolleyballV2AllOddsCache(
+  eventId: string | number | undefined,
+  event: PulseScoreEvent | null | undefined,
+): void {
+  const normalizedId = String(eventId ?? "").trim();
+  if (!normalizedId || !event) return;
+  const markets = buildVolleyballV2AllOddsMarkets(event);
+  if (markets.length === 0) return;
+  volleyballV2AllOddsCache.set(normalizedId, {
+    builtAt: Date.now(),
+    markets,
+  });
+}
+
 function buildBasketballMatchFromPulseScore(
   event: PulseScoreEvent,
   kind: "upcoming" | "live",
@@ -5793,6 +6090,21 @@ async function loadPulseScoreEventsForSport(
         primeBasketballV2AllOddsCache(event.eventId, event);
       }
     }
+    if (sport === "ice_hockey") {
+      for (const event of batch) {
+        primeHockeyV2AllOddsCache(event.eventId, event);
+      }
+    }
+    if (sport === "baseball") {
+      for (const event of batch) {
+        primeBaseballV2AllOddsCache(event.eventId, event);
+      }
+    }
+    if (sport === "volleyball") {
+      for (const event of batch) {
+        primeVolleyballV2AllOddsCache(event.eventId, event);
+      }
+    }
     events.push(...batch);
     if (!response.hasNextPage || batch.length === 0) break;
     page += 1;
@@ -6174,6 +6486,168 @@ async function getFootballV2AllOdds(
     }
   })();
   footballV2AllOddsInFlight.set(eventId, request);
+  return request;
+}
+
+async function getHockeyV2AllOdds(
+  eventId: string,
+): Promise<
+  Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>
+> {
+  const now = Date.now();
+  const cached = hockeyV2AllOddsCache.get(eventId);
+  if (cached && now - cached.builtAt < HOCKEY_V2_ALL_ODDS_TTL_MS) {
+    return cached.markets;
+  }
+  const existingRequest = hockeyV2AllOddsInFlight.get(eventId);
+  if (existingRequest) return existingRequest;
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) {
+    return cached?.markets ?? [];
+  }
+  const request = (async () => {
+    try {
+      const liveEvent = await client.getLiveEventById(
+        HOCKEY_PROVIDER_CONFIG.bookmaker,
+        eventId,
+      );
+      const prematchEvent =
+        liveEvent ??
+        (await client.getEventById(
+          HOCKEY_PROVIDER_CONFIG.bookmaker,
+          HOCKEY_PROVIDER_CONFIG.pulseScoreSport,
+          eventId,
+        ));
+      const markets = buildHockeyV2AllOddsMarkets(prematchEvent);
+      hockeyV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
+      return markets;
+    } catch (err) {
+      if (cached && now - cached.builtAt < HOCKEY_V2_ALL_ODDS_STALE_TTL_MS) {
+        logger.warn(
+          { err, eventId },
+          "[hockey-v2] all-odds fetch failed — serving stale cache",
+        );
+        return cached.markets;
+      }
+      throw err;
+    } finally {
+      hockeyV2AllOddsInFlight.delete(eventId);
+    }
+  })();
+  hockeyV2AllOddsInFlight.set(eventId, request);
+  return request;
+}
+
+async function getBaseballV2AllOdds(
+  eventId: string,
+): Promise<
+  Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>
+> {
+  const now = Date.now();
+  const cached = baseballV2AllOddsCache.get(eventId);
+  if (cached && now - cached.builtAt < BASEBALL_V2_ALL_ODDS_TTL_MS) {
+    return cached.markets;
+  }
+  const existingRequest = baseballV2AllOddsInFlight.get(eventId);
+  if (existingRequest) return existingRequest;
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) {
+    return cached?.markets ?? [];
+  }
+  const request = (async () => {
+    try {
+      const liveEvent = await client.getLiveEventById(
+        BASEBALL_PROVIDER_CONFIG.bookmaker,
+        eventId,
+      );
+      const prematchEvent =
+        liveEvent ??
+        (await client.getEventById(
+          BASEBALL_PROVIDER_CONFIG.bookmaker,
+          BASEBALL_PROVIDER_CONFIG.pulseScoreSport,
+          eventId,
+        ));
+      const markets = buildBaseballV2AllOddsMarkets(prematchEvent);
+      baseballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
+      return markets;
+    } catch (err) {
+      if (cached && now - cached.builtAt < BASEBALL_V2_ALL_ODDS_STALE_TTL_MS) {
+        logger.warn(
+          { err, eventId },
+          "[baseball-v2] all-odds fetch failed — serving stale cache",
+        );
+        return cached.markets;
+      }
+      throw err;
+    } finally {
+      baseballV2AllOddsInFlight.delete(eventId);
+    }
+  })();
+  baseballV2AllOddsInFlight.set(eventId, request);
+  return request;
+}
+
+async function getVolleyballV2AllOdds(
+  eventId: string,
+): Promise<
+  Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>
+> {
+  const now = Date.now();
+  const cached = volleyballV2AllOddsCache.get(eventId);
+  if (cached && now - cached.builtAt < VOLLEYBALL_V2_ALL_ODDS_TTL_MS) {
+    return cached.markets;
+  }
+  const existingRequest = volleyballV2AllOddsInFlight.get(eventId);
+  if (existingRequest) return existingRequest;
+  const client = getPulseScoreClient();
+  if (!client.isConfigured()) {
+    return cached?.markets ?? [];
+  }
+  const request = (async () => {
+    try {
+      const liveEvent = await client.getLiveEventById(
+        VOLLEYBALL_PROVIDER_CONFIG.bookmaker,
+        eventId,
+      );
+      const prematchEvent =
+        liveEvent ??
+        (await client.getEventById(
+          VOLLEYBALL_PROVIDER_CONFIG.bookmaker,
+          VOLLEYBALL_PROVIDER_CONFIG.pulseScoreSport,
+          eventId,
+        ));
+      const markets = buildVolleyballV2AllOddsMarkets(prematchEvent);
+      volleyballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
+      return markets;
+    } catch (err) {
+      if (
+        cached &&
+        now - cached.builtAt < VOLLEYBALL_V2_ALL_ODDS_STALE_TTL_MS
+      ) {
+        logger.warn(
+          { err, eventId },
+          "[volleyball-v2] all-odds fetch failed — serving stale cache",
+        );
+        return cached.markets;
+      }
+      throw err;
+    } finally {
+      volleyballV2AllOddsInFlight.delete(eventId);
+    }
+  })();
+  volleyballV2AllOddsInFlight.set(eventId, request);
   return request;
 }
 
@@ -12876,9 +13350,6 @@ async function rebuildUpcomingCache(): Promise<void> {
           matches: await buildHockeyUpcomingFromV2(),
         });
       }
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildHockeyUpcomingFromMrDoge() });
-      }
       hockey = chooseUpcomingProvider("hockey", candidates);
       _lastGoodHockeyUpcoming = hockey;
     } catch (err) {
@@ -12894,9 +13365,6 @@ async function rebuildUpcomingCache(): Promise<void> {
           matches: await buildVolleyballUpcomingFromV2(),
         });
       }
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildVolleyballUpcomingFromMrDoge() });
-      }
       volleyball = chooseUpcomingProvider("volleyball", candidates);
       _lastGoodVolleyballUpcoming = volleyball;
     } catch (err) {
@@ -12911,9 +13379,6 @@ async function rebuildUpcomingCache(): Promise<void> {
           provider: "v2",
           matches: await buildBaseballUpcomingFromV2(),
         });
-      }
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildBaseballUpcomingFromMrDoge() });
       }
       baseball = chooseUpcomingProvider("baseball", candidates);
       _lastGoodBaseballUpcoming = baseball;
@@ -12959,7 +13424,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   if (CONFIG.MRDOGE_API_KEY) {
     const liveOddsTargets = getMrDogeLiveMatches().filter((m) => !!m.stats?.sport);
     const nonFootballTargets = liveOddsTargets
-      .filter((m) => m.stats?.sport !== "soccer")
+      .filter(
+        (m) =>
+          m.stats?.sport !== "soccer" &&
+          m.stats?.sport !== "ice_hockey" &&
+          m.stats?.sport !== "baseball" &&
+          m.stats?.sport !== "volleyball",
+      )
       .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) }));
     const footballOddsTargets = liveOddsTargets
       .filter((m) => m.stats?.sport === "soccer")
@@ -13063,9 +13534,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       matches: await getHockeyV2LiveCached(),
     });
   }
-  if (CONFIG.MRDOGE_API_KEY) {
-    hockeyCandidates.push({ provider: "mrdoge", matches: await buildHockeyLiveFromMrDoge() });
-  }
   const hockeyLive = sportWithFallback("hockey", chooseLiveProvider("hockey", hockeyCandidates));
   const baseballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
   if (useBaseballV2()) {
@@ -13074,9 +13542,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       matches: await getBaseballV2LiveCached(),
     });
   }
-  if (CONFIG.MRDOGE_API_KEY) {
-    baseballCandidates.push({ provider: "mrdoge", matches: await buildBaseballLiveFromMrDoge() });
-  }
   const baseballLive = sportWithFallback("baseball", chooseLiveProvider("baseball", baseballCandidates));
   const volleyballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
   if (useVolleyballV2()) {
@@ -13084,9 +13549,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       provider: "v2",
       matches: await getVolleyballV2LiveCached(),
     });
-  }
-  if (CONFIG.MRDOGE_API_KEY) {
-    volleyballCandidates.push({ provider: "mrdoge", matches: await buildVolleyballLiveFromMrDoge() });
   }
   const volleyballLiveItems = sportWithFallback("volleyball", chooseLiveProvider("volleyball", volleyballCandidates));
   // api-tennis removed 2026-09-20 (user decision); Mr. Doge is tennis's
@@ -14022,7 +14484,7 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "football").toLowerCase();
   if (
     !id ||
-    !["football", "soccer", "tennis", "basketball"].includes(sport)
+    !["football", "soccer", "tennis", "basketball", "hockey", "baseball", "volleyball"].includes(sport)
   ) {
     res.json({ markets: [] });
     return;
@@ -14072,6 +14534,72 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
       });
       return;
     }
+  }
+
+  if (
+    isHockeyV2MatchId(rawRouteId) &&
+    useHockeyV2() &&
+    sport === "hockey"
+  ) {
+    try {
+      res.json({ markets: await getHockeyV2AllOdds(id) });
+      return;
+    } catch (err) {
+      logger.warn({ err, id, sport }, "[hockey-v2] all-odds fetch failed");
+      res.status(503).json({
+        markets: [],
+        error: "pulsescore_odds_temporarily_unavailable",
+      });
+      return;
+    }
+  }
+
+  if (
+    isBaseballV2MatchId(rawRouteId) &&
+    useBaseballV2() &&
+    sport === "baseball"
+  ) {
+    try {
+      res.json({ markets: await getBaseballV2AllOdds(id) });
+      return;
+    } catch (err) {
+      logger.warn({ err, id, sport }, "[baseball-v2] all-odds fetch failed");
+      res.status(503).json({
+        markets: [],
+        error: "pulsescore_odds_temporarily_unavailable",
+      });
+      return;
+    }
+  }
+
+  if (
+    isVolleyballV2MatchId(rawRouteId) &&
+    useVolleyballV2() &&
+    sport === "volleyball"
+  ) {
+    try {
+      res.json({ markets: await getVolleyballV2AllOdds(id) });
+      return;
+    } catch (err) {
+      logger.warn({ err, id, sport }, "[volleyball-v2] all-odds fetch failed");
+      res.status(503).json({
+        markets: [],
+        error: "pulsescore_odds_temporarily_unavailable",
+      });
+      return;
+    }
+  }
+
+  if (
+    sport === "hockey" ||
+    sport === "baseball" ||
+    sport === "volleyball"
+  ) {
+    res.status(503).json({
+      markets: [],
+      error: "pulsescore_odds_temporarily_unavailable",
+    });
+    return;
   }
 
   try {
@@ -14396,9 +14924,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
         matches: await buildHockeyUpcomingFromV2(),
       });
     }
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildHockeyUpcomingFromMrDoge() });
-    }
     hockey = chooseUpcomingProvider("hockey", candidates);
     workingCache.hockey = hockey;
   } catch (err) {
@@ -14413,9 +14938,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
         matches: await buildVolleyballUpcomingFromV2(),
       });
     }
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildVolleyballUpcomingFromMrDoge() });
-    }
     volleyball = chooseUpcomingProvider("volleyball", candidates);
     workingCache.volleyball = volleyball;
   } catch (err) {
@@ -14429,9 +14951,6 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
         provider: "v2",
         matches: await buildBaseballUpcomingFromV2(),
       });
-    }
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildBaseballUpcomingFromMrDoge() });
     }
     baseball = chooseUpcomingProvider("baseball", candidates);
     workingCache.baseball = baseball;
