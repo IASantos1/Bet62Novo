@@ -13,7 +13,6 @@ import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
 import predictionsRouter from "./predictions.js";
 import casinoRouter from "./casino.js";
-import providerWebhooksRouter from "./providerWebhooks.js";
 
 const router: IRouter = Router();
 
@@ -31,6 +30,5 @@ router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/predictions", predictionsRouter);
 router.use("/casino", casinoRouter);
-router.use(providerWebhooksRouter);
 
 export default router;

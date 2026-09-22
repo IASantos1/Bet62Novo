@@ -1784,14 +1784,6 @@ export function normalizeSettlementSelectionKey(selection: string): string {
     const m = s.match(/^b-q([1-4])t-([ou])-([\d.]+)$/);
     s = `q${m![1]}t-${m![2]}-${m![3]}`;
   }
-  // Basketball first-half winner / total aliases from the frontend's
-  // dedicated basketball layout.
-  else if (s === "b-fh-home") s = "h1-home";
-  else if (s === "b-fh-away") s = "h1-away";
-  else if (/^b-fht-([ou])-([\d.]+)$/.test(s)) {
-    const m = s.match(/^b-fht-([ou])-([\d.]+)$/);
-    s = `b-h1-pts-${m![1]}-${m![2]}`;
-  }
   // Basketball quarter spreads — line accepts an optional leading "-" (see
   // the qSpread regex's own comment above for why).
   else if (/^b-q([1-4])s-(home|away)-(-?[\d.]+)$/.test(s)) {
@@ -4146,12 +4138,12 @@ function providerMatchIdPrefixesForSport(
       // (findLiveResultByTeams/findResultByTeams) for 100% of today's football bets.
       // gs-soccer added 2026 — GoalServe primary provider; uses soccer internally
       // for historical football, so prefix is gs-soccer-XXX even after normalization.
-      return ["pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
+      return ["goalapi-football", "propline-football", "pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
     case "tennis":
       // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
       // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
       // kept for the same pre-migration reason as football-v2 above.
-      return ["pulsescore-tennis", "tennis-v1", "tennis-v2", "gs-tennis"];
+      return ["propline-tennis", "pulsescore-tennis", "tennis-v1", "tennis-v2", "gs-tennis"];
     case "basketball":
       // pulsescore-basketball is the current live prefix
       // (buildBasketballLiveFromPulseScore in matches.ts, switched from bwin
@@ -4166,7 +4158,7 @@ function providerMatchIdPrefixesForSport(
       // ensureFinishedMatchResult() for one either, silently breaking both
       // the fuzzy-lookup fallback and the active "confirm this match is
       // really finished" check for 100% of today's basketball bets.
-      return ["pulsescore-basketball", "bball-v2", "gs-basketball"];
+      return ["propline-basketball", "pulsescore-basketball", "bball-v2", "gs-basketball"];
     case "baseball":
       // Missing "pulsescore-baseball" until 2026-08-28 (found while wiring
       // real onexbet markets into baseball this session) — same bug class
@@ -4176,22 +4168,22 @@ function providerMatchIdPrefixesForSport(
       // since that pipeline shipped, but this list never had it, silently
       // breaking the fuzzy team-name-lookup fallback for every current
       // baseball bet — baseball-v2/mlb-v2 are the dead pre-migration prefixes.
-      return ["pulsescore-baseball", "baseball-v2", "mlb-v2", "gs-baseball"];
+      return ["propline-baseball", "pulsescore-baseball", "baseball-v2", "mlb-v2", "gs-baseball"];
     case "hockey":
       // Same gap as baseball above, same fix — hockey-v2 is the dead
       // pre-migration prefix.
-      return ["pulsescore-hockey", "hockey-v2", "gs-hockey"];
+      return ["propline-hockey", "pulsescore-hockey", "hockey-v2", "gs-hockey"];
     case "mma":
       // New sport (2026-08-28) — no pre-migration prefix exists, this is
       // the only one buildMmaUpcomingFromPulseScore ever creates.
-      return ["pulsescore-mma", "gs-mma"];
+      return ["propline-mma", "pulsescore-mma", "gs-mma"];
     case "volleyball":
       // pulsescore-volleyball is the current live AND prematch prefix
       // (buildVolleyballLiveFromPulseScore/buildVolleyballUpcomingFromPulseScore
       // in matches.ts, built 2026-08-09) — volley-live/volley-odds are the
       // dead Statpal-era prefixes, kept for pre-migration matchIds only.
       // Same missing-prefix bug as basketball above (see its comment).
-      return ["pulsescore-volleyball", "volley-live", "volley-odds", "gs-volleyball"];
+      return ["propline-volleyball", "pulsescore-volleyball", "volley-live", "volley-odds", "gs-volleyball"];
     case "handball":
       return ["gs-handball"];
     case "cricket":
@@ -4209,7 +4201,7 @@ function providerMatchIdPrefixesForSport(
     case "futsal":
       return ["gs-futsal"];
     case "darts":
-      return ["gs-darts"];
+      return ["propline-darts", "gs-darts"];
   }
 }
 
@@ -4321,7 +4313,7 @@ function isProviderManagedMatchId(matchId: string): boolean {
   // (see providerMatchIdPrefixesForSport's matching comment above).
   // pulsescore-mma added the same day — new sport, built from scratch.
   // gs-* prefixes: GoalServe (2026). Supported for all migrated sports.
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^(goalapi-football|propline-(football|tennis|basketball|volleyball|hockey|baseball|mma|darts))-.+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }

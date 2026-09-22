@@ -41,7 +41,6 @@ router.get("/debug-provider-quality", (_req, res) => {
     upcoming: g.__providerQualityDebug?.upcoming ?? {},
     live: g.__providerQualityDebug?.live ?? {},
     livePayload: g.__livePayloadDebug ?? null,
-    upcomingVisibility: g.__upcomingVisibilityDebug ?? null,
   });
 });
 

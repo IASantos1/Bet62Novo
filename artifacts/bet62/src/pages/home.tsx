@@ -3388,13 +3388,7 @@ const OTHER_SPORTS: {
   },
 ];
 
-type TopLeagueEntry = {
-  league: string;
-  country: string;
-  sport: string;
-  leagueId?: string;
-  regionId?: string;
-};
+type TopLeagueEntry = { league: string; country: string; sport: string };
 
 type SidebarCatalogRegion = {
   id: number;
@@ -3409,20 +3403,6 @@ type SidebarCatalogCompetition = {
   name: string;
   regionId: number;
   eventCount: number;
-};
-
-type SidebarCatalogDiagnostic = {
-  code:
-    | "ok"
-    | "partial_window"
-    | "empty_window"
-    | "not_configured"
-    | "unsupported_sport"
-    | "provider_error";
-  message: string;
-  startDate?: string;
-  endDate?: string;
-  eventCount?: number;
 };
 
 const MRDOGE_CATALOG_SPORTS = new Set([
@@ -3449,14 +3429,9 @@ type SidebarTreeContentProps = {
   topLeagues?: TopLeagueEntry[];
   selectedLeague?: string | null;
   setSelectedLeague?: (l: string | null) => void;
-  selectedLeagueId?: string | null;
-  setSelectedLeagueId?: (id: string | null) => void;
   selectedCountry?: string | null;
   setSelectedCountry?: (c: string | null) => void;
-  selectedRegionId?: string | null;
-  setSelectedRegionId?: (id: string | null) => void;
   catalogBySport?: Record<string, SidebarCatalogRegion[]>;
-  catalogDiagnosticBySport?: Record<string, SidebarCatalogDiagnostic | undefined>;
   competitionCatalogByRegion?: Record<string, SidebarCatalogCompetition[]>;
   catalogLoadingSport?: string | null;
   competitionLoadingKey?: string | null;
@@ -3477,14 +3452,9 @@ function SidebarTreeContent({
   topLeagues,
   selectedLeague,
   setSelectedLeague,
-  selectedLeagueId,
-  setSelectedLeagueId,
   selectedCountry,
   setSelectedCountry,
-  selectedRegionId,
-  setSelectedRegionId,
   catalogBySport,
-  catalogDiagnosticBySport,
   competitionCatalogByRegion,
   catalogLoadingSport,
   competitionLoadingKey,
@@ -3526,63 +3496,29 @@ function SidebarTreeContent({
     fallbackCountry?: string,
   ) {
     const regions = catalogBySport?.[sportKey] ?? [];
-    const diagnostic = catalogDiagnosticBySport?.[sportKey];
     const showDynamic = dynamicSportKeys.has(sportKey) && regions.length > 0;
-    const diagnosticNotice = diagnostic && diagnostic.code !== "ok" ? (
-      <div className="mb-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2">
-        <div className="text-[11px] font-semibold text-zinc-300">
-          Catálogo MrDoge
-        </div>
-        <div
-          className={`mt-1 text-[11px] leading-relaxed ${
-            diagnostic.code === "provider_error" || diagnostic.code === "not_configured"
-              ? "text-amber-400"
-              : "text-zinc-500"
-          }`}
-        >
-          {diagnostic.message}
-        </div>
-        {diagnostic.startDate && diagnostic.endDate && (
-          <div className="mt-1 text-[10px] text-zinc-600">
-            Janela: {diagnostic.startDate} → {diagnostic.endDate}
-          </div>
-        )}
-      </div>
-    ) : null;
-    if (dynamicSportKeys.has(sportKey) && diagnostic && regions.length === 0) {
-      return (
-        <div className="ml-2 mt-0.5 border-l border-zinc-800 pl-3 pr-2 py-2">
-          {diagnosticNotice}
-        </div>
-      );
-    }
     if (!showDynamic) return null;
 
     return (
       <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-        {diagnosticNotice}
         {regions.map((region) => {
           const regionKey = `${sportKey}:${region.id}`;
           const competitions = competitionCatalogByRegion?.[regionKey] ?? [];
           const isLoadingCompetitions = competitionLoadingKey === regionKey;
-          const isActive = selectedRegionId
-            ? selectedRegionId === String(region.id)
-            : selectedCountry === region.name;
           return (
             <div key={regionKey}>
               <button
                 onClick={() => {
+                  const isActive = selectedCountry === region.name;
                   setExpandedCountry(isActive ? null : regionKey);
                   setSelectedCountry?.(isActive ? null : region.name);
-                  setSelectedRegionId?.(isActive ? null : String(region.id));
                   setSelectedLeague?.(null);
-                  setSelectedLeagueId?.(null);
                   setSelectedSport(sportKey);
                   setActiveTab("sports");
                   if (!isActive) ensureCompetitionCatalog?.(sportKey, region);
                   onClose?.();
                 }}
-                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${isActive ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === regionKey ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === region.name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === regionKey ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
               >
                 {region.flagUrl ? (
                   <StableImage
@@ -3610,9 +3546,7 @@ function SidebarTreeContent({
                     </div>
                   )}
                   {competitions.map((competition) => {
-                    const active = selectedLeagueId
-                      ? selectedLeagueId === String(competition.id)
-                      : selectedLeague === competition.name;
+                    const active = selectedLeague === competition.name;
                     const logo = getLeagueLogo(
                       competition.name,
                       region.name,
@@ -3626,11 +3560,7 @@ function SidebarTreeContent({
                           setSelectedLeague?.(
                             active ? null : competition.name,
                           );
-                          setSelectedLeagueId?.(
-                            active ? null : String(competition.id),
-                          );
                           setSelectedCountry?.(null);
-                          setSelectedRegionId?.(null);
                           setSelectedSport(sportKey);
                           setActiveTab("sports");
                           onClose?.();
@@ -3672,9 +3602,7 @@ function SidebarTreeContent({
                           key={`${regionKey}:${league}`}
                           onClick={() => {
                             setSelectedLeague?.(active ? null : league);
-                            setSelectedLeagueId?.(null);
                             setSelectedCountry?.(null);
-                            setSelectedRegionId?.(null);
                             setSelectedSport(sportKey);
                             setActiveTab("sports");
                             onClose?.();
@@ -3730,18 +3658,12 @@ function SidebarTreeContent({
                         : l.sport === "baseball"
                           ? "⚾"
                           : "⚽");
-              const active = l.leagueId && selectedLeagueId
-                ? selectedLeagueId === l.leagueId
-                : selectedLeague === l.league;
+              const active = selectedLeague === l.league;
               return (
                 <button
-                  key={`${l.sport}:${l.leagueId ?? l.country}:${l.league}`}
+                  key={l.league}
                   onClick={() => {
                     setSelectedLeague(active ? null : l.league);
-                    setSelectedLeagueId?.(active ? null : l.leagueId ?? null);
-                    setSelectedCountry?.(null);
-                    setSelectedRegionId?.(null);
-                    setSelectedSport(l.sport || "football");
                     setActiveTab("sports");
                     onClose?.();
                   }}
@@ -3765,9 +3687,7 @@ function SidebarTreeContent({
         onClick={() => {
           go("all");
           setSelectedLeague?.(null);
-          setSelectedLeagueId?.(null);
           setSelectedCountry?.(null);
-          setSelectedRegionId?.(null);
         }}
         className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" && !selectedLeague && !selectedCountry ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
       >
@@ -3803,9 +3723,7 @@ function SidebarTreeContent({
                       const isActive = selectedCountry === name;
                       setExpandedCountry(isActive ? null : name);
                       setSelectedCountry?.(isActive ? null : name);
-                      setSelectedRegionId?.(null);
                       setSelectedLeague?.(null);
-                      setSelectedLeagueId?.(null);
                       setSelectedSport("football");
                       setActiveTab("sports");
                       onClose?.();
@@ -3829,9 +3747,7 @@ function SidebarTreeContent({
                             key={league}
                             onClick={() => {
                               setSelectedLeague?.(active ? null : league);
-                              setSelectedLeagueId?.(null);
                               setSelectedCountry?.(null);
-                              setSelectedRegionId?.(null);
                               setSelectedSport("football");
                               setActiveTab("sports");
                               onClose?.();
@@ -3894,9 +3810,6 @@ function SidebarTreeContent({
                       key={league}
                       onClick={() => {
                         setSelectedLeague?.(active ? null : league);
-                        setSelectedLeagueId?.(null);
-                        setSelectedCountry?.(null);
-                        setSelectedRegionId?.(null);
                         setSelectedSport(key);
                         setActiveTab("sports");
                         onClose?.();
@@ -4145,9 +4058,7 @@ type Match = {
   stadium?: string;
   referee?: string;
   league: string;
-  leagueId?: string;
   country?: string;
-  regionId?: string;
   time?: string;
   date?: string;
   sport?: string;
@@ -5238,11 +5149,7 @@ export default function Home({
   const [betFundingMode, setBetFundingMode] = useState<"balance" | "freebet">(
     "balance",
   );
-  const [selectedSport, setSelectedSport] = useState<string>("all");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
-  const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   // No native app exists yet — the "download for iOS/Android" banner
   // advertised a nonexistent app, so it's disabled at the source instead of
   // deleting all its JSX/positioning logic (which would need to be re-added
@@ -5403,37 +5310,31 @@ export default function Home({
   // guards on those effects), so this doesn't do new work on other tabs.
   const liveTabLists = useMemo(() => {
     const filterBySport = (m: Match) => {
-      const byLiveSport =
+      const bySport =
         liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
-      const bySelectedSport =
-        selectedSport === "all" || (m.sport ?? "football") === selectedSport;
-      const byCountry =
-        selectedRegionId && m.regionId
-          ? String(m.regionId) === selectedRegionId
-          : countryMatchesFilter(
-              m.country,
-              selectedCountry ?? undefined,
-              m.league,
-            );
-      const byLeague =
-        !selectedLeague ||
-        (selectedLeagueId && m.leagueId
-          ? String(m.leagueId) === selectedLeagueId
-          : leagueMatchesFilter(m.league, selectedLeague));
       const q = liveSearchQuery.trim().toLowerCase();
       const bySearch =
         !q ||
         m.home.toLowerCase().includes(q) ||
         m.away.toLowerCase().includes(q) ||
         (m.league ?? "").toLowerCase().includes(q);
-      return byLiveSport && bySelectedSport && byCountry && byLeague && bySearch;
+      return bySport && bySearch;
     };
+    const liveSportPriority = new Map(
+      ["football", "tennis", "basketball", "baseball", "hockey", "volleyball"].map(
+        (sport, index) => [sport, index],
+      ),
+    );
     const actualLive = liveMatches.filter(
       (m) => {
         const s = String(m.status ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
         const isFinished = /final|fin|finished|ended|complete|full.?time|after.?extra|after.?penalt|retir|abandon|cancel|award|default|ft|aet|ap/.test(s);
         return m.startsIn === undefined && !isFinished && filterBySport(m);
       },
+    ).sort(
+      (a, b) =>
+        (liveSportPriority.get(a.sport ?? "football") ?? 99) -
+        (liveSportPriority.get(b.sport ?? "football") ?? 99),
     );
     // Dedup key: match id when every source actually has a stable one,
     // team-name pair otherwise — a bare team-name key alone would silently
@@ -5491,18 +5392,7 @@ export default function Home({
     }) as typeof emBreve;
     return { actualLive, emBreveWithFillers };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    liveMatches,
-    upcomingMatches,
-    fillerMatches,
-    liveSportFilter,
-    liveSearchQuery,
-    selectedSport,
-    selectedCountry,
-    selectedLeague,
-    selectedRegionId,
-    selectedLeagueId,
-  ]);
+  }, [liveMatches, upcomingMatches, fillerMatches, liveSportFilter, liveSearchQuery]);
 
   const [upcomingLoading, setUpcomingLoading] = useState(() => {
     try {
@@ -5518,6 +5408,7 @@ export default function Home({
     } catch {}
     return true;
   });
+  const [selectedSport, setSelectedSport] = useState<string>("all");
   const [upcomingSearchQuery, setUpcomingSearchQuery] = useState<string>("");
   const [showAllLeagues, setShowAllLeagues] = useState<boolean>(false);
   // "default" = today (all leagues) + big leagues up to 7 days ahead.
@@ -6106,11 +5997,9 @@ export default function Home({
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<
     string | null
   >(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [catalogBySport, setCatalogBySport] = useState<
     Record<string, SidebarCatalogRegion[]>
-  >({});
-  const [catalogDiagnosticBySport, setCatalogDiagnosticBySport] = useState<
-    Record<string, SidebarCatalogDiagnostic | undefined>
   >({});
   const [competitionCatalogByRegion, setCompetitionCatalogByRegion] =
     useState<Record<string, SidebarCatalogCompetition[]>>({});
@@ -6169,29 +6058,26 @@ export default function Home({
     "Tunisian Ligue Professionnelle 1",
   ];
   const normalizeLeaguePriorityKey = (value: string) =>
-    normalizeLeagueFilterName(value);
+    String(value ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
   const leaguePriorityIndex = (league: string) => {
     const normalizedLeague = normalizeLeaguePriorityKey(league);
-    const index = PRIORITY_LEAGUES.findIndex((entry) => {
-      const normalizedEntry = normalizeLeaguePriorityKey(entry);
-      return (
-        normalizedLeague === normalizedEntry ||
-        normalizedLeague.startsWith(`${normalizedEntry} `)
-      );
-    });
+    const index = PRIORITY_LEAGUES.findIndex((entry) =>
+      normalizedLeague.includes(normalizeLeaguePriorityKey(entry)),
+    );
     return index === -1 ? Number.MAX_SAFE_INTEGER : index;
   };
   const sidebarTopLeagues = (() => {
     const leagueMap = new Map<string, TopLeagueEntry>();
     [...liveMatches, ...upcomingMatches].forEach((m) => {
-      const key = `${m.sport ?? "football"}:${m.leagueId ?? m.country ?? ""}:${m.league}`;
-      if (!leagueMap.has(key)) {
-        leagueMap.set(key, {
+      if (!leagueMap.has(m.league)) {
+        leagueMap.set(m.league, {
           league: m.league,
           country: m.country || "",
           sport: m.sport || "football",
-          leagueId: m.leagueId ? String(m.leagueId) : undefined,
-          regionId: m.regionId ? String(m.regionId) : undefined,
         });
       }
     });
@@ -6208,7 +6094,6 @@ export default function Home({
 
   useEffect(() => {
     setCatalogBySport({});
-    setCatalogDiagnosticBySport({});
     setCompetitionCatalogByRegion({});
     setCatalogLoadingSport(null);
     setCompetitionLoadingKey(null);
@@ -6218,7 +6103,6 @@ export default function Home({
     async (sport: string) => {
       if (!MRDOGE_CATALOG_SPORTS.has(sport)) return;
       if ((catalogBySport[sport] ?? []).length > 0) return;
-      if (catalogDiagnosticBySport[sport]) return;
       if (catalogLoadingSport === sport) return;
 
       setCatalogLoadingSport(sport);
@@ -6226,40 +6110,20 @@ export default function Home({
         const params = new URLSearchParams({ sport });
         if (upcomingRange === "month") params.set("range", "month");
         const r = await fetch(`/api/matches/catalog?${params.toString()}`);
-        const data = r.ok
-          ? await r.json()
-          : {
-              regions: [],
-              diagnostic: {
-                code: "provider_error",
-                message: "Não foi possível carregar o catálogo agora.",
-              },
-            };
+        const data = r.ok ? await r.json() : { regions: [] };
         const regions = Array.isArray(data?.regions)
           ? (data.regions as SidebarCatalogRegion[])
           : [];
-        if (data?.diagnostic) {
-          setCatalogDiagnosticBySport((prev) => ({
-            ...prev,
-            [sport]: data.diagnostic as SidebarCatalogDiagnostic,
-          }));
-        }
         setCatalogBySport((prev) =>
           (prev[sport] ?? []).length > 0 ? prev : { ...prev, [sport]: regions },
         );
       } catch {
-        setCatalogDiagnosticBySport((prev) => ({
-          ...prev,
-          [sport]: {
-            code: "provider_error",
-            message: "Não foi possível carregar o catálogo agora.",
-          },
-        }));
+        /* keep fallback sidebar */
       } finally {
         setCatalogLoadingSport((prev) => (prev === sport ? null : prev));
       }
     },
-    [catalogBySport, catalogDiagnosticBySport, catalogLoadingSport, upcomingRange],
+    [catalogBySport, catalogLoadingSport, upcomingRange],
   );
 
   const ensureCompetitionCatalog = useCallback(
@@ -6519,7 +6383,6 @@ export default function Home({
   );
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
-  const [allOddsError, setAllOddsError] = useState(false);
   const normalizeAllOddsText = useCallback(
     (value: string) =>
       String(value ?? "")
@@ -6533,27 +6396,8 @@ export default function Home({
     const group = normalizeAllOddsText(market.group ?? "");
     const name = normalizeAllOddsText(market.name ?? "");
     const full = `${group} ${name}`.trim();
-    // The native football model has full-time Draw No Bet, but it does not
-    // have a first-half DNB slot. Treating both names as the same duplicate
-    // silently hid MrDoge's real SOCCER_FIRST_HALF_RESULT_NODRAW market.
-    const isFirstHalfDrawNoBet =
-      /(1st half|first half|1[ºo] tempo|primeiro tempo)/.test(full) &&
-      /(draw no bet|empate anula)/.test(full);
-    if (isFirstHalfDrawNoBet) return false;
-    // These exact MrDoge names are already represented by AdvancedMarkets.
-    // Keep first-half totals out of this list because MrDoge can publish
-    // several lines while the native model intentionally stores only one.
-    if (
-      [
-        "goals over/under",
-        "gols mais/menos",
-        "golos mais/menos",
-        "home team goals over/under",
-        "away team goals over/under",
-        "match result handicap",
-        "resultado com handicap",
-      ].includes(name)
-    ) {
+    if (/^(h2h|moneyline|match winner)$/.test(name)) return true;
+    if (/^totals\s*·\s*(0\.5|1\.5|2\.5|3\.5|4\.5|5\.5|6\.5)$/.test(name)) {
       return true;
     }
     return [
@@ -7688,7 +7532,6 @@ export default function Home({
     setConfrontosLoading(false);
     setAllOddsData(null);
     setAllOddsLoading(false);
-    setAllOddsError(false);
     // Auto-switch to ET/Pen tab if match is already in that phase
     if (expandedMatch?.markets?.etExtra) {
       setModalTab("prolongamento");
@@ -7967,33 +7810,25 @@ export default function Home({
     if (sport !== "football") {
       setAllOddsData([]);
       setAllOddsLoading(false);
-      setAllOddsError(false);
       return;
     }
     const rawId = getProviderMatchId(expandedMatch.id);
     if (!rawId) {
       setAllOddsData([]);
       setAllOddsLoading(false);
-      setAllOddsError(false);
       return;
     }
     let cancelled = false;
     setAllOddsLoading(true);
-    setAllOddsError(false);
     fetch(`/api/matches/all-odds/${encodeURIComponent(rawId)}?sport=${encodeURIComponent(sport)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`all-odds ${r.status}`);
-        return r.json();
-      })
+      .then((r) => (r.ok ? r.json() : { markets: [] }))
       .then((d) => {
         if (cancelled) return;
         setAllOddsData(Array.isArray(d?.markets) ? d.markets : []);
-        setAllOddsError(false);
       })
       .catch(() => {
         if (cancelled) return;
         setAllOddsData([]);
-        setAllOddsError(true);
       })
       .finally(() => {
         if (cancelled) return;
@@ -8167,7 +8002,17 @@ export default function Home({
       fetch("/api/matches/tennis-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setTennisOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setTennisOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  Array.isArray(item?.players) &&
+                  item.players.length >= 2 &&
+                  Array.isArray(item?.matchOdds) &&
+                  item.matchOdds.length >= 2,
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -8175,7 +8020,15 @@ export default function Home({
       fetch("/api/matches/basketball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setBasketballOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setBasketballOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -8207,7 +8060,15 @@ export default function Home({
       fetch("/api/matches/volleyball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setVolleyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setVolleyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -8215,7 +8076,15 @@ export default function Home({
       fetch("/api/matches/hockey-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setHockeyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setHockeyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -8259,9 +8128,7 @@ export default function Home({
           home: string;
           away: string;
           league: string;
-          leagueId?: string;
           country?: string;
-          regionId?: string;
           time?: string;
           date?: string;
           sport?: string;
@@ -8333,7 +8200,7 @@ export default function Home({
     }
     if (activeTab !== "sports" && activeTab !== "live") return;
     fetchUpcoming(!canUseSnap);
-    const id = setInterval(() => fetchUpcoming(false), 30_000);
+    const id = setInterval(() => fetchUpcoming(false), 15_000);
     return () => clearInterval(id);
   }, [
     fetchUpcoming,
@@ -8355,9 +8222,7 @@ export default function Home({
     home: string;
     away: string;
     league: string;
-    leagueId?: string;
     country?: string;
-    regionId?: string;
     sport?: string;
     status?: string;
     homeTeamId?: string;
@@ -9231,7 +9096,17 @@ export default function Home({
       fetch("/api/matches/tennis-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setTennisOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setTennisOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  Array.isArray(item?.players) &&
+                  item.players.length >= 2 &&
+                  Array.isArray(item?.matchOdds) &&
+                  item.matchOdds.length >= 2,
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9239,7 +9114,15 @@ export default function Home({
       fetch("/api/matches/basketball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setBasketballOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setBasketballOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9247,7 +9130,15 @@ export default function Home({
       fetch("/api/matches/hockey-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setHockeyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setHockeyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -9263,7 +9154,15 @@ export default function Home({
       fetch("/api/matches/volleyball-odds")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d?.odds) setVolleyOddsMatches(d.odds);
+          if (Array.isArray(d?.odds)) {
+            setVolleyOddsMatches(
+              d.odds.filter(
+                (item: any) =>
+                  typeof item?.homeTeam?.name === "string" &&
+                  typeof item?.awayTeam?.name === "string",
+              ),
+            );
+          }
         })
         .catch(() => {
           /* non-critical */
@@ -13556,6 +13455,7 @@ export default function Home({
     market,
     label,
     suspKey,
+    allowWrap = false,
   }: {
     match: Match;
     sel: string;
@@ -13563,6 +13463,7 @@ export default function Home({
     market: string;
     label: string;
     suspKey?: string;
+    allowWrap?: boolean;
   }) => {
     if ((match.sport ?? "football") === "tennis" && sel === "draw") return null;
     if (odd <= 0) return null; // settled/impossible market line — hide completely
@@ -13573,6 +13474,7 @@ export default function Home({
       const stripped = n
         .replace(/\s*\((Women|Women's|Women’s|Men|Men's|Men’s|U-?\d{1,2})\)\s*$/i, "")
         .trim();
+      if (allowWrap) return stripped;
       const MAX = 14;
       if (stripped.length <= MAX) return stripped;
       return stripped.slice(0, MAX - 1).trimEnd() + "…";
@@ -13591,11 +13493,11 @@ export default function Home({
       const suspensionLabel = getLiveSuspensionLabel(match);
       return (
         <div
-          className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-75 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/85" : "border-zinc-300 bg-zinc-100"}`}
-          title="Mercado suspenso"
+          className={`flex-1 flex flex-col items-center justify-center min-w-0 ${allowWrap ? "min-h-[68px] h-auto py-2 px-2" : "h-[58px] px-1"} rounded-xl border opacity-75 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/85" : "border-zinc-300 bg-zinc-100"}`}
+          title={`${cleanLabel} — Mercado suspenso`}
           aria-disabled="true"
         >
-          <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
+          <span className={`text-[10px] text-zinc-500 mb-1 leading-tight text-center w-full px-0.5 ${allowWrap ? "whitespace-normal break-words line-clamp-2" : "truncate"}`}>
             {cleanLabel}
           </span>
           <span
@@ -13629,9 +13531,10 @@ export default function Home({
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${active ? isDarkTheme ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30" : "border-red-300 bg-red-50 ring-1 ring-red-200" : isDarkTheme ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
+        className={`flex-1 flex flex-col items-center justify-center min-w-0 ${allowWrap ? "min-h-[68px] h-auto py-2 px-2" : "h-[58px] px-1"} rounded-xl border transition-all ${active ? isDarkTheme ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30" : "border-red-300 bg-red-50 ring-1 ring-red-200" : isDarkTheme ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
+        title={cleanLabel}
       >
-        <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
+        <span className={`text-[10px] text-zinc-500 mb-1 leading-tight text-center w-full px-0.5 ${allowWrap ? "whitespace-normal break-words line-clamp-2" : "truncate"}`}>
           {cleanLabel}
         </span>
         <span
@@ -14283,13 +14186,15 @@ export default function Home({
       const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
       const choiceName = normalizeAllOddsText(choice.name ?? "");
       const choiceLabel = String(choice.label ?? "").trim();
-      const lineMatch = choiceLabel.match(/(\d+(?:[.,]\d+)?)/);
+      const lineMatch =
+        choiceLabel.match(/([-+]?\d+(?:[.,]\d+)?)/) ??
+        String(market.name ?? "").match(/·\s*([-+]?\d+(?:[.,]\d+)?)/);
       const line = lineMatch?.[1]?.replace(",", ".");
       if (bucket === "gols" && /(odd\/even|odd even|impar|par)/.test(marketText)) {
-        if (choiceName === "1" || choiceName.includes("odd") || /^home$/i.test(choiceLabel) || /^mandante$/i.test(choiceLabel) || /^odd$/i.test(choiceLabel)) {
+        if (choiceName.includes("odd") || /^home$/i.test(choiceLabel) || /^odd$/i.test(choiceLabel)) {
           return "Ímpar";
         }
-        if (choiceName === "0" || choiceName.includes("even") || /^par$/i.test(choiceLabel) || /^even$/i.test(choiceLabel)) {
+        if (choiceName.includes("even") || /^par$/i.test(choiceLabel) || /^even$/i.test(choiceLabel)) {
           return "Par";
         }
       }
@@ -14302,6 +14207,13 @@ export default function Home({
         if (/away team goals/.test(marketText) && line) return `Fora -${line}`;
         if (/home team goals/.test(marketText) && line) return `Casa -${line}`;
         return line ? `Menos ${line}` : choiceLabel.replace(/^under\b/i, "Menos");
+      }
+      if (
+        (bucket === "handicap" || bucket === "asiatico") &&
+        line &&
+        !/[-+]?\d/.test(choiceLabel)
+      ) {
+        return `${choiceLabel} (${line})`;
       }
       return choiceLabel
         .replace(/^yes\b/i, "Sim")
@@ -14365,10 +14277,7 @@ export default function Home({
       sections: typeof extraAllOddsSections,
       bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) => {
-      if (!isFootball || allOddsLoading || sections.length === 0) return null;
-      // "Todos" must actually include every open MrDoge market. Previously
-      // every non-native market was deliberately hidden here for live games,
-      // which made a 14-market API response look like only the basic markets.
+      if (allOddsLoading || sections.length === 0) return null;
       return (
         <div className="space-y-2">
           {sections.map((section) => {
@@ -14395,33 +14304,24 @@ export default function Home({
                     key={`inline-${bucket}-${section.section}-${groupIndex}`}
                     title={group.title}
                   >
-                    <div className="w-full flex flex-col gap-2">
-                      {group.items.map(({ market, originalIndex }) => (
-                        <div
-                          key={`all-row-${bucket}-${originalIndex}`}
-                          className={`w-full grid gap-2 ${
-                            market.choices.length === 1
-                              ? "grid-cols-1"
-                              : market.choices.length === 2
-                                ? "grid-cols-2"
-                                : market.choices.length === 3
-                                  ? "grid-cols-3"
-                                  : "grid-cols-2 sm:grid-cols-3"
-                          }`}
-                        >
-                          {market.choices.map((choice, choiceIndex) => (
-                            <MarketOddsBtn
-                              key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                              match={match}
-                              sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
-                              odd={choice.odds}
-                              market={`all-${bucket}-${originalIndex}`}
-                              label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
-                            />
-                          ))}
-                        </div>
-                      ))}
-                    </div>
+                    {group.items.map(({ market, originalIndex }) => (
+                      <div
+                        key={`all-row-${bucket}-${originalIndex}`}
+                        className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2"
+                      >
+                        {market.choices.map((choice, choiceIndex) => (
+                          <MarketOddsBtn
+                            key={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                            match={match}
+                            sel={`all-${bucket}-${originalIndex}-${choiceIndex}`}
+                            odd={choice.odds}
+                            market={`all-${bucket}-${originalIndex}`}
+                            label={formatExtraAllOddsChoiceLabel(market, choice, bucket)}
+                            allowWrap
+                          />
+                        ))}
+                      </div>
+                    ))}
                   </MarketGroup>
                 ))}
               </div>
@@ -14474,11 +14374,6 @@ export default function Home({
                       {tab.label}
                     </button>
                   ))}
-                </div>
-              )}
-              {isFootball && allOddsError && (
-                <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] font-medium text-amber-200">
-                  O catálogo completo de mercados está temporariamente indisponível. As odds visíveis abaixo podem estar incompletas.
                 </div>
               )}
 
@@ -20755,14 +20650,9 @@ export default function Home({
                   topLeagues={sidebarTopLeagues}
                   selectedLeague={selectedLeague}
                   setSelectedLeague={setSelectedLeague}
-                  selectedLeagueId={selectedLeagueId}
-                  setSelectedLeagueId={setSelectedLeagueId}
                   selectedCountry={selectedCountry}
                   setSelectedCountry={setSelectedCountry}
-                  selectedRegionId={selectedRegionId}
-                  setSelectedRegionId={setSelectedRegionId}
                   catalogBySport={catalogBySport}
-                  catalogDiagnosticBySport={catalogDiagnosticBySport}
                   competitionCatalogByRegion={competitionCatalogByRegion}
                   catalogLoadingSport={catalogLoadingSport}
                   competitionLoadingKey={competitionLoadingKey}
@@ -20841,14 +20731,9 @@ export default function Home({
                 topLeagues={sidebarTopLeagues}
                 selectedLeague={selectedLeague}
                 setSelectedLeague={setSelectedLeague}
-                selectedLeagueId={selectedLeagueId}
-                setSelectedLeagueId={setSelectedLeagueId}
                 selectedCountry={selectedCountry}
                 setSelectedCountry={setSelectedCountry}
-                selectedRegionId={selectedRegionId}
-                setSelectedRegionId={setSelectedRegionId}
                 catalogBySport={catalogBySport}
-                catalogDiagnosticBySport={catalogDiagnosticBySport}
                 competitionCatalogByRegion={competitionCatalogByRegion}
                 catalogLoadingSport={catalogLoadingSport}
                 competitionLoadingKey={competitionLoadingKey}
@@ -23293,9 +23178,7 @@ export default function Home({
                           onClick={() => {
                             setSelectedSport("football");
                             setSelectedLeague(null);
-                            setSelectedLeagueId(null);
                             setSelectedCountry(null);
-                            setSelectedRegionId(null);
                             setUpcomingSearchQuery("");
                             selectMainTab("sports");
                           }}
@@ -23328,9 +23211,7 @@ export default function Home({
                               onClick={() => {
                                 setSelectedSport("football");
                                 setSelectedLeague(null);
-                                setSelectedLeagueId(null);
                                 setSelectedCountry(null);
-                                setSelectedRegionId(null);
                                 setUpcomingSearchQuery("");
                                 selectMainTab("sports");
                               }}
@@ -23608,21 +23489,25 @@ export default function Home({
                       return true;
                     }),
                   ];
-                  // Country and league are independent constraints. The old
-                  // early return made country silently override league when
-                  // both states survived a navigation path.
-                  const countryFiltered = selectedCountry
-                    ? combined.filter((m) =>
-                        selectedRegionId && m.regionId
-                          ? String(m.regionId) === selectedRegionId
-                          : countryMatchesFilter(
-                              m.country,
-                              selectedCountry,
-                              m.league,
-                            ),
+                  // Filter by country across all sports, preferring the explicit match country.
+                  if (selectedCountry) {
+                    const seen2 = new Set<string>();
+                    return combined
+                      .filter((m) =>
+                        countryMatchesFilter(
+                          m.country,
+                          selectedCountry,
+                          m.league,
+                        ),
                       )
-                    : combined;
-                  if (!selectedLeague) return countryFiltered;
+                      .filter((m) => {
+                        const k = String(m.id);
+                        if (seen2.has(k)) return false;
+                        seen2.add(k);
+                        return true;
+                      });
+                  }
+                  if (!selectedLeague) return combined;
                   // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
                   const _mlPats: Array<{ p: string[]; label: string }> = [
                     {
@@ -23748,11 +23633,8 @@ export default function Home({
                     return best;
                   };
                   const seen = new Set<string>();
-                  return countryFiltered
+                  return combined
                     .filter((m) => {
-                      if (selectedLeagueId && m.leagueId) {
-                        return String(m.leagueId) === selectedLeagueId;
-                      }
                       const ml = _fml(m.league, m.country);
                       return (
                         (ml && ml.label === selectedLeague) ||
@@ -23817,25 +23699,15 @@ export default function Home({
                   { key: "formula1", emoji: "🏎️", label: "Fórmula 1" },
                   { key: "handball", emoji: "🤾", label: "Handebol" },
                 ];
-                // Limit league groups, not an arbitrary number of matches.
-                // This keeps every game from each visible league together and
-                // makes the "Ver todas as ligas" control match its behaviour.
-                const _PER_SPORT_LEAGUE_LIMIT = 20;
+                // Limit matches per sport group to top N by default (highest-priority leagues first
+                // since the backend already sorts by league priority). Toggle shows all.
+                const _PER_SPORT_LIMIT = 20;
                 const _shouldLimit = !showAllLeagues && selectedSport === "all" && !selectedLeague && !upcomingSearchQuery;
                 const sportGroups = SPORT_GROUPS.map((g) => {
                   const all = listUpcoming.filter((m) => {
                     return (m.sport ?? "football") === g.key;
                   });
-                  const visibleLeagueKeys = new Set<string>();
-                  const matches = _shouldLimit
-                    ? all.filter((m) => {
-                        const leagueKey = `${normalizeCountryFilterName(m.country ?? "")}:${normalizeLeagueFilterName(m.league ?? "")}`;
-                        if (visibleLeagueKeys.has(leagueKey)) return true;
-                        if (visibleLeagueKeys.size >= _PER_SPORT_LEAGUE_LIMIT) return false;
-                        visibleLeagueKeys.add(leagueKey);
-                        return true;
-                      })
-                    : all;
+                  const matches = _shouldLimit ? all.slice(0, _PER_SPORT_LIMIT) : all;
                   return { ...g, matches, totalCount: all.length };
                 }).filter((g) => g.matches.length > 0);
 
@@ -23937,12 +23809,7 @@ export default function Home({
                           return (
                             <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                               <button
-                                {...makeTap(() => {
-                                  setSelectedLeague(null);
-                                  setSelectedLeagueId(null);
-                                  setSelectedCountry(null);
-                                  setSelectedRegionId(null);
-                                })}
+                                {...makeTap(() => setSelectedLeague(null))}
                                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLabel ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                               >
                                 <span className="shrink-0">🎾</span>
@@ -23955,12 +23822,9 @@ export default function Home({
                                 return (
                                   <button
                                     key={i}
-                                    {...makeTap(() => {
-                                      setSelectedLeague(active ? null : label);
-                                      setSelectedLeagueId(null);
-                                      setSelectedCountry(null);
-                                      setSelectedRegionId(null);
-                                    })}
+                                    {...makeTap(() =>
+                                      setSelectedLeague(active ? null : label),
+                                    )}
                                     className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                                     title={sub ? `${main}, ${sub}` : main}
                                   >
@@ -24259,12 +24123,7 @@ export default function Home({
                           <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                             {chips.length >= 2 && (
                               <button
-                                {...makeTap(() => {
-                                  setSelectedLeague(null);
-                                  setSelectedLeagueId(null);
-                                  setSelectedCountry(null);
-                                  setSelectedRegionId(null);
-                                })}
+                                {...makeTap(() => setSelectedLeague(null))}
                                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                               >
                                 <svg
@@ -24316,12 +24175,9 @@ export default function Home({
                               return (
                                 <button
                                   key={i}
-                                  {...makeTap(() => {
-                                    setSelectedLeague(active ? null : c.label);
-                                    setSelectedLeagueId(null);
-                                    setSelectedCountry(null);
-                                    setSelectedRegionId(null);
-                                  })}
+                                  {...makeTap(() =>
+                                    setSelectedLeague(active ? null : c.label),
+                                  )}
                                   className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                                 >
                                   {c.logo ? (

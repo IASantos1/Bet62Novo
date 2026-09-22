@@ -8,6 +8,7 @@
 import { getMrDogeClient } from "./client.js";
 import { logger } from "../../lib/logger.js";
 import type { Market, Subscription } from "@mrdoge/node";
+import { MRDOGE_SOCCER_BET_TYPES } from "./common.js";
 
 const oddsByMatchId = new Map<string, Market[]>();
 const subsByMatchId = new Map<string, Subscription<"odds.subscribe">>();
@@ -54,11 +55,10 @@ async function runSync(targets: LiveOddsTarget[]): Promise<void> {
   const mrdoge = getMrDogeClient();
   for (const { matchId, sport } of targets) {
     if (subsByMatchId.has(matchId)) continue;
-    // Do not restrict betTypes here. Mr. Doge exposes different market
-    // sysnames before and after kickoff (for example PRELIVE vs LIVE), and
-    // the API can add markets without a client deploy. The odds resource
-    // returns only markets available for this match.
-    const params = { matchId };
+    const params =
+      sport === "soccer"
+        ? { matchId, betTypes: [...MRDOGE_SOCCER_BET_TYPES] }
+        : { matchId };
     try {
       try {
         const snapshot = await mrdoge.odds.list(params);

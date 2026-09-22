@@ -19,25 +19,8 @@ import type { Match, Market } from "@mrdoge/node";
 import { getMrDogeClient } from "../services/mrdoge/client.js";
 import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
-import { getGoalApiClient } from "../providers/goalApi/client.js";
-import type { GoalApiFixture } from "../providers/goalApi/schema.js";
-import { getPulseScoreClient } from "../providers/pulsescore/client.js";
-import type {
-  PulseScoreEvent,
-  PulseScoreMarket,
-  PulseScoreSelection,
-} from "../providers/pulsescore/schema.js";
 import {
-  getSportProviderConfig,
-  type Bet62Sport,
-} from "../sportsbook/config/providerMatrix.js";
-import { syncGoalApiLiveSubscriptions } from "../services/goalApi/liveSync.js";
-import {
-  listGoalApiFootballStates,
-  upsertGoalApiFootballFixture,
-} from "../sportsbook/live/liveStateStore.js";
-import { mergeFootballStateWithOdds } from "../sportsbook/merge/mergeFootballStateWithOdds.js";
-import {
+  MRDOGE_SOCCER_BET_TYPES,
   MRDOGE_SPORT_BY_BET62,
   mrDogeMatchId,
   mrDogeRegionFlag,
@@ -56,8 +39,18 @@ import {
   buildMrDogeTimelineEvents,
   extractMrDogeTennisLiveExtra,
   extractMrDogeBasketballLiveExtra,
+  extractMrDogeIceHockeyLiveExtra,
+  extractMrDogeBaseballLiveExtra,
   extractMrDogeVolleyballLiveExtra,
 } from "../services/mrdoge/common.js";
+import {
+  getGoalFootballMatches,
+  getPropLineMatches,
+  projectBet62Odds,
+  providerMatchHasFreshOdds,
+  type ProviderMatch,
+} from "../services/providers/bet62.js";
+import { getGoalFixtureResource } from "../services/goal/client.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
@@ -69,6 +62,8 @@ const router: IRouter = Router();
 function extractProviderMatchId(rawId: string): string {
   return String(rawId ?? "")
     .replace(/^[a-z]+-v\d+-/i, "")
+    .replace(/^goalapi-[a-z_]+-/i, "")
+    .replace(/^propline-[a-z_]+-/i, "")
     .replace(/^mrdoge-[a-z_]+-/i, "")
     .replace(/^sportmonks-[a-z_]+-/i, "");
 }
@@ -145,6 +140,58 @@ function mapMrDogeMarketToAllOdds(market: Market): {
     group: mrDogeAllOddsGroup(market),
     choices,
   };
+}
+
+function mapProviderMarketsToAllOdds(value: unknown): Array<{
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}> {
+  if (!Array.isArray(value)) return [];
+  const selectionKey = (selection: string): string =>
+    selection
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const groups = new Map<string, {
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const row = candidate as Record<string, unknown>;
+    const market = String(row["market"] ?? "Mercado");
+    const period = String(row["period"] ?? "");
+    const line = row["line"] == null ? "" : String(row["line"]);
+    const key = `${market}|${period}|${line}`;
+    const item = groups.get(key) ?? {
+      name: [market, period, line].filter(Boolean).join(" · "),
+      group: /total|goal|score/i.test(market)
+        ? "Golos"
+        : /spread|handicap/i.test(market)
+          ? "Handicap"
+          : "Principal",
+      choices: [],
+    };
+    const selection = String(row["selection"] ?? "");
+    const odds = Number(row["odds"] ?? row["oddsDecimal"] ?? 0);
+    if (selection && Number.isFinite(odds) && odds > 1.001) {
+      const normalizedSelection = selectionKey(selection);
+      const existing = item.choices.find(
+        (choice) => selectionKey(choice.name) === normalizedSelection,
+      );
+      if (!existing) {
+        item.choices.push({ name: selection, label: selection, odds });
+      } else if (odds > existing.odds) {
+        existing.odds = odds;
+      }
+    }
+    groups.set(key, item);
+  }
+  return [...groups.values()].filter((item) => item.choices.length > 0);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -585,9 +632,9 @@ export type LiveMatchState = {
   _suspensionReason?: string;
   // Feed health warning (must not be treated as a market suspension)
   _feedWarning?: string;
-  // Stable MrDoge catalog identifiers when that provider supplies the match.
+  // League ID (football only) — currently unpopulated; no provider feeds it
+  // since the StatPal integration that used to set it was removed.
   leagueId?: string;
-  regionId?: string;
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
@@ -811,11 +858,10 @@ export type UpcomingMatch = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   leagueId?: string;
-  regionId?: string;
   isWomens?: boolean;
   /** Football only — true when the league is in the curated priority allowlist
-   * (footballLeagueAllowedStrict). Drives ordering/tiering; the default
-   * upcoming visibility window is 15 days, while "?range=month" widens it. */
+   * (footballLeagueAllowedStrict). Drives the default "today + big leagues up
+   * to 7 days ahead" vs "?range=month" widening in GET /upcoming. */
   isPriorityLeague?: boolean;
   providerStatusGroup?: number;
   providerStatusText?: string;
@@ -843,8 +889,6 @@ export type UpcomingMatch = {
   f1Extra?: F1ExtraData;
   /** MMA only — real markets beyond the moneyline (odds.home/away) */
   mmaExtra?: MmaExtraData;
-  allowNoOddsVisibility?: boolean;
-  oddsTemporarilyUnavailable?: boolean;
 };
 
 type ProviderQualitySnapshot = {
@@ -877,20 +921,6 @@ type MatchCatalogCompetition = {
   eventCount: number;
 };
 
-type MatchCatalogDiagnostic = {
-  code:
-    | "ok"
-    | "partial_window"
-    | "empty_window"
-    | "not_configured"
-    | "unsupported_sport"
-    | "provider_error";
-  message: string;
-  startDate?: string;
-  endDate?: string;
-  eventCount?: number;
-};
-
 const UPCOMING_MIN_TOTAL = 3;
 const UPCOMING_MIN_TEAM_RATIO = 0.9;
 const UPCOMING_MIN_ANY_ODDS_RATIO = 0.35;
@@ -905,22 +935,9 @@ function mrDogeCatalogDateWindow(range: string): {
   endDate: string;
 } {
   const startDate = new Date().toISOString().slice(0, 10);
-  const days = range === "month" ? 30 : 15;
+  const days = range === "month" ? 30 : 7;
   const endDate = new Date(
     Date.now() + days * 24 * 60 * 60 * 1000,
-  ).toISOString().slice(0, 10);
-  return { startDate, endDate };
-}
-
-function mrDogeLateCatalogDateWindow(): {
-  startDate: string;
-  endDate: string;
-} {
-  const startDate = new Date(
-    Date.now() + 8 * 24 * 60 * 60 * 1000,
-  ).toISOString().slice(0, 10);
-  const endDate = new Date(
-    Date.now() + 15 * 24 * 60 * 60 * 1000,
   ).toISOString().slice(0, 10);
   return { startDate, endDate };
 }
@@ -1794,10 +1811,7 @@ function footballLeagueAllowedStrict(
 }
 
 const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
-// Live score data comes from one shared matches subscription. Odds are a
-// separate per-match Business-tier subscription, so cap only the expensive
-// odds streams while still exposing every non-blocked live fixture.
-const MRDOGE_LIVE_ODDS_MAX = 100;
+const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
 
 function isMajorWomensLeague(name: string): boolean {
   const lower = String(name ?? "")
@@ -2073,4590 +2087,6 @@ export function filterFootballMarketsByTier(
   out.doubleChance = { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 };
   out.bothTeamsScore = { yes: 0, no: 0 };
   return out;
-}
-
-const FOOTBALL_V2_ID_PREFIX = "football-v2-";
-const FOOTBALL_PROVIDER_CONFIG = getSportProviderConfig("football");
-const TENNIS_V2_ID_PREFIX = "tennis-v2-";
-const TENNIS_PROVIDER_CONFIG = getSportProviderConfig("tennis");
-const BASKETBALL_V2_ID_PREFIX = "basketball-v2-";
-const BASKETBALL_PROVIDER_CONFIG = getSportProviderConfig("basketball");
-const HOCKEY_V2_ID_PREFIX = "hockey-v2-";
-const HOCKEY_PROVIDER_CONFIG = getSportProviderConfig("ice_hockey");
-const BASEBALL_V2_ID_PREFIX = "baseball-v2-";
-const BASEBALL_PROVIDER_CONFIG = getSportProviderConfig("baseball");
-const VOLLEYBALL_V2_ID_PREFIX = "volleyball-v2-";
-const VOLLEYBALL_PROVIDER_CONFIG = getSportProviderConfig("volleyball");
-const FOOTBALL_V2_LIVE_TTL_MS = 1_000;
-const FOOTBALL_V2_ALL_ODDS_TTL_MS = 20_000;
-const FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
-const TENNIS_V2_ALL_ODDS_TTL_MS = 20_000;
-const TENNIS_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
-const BASKETBALL_V2_ALL_ODDS_TTL_MS = 20_000;
-const BASKETBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
-const HOCKEY_V2_ALL_ODDS_TTL_MS = 20_000;
-const HOCKEY_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
-const BASEBALL_V2_ALL_ODDS_TTL_MS = 20_000;
-const BASEBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
-const VOLLEYBALL_V2_ALL_ODDS_TTL_MS = 20_000;
-const VOLLEYBALL_V2_ALL_ODDS_STALE_TTL_MS = 5 * 60_000;
-const FOOTBALL_V2_PAGE_LIMIT = 30;
-const FOOTBALL_V2_GOAL_DATE_BATCH = 4;
-const FOOTBALL_V2_STATE_FRESH_MS = 3 * 60_000;
-const FOOTBALL_V2_UPCOMING_RETENTION_MS = 20 * 60_000;
-const TENNIS_V2_PAGE_LIMIT = 30;
-const BASKETBALL_V2_PAGE_LIMIT = 30;
-const HOCKEY_V2_PAGE_LIMIT = 30;
-const BASEBALL_V2_PAGE_LIMIT = 30;
-const VOLLEYBALL_V2_PAGE_LIMIT = 30;
-
-let footballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
-  null;
-let footballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
-let tennisV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
-  null;
-let tennisV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
-let basketballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
-  null;
-let basketballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
-let hockeyV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
-  null;
-let hockeyV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
-let baseballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
-  null;
-let baseballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
-let volleyballV2LiveCache: { builtAt: number; matches: LiveMatchState[] } | null =
-  null;
-let volleyballV2LiveInFlight: Promise<LiveMatchState[]> | null = null;
-const footballV2AllOddsCache = new Map<
-  string,
-  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
->();
-const footballV2AllOddsInFlight = new Map<
-  string,
-  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
->();
-const tennisV2AllOddsCache = new Map<
-  string,
-  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
->();
-const tennisV2AllOddsInFlight = new Map<
-  string,
-  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
->();
-const basketballV2AllOddsCache = new Map<
-  string,
-  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
->();
-const basketballV2AllOddsInFlight = new Map<
-  string,
-  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
->();
-const hockeyV2AllOddsCache = new Map<
-  string,
-  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
->();
-const hockeyV2AllOddsInFlight = new Map<
-  string,
-  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
->();
-const baseballV2AllOddsCache = new Map<
-  string,
-  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
->();
-const baseballV2AllOddsInFlight = new Map<
-  string,
-  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
->();
-const volleyballV2AllOddsCache = new Map<
-  string,
-  { builtAt: number; markets: Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }> }
->();
-const volleyballV2AllOddsInFlight = new Map<
-  string,
-  Promise<Array<{ name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> }>>
->();
-const footballV2RecentVisibleUpcoming = new Map<
-  string,
-  { expiresAt: number; match: UpcomingMatch }
->();
-
-const TOTAL_GOALS_LINE_FIELD_MAP: Record<
-  string,
-  [keyof AdvancedMarkets["totalGoals"], keyof AdvancedMarkets["totalGoals"]]
-> = {
-  "0.5": ["over05", "under05"],
-  "1.5": ["over15", "under15"],
-  "2.5": ["over25", "under25"],
-  "3.5": ["over35", "under35"],
-  "4.5": ["over45", "under45"],
-  "5.5": ["over55", "under55"],
-  "6.5": ["over65", "under65"],
-};
-
-const ASIAN_TOTALS_LINE_FIELD_MAP: Record<
-  string,
-  [keyof NonNullable<AdvancedMarkets["asianTotals"]>, keyof NonNullable<AdvancedMarkets["asianTotals"]>]
-> = {
-  "0.5": ["o05", "u05"],
-  "2.25": ["o225", "u225"],
-  "2.75": ["o275", "u275"],
-  "4.5": ["o45", "u45"],
-  "5.5": ["o55", "u55"],
-};
-
-function useFootballV2Odds(): boolean {
-  const explicitPulseScore =
-    CONFIG.FOOTBALL_ODDS_PROVIDER === FOOTBALL_PROVIDER_CONFIG.oddsProvider;
-  return (
-    isPulseScoreAvailable() &&
-    (explicitPulseScore || !CONFIG.MRDOGE_API_KEY)
-  );
-}
-
-function isGoalApiAvailable(): boolean {
-  return CONFIG.USE_GOAL_API || getGoalApiClient().isConfigured();
-}
-
-function useFootballV2State(): boolean {
-  return (
-    isGoalApiAvailable() &&
-    CONFIG.FOOTBALL_MATCH_STATE_PROVIDER ===
-      FOOTBALL_PROVIDER_CONFIG.matchStateProvider
-  );
-}
-
-function useFootballV2Live(): boolean {
-  return useFootballV2Odds() && (useFootballV2State() || !CONFIG.MRDOGE_API_KEY);
-}
-
-function isPulseScoreAvailable(): boolean {
-  return CONFIG.USE_PULSESCORE || getPulseScoreClient().isConfigured();
-}
-
-function useTennisV2(): boolean {
-  return (
-    isPulseScoreAvailable() &&
-    TENNIS_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
-    TENNIS_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
-  );
-}
-
-function useBasketballV2(): boolean {
-  return (
-    isPulseScoreAvailable() &&
-    BASKETBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
-    BASKETBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
-  );
-}
-
-function useHockeyV2(): boolean {
-  return (
-    isPulseScoreAvailable() &&
-    HOCKEY_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
-    HOCKEY_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
-  );
-}
-
-function useBaseballV2(): boolean {
-  return (
-    isPulseScoreAvailable() &&
-    BASEBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
-    BASEBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
-  );
-}
-
-function useVolleyballV2(): boolean {
-  return (
-    isPulseScoreAvailable() &&
-    VOLLEYBALL_PROVIDER_CONFIG.oddsProvider === "pulsescore" &&
-    VOLLEYBALL_PROVIDER_CONFIG.matchStateProvider === "pulsescore"
-  );
-}
-
-function footballV2MatchId(providerId: string): string {
-  return `${FOOTBALL_V2_ID_PREFIX}${providerId}`;
-}
-
-function isFootballV2MatchId(matchId: string): boolean {
-  return String(matchId ?? "").startsWith(FOOTBALL_V2_ID_PREFIX);
-}
-
-function tennisV2MatchId(providerId: string): string {
-  return `${TENNIS_V2_ID_PREFIX}${providerId}`;
-}
-
-function isTennisV2MatchId(matchId: string): boolean {
-  return String(matchId ?? "").startsWith(TENNIS_V2_ID_PREFIX);
-}
-
-function basketballV2MatchId(providerId: string): string {
-  return `${BASKETBALL_V2_ID_PREFIX}${providerId}`;
-}
-
-function isBasketballV2MatchId(matchId: string): boolean {
-  return String(matchId ?? "").startsWith(BASKETBALL_V2_ID_PREFIX);
-}
-
-function hockeyV2MatchId(providerId: string): string {
-  return `${HOCKEY_V2_ID_PREFIX}${providerId}`;
-}
-
-function isHockeyV2MatchId(matchId: string): boolean {
-  return String(matchId ?? "").startsWith(HOCKEY_V2_ID_PREFIX);
-}
-
-function baseballV2MatchId(providerId: string): string {
-  return `${BASEBALL_V2_ID_PREFIX}${providerId}`;
-}
-
-function isBaseballV2MatchId(matchId: string): boolean {
-  return String(matchId ?? "").startsWith(BASEBALL_V2_ID_PREFIX);
-}
-
-function volleyballV2MatchId(providerId: string): string {
-  return `${VOLLEYBALL_V2_ID_PREFIX}${providerId}`;
-}
-
-function isVolleyballV2MatchId(matchId: string): boolean {
-  return String(matchId ?? "").startsWith(VOLLEYBALL_V2_ID_PREFIX);
-}
-
-function normalizeFootballToken(value: string | undefined): string {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function normalizeFootballIdentityChunk(value: string | undefined): string {
-  return normalizeFootballToken(value).replace(/\b(fc|cf|sc|ac|cd|club)\b/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function parseIsoMinuteBucket(value: string | undefined): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const ms = Date.parse(raw);
-  if (!Number.isFinite(ms)) return raw.slice(0, 16);
-  return new Date(Math.round(ms / 60_000) * 60_000).toISOString().slice(0, 16);
-}
-
-function footballProviderIdentityKey(
-  home: string | undefined,
-  away: string | undefined,
-  startTime?: string,
-): string {
-  return [
-    normalizeFootballIdentityChunk(home),
-    normalizeFootballIdentityChunk(away),
-    parseIsoMinuteBucket(startTime),
-  ].join("|");
-}
-
-function footballProviderFallbackIdentityKey(
-  home: string | undefined,
-  away: string | undefined,
-): string {
-  return [
-    normalizeFootballIdentityChunk(home),
-    normalizeFootballIdentityChunk(away),
-  ].join("|");
-}
-
-function prettifyFootballStatKey(key: string): string {
-  const cleaned = String(key ?? "")
-    .replace(/[_-]+/g, " ")
-    .trim();
-  if (!cleaned) return "";
-  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-}
-
-function parseGoalApiBool(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value > 0;
-  const text = String(value ?? "").trim().toLowerCase();
-  return text === "1" || text === "true" || text === "yes" || text === "live";
-}
-
-function goalApiFixtureKickoffIso(
-  fixture: GoalApiFixture | null | undefined,
-): string | undefined {
-  const kickoff = String(
-    fixture?.kickoffUtc ?? fixture?.start_time ?? "",
-  ).trim();
-  if (kickoff) return kickoff;
-  const matchDate = String(fixture?.matchDate ?? "").trim();
-  const matchTime = String(fixture?.matchTime ?? "").trim();
-  if (matchDate && matchTime) return `${matchDate}T${matchTime}:00.000Z`;
-  return undefined;
-}
-
-function toLisbonDateTime(isoLike: string | undefined): {
-  date: string;
-  time: string;
-} {
-  const raw = String(isoLike ?? "").trim();
-  const ms = Date.parse(raw);
-  if (!raw || !Number.isFinite(ms)) return { date: "", time: "" };
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Lisbon",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(ms));
-  const out: Record<string, string> = {};
-  for (const part of parts) out[part.type] = part.value;
-  return {
-    date: `${out["year"] ?? "1970"}-${out["month"] ?? "01"}-${out["day"] ?? "01"}`,
-    time: `${out["hour"] ?? "00"}:${out["minute"] ?? "00"}`,
-  };
-}
-
-function splitPulseScoreLeague(
-  leagueRaw: string | undefined,
-  countryRaw?: string,
-): { country: string; league: string } {
-  const leagueText = String(leagueRaw ?? "").trim();
-  const countryText = String(countryRaw ?? "").trim();
-  if (leagueText.includes("||")) {
-    const [country, ...rest] = leagueText.split("||");
-    return {
-      country: String(country ?? "").trim() || countryText,
-      league: rest.join("||").trim(),
-    };
-  }
-  return {
-    country: countryText,
-    league: leagueText,
-  };
-}
-
-function isGoalApiLiveStatus(statusRaw: string | undefined): boolean {
-  const text = normalizeFootballToken(statusRaw);
-  return (
-    text === "ht" ||
-    text === "live" ||
-    text.includes("1st half") ||
-    text.includes("2nd half") ||
-    text.includes("half time") ||
-    text.includes("pen") ||
-    text.includes("extra time") ||
-    /^\d{1,3}(\+\d+)?$/.test(String(statusRaw ?? "").trim())
-  );
-}
-
-function isGoalApiFinishedStatus(statusRaw: string | undefined): boolean {
-  return isFinishedVisibilityStatus(statusRaw);
-}
-
-function goalApiFixtureIsLive(fixture: GoalApiFixture): boolean {
-  return (
-    parseGoalApiBool(fixture.match_live) ||
-    isGoalApiLiveStatus(
-      String(fixture.match_status ?? fixture.status ?? "").trim(),
-    )
-  );
-}
-
-function goalApiFixtureIsUpcoming(fixture: GoalApiFixture): boolean {
-  if (goalApiFixtureIsLive(fixture)) return false;
-  const statusText = String(fixture.match_status ?? fixture.status ?? "").trim();
-  if (isGoalApiFinishedStatus(statusText)) return false;
-  const kickoffMs = Date.parse(goalApiFixtureKickoffIso(fixture) ?? "");
-  return !Number.isFinite(kickoffMs) || kickoffMs >= Date.now() - 5 * 60_000;
-}
-
-function parseFootballMinuteValue(...values: unknown[]): number {
-  for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return Math.max(0, Math.round(value));
-    }
-    const text = String(value ?? "").trim();
-    if (!text) continue;
-    const match = text.match(/(\d{1,3})(?:\+\d+)?/);
-    if (match) return Math.max(0, parseInt(match[1] ?? "0", 10));
-  }
-  return 0;
-}
-
-function footballPhaseFromStatus(statusRaw: string | undefined):
-  | "1H"
-  | "2H"
-  | "HT"
-  | "FT"
-  | "ET"
-  | "PEN"
-  | undefined {
-  const text = normalizeFootballToken(statusRaw);
-  if (!text) return undefined;
-  if (text === "ht" || text.includes("half time")) return "HT";
-  if (text.includes("pen")) return "PEN";
-  if (text.includes("extra time")) return "ET";
-  if (text.includes("2nd half")) return "2H";
-  if (text.includes("1st half")) return "1H";
-  if (text === "ft" || text.includes("full time") || text.includes("final")) {
-    return "FT";
-  }
-  if (/^\d{1,2}(\+\d+)?$/.test(String(statusRaw ?? "").trim())) {
-    return parseFootballMinuteValue(statusRaw) >= 46 ? "2H" : "1H";
-  }
-  return undefined;
-}
-
-function pulseScoreSelectionLine(
-  market: PulseScoreMarket,
-  selection: PulseScoreSelection | null,
-): number | null {
-  const raw =
-    selection?.line ??
-    market.line ??
-    null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function pulseScoreSelectionOdd(
-  selection: PulseScoreSelection | null | undefined,
-): number {
-  const odd = Number(selection?.odds ?? 0);
-  return Number.isFinite(odd) && odd > 1.01 ? odd : 0;
-}
-
-function pulseScoreMarketSelections(
-  market: PulseScoreMarket,
-): PulseScoreSelection[] {
-  return Array.isArray(market.selections)
-    ? market.selections.filter(
-        (selection) =>
-          selection &&
-          selection.isActive !== false &&
-          pulseScoreSelectionOdd(selection) > 0,
-      )
-    : [];
-}
-
-function pulseScoreSelectionKey(selection: PulseScoreSelection): string {
-  return normalizeFootballToken(
-    selection.canonicalOutcome ??
-      selection.name ??
-      selection.rawName,
-  );
-}
-
-function findPulseScoreSelection(
-  market: PulseScoreMarket,
-  ...keys: string[]
-): PulseScoreSelection | null {
-  const expected = new Set(keys.map((key) => normalizeFootballToken(key)));
-  for (const selection of pulseScoreMarketSelections(market)) {
-    const token = pulseScoreSelectionKey(selection);
-    if (expected.has(token)) return selection;
-  }
-  return null;
-}
-
-function formatPulseScoreLine(line: number | string | null | undefined): string {
-  const parsed = Number(line);
-  if (Number.isFinite(parsed)) {
-    return Number.isInteger(parsed) ? String(parsed) : String(parsed);
-  }
-  return String(line ?? "").trim();
-}
-
-function pulseScoreSelectionLabel(
-  market: PulseScoreMarket,
-  selection: PulseScoreSelection,
-): string {
-  const outcome = normalizeFootballToken(selection.canonicalOutcome);
-  const raw =
-    String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "").trim() ||
-    "Selection";
-  const line = pulseScoreSelectionLine(market, selection);
-  if ((outcome === "over" || outcome === "under") && line != null) {
-    return `${raw} ${formatPulseScoreLine(line)}`.trim();
-  }
-  return raw;
-}
-
-function pulseScoreAllOddsGroup(market: PulseScoreMarket): string {
-  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-  const raw = normalizeFootballToken(market.rawName ?? "");
-  const period = normalizeFootballToken(market.period ?? "");
-  if (
-    canonical.includes("correct score") ||
-    raw.includes("correct score") ||
-    raw.includes("number of goals")
-  ) {
-    return "Placar";
-  }
-  if (
-    period.includes("half") ||
-    raw.includes("1st half") ||
-    raw.includes("2nd half") ||
-    canonical.includes("half time")
-  ) {
-    return "Tempos";
-  }
-  if (raw.includes("corner")) return "Cantos";
-  if (raw.includes("card")) return "Cartões";
-  if (
-    canonical.includes("asian") ||
-    canonical.includes("handicap") ||
-    canonical.includes("draw no bet") ||
-    raw.includes("asian") ||
-    raw.includes("handicap")
-  ) {
-    return "Asiático";
-  }
-  if (
-    canonical.includes("over under") ||
-    canonical.includes("odd even") ||
-    canonical.includes("teams to score") ||
-    raw.includes("goal")
-  ) {
-    return "Golos";
-  }
-  if (
-    canonical.includes("double chance") ||
-    canonical.includes("draw no bet") ||
-    raw.includes("double chance")
-  ) {
-    return "Especiais";
-  }
-  return "Principal";
-}
-
-function mapPulseScoreMarketToAllOdds(
-  market: PulseScoreMarket,
-): {
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-} | null {
-  const choices = pulseScoreMarketSelections(market).map((selection) => ({
-    name: String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "").trim(),
-    label: pulseScoreSelectionLabel(market, selection),
-    odds: pulseScoreSelectionOdd(selection),
-  }));
-  if (choices.length === 0) return null;
-  const line = pulseScoreSelectionLine(market, choices.length > 0 ? pulseScoreMarketSelections(market)[0] ?? null : null);
-  const rawName = String(
-    market.rawName ?? market.canonicalMarket ?? "Mercado",
-  ).trim();
-  const name =
-    line != null && !rawName.includes(String(line))
-      ? `${rawName} ${formatPulseScoreLine(line)}`
-      : rawName;
-  return {
-    name,
-    group: pulseScoreAllOddsGroup(market),
-    choices,
-  };
-}
-
-function buildFootballV2AllOddsMarkets(
-  event: PulseScoreEvent | null | undefined,
-): Array<{
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-}> {
-  return (Array.isArray(event?.markets) ? event.markets : [])
-    .map((market) => mapPulseScoreMarketToAllOdds(market))
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-}
-
-function primeFootballV2AllOddsCache(
-  eventId: string | number | undefined,
-  event: PulseScoreEvent | null | undefined,
-): void {
-  const normalizedId = String(eventId ?? "").trim();
-  if (!normalizedId || !event) return;
-  const markets = buildFootballV2AllOddsMarkets(event);
-  if (markets.length === 0) return;
-  footballV2AllOddsCache.set(normalizedId, {
-    builtAt: Date.now(),
-    markets,
-  });
-}
-
-function setPulseScoreTotalGoalsLine(
-  target: AdvancedMarkets["totalGoals"],
-  line: number | null,
-  over: number,
-  under: number,
-): boolean {
-  if (line == null) return false;
-  const slots = TOTAL_GOALS_LINE_FIELD_MAP[String(line)];
-  if (!slots) return false;
-  target[slots[0]] = over;
-  target[slots[1]] = under;
-  return true;
-}
-
-function setPulseScoreAsianTotalsLine(
-  target: NonNullable<AdvancedMarkets["asianTotals"]>,
-  line: number | null,
-  over: number,
-  under: number,
-): boolean {
-  if (line == null) return false;
-  const slots = ASIAN_TOTALS_LINE_FIELD_MAP[String(line)];
-  if (!slots) return false;
-  target[slots[0]] = over;
-  target[slots[1]] = under;
-  return true;
-}
-
-function setPulseScoreTeamGoalLine(
-  target: NonNullable<AdvancedMarkets["teamGoals"]>,
-  side: "home" | "away",
-  line: number | null,
-  over: number,
-  under: number,
-): boolean {
-  if (line == null) return false;
-  const suffix =
-    line === 0.5 ? "05" : line === 1.5 ? "15" : line === 2.5 ? "25" : null;
-  if (!suffix) return false;
-  target[`${side}Over${suffix}` as keyof NonNullable<AdvancedMarkets["teamGoals"]>] =
-    over;
-  target[`${side}Under${suffix}` as keyof NonNullable<AdvancedMarkets["teamGoals"]>] =
-    under;
-  return true;
-}
-
-function parsePulseScoreHtftCode(
-  selection: PulseScoreSelection,
-): keyof NonNullable<AdvancedMarkets["htft"]> | null {
-  const outcome = normalizeFootballToken(selection.canonicalOutcome);
-  const raw = normalizeFootballToken(selection.rawName);
-  const compact = outcome || raw;
-  if (compact === "home home" || compact === "1 1" || compact === "11") {
-    return "hh";
-  }
-  if (compact === "home draw" || compact === "1 x" || compact === "1x") {
-    return "hd";
-  }
-  if (compact === "home away" || compact === "1 2" || compact === "12") {
-    return "ha";
-  }
-  if (compact === "draw home" || compact === "x 1" || compact === "x1") {
-    return "dh";
-  }
-  if (compact === "draw draw" || compact === "x x" || compact === "xx") {
-    return "dd";
-  }
-  if (compact === "draw away" || compact === "x 2" || compact === "x2") {
-    return "da";
-  }
-  if (compact === "away home" || compact === "2 1" || compact === "21") {
-    return "ah";
-  }
-  if (compact === "away draw" || compact === "2 x" || compact === "2x") {
-    return "ad";
-  }
-  if (compact === "away away" || compact === "2 2" || compact === "22") {
-    return "aa";
-  }
-  return null;
-}
-
-function buildGoalApiTimelineEvents(
-  fixture: GoalApiFixture | null | undefined,
-): Array<{
-  type: string;
-  team: string;
-  minute: number;
-  player: string;
-  playerId?: string;
-  detail?: string;
-}> {
-  if (!Array.isArray(fixture?.events)) return [];
-  return fixture.events
-    .map((event) => {
-      const record =
-        event && typeof event === "object"
-          ? (event as Record<string, unknown>)
-          : null;
-      if (!record) return null;
-      const type = String(
-        record["type"] ??
-          record["event"] ??
-          record["event_type"] ??
-          "event",
-      ).trim();
-      const player = String(
-        record["player"] ??
-          record["playerName"] ??
-          record["player_name"] ??
-          "",
-      ).trim();
-      const detail = String(
-        record["detail"] ??
-          record["description"] ??
-          record["reason"] ??
-          "",
-      ).trim();
-      const minute = parseFootballMinuteValue(
-        record["minute"],
-        record["time"],
-        record["elapsed"],
-      );
-      const teamValue = String(
-        record["team"] ??
-          record["teamName"] ??
-          record["team_name"] ??
-          record["side"] ??
-          "",
-      ).trim();
-      return {
-        type: type || "event",
-        team: teamValue || "neutral",
-        minute,
-        player,
-        detail: detail || undefined,
-        playerId:
-          record["playerId"] != null
-            ? String(record["playerId"])
-            : record["player_id"] != null
-              ? String(record["player_id"])
-              : undefined,
-      };
-    })
-    .filter(Boolean) as Array<{
-    type: string;
-    team: string;
-    minute: number;
-    player: string;
-    playerId?: string;
-    detail?: string;
-  }>;
-}
-
-function buildGoalApiMatchStats(
-  fixture: GoalApiFixture | null | undefined,
-): Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> | undefined {
-  const stats =
-    fixture?.statistics && typeof fixture.statistics === "object"
-      ? (fixture.statistics as Record<string, unknown>)
-      : null;
-  if (!stats) return undefined;
-  const rows = Object.entries(stats)
-    .map(([key, value]) => {
-      if (!value || typeof value !== "object") return null;
-      const record = value as Record<string, unknown>;
-      const home =
-        record["home"] ??
-        record["homeValue"] ??
-        record["team1"] ??
-        record["value_home"];
-      const away =
-        record["away"] ??
-        record["awayValue"] ??
-        record["team2"] ??
-        record["value_away"];
-      if (home == null && away == null) return null;
-      return {
-        name: prettifyFootballStatKey(key),
-        home: String(home ?? "-"),
-        away: String(away ?? "-"),
-      };
-    })
-    .filter(Boolean) as Array<{ name: string; home: string; away: string }>;
-  return rows.length > 0 ? [{ title: "Estatísticas", rows }] : undefined;
-}
-
-function buildPulseScoreFootballMarkets(
-  event: PulseScoreEvent | null,
-): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
-  const moneyline = { home: 0, draw: 0, away: 0 };
-  const markets = zerofillAdvancedMarkets();
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const period = normalizeFootballToken(market.period ?? "");
-    const home = pulseScoreSelectionOdd(findPulseScoreSelection(market, "home"));
-    const draw = pulseScoreSelectionOdd(findPulseScoreSelection(market, "draw"));
-    const away = pulseScoreSelectionOdd(findPulseScoreSelection(market, "away"));
-    const yes = pulseScoreSelectionOdd(findPulseScoreSelection(market, "yes"));
-    const no = pulseScoreSelectionOdd(findPulseScoreSelection(market, "no"));
-    const odd = pulseScoreSelectionOdd(findPulseScoreSelection(market, "odd"));
-    const even = pulseScoreSelectionOdd(findPulseScoreSelection(market, "even"));
-    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
-    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
-    const line = pulseScoreSelectionLine(
-      market,
-      pulseScoreMarketSelections(market)[0] ?? null,
-    );
-
-    if (canonical === "match result") {
-      if (period.includes("first half")) {
-        markets.halfTime = { home, draw, away };
-      } else if (period.includes("second half")) {
-        markets.secondHalf = { home, draw, away };
-      } else {
-        moneyline.home = home;
-        moneyline.draw = draw;
-        moneyline.away = away;
-      }
-      continue;
-    }
-
-    if (canonical === "double chance") {
-      markets.doubleChance = {
-        homeOrDraw: pulseScoreSelectionOdd(
-          findPulseScoreSelection(market, "home draw", "1x"),
-        ),
-        awayOrDraw: pulseScoreSelectionOdd(
-          findPulseScoreSelection(market, "away draw", "x2"),
-        ),
-        homeOrAway: pulseScoreSelectionOdd(
-          findPulseScoreSelection(market, "home away", "12"),
-        ),
-      };
-      continue;
-    }
-
-    if (canonical === "both teams to score") {
-      if (period.includes("first half")) {
-        markets.btts1H = { yes, no };
-      } else if (period.includes("second half")) {
-        markets.btts2H = { yes, no };
-      } else {
-        markets.bothTeamsScore = { yes, no };
-      }
-      continue;
-    }
-
-    if (canonical === "half time full time") {
-      const htft: NonNullable<AdvancedMarkets["htft"]> = {
-        hh: 0,
-        hd: 0,
-        ha: 0,
-        dh: 0,
-        dd: 0,
-        da: 0,
-        ah: 0,
-        ad: 0,
-        aa: 0,
-      };
-      for (const selection of pulseScoreMarketSelections(market)) {
-        const code = parsePulseScoreHtftCode(selection);
-        if (!code) continue;
-        htft[code] = pulseScoreSelectionOdd(selection);
-      }
-      markets.htft = htft;
-      continue;
-    }
-
-    if (canonical === "draw no bet") {
-      markets.drawNoBet = { home, away };
-      continue;
-    }
-
-    if (canonical === "correct score") {
-      const target =
-        period.includes("first half")
-          ? (markets.htCorrectScore ??= {})
-          : period.includes("second half")
-            ? (markets.h2CorrectScore ??= {})
-            : (markets.correctScore ??= {});
-      for (const selection of pulseScoreMarketSelections(market)) {
-        const label = String(
-          selection.rawName ?? selection.name ?? "",
-        ).trim();
-        if (!label) continue;
-        target[label.replace(/\s+/g, "")] = pulseScoreSelectionOdd(selection);
-      }
-      continue;
-    }
-
-    if (
-      canonical === "odd even" ||
-      raw.includes("odd even") ||
-      raw.includes("odd/even")
-    ) {
-      markets.goalOddEven = { odd, even };
-      continue;
-    }
-
-    if (canonical === "asian handicap" || raw.includes("asian handicap")) {
-      if (raw.includes("corner")) {
-        markets.cornersHandicap = { line: line ?? 0, home, away };
-      } else {
-        markets.asianHandicap = { line: line ?? 0, home, away };
-      }
-      continue;
-    }
-
-    if (canonical === "handicap" || raw.includes("handicap")) {
-      if (draw > 0) {
-        markets.europeanHandicap = {
-          line: line ?? 0,
-          home,
-          draw,
-          away,
-        };
-      } else if (line === 1) {
-        markets.handicap = {
-          homeMinusOne: home,
-          awayPlusOne: away,
-          homeMinusOneHalf: markets.handicap.homeMinusOneHalf,
-          awayPlusOneHalf: markets.handicap.awayPlusOneHalf,
-        };
-      } else if (line === 1.5) {
-        markets.handicap = {
-          homeMinusOne: markets.handicap.homeMinusOne,
-          awayPlusOne: markets.handicap.awayPlusOne,
-          homeMinusOneHalf: home,
-          awayPlusOneHalf: away,
-        };
-      }
-      continue;
-    }
-
-    if (canonical === "next goal" || raw.includes("next goal") || raw.includes("first goal")) {
-      markets.firstGoal = {
-        home,
-        away,
-        noGoal: pulseScoreSelectionOdd(
-          findPulseScoreSelection(market, "none", "no goal", "draw"),
-        ),
-      };
-      continue;
-    }
-
-    if (
-      canonical === "team totals" ||
-      raw.includes("team goals") ||
-      raw.includes("team total") ||
-      raw.includes("home team goals") ||
-      raw.includes("away team goals")
-    ) {
-      const side: "home" | "away" | null =
-        raw.includes("home") || raw.includes("casa")
-          ? "home"
-          : raw.includes("away") || raw.includes("fora")
-            ? "away"
-            : null;
-      if (side && over > 0 && under > 0) {
-        if (raw.includes("corner")) {
-          if (side === "home") {
-            markets.homeCorners = { line: line ?? 0, over, under };
-          } else {
-            markets.awayCorners = { line: line ?? 0, over, under };
-          }
-        } else if (raw.includes("card")) {
-          if (side === "home") {
-            markets.homeCards = { line: line ?? 0, over, under };
-          } else {
-            markets.awayCards = { line: line ?? 0, over, under };
-          }
-        } else if (markets.teamGoals) {
-          setPulseScoreTeamGoalLine(markets.teamGoals, side, line, over, under);
-        }
-      }
-      continue;
-    }
-
-    if (
-      canonical === "over under" ||
-      raw.includes("over under") ||
-      raw.includes("over/under")
-    ) {
-      if (!(over > 0 && under > 0)) continue;
-      if (raw.includes("corner")) {
-        if (line === 8.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o85: over, u85: under };
-        else if (line === 9.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o95: over, u95: under };
-        else if (line === 10.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o105: over, u105: under };
-        continue;
-      }
-      if (raw.includes("card")) {
-        if (line === 3.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o35: over, u35: under };
-        else if (line === 4.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o45: over, u45: under };
-        continue;
-      }
-      if (period.includes("first half")) {
-        markets.firstHalfTotal = { line: line ?? 0, over, under };
-        markets._total1H = line ?? 0;
-        continue;
-      }
-      if (canonical.includes("asian") || raw.includes("asian")) {
-        markets.asianTotals = {
-          o05: 0,
-          u05: 0,
-          o45: 0,
-          u45: 0,
-          o55: 0,
-          u55: 0,
-          o225: 0,
-          u225: 0,
-          o275: 0,
-          u275: 0,
-          ...(markets.asianTotals ?? {}),
-        };
-        setPulseScoreAsianTotalsLine(markets.asianTotals, line, over, under);
-        continue;
-      }
-      setPulseScoreTotalGoalsLine(markets.totalGoals, line, over, under);
-    }
-  }
-  return { odds: moneyline, markets };
-}
-
-function buildFootballMatchFromProviders(
-  fixture: GoalApiFixture | null,
-  oddsEvent: PulseScoreEvent | null,
-  kind: "live" | "upcoming",
-): LiveMatchState | UpcomingMatch | null {
-  const merged = mergeFootballStateWithOdds(fixture, oddsEvent);
-  if (!merged && !fixture && !oddsEvent) return null;
-  const fallbackHome = String(
-    fixture?.home_team_name ?? oddsEvent?.home ?? "",
-  ).trim();
-  const fallbackAway = String(
-    fixture?.away_team_name ?? oddsEvent?.away ?? "",
-  ).trim();
-  if (!fallbackHome || !fallbackAway) return null;
-  const eventData = buildPulseScoreFootballMarkets(oddsEvent);
-  const providerId = String(
-    oddsEvent?.eventId ??
-      fixture?.id ??
-      footballProviderIdentityKey(
-        fallbackHome,
-        fallbackAway,
-        goalApiFixtureKickoffIso(fixture) ?? oddsEvent?.startTime,
-      ),
-  ).trim();
-  if (!providerId) return null;
-  const leagueParts = splitPulseScoreLeague(
-    merged?.league ?? oddsEvent?.league,
-    merged?.country ?? oddsEvent?.country,
-  );
-  const country = String(
-    fixture?.country_name ??
-      leagueParts.country ??
-      merged?.country ??
-      "",
-  ).trim();
-  const league = String(
-    fixture?.league_name ??
-      leagueParts.league ??
-      merged?.league ??
-      "",
-  ).trim();
-  const tier = footballMarketTier(league, country);
-  const filteredMarkets = filterFootballMarketsByTier(eventData.markets, tier);
-  const kickoffFallback = String(
-    oddsEvent?.startTime ?? merged?.startTime ?? "",
-  ).trim();
-  const kickoffIso =
-    goalApiFixtureKickoffIso(fixture) ??
-    (kickoffFallback || undefined);
-  const { date, time } = toLisbonDateTime(kickoffIso);
-  const hasRealOdds =
-    (eventData.odds.home > 1.01 &&
-      eventData.odds.draw > 1.01 &&
-      eventData.odds.away > 1.01) ||
-    hasPlayableMarketOdds(filteredMarkets);
-
-  if (kind === "upcoming") {
-    const match: UpcomingMatch = {
-      id: footballV2MatchId(providerId),
-      home: fallbackHome,
-      away: fallbackAway,
-      league,
-      country,
-      date,
-      time,
-      sport: "football",
-      hasRealOdds,
-      odds: eventData.odds,
-      markets: filteredMarkets,
-      isPriorityLeague:
-        footballCompetitionVisibilityBand(country, league) === "preferred",
-      status: String(
-        fixture?.match_status ??
-          fixture?.status ??
-          oddsEvent?.matchClock?.period ??
-          "",
-      ).trim() || undefined,
-    };
-    return match;
-  }
-
-  const statusText = String(
-    fixture?.match_status ??
-      fixture?.status ??
-      oddsEvent?.matchClock?.period ??
-      (oddsEvent?.live ? "LIVE" : ""),
-  ).trim();
-  const minute = parseFootballMinuteValue(
-    oddsEvent?.matchClock?.minute,
-    fixture?.match_status,
-    fixture?.status,
-  );
-  const liveMatch: LiveMatchState = {
-    id: footballV2MatchId(providerId),
-    home: fallbackHome,
-    away: fallbackAway,
-    league,
-    country,
-    sport: "football",
-    matchTier: tier,
-    homeScore: Number(merged?.score.home ?? fixture?.score?.home ?? oddsEvent?.score?.home ?? 0) || 0,
-    awayScore: Number(merged?.score.away ?? fixture?.score?.away ?? oddsEvent?.score?.away ?? 0) || 0,
-    minute,
-    status:
-      statusText ||
-      (fixture && goalApiFixtureIsLive(fixture) ? "LIVE" : ""),
-    hasRealOdds,
-    odds: eventData.odds,
-    markets: filteredMarkets,
-    events: buildGoalApiTimelineEvents(fixture),
-    date,
-    time,
-    matchStats: buildGoalApiMatchStats(fixture),
-    _liveExtra: {
-      phase: footballPhaseFromStatus(statusText),
-      clockSec: minute > 0 ? minute * 60 : undefined,
-      clockRunning: fixture ? goalApiFixtureIsLive(fixture) : false,
-    },
-  };
-  return liveMatch;
-}
-
-function indexGoalApiFootballFixtures(fixtures: GoalApiFixture[]): {
-  byIdentity: Map<string, GoalApiFixture>;
-  byFallback: Map<string, GoalApiFixture>;
-  pairedIds: Set<string>;
-} {
-  const byIdentity = new Map<string, GoalApiFixture>();
-  const byFallback = new Map<string, GoalApiFixture>();
-  for (const fixture of fixtures) {
-    const identity = footballProviderIdentityKey(
-      fixture.home_team_name,
-      fixture.away_team_name,
-      goalApiFixtureKickoffIso(fixture),
-    );
-    const fallback = footballProviderFallbackIdentityKey(
-      fixture.home_team_name,
-      fixture.away_team_name,
-    );
-    if (identity && !byIdentity.has(identity)) byIdentity.set(identity, fixture);
-    if (fallback && !byFallback.has(fallback)) byFallback.set(fallback, fixture);
-  }
-  return { byIdentity, byFallback, pairedIds: new Set<string>() };
-}
-
-function getGoalApiFixtureForPulseScoreEvent(
-  indexes: ReturnType<typeof indexGoalApiFootballFixtures>,
-  oddsEvent: PulseScoreEvent,
-): GoalApiFixture | null {
-  const exactKey = footballProviderIdentityKey(
-    oddsEvent.home,
-    oddsEvent.away,
-    oddsEvent.startTime,
-  );
-  const fallbackKey = footballProviderFallbackIdentityKey(
-    oddsEvent.home,
-    oddsEvent.away,
-  );
-  const exact = indexes.byIdentity.get(exactKey) ?? null;
-  if (exact) {
-    indexes.pairedIds.add(String(exact.id));
-    return exact;
-  }
-  const fallback = indexes.byFallback.get(fallbackKey) ?? null;
-  if (fallback) {
-    indexes.pairedIds.add(String(fallback.id));
-    return fallback;
-  }
-  return null;
-}
-
-function hasPlayableUpcomingOdds(match: UpcomingMatch): boolean {
-  return (
-    (match.hasRealOdds ?? false) ||
-    (match.odds?.home ?? 0) > 0 ||
-    (match.odds?.draw ?? 0) > 0 ||
-    (match.odds?.away ?? 0) > 0 ||
-    hasPlayableMarketOdds(match.markets)
-  );
-}
-
-function footballV2UpcomingRetentionKey(
-  fixture: GoalApiFixture | null | undefined,
-): string {
-  if (!fixture) return "";
-  const exact = footballProviderIdentityKey(
-    fixture.home_team_name,
-    fixture.away_team_name,
-    goalApiFixtureKickoffIso(fixture),
-  );
-  if (exact.replace(/\|/g, "").length > 0) return exact;
-  return footballProviderFallbackIdentityKey(
-    fixture.home_team_name,
-    fixture.away_team_name,
-  );
-}
-
-function cleanupFootballV2UpcomingRetention(now = Date.now()): void {
-  for (const [key, entry] of footballV2RecentVisibleUpcoming.entries()) {
-    if (entry.expiresAt > now) continue;
-    footballV2RecentVisibleUpcoming.delete(key);
-  }
-}
-
-function getRetainedFootballV2UpcomingMatch(
-  fixture: GoalApiFixture | null | undefined,
-  now = Date.now(),
-): UpcomingMatch | null {
-  const key = footballV2UpcomingRetentionKey(fixture);
-  if (!key) return null;
-  const retained = footballV2RecentVisibleUpcoming.get(key);
-  if (!retained || retained.expiresAt <= now) return null;
-  return retained.match;
-}
-
-function rememberFootballV2UpcomingMatch(
-  fixture: GoalApiFixture | null | undefined,
-  match: UpcomingMatch,
-  now = Date.now(),
-): void {
-  const key = footballV2UpcomingRetentionKey(fixture);
-  if (!key) return;
-  footballV2RecentVisibleUpcoming.set(key, {
-    expiresAt: now + FOOTBALL_V2_UPCOMING_RETENTION_MS,
-    match,
-  });
-}
-
-function mergeGoalApiFixturePayload(
-  base: GoalApiFixture,
-  overlay: GoalApiFixture,
-): GoalApiFixture {
-  return {
-    ...base,
-    ...overlay,
-    score: {
-      ...(base.score ?? {}),
-      ...(overlay.score ?? {}),
-    },
-  };
-}
-
-function goalApiStatePayloadToFixture(payload: unknown): GoalApiFixture | null {
-  if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
-  const fixtureId = String(record["id"] ?? record["fixtureId"] ?? "").trim();
-  if (!fixtureId) return null;
-  return {
-    ...(record as GoalApiFixture),
-    id: fixtureId,
-  };
-}
-
-function mergeGoalApiLiveFixturesWithStore(
-  fixtures: GoalApiFixture[],
-): GoalApiFixture[] {
-  const byId = new Map<string, GoalApiFixture>();
-  for (const fixture of fixtures) {
-    byId.set(String(fixture.id), fixture);
-  }
-  const now = Date.now();
-  for (const state of listGoalApiFootballStates()) {
-    if (now - state.updatedAt > FOOTBALL_V2_STATE_FRESH_MS) continue;
-    const fixture = goalApiStatePayloadToFixture(state.payload);
-    if (!fixture) continue;
-    const id = String(fixture.id);
-    const current = byId.get(id);
-    byId.set(id, current ? mergeGoalApiFixturePayload(current, fixture) : fixture);
-  }
-  return [...byId.values()].filter((fixture) => goalApiFixtureIsLive(fixture));
-}
-
-async function loadPulseScoreFootballPrematchEvents(): Promise<PulseScoreEvent[]> {
-  if (!useFootballV2Odds()) return [];
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) return [];
-  const events: PulseScoreEvent[] = [];
-  let page = 1;
-  while (page <= 50) {
-    const response = await client.listPrematchEventsPage(
-      FOOTBALL_PROVIDER_CONFIG.bookmaker,
-      FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
-      { query: { page, limit: FOOTBALL_V2_PAGE_LIMIT } },
-    );
-    const batch = Array.isArray(response.events) ? response.events : [];
-    for (const event of batch) {
-      primeFootballV2AllOddsCache(event.eventId, event);
-    }
-    events.push(...batch);
-    if (!response.hasNextPage || batch.length === 0) break;
-    page += 1;
-  }
-  return events;
-}
-
-async function loadPulseScoreFootballLiveEvents(): Promise<PulseScoreEvent[]> {
-  if (!useFootballV2Odds()) return [];
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) return [];
-  const events: PulseScoreEvent[] = [];
-  let page = 1;
-  while (page <= 20) {
-    const response = await client.listLiveEventsPage(
-      FOOTBALL_PROVIDER_CONFIG.bookmaker,
-      FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
-      { query: { page, limit: FOOTBALL_V2_PAGE_LIMIT } },
-    );
-    const batch = Array.isArray(response.events) ? response.events : [];
-    for (const event of batch) {
-      primeFootballV2AllOddsCache(event.eventId, event);
-    }
-    events.push(...batch);
-    if (!response.hasNextPage || batch.length === 0) break;
-    page += 1;
-  }
-  return events;
-}
-
-function listIsoDatesInclusive(endDate: string): string[] {
-  const dates: string[] = [];
-  const start = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
-  const end = new Date(`${endDate}T00:00:00.000Z`);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
-    return dates;
-  }
-  for (
-    let cursor = start.getTime();
-    cursor <= end.getTime();
-    cursor += 24 * 60 * 60 * 1000
-  ) {
-    dates.push(new Date(cursor).toISOString().slice(0, 10));
-  }
-  return dates;
-}
-
-async function loadGoalApiFootballFixturesInWindow(
-  endDate: string,
-): Promise<GoalApiFixture[]> {
-  if (!useFootballV2State()) return [];
-  const client = getGoalApiClient();
-  if (!client.isConfigured()) return [];
-  const dates = listIsoDatesInclusive(endDate);
-  const fixtures: GoalApiFixture[] = [];
-  const seen = new Set<string>();
-  for (let i = 0; i < dates.length; i += FOOTBALL_V2_GOAL_DATE_BATCH) {
-    const batch = dates.slice(i, i + FOOTBALL_V2_GOAL_DATE_BATCH);
-    const settled = await Promise.allSettled(
-      batch.map((date) => client.listFixturesByDate(date)),
-    );
-    for (const result of settled) {
-      if (result.status !== "fulfilled") continue;
-      for (const fixture of result.value) {
-        const id = String(fixture.id ?? "");
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-        upsertGoalApiFootballFixture(fixture);
-        fixtures.push(fixture);
-      }
-    }
-  }
-  return fixtures;
-}
-
-async function loadGoalApiLiveFootballFixtures(): Promise<GoalApiFixture[]> {
-  if (!useFootballV2State()) return [];
-  const client = getGoalApiClient();
-  if (!client.isConfigured()) return [];
-  let fixtures: GoalApiFixture[] = [];
-  try {
-    fixtures = await client.listLiveFixtures();
-    for (const fixture of fixtures) upsertGoalApiFootballFixture(fixture);
-  } catch (err) {
-    logger.warn({ err }, "[football-v2] Goal API live REST failed — using stored live state");
-  }
-  const merged = mergeGoalApiLiveFixturesWithStore(fixtures);
-  syncGoalApiLiveSubscriptions(merged.map((fixture) => fixture.id));
-  return merged;
-}
-
-async function buildFootballUpcomingFromV2(): Promise<UpcomingMatch[]> {
-  cleanupFootballV2UpcomingRetention();
-  const now = Date.now();
-  const [fixtures, oddsEvents] = await Promise.all([
-    loadGoalApiFootballFixturesInWindow(getUpcomingFetchEndDate()),
-    loadPulseScoreFootballPrematchEvents(),
-  ]);
-  const upcomingFixtures = fixtures.filter((fixture) => goalApiFixtureIsUpcoming(fixture));
-  const indexes = indexGoalApiFootballFixtures(upcomingFixtures);
-  const matches: UpcomingMatch[] = [];
-  const freshlyVisible: Array<{ fixture: GoalApiFixture; match: UpcomingMatch }> = [];
-
-  for (const oddsEvent of oddsEvents) {
-    const fixture = getGoalApiFixtureForPulseScoreEvent(indexes, oddsEvent);
-    const built = buildFootballMatchFromProviders(
-      fixture,
-      oddsEvent,
-      "upcoming",
-    );
-    if (!built) continue;
-    const match = built as UpcomingMatch;
-    if (!hasPlayableUpcomingOdds(match)) {
-      const retained = getRetainedFootballV2UpcomingMatch(fixture, now);
-      if (retained) {
-        match.id = retained.id;
-        match.allowNoOddsVisibility = true;
-        match.oddsTemporarilyUnavailable = true;
-      }
-    }
-    if (fixture && hasPlayableUpcomingOdds(match)) {
-      freshlyVisible.push({ fixture, match });
-    }
-    matches.push(match);
-  }
-
-  for (const fixture of upcomingFixtures) {
-    if (indexes.pairedIds.has(String(fixture.id))) continue;
-    const retained = getRetainedFootballV2UpcomingMatch(fixture, now);
-    if (!retained) continue;
-    const built = buildFootballMatchFromProviders(fixture, null, "upcoming");
-    if (!built) continue;
-    const match = built as UpcomingMatch;
-    match.id = retained.id;
-    match.allowNoOddsVisibility = true;
-    match.oddsTemporarilyUnavailable = true;
-    matches.push(match);
-  }
-
-  const visible = matches
-    .filter(
-      (match) =>
-        footballCompetitionVisibilityBand(match.country, match.league) !==
-        "blocked",
-    )
-    .sort((a, b) => {
-      const aMs = parseUpcomingKickoffMs(a) ?? Number.MAX_SAFE_INTEGER;
-      const bMs = parseUpcomingKickoffMs(b) ?? Number.MAX_SAFE_INTEGER;
-      return aMs - bMs;
-    });
-  const visibleIds = new Set(visible.map((match) => match.id));
-  for (const entry of freshlyVisible) {
-    if (!visibleIds.has(entry.match.id)) continue;
-    rememberFootballV2UpcomingMatch(entry.fixture, entry.match, now);
-  }
-  return visible;
-}
-
-async function buildFootballLiveFromV2(): Promise<LiveMatchState[]> {
-  const [fixtures, oddsEvents] = await Promise.all([
-    loadGoalApiLiveFootballFixtures(),
-    loadPulseScoreFootballLiveEvents(),
-  ]);
-  const indexes = indexGoalApiFootballFixtures(fixtures);
-  const fromOdds = oddsEvents
-    .map((oddsEvent) =>
-      buildFootballMatchFromProviders(
-        getGoalApiFixtureForPulseScoreEvent(indexes, oddsEvent),
-        oddsEvent,
-        "live",
-      ),
-    )
-    .filter(Boolean) as LiveMatchState[];
-  const fixtureOnly = fixtures
-    .filter((fixture) => !indexes.pairedIds.has(String(fixture.id)))
-    .map((fixture) =>
-      buildFootballMatchFromProviders(fixture, null, "live"),
-    )
-    .filter(Boolean) as LiveMatchState[];
-  return [...fromOdds, ...fixtureOnly].filter(
-    (match) =>
-      footballCompetitionVisibilityBand(match.country, match.league) !==
-      "blocked",
-  );
-}
-
-async function getFootballV2LiveCached(
-  forceFresh = false,
-): Promise<LiveMatchState[]> {
-  if (
-    !forceFresh &&
-    footballV2LiveCache &&
-    Date.now() - footballV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
-  ) {
-    return footballV2LiveCache.matches;
-  }
-  if (!forceFresh && footballV2LiveInFlight) return footballV2LiveInFlight;
-  footballV2LiveInFlight = buildFootballLiveFromV2()
-    .then((matches) => {
-      footballV2LiveCache = { builtAt: Date.now(), matches };
-      return matches;
-    })
-    .finally(() => {
-      footballV2LiveInFlight = null;
-    });
-  return footballV2LiveInFlight;
-}
-
-function pulseScoreTennisMoneyline(
-  event: PulseScoreEvent | null | undefined,
-): { home: number; draw: number; away: number } | null {
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    if (
-      canonical !== "match result" &&
-      canonical !== "match winner" &&
-      !raw.includes("match result") &&
-      !raw.includes("match winner")
-    ) {
-      continue;
-    }
-    const home = pulseScoreSelectionOdd(findPulseScoreSelection(market, "home"));
-    const away = pulseScoreSelectionOdd(findPulseScoreSelection(market, "away"));
-    if (home > 1.01 && away > 1.01) {
-      return { home, draw: 0, away };
-    }
-  }
-  return null;
-}
-
-function parseTennisSetPairsFromText(text: string | undefined): Array<[number, number]> {
-  const input = String(text ?? "").trim();
-  if (!input) return [];
-  const pairs: Array<[number, number]> = [];
-  const regex = /(\d{1,2})\s*[-:]\s*(\d{1,2})/g;
-  for (const match of input.matchAll(regex)) {
-    const home = parseInt(match[1] ?? "", 10);
-    const away = parseInt(match[2] ?? "", 10);
-    if (Number.isFinite(home) && Number.isFinite(away)) {
-      pairs.push([home, away]);
-    }
-  }
-  return pairs;
-}
-
-function readNumericField(
-  record: Record<string, unknown>,
-  candidates: string[],
-): number | null {
-  for (const key of candidates) {
-    const value = record[key];
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
-function readTextField(
-  record: Record<string, unknown>,
-  candidates: string[],
-): string {
-  for (const key of candidates) {
-    const value = String(record[key] ?? "").trim();
-    if (value) return value;
-  }
-  return "";
-}
-
-function parsePulseScoreTennisLiveExtra(
-  event: PulseScoreEvent | null | undefined,
-): {
-  sets: Array<[number, number]>;
-  currentPoints?: [number | string, number | string];
-  serving?: [boolean, boolean];
-} {
-  const sources: Array<Record<string, unknown>> = [];
-  if (event?.moreInfo && typeof event.moreInfo === "object") {
-    sources.push(event.moreInfo as Record<string, unknown>);
-  }
-  if (event?.statistics && typeof event.statistics === "object") {
-    sources.push(event.statistics as Record<string, unknown>);
-  }
-  const sets: Array<[number, number]> = [];
-  for (const source of sources) {
-    for (let setNo = 1; setNo <= 5; setNo += 1) {
-      const home = readNumericField(source, [
-        `set${setNo}Home`,
-        `set${setNo}_home`,
-        `homeSet${setNo}`,
-        `home_set_${setNo}`,
-        `s${setNo}h`,
-      ]);
-      const away = readNumericField(source, [
-        `set${setNo}Away`,
-        `set${setNo}_away`,
-        `awaySet${setNo}`,
-        `away_set_${setNo}`,
-        `s${setNo}a`,
-      ]);
-      if (home == null || away == null) continue;
-      sets[setNo - 1] = [home, away];
-    }
-    if (sets.length > 0) break;
-  }
-  if (sets.length === 0) {
-    const textCandidates = [
-      String(event?.score?.info ?? ""),
-      ...sources.map((source) =>
-        readTextField(source, [
-          "scoreInfo",
-          "score_info",
-          "sets",
-          "setScores",
-          "set_scores",
-          "scoreboard",
-        ]),
-      ),
-    ].filter(Boolean);
-    for (const text of textCandidates) {
-      const parsed = parseTennisSetPairsFromText(text);
-      if (parsed.length > 0) {
-        sets.push(...parsed);
-        break;
-      }
-    }
-  }
-
-  let currentPoints: [number | string, number | string] | undefined;
-  for (const source of sources) {
-    const home = source["currentPointsHome"] ?? source["homePoints"] ?? source["pointHome"] ?? source["point_home"];
-    const away = source["currentPointsAway"] ?? source["awayPoints"] ?? source["pointAway"] ?? source["point_away"];
-    if (home != null || away != null) {
-      currentPoints = [home as number | string, away as number | string];
-      break;
-    }
-    const combined = readTextField(source, [
-      "currentPoints",
-      "current_points",
-      "gameScore",
-      "game_score",
-      "points",
-    ]);
-    const match = combined.match(/([0-9ADad]{1,2})\s*[-:]\s*([0-9ADad]{1,2})/);
-    if (match) {
-      currentPoints = [match[1]!, match[2]!];
-      break;
-    }
-  }
-
-  let serving: [boolean, boolean] | undefined;
-  for (const source of sources) {
-    const server = readTextField(source, [
-      "serving",
-      "server",
-      "servingSide",
-      "serving_side",
-    ]).toLowerCase();
-    if (!server) continue;
-    if (server.includes("home") || server.includes("1")) {
-      serving = [true, false];
-      break;
-    }
-    if (server.includes("away") || server.includes("2")) {
-      serving = [false, true];
-      break;
-    }
-  }
-
-  return {
-    sets: sets.filter(Boolean),
-    ...(currentPoints ? { currentPoints } : {}),
-    ...(serving ? { serving } : {}),
-  };
-}
-
-function pulseScoreTennisAllOddsGroup(market: PulseScoreMarket): string {
-  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-  const raw = normalizeFootballToken(market.rawName ?? "");
-  const period = normalizeFootballToken(market.period ?? "");
-  if (
-    raw.includes("correct score") ||
-    raw.includes("set score") ||
-    canonical.includes("correct score")
-  ) {
-    return "Placar";
-  }
-  if (
-    raw.includes("tie break") ||
-    raw.includes("odd even") ||
-    raw.includes("aces")
-  ) {
-    return "Especiais";
-  }
-  if (
-    raw.includes("handicap") ||
-    raw.includes("spread")
-  ) {
-    return "Handicap";
-  }
-  if (
-    raw.includes("total games") ||
-    raw.includes("total sets") ||
-    raw.includes("games over under") ||
-    canonical.includes("over under")
-  ) {
-    return "Golos";
-  }
-  if (
-    period.includes("set") ||
-    raw.includes("set winner")
-  ) {
-    return "Sets";
-  }
-  return "Principal";
-}
-
-function buildPulseScoreScoreList(
-  market: PulseScoreMarket,
-): Array<{ label: string; odds: number }> {
-  return pulseScoreMarketSelections(market).map((selection) => ({
-    label: pulseScoreSelectionLabel(market, selection),
-    odds: pulseScoreSelectionOdd(selection),
-  }));
-}
-
-function uniqueTennisTotalsLines(
-  lines: Array<{ line: number; over: number; under: number }>,
-): Array<{ line: number; over: number; under: number }> {
-  const seen = new Set<string>();
-  return lines.filter((entry) => {
-    const key = `${entry.line}:${entry.over}:${entry.under}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function applyPulseScoreTennisExtras(
-  baseExtras: AdvancedMarkets["tennisExtra"],
-  event: PulseScoreEvent,
-): AdvancedMarkets["tennisExtra"] {
-  const extras: AdvancedMarkets["tennisExtra"] = {
-    ...baseExtras,
-    totalGamesLines: [...(baseExtras.totalGamesLines ?? [])],
-  };
-  for (const market of Array.isArray(event.markets) ? event.markets : []) {
-    if (!market || market.isActive === false) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const period = normalizeFootballToken(market.period ?? "");
-    const line = pulseScoreSelectionLine(
-      market,
-      pulseScoreMarketSelections(market)[0] ?? null,
-    );
-    const home = pulseScoreSelectionOdd(findPulseScoreSelection(market, "home"));
-    const away = pulseScoreSelectionOdd(findPulseScoreSelection(market, "away"));
-    const yes = pulseScoreSelectionOdd(findPulseScoreSelection(market, "yes"));
-    const no = pulseScoreSelectionOdd(findPulseScoreSelection(market, "no"));
-    const odd = pulseScoreSelectionOdd(findPulseScoreSelection(market, "odd"));
-    const even = pulseScoreSelectionOdd(findPulseScoreSelection(market, "even"));
-    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
-    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
-
-    if (
-      canonical === "match winner" ||
-      canonical === "match result" ||
-      raw.includes("match winner") ||
-      raw.includes("match result")
-    ) {
-      if (period.includes("first set") || period === "1st set") {
-        extras.firstSet = { home, away };
-      } else if (period.includes("second set") || period === "2nd set") {
-        extras.set2 = { home, away };
-      } else if (period.includes("third set") || period === "3rd set") {
-        extras.set3 = { home, away };
-      }
-      continue;
-    }
-
-    if (
-      (canonical === "over under" || raw.includes("total games")) &&
-      over > 0 &&
-      under > 0 &&
-      line != null
-    ) {
-      const total = { line, over, under };
-      if (period.includes("first set") || period === "1st set") {
-        extras.set1Games = total;
-      } else if (period.includes("second set") || period === "2nd set") {
-        extras.set2Games = total;
-      } else {
-        extras.totalGames = total;
-        extras.totalGamesLines = uniqueTennisTotalsLines([
-          ...(extras.totalGamesLines ?? []),
-          total,
-        ]);
-      }
-      continue;
-    }
-
-    if (
-      (canonical.includes("handicap") || raw.includes("handicap")) &&
-      home > 0 &&
-      away > 0 &&
-      line != null
-    ) {
-      if (period.includes("second set") || period === "2nd set") {
-        extras.gameHandicapSet2 = { line, home, away };
-      } else {
-        extras.gameHandicap = { line, home, away };
-      }
-      continue;
-    }
-
-    if ((canonical === "odd even" || raw.includes("odd even")) && odd > 0 && even > 0) {
-      if (period.includes("first set") || period === "1st set") {
-        extras.oddEven1st = { odd, even };
-      } else if (period.includes("second set") || period === "2nd set") {
-        extras.oddEven2nd = { odd, even };
-      } else {
-        extras.oddEvenGames = { odd, even };
-      }
-      continue;
-    }
-
-    if ((canonical.includes("tie break") || raw.includes("tie break")) && yes > 0 && no > 0) {
-      if (period.includes("first set") || period === "1st set") {
-        extras.tieBreak1st = { yes, no };
-      } else if (raw.includes("final set")) {
-        extras.finalSetTieBreakOrExtra = { yes, no };
-      } else {
-        extras.tieBreak = { yes, no };
-      }
-      continue;
-    }
-
-    if ((raw.includes("total tie break") || canonical.includes("total tie break")) && over > 0 && under > 0 && line != null) {
-      extras.totalTieBreaks = { line, over, under };
-      continue;
-    }
-
-    if ((raw.includes("total sets") || canonical.includes("total sets")) && over > 0 && under > 0 && line != null) {
-      extras.totalSets = { line, over, under };
-      continue;
-    }
-
-    if ((raw.includes("straight sets") || canonical.includes("straight sets")) && yes > 0 && no > 0) {
-      extras.straightSetsWinner = { yes, no };
-      continue;
-    }
-
-    if ((raw.includes("distance") || raw.includes("3 sets")) && yes > 0 && no > 0) {
-      extras.goTheDistance = { yes, no };
-      continue;
-    }
-
-    if ((raw.includes("highest set total") || canonical.includes("highest set total")) && over > 0 && under > 0 && line != null) {
-      extras.highestSetTotal = { line, over, under };
-      continue;
-    }
-
-    if ((raw.includes("sets scoring") || raw.includes("higher scoring set")) &&
-      pulseScoreSelectionOdd(findPulseScoreSelection(market, "first", "1st set")) > 0 &&
-      pulseScoreSelectionOdd(findPulseScoreSelection(market, "second", "2nd set")) > 0
-    ) {
-      extras.setsScoring = {
-        firstHigher: pulseScoreSelectionOdd(findPulseScoreSelection(market, "first", "1st set")),
-        secondHigher: pulseScoreSelectionOdd(findPulseScoreSelection(market, "second", "2nd set")),
-        equal: pulseScoreSelectionOdd(findPulseScoreSelection(market, "equal", "draw")),
-      };
-      continue;
-    }
-
-    if ((raw.includes("correct score") || raw.includes("set score")) && pulseScoreMarketSelections(market).length > 0) {
-      const scores = buildPulseScoreScoreList(market);
-      if (period.includes("first set") || period === "1st set") {
-        extras.score1st = scores;
-      } else if (period.includes("second set") || period === "2nd set") {
-        extras.score2nd = scores;
-      } else if (period.includes("third set") || period === "3rd set") {
-        extras.score3rd = scores;
-      }
-      continue;
-    }
-
-    if ((raw.includes("match score") || raw.includes("set match")) && pulseScoreMarketSelections(market).length > 0) {
-      const values = {
-        h11: pulseScoreSelectionOdd(findPulseScoreSelection(market, "2 0", "home 2 0")),
-        h12: pulseScoreSelectionOdd(findPulseScoreSelection(market, "2 1", "home 2 1")),
-        a21: pulseScoreSelectionOdd(findPulseScoreSelection(market, "1 2", "away 2 1")),
-        a22: pulseScoreSelectionOdd(findPulseScoreSelection(market, "0 2", "away 2 0")),
-      };
-      if (values.h11 || values.h12 || values.a21 || values.a22) {
-        extras.setMatch = values;
-      }
-      continue;
-    }
-
-    if ((raw.includes("aces") || canonical.includes("aces")) && over > 0 && under > 0 && line != null) {
-      if (raw.includes("home") || normalizeFootballToken(event.home).split(" ").some((part) => part && raw.includes(part))) {
-        extras.homeAces = { line, over, under };
-      } else if (raw.includes("away") || normalizeFootballToken(event.away).split(" ").some((part) => part && raw.includes(part))) {
-        extras.awayAces = { line, over, under };
-      }
-      continue;
-    }
-  }
-  extras.totalGamesLines = uniqueTennisTotalsLines(extras.totalGamesLines ?? []);
-  return extras;
-}
-
-function buildTennisV2AllOddsMarkets(
-  event: PulseScoreEvent | null | undefined,
-): Array<{
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-}> {
-  return (Array.isArray(event?.markets) ? event.markets : [])
-    .map((market) => {
-      const choices = pulseScoreMarketSelections(market).map((selection) => ({
-        name: String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "").trim(),
-        label: pulseScoreSelectionLabel(market, selection),
-        odds: pulseScoreSelectionOdd(selection),
-      }));
-      if (choices.length === 0) return null;
-      const line = pulseScoreSelectionLine(market, pulseScoreMarketSelections(market)[0] ?? null);
-      const rawName = String(market.rawName ?? market.canonicalMarket ?? "Mercado").trim();
-      return {
-        name:
-          line != null && !rawName.includes(String(line))
-            ? `${rawName} ${formatPulseScoreLine(line)}`
-            : rawName,
-        group: pulseScoreTennisAllOddsGroup(market),
-        choices,
-      };
-    })
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-}
-
-function primeTennisV2AllOddsCache(
-  eventId: string | number | undefined,
-  event: PulseScoreEvent | null | undefined,
-): void {
-  const normalizedId = String(eventId ?? "").trim();
-  if (!normalizedId || !event) return;
-  const markets = buildTennisV2AllOddsMarkets(event);
-  if (markets.length === 0) return;
-  tennisV2AllOddsCache.set(normalizedId, {
-    builtAt: Date.now(),
-    markets,
-  });
-}
-
-function emptyBasketballExtras(): NonNullable<AdvancedMarkets["basketballExtra"]> {
-  return {
-    q1: { home: 0, away: 0 },
-    q2: { home: 0, away: 0 },
-    q3: { home: 0, away: 0 },
-    q4: { home: 0, away: 0 },
-    teamTotalHome: { line: 0, over: 0, under: 0 },
-    teamTotalAway: { line: 0, over: 0, under: 0 },
-    totalsRange: [],
-  };
-}
-
-function pulseScoreSelectionMatchesTokens(
-  selection: PulseScoreSelection,
-  tokens: string[],
-): boolean {
-  const selectionToken = normalizeFootballToken(
-    [
-      selection.canonicalOutcome,
-      selection.name,
-      selection.rawName,
-    ]
-      .filter(Boolean)
-      .join(" "),
-  );
-  return tokens.some((token) => {
-    const expected = normalizeFootballToken(token);
-    if (!expected) return false;
-    if (selectionToken === expected) return true;
-    return expected.length > 2 && selectionToken.includes(expected);
-  });
-}
-
-function findPulseScoreBasketballTeamSelection(
-  market: PulseScoreMarket,
-  event: PulseScoreEvent,
-  side: "home" | "away",
-): PulseScoreSelection | null {
-  const exact = findPulseScoreSelection(
-    market,
-    side,
-    side === "home" ? "1" : "2",
-    side === "home" ? "team1" : "team2",
-    side === "home" ? "home team" : "away team",
-    side === "home" ? event.home : event.away,
-  );
-  if (exact) return exact;
-  const tokens = [
-    side,
-    side === "home" ? "1" : "2",
-    side === "home" ? "team1" : "team2",
-    side === "home" ? "home team" : "away team",
-    side === "home" ? event.home : event.away,
-  ];
-  for (const selection of pulseScoreMarketSelections(market)) {
-    if (pulseScoreSelectionMatchesTokens(selection, tokens)) return selection;
-  }
-  return null;
-}
-
-function pulseScoreBasketballScope(
-  market: PulseScoreMarket,
-): "game" | "firstHalf" | "q1" | "q2" | "q3" | "q4" {
-  const text = normalizeFootballToken(
-    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
-  );
-  if (
-    text.includes("1st quarter") ||
-    text.includes("first quarter") ||
-    text.includes("quarter 1") ||
-    text.includes("q1")
-  ) {
-    return "q1";
-  }
-  if (
-    text.includes("2nd quarter") ||
-    text.includes("second quarter") ||
-    text.includes("quarter 2") ||
-    text.includes("q2")
-  ) {
-    return "q2";
-  }
-  if (
-    text.includes("3rd quarter") ||
-    text.includes("third quarter") ||
-    text.includes("quarter 3") ||
-    text.includes("q3")
-  ) {
-    return "q3";
-  }
-  if (
-    text.includes("4th quarter") ||
-    text.includes("fourth quarter") ||
-    text.includes("quarter 4") ||
-    text.includes("q4")
-  ) {
-    return "q4";
-  }
-  if (
-    text.includes("1st half") ||
-    text.includes("first half") ||
-    text.includes("half time") ||
-    text.includes("1 half")
-  ) {
-    return "firstHalf";
-  }
-  return "game";
-}
-
-function pulseScoreBasketballMarketSide(
-  market: PulseScoreMarket,
-  event: PulseScoreEvent,
-): "home" | "away" | null {
-  const text = normalizeFootballToken(
-    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
-  );
-  const homeName = normalizeFootballToken(event.home);
-  const awayName = normalizeFootballToken(event.away);
-  if (homeName && text.includes(homeName)) return "home";
-  if (awayName && text.includes(awayName)) return "away";
-  if (
-    text.includes("home team") ||
-    text.includes("team1") ||
-    text.includes("team 1") ||
-    text.includes("home")
-  ) {
-    return "home";
-  }
-  if (
-    text.includes("away team") ||
-    text.includes("team2") ||
-    text.includes("team 2") ||
-    text.includes("visitor") ||
-    text.includes("away")
-  ) {
-    return "away";
-  }
-  return null;
-}
-
-function parseBasketballQuarterPairsFromText(text: string): Array<[number, number]> {
-  const pairs: Array<[number, number]> = [];
-  if (!text.trim()) return pairs;
-  const seen = new Map<number, [number, number]>();
-  const patterns = [
-    /(?:q|quarter)\s*([1-4])\D{0,10}(\d+)\s*[-:]\s*(\d+)/gi,
-    /([1-4])(?:st|nd|rd|th)\s*quarter\D{0,10}(\d+)\s*[-:]\s*(\d+)/gi,
-  ];
-  for (const pattern of patterns) {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(text)) !== null) {
-      const quarter = Number(match[1] ?? 0);
-      const home = Number(match[2] ?? 0);
-      const away = Number(match[3] ?? 0);
-      if (!Number.isFinite(quarter) || quarter < 1 || quarter > 4) continue;
-      if (!Number.isFinite(home) || !Number.isFinite(away)) continue;
-      seen.set(quarter, [home, away]);
-    }
-  }
-  for (let quarter = 1; quarter <= 4; quarter += 1) {
-    const pair = seen.get(quarter);
-    if (pair) pairs.push(pair);
-  }
-  return pairs;
-}
-
-function parsePulseScoreBasketballLiveExtra(
-  event: PulseScoreEvent | null | undefined,
-): {
-  quarters?: Array<[number, number]>;
-  clockStr?: string;
-  clockSec?: number;
-  clockRunning?: boolean;
-} {
-  const sources: Array<Record<string, unknown>> = [];
-  if (event?.moreInfo && typeof event.moreInfo === "object") {
-    sources.push(event.moreInfo as Record<string, unknown>);
-  }
-  if (event?.statistics && typeof event.statistics === "object") {
-    sources.push(event.statistics as Record<string, unknown>);
-  }
-  const quarters: Array<[number, number]> = [];
-  for (const source of sources) {
-    for (let quarter = 1; quarter <= 4; quarter += 1) {
-      const home = readNumericField(source, [
-        `q${quarter}Home`,
-        `q${quarter}_home`,
-        `quarter${quarter}Home`,
-        `quarter${quarter}_home`,
-        `homeQuarter${quarter}`,
-        `home_quarter_${quarter}`,
-      ]);
-      const away = readNumericField(source, [
-        `q${quarter}Away`,
-        `q${quarter}_away`,
-        `quarter${quarter}Away`,
-        `quarter${quarter}_away`,
-        `awayQuarter${quarter}`,
-        `away_quarter_${quarter}`,
-      ]);
-      if (home == null || away == null) continue;
-      quarters[quarter - 1] = [home, away];
-    }
-    if (quarters.length > 0) break;
-  }
-  if (quarters.length === 0) {
-    const textCandidates = [
-      String(event?.score?.info ?? ""),
-      ...sources.map((source) =>
-        readTextField(source, [
-          "scoreInfo",
-          "score_info",
-          "quarters",
-          "quarterScores",
-          "quarter_scores",
-          "scoreboard",
-        ]),
-      ),
-    ].filter(Boolean);
-    for (const text of textCandidates) {
-      const parsed = parseBasketballQuarterPairsFromText(text);
-      if (parsed.length > 0) {
-        quarters.push(...parsed);
-        break;
-      }
-    }
-  }
-  const minute = Number(event?.matchClock?.minute ?? NaN);
-  const second = Number(event?.matchClock?.second ?? NaN);
-  const numericClockSec =
-    Number.isFinite(minute) && Number.isFinite(second)
-      ? Math.max(0, minute * 60 + second)
-      : null;
-  const sourceClockSec =
-    sources
-      .map((source) =>
-        readNumericField(source, [
-          "clockSeconds",
-          "clock_seconds",
-          "remainingSeconds",
-          "remaining_seconds",
-          "timeRemainingSeconds",
-          "time_remaining_seconds",
-        ]),
-      )
-      .find((value) => value != null) ?? null;
-  const clockStr =
-    Number.isFinite(minute) && Number.isFinite(second)
-      ? `${String(Math.max(0, minute)).padStart(2, "0")}:${String(Math.max(0, second)).padStart(2, "0")}`
-      : sources
-          .map((source) =>
-            readTextField(source, [
-              "clock",
-              "clockDisplay",
-              "clock_display",
-              "timeRemaining",
-              "time_remaining",
-            ]),
-          )
-          .find(Boolean);
-  return {
-    ...(quarters.length > 0 ? { quarters: quarters.filter(Boolean) } : {}),
-    ...(clockStr ? { clockStr } : {}),
-    ...(numericClockSec != null || sourceClockSec != null
-      ? { clockSec: numericClockSec ?? sourceClockSec ?? undefined }
-      : {}),
-    ...(event?.live != null ? { clockRunning: !!event.live } : {}),
-  };
-}
-
-function uniqueBasketballTotalsLines(
-  lines: Array<{ line: number; over: number; under: number }>,
-): Array<{ line: number; over: number; under: number }> {
-  const seen = new Set<string>();
-  return lines.filter((entry) => {
-    const key = `${entry.line}:${entry.over}:${entry.under}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function uniqueBasketballSpreads(
-  lines: Array<{ line: number; home: number; away: number }>,
-): Array<{ line: number; home: number; away: number }> {
-  const seen = new Set<string>();
-  return lines.filter((entry) => {
-    const key = `${entry.line}:${entry.home}:${entry.away}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function pickBalancedBasketballTotal(
-  lines: Array<{ line: number; over: number; under: number }>,
-): { line: number; over: number; under: number } | null {
-  const candidates = uniqueBasketballTotalsLines(lines).filter(
-    (entry) => entry.over > 1.01 && entry.under > 1.01,
-  );
-  if (candidates.length === 0) return null;
-  return candidates.sort((a, b) => {
-    const delta = Math.abs(a.over - a.under) - Math.abs(b.over - b.under);
-    if (delta !== 0) return delta;
-    return Math.abs(a.line) - Math.abs(b.line);
-  })[0]!;
-}
-
-function pickBalancedBasketballSpread(
-  lines: Array<{ line: number; home: number; away: number }>,
-): { line: number; home: number; away: number } | null {
-  const candidates = uniqueBasketballSpreads(lines).filter(
-    (entry) => entry.home > 1.01 && entry.away > 1.01,
-  );
-  if (candidates.length === 0) return null;
-  return candidates.sort((a, b) => {
-    const delta = Math.abs(a.home - a.away) - Math.abs(b.home - b.away);
-    if (delta !== 0) return delta;
-    return Math.abs(a.line) - Math.abs(b.line);
-  })[0]!;
-}
-
-function buildPulseScoreBasketballMarkets(
-  event: PulseScoreEvent | null | undefined,
-): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
-  const moneyline = { home: 0, draw: 0, away: 0 };
-  const syntheticBase =
-    event?.home && event?.away
-      ? (makeBasketballMarketsFromTeams(
-          String(event.home),
-          String(event.away),
-        ) as AdvancedMarkets & Record<string, unknown>)
-      : (zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, unknown>);
-  const markets = {
-    ...syntheticBase,
-    totalGoals: { ...(syntheticBase.totalGoals ?? zerofillAdvancedMarkets().totalGoals) },
-    handicap: { ...(syntheticBase.handicap ?? zerofillAdvancedMarkets().handicap) },
-    halfTime: { ...(syntheticBase.halfTime ?? zerofillAdvancedMarkets().halfTime) },
-    firstGoal: { ...(syntheticBase.firstGoal ?? zerofillAdvancedMarkets().firstGoal) },
-  } as AdvancedMarkets & Record<string, unknown>;
-  const basketballExtra: NonNullable<AdvancedMarkets["basketballExtra"]> = {
-    ...emptyBasketballExtras(),
-    ...(syntheticBase.basketballExtra
-      ? {
-          ...syntheticBase.basketballExtra,
-          q1: { ...syntheticBase.basketballExtra.q1 },
-          q2: { ...syntheticBase.basketballExtra.q2 },
-          q3: { ...syntheticBase.basketballExtra.q3 },
-          q4: { ...syntheticBase.basketballExtra.q4 },
-          ...(syntheticBase.basketballExtra.q1Total
-            ? { q1Total: { ...syntheticBase.basketballExtra.q1Total } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q2Total
-            ? { q2Total: { ...syntheticBase.basketballExtra.q2Total } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q3Total
-            ? { q3Total: { ...syntheticBase.basketballExtra.q3Total } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q4Total
-            ? { q4Total: { ...syntheticBase.basketballExtra.q4Total } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q1Spread
-            ? { q1Spread: { ...syntheticBase.basketballExtra.q1Spread } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q2Spread
-            ? { q2Spread: { ...syntheticBase.basketballExtra.q2Spread } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q3Spread
-            ? { q3Spread: { ...syntheticBase.basketballExtra.q3Spread } }
-            : {}),
-          ...(syntheticBase.basketballExtra.q4Spread
-            ? { q4Spread: { ...syntheticBase.basketballExtra.q4Spread } }
-            : {}),
-          teamTotalHome: { ...syntheticBase.basketballExtra.teamTotalHome },
-          teamTotalAway: { ...syntheticBase.basketballExtra.teamTotalAway },
-          ...(syntheticBase.basketballExtra.anyQuarter
-            ? { anyQuarter: { ...syntheticBase.basketballExtra.anyQuarter } }
-            : {}),
-          ...(syntheticBase.basketballExtra.allQuarters
-            ? { allQuarters: { ...syntheticBase.basketballExtra.allQuarters } }
-            : {}),
-          ...(syntheticBase.basketballExtra.firstPoint
-            ? { firstPoint: { ...syntheticBase.basketballExtra.firstPoint } }
-            : {}),
-          ...(syntheticBase.basketballExtra.nextPoint
-            ? { nextPoint: { ...syntheticBase.basketballExtra.nextPoint } }
-            : {}),
-          ...(syntheticBase.basketballExtra.nextThree
-            ? { nextThree: { ...syntheticBase.basketballExtra.nextThree } }
-            : {}),
-          ...(syntheticBase.basketballExtra.firstHalf
-            ? { firstHalf: { ...syntheticBase.basketballExtra.firstHalf } }
-            : {}),
-          ...(syntheticBase.basketballExtra.firstHalfTotal
-            ? { firstHalfTotal: { ...syntheticBase.basketballExtra.firstHalfTotal } }
-            : {}),
-          totalsRange: [...(syntheticBase.basketballExtra.totalsRange ?? [])],
-        }
-      : {}),
-  };
-  const matchTotals: Array<{ line: number; over: number; under: number }> = [];
-  const firstHalfTotals: Array<{ line: number; over: number; under: number }> =
-    [];
-  const quarterTotals: Record<
-    "q1" | "q2" | "q3" | "q4",
-    Array<{ line: number; over: number; under: number }>
-  > = {
-    q1: [],
-    q2: [],
-    q3: [],
-    q4: [],
-  };
-  const matchSpreads: Array<{ line: number; home: number; away: number }> = [];
-  const quarterSpreads: Record<
-    "q1" | "q2" | "q3" | "q4",
-    Array<{ line: number; home: number; away: number }>
-  > = {
-    q1: [],
-    q2: [],
-    q3: [],
-    q4: [],
-  };
-  const teamTotals = {
-    home: [] as Array<{ line: number; over: number; under: number }>,
-    away: [] as Array<{ line: number; over: number; under: number }>,
-  };
-
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const scope = pulseScoreBasketballScope(market);
-    const overSelection = findPulseScoreSelection(market, "over");
-    const underSelection = findPulseScoreSelection(market, "under");
-    const homeSelection = event
-      ? findPulseScoreBasketballTeamSelection(market, event, "home")
-      : null;
-    const awaySelection = event
-      ? findPulseScoreBasketballTeamSelection(market, event, "away")
-      : null;
-    const line = pulseScoreSelectionLine(
-      market,
-      overSelection ?? underSelection ?? homeSelection ?? awaySelection,
-    );
-    const home = pulseScoreSelectionOdd(homeSelection);
-    const away = pulseScoreSelectionOdd(awaySelection);
-    const over = pulseScoreSelectionOdd(overSelection);
-    const under = pulseScoreSelectionOdd(underSelection);
-    const isAnyQuarter =
-      canonical.includes("any quarter") || raw.includes("any quarter");
-    const isAllQuarters =
-      canonical.includes("all quarters") || raw.includes("all quarters");
-    const isFirstPoint =
-      canonical.includes("first point") ||
-      canonical.includes("first basket") ||
-      raw.includes("first point") ||
-      raw.includes("first basket");
-    const isNextPoint =
-      canonical.includes("next point") ||
-      canonical.includes("next basket") ||
-      raw.includes("next point") ||
-      raw.includes("next basket");
-    const isNextThree =
-      canonical.includes("next three") ||
-      canonical.includes("three pointer") ||
-      raw.includes("next three") ||
-      raw.includes("next 3");
-    const isTeamTotal =
-      canonical.includes("team total") ||
-      raw.includes("team total") ||
-      raw.includes("team points");
-    const isSpread =
-      canonical.includes("spread") ||
-      canonical.includes("handicap") ||
-      raw.includes("spread") ||
-      raw.includes("handicap");
-    const isTotal =
-      !isSpread &&
-      (canonical.includes("over under") ||
-        canonical.includes("total") ||
-        raw.includes("over under") ||
-        raw.includes("total")) &&
-      !isTeamTotal;
-
-    if (isAnyQuarter && home > 1.01 && away > 1.01) {
-      basketballExtra.anyQuarter = { home, away };
-      continue;
-    }
-    if (isAllQuarters && home > 1.01 && away > 1.01) {
-      basketballExtra.allQuarters = { home, away };
-      continue;
-    }
-    if (isFirstPoint && home > 1.01 && away > 1.01) {
-      basketballExtra.firstPoint = { home, away };
-      continue;
-    }
-    if (isNextPoint && home > 1.01 && away > 1.01) {
-      basketballExtra.nextPoint = { home, away };
-      continue;
-    }
-    if (isNextThree && home > 1.01 && away > 1.01) {
-      basketballExtra.nextThree = { home, away };
-      continue;
-    }
-    if (isTeamTotal && line != null && over > 1.01 && under > 1.01) {
-      const side = event ? pulseScoreBasketballMarketSide(market, event) : null;
-      if (side) teamTotals[side].push({ line, over, under });
-      continue;
-    }
-    if (isSpread && line != null && home > 1.01 && away > 1.01) {
-      const candidate = { line, home, away };
-      if (scope === "q1" || scope === "q2" || scope === "q3" || scope === "q4") {
-        quarterSpreads[scope].push(candidate);
-      } else if (scope === "game") {
-        matchSpreads.push(candidate);
-      }
-      continue;
-    }
-    if (isTotal && line != null && over > 1.01 && under > 1.01) {
-      const candidate = { line, over, under };
-      if (scope === "firstHalf") {
-        firstHalfTotals.push(candidate);
-      } else if (scope === "q1" || scope === "q2" || scope === "q3" || scope === "q4") {
-        quarterTotals[scope].push(candidate);
-      } else {
-        matchTotals.push(candidate);
-      }
-      continue;
-    }
-    if (home <= 1.01 || away <= 1.01) continue;
-    if (scope === "firstHalf") {
-      markets.halfTime = { home, draw: 0, away };
-      basketballExtra.firstHalf = { home, away };
-      continue;
-    }
-    if (scope === "q1") {
-      basketballExtra.q1 = { home, away };
-      continue;
-    }
-    if (scope === "q2") {
-      basketballExtra.q2 = { home, away };
-      continue;
-    }
-    if (scope === "q3") {
-      basketballExtra.q3 = { home, away };
-      continue;
-    }
-    if (scope === "q4") {
-      basketballExtra.q4 = { home, away };
-      continue;
-    }
-    const looksLikeMoneyline =
-      canonical.includes("moneyline") ||
-      canonical.includes("match winner") ||
-      canonical.includes("winner") ||
-      canonical.includes("result") ||
-      raw.includes("moneyline") ||
-      raw.includes("winner") ||
-      raw.includes("result");
-    if (looksLikeMoneyline || (moneyline.home === 0 && moneyline.away === 0)) {
-      moneyline.home = home;
-      moneyline.away = away;
-    }
-  }
-
-  const mainTotal = pickBalancedBasketballTotal(matchTotals);
-  if (mainTotal) {
-    markets.totalGoals.over25 = mainTotal.over;
-    markets.totalGoals.under25 = mainTotal.under;
-    markets._total = mainTotal.line;
-  }
-  if (matchTotals.length > 0) {
-    basketballExtra.totalsRange = uniqueBasketballTotalsLines(matchTotals);
-  }
-
-  const firstHalfTotal = pickBalancedBasketballTotal(firstHalfTotals);
-  if (firstHalfTotal) {
-    markets.firstHalfTotal = firstHalfTotal;
-    markets.totalGoals.over15 = firstHalfTotal.over;
-    markets.totalGoals.under15 = firstHalfTotal.under;
-    markets._total1H = firstHalfTotal.line;
-    basketballExtra.firstHalfTotal = firstHalfTotal;
-  }
-
-  const mainSpread = pickBalancedBasketballSpread(matchSpreads);
-  if (mainSpread) {
-    markets.handicap.homeMinusOne = mainSpread.home;
-    markets.handicap.awayPlusOne = mainSpread.away;
-    markets._spread = mainSpread.line;
-    markets._spreadLine = mainSpread.line;
-  }
-
-  const q1Total = pickBalancedBasketballTotal(quarterTotals.q1);
-  if (q1Total) basketballExtra.q1Total = q1Total;
-  const q2Total = pickBalancedBasketballTotal(quarterTotals.q2);
-  if (q2Total) basketballExtra.q2Total = q2Total;
-  const q3Total = pickBalancedBasketballTotal(quarterTotals.q3);
-  if (q3Total) basketballExtra.q3Total = q3Total;
-  const q4Total = pickBalancedBasketballTotal(quarterTotals.q4);
-  if (q4Total) basketballExtra.q4Total = q4Total;
-
-  const q1Spread = pickBalancedBasketballSpread(quarterSpreads.q1);
-  if (q1Spread) basketballExtra.q1Spread = q1Spread;
-  const q2Spread = pickBalancedBasketballSpread(quarterSpreads.q2);
-  if (q2Spread) basketballExtra.q2Spread = q2Spread;
-  const q3Spread = pickBalancedBasketballSpread(quarterSpreads.q3);
-  if (q3Spread) basketballExtra.q3Spread = q3Spread;
-  const q4Spread = pickBalancedBasketballSpread(quarterSpreads.q4);
-  if (q4Spread) basketballExtra.q4Spread = q4Spread;
-
-  const homeTeamTotal = pickBalancedBasketballTotal(teamTotals.home);
-  if (homeTeamTotal) basketballExtra.teamTotalHome = homeTeamTotal;
-  const awayTeamTotal = pickBalancedBasketballTotal(teamTotals.away);
-  if (awayTeamTotal) basketballExtra.teamTotalAway = awayTeamTotal;
-
-  markets.basketballExtra = basketballExtra;
-  return { odds: moneyline, markets: markets as AdvancedMarkets };
-}
-
-function pulseScoreBasketballAllOddsGroup(market: PulseScoreMarket): string {
-  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-  const raw = normalizeFootballToken(market.rawName ?? "");
-  const period = normalizeFootballToken(market.period ?? "");
-  if (
-    period.includes("quarter") ||
-    period.includes("half") ||
-    raw.includes("quarter") ||
-    raw.includes("half")
-  ) {
-    return "Períodos";
-  }
-  if (
-    canonical.includes("team total") ||
-    raw.includes("team total") ||
-    raw.includes("team points")
-  ) {
-    return "Equipas";
-  }
-  if (
-    canonical.includes("spread") ||
-    canonical.includes("handicap") ||
-    raw.includes("spread") ||
-    raw.includes("handicap")
-  ) {
-    return "Handicap";
-  }
-  if (
-    canonical.includes("total") ||
-    canonical.includes("over under") ||
-    raw.includes("total") ||
-    raw.includes("over under")
-  ) {
-    return "Totais";
-  }
-  if (
-    raw.includes("first basket") ||
-    raw.includes("next basket") ||
-    raw.includes("any quarter") ||
-    raw.includes("all quarters")
-  ) {
-    return "Especiais";
-  }
-  return "Principal";
-}
-
-function buildBasketballV2AllOddsMarkets(
-  event: PulseScoreEvent | null | undefined,
-): Array<{
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-}> {
-  return (Array.isArray(event?.markets) ? event.markets : [])
-    .map((market) => {
-      const choices = pulseScoreMarketSelections(market).map((selection) => ({
-        name: String(
-          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
-        ).trim(),
-        label: pulseScoreSelectionLabel(market, selection),
-        odds: pulseScoreSelectionOdd(selection),
-      }));
-      if (choices.length === 0) return null;
-      const line = pulseScoreSelectionLine(
-        market,
-        pulseScoreMarketSelections(market)[0] ?? null,
-      );
-      const rawName = String(
-        market.rawName ?? market.canonicalMarket ?? "Mercado",
-      ).trim();
-      return {
-        name:
-          line != null && !rawName.includes(String(line))
-            ? `${rawName} ${formatPulseScoreLine(line)}`
-            : rawName,
-        group: pulseScoreBasketballAllOddsGroup(market),
-        choices,
-      };
-    })
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-}
-
-function primeBasketballV2AllOddsCache(
-  eventId: string | number | undefined,
-  event: PulseScoreEvent | null | undefined,
-): void {
-  const normalizedId = String(eventId ?? "").trim();
-  if (!normalizedId || !event) return;
-  const markets = buildBasketballV2AllOddsMarkets(event);
-  if (markets.length === 0) return;
-  basketballV2AllOddsCache.set(normalizedId, {
-    builtAt: Date.now(),
-    markets,
-  });
-}
-
-function pulseScoreHockeyAllOddsGroup(market: PulseScoreMarket): string {
-  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-  const raw = normalizeFootballToken(market.rawName ?? "");
-  const period = normalizeFootballToken(market.period ?? "");
-  if (
-    canonical.includes("correct score") ||
-    raw.includes("correct score")
-  ) {
-    return "Placar";
-  }
-  if (
-    period.includes("period") ||
-    raw.includes("period") ||
-    canonical.includes("period")
-  ) {
-    return "Períodos";
-  }
-  if (
-    canonical.includes("handicap") ||
-    canonical.includes("puck line") ||
-    raw.includes("handicap") ||
-    raw.includes("puck line")
-  ) {
-    return "Handicap";
-  }
-  if (
-    canonical.includes("total") ||
-    canonical.includes("over under") ||
-    raw.includes("goal") ||
-    raw.includes("shots on goal")
-  ) {
-    return "Totais";
-  }
-  return "Principal";
-}
-
-function pulseScoreBaseballAllOddsGroup(market: PulseScoreMarket): string {
-  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-  const raw = normalizeFootballToken(market.rawName ?? "");
-  const period = normalizeFootballToken(market.period ?? "");
-  if (
-    canonical.includes("correct score") ||
-    raw.includes("correct score")
-  ) {
-    return "Placar";
-  }
-  if (
-    period.includes("inning") ||
-    raw.includes("inning") ||
-    raw.includes("first 5") ||
-    raw.includes("f5")
-  ) {
-    return "Entradas";
-  }
-  if (
-    canonical.includes("handicap") ||
-    canonical.includes("run line") ||
-    raw.includes("handicap") ||
-    raw.includes("run line")
-  ) {
-    return "Handicap";
-  }
-  if (
-    canonical.includes("total") ||
-    canonical.includes("over under") ||
-    raw.includes("total")
-  ) {
-    return "Totais";
-  }
-  return "Principal";
-}
-
-function pulseScoreVolleyballAllOddsGroup(market: PulseScoreMarket): string {
-  const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-  const raw = normalizeFootballToken(market.rawName ?? "");
-  const period = normalizeFootballToken(market.period ?? "");
-  if (
-    canonical.includes("correct score") ||
-    raw.includes("correct score")
-  ) {
-    return "Placar";
-  }
-  if (
-    period.includes("set") ||
-    raw.includes("set") ||
-    canonical.includes("set winner")
-  ) {
-    return "Sets";
-  }
-  if (
-    canonical.includes("handicap") ||
-    raw.includes("handicap")
-  ) {
-    return "Handicap";
-  }
-  if (
-    canonical.includes("total") ||
-    canonical.includes("over under") ||
-    raw.includes("points")
-  ) {
-    return "Pontos";
-  }
-  return "Principal";
-}
-
-function buildHockeyV2AllOddsMarkets(
-  event: PulseScoreEvent | null | undefined,
-): Array<{
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-}> {
-  return (Array.isArray(event?.markets) ? event.markets : [])
-    .map((market) => {
-      const choices = pulseScoreMarketSelections(market).map((selection) => ({
-        name: String(
-          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
-        ).trim(),
-        label: pulseScoreSelectionLabel(market, selection),
-        odds: pulseScoreSelectionOdd(selection),
-      }));
-      if (choices.length === 0) return null;
-      const line = pulseScoreSelectionLine(
-        market,
-        pulseScoreMarketSelections(market)[0] ?? null,
-      );
-      const rawName = String(
-        market.rawName ?? market.canonicalMarket ?? "Mercado",
-      ).trim();
-      return {
-        name:
-          line != null && !rawName.includes(String(line))
-            ? `${rawName} ${formatPulseScoreLine(line)}`
-            : rawName,
-        group: pulseScoreHockeyAllOddsGroup(market),
-        choices,
-      };
-    })
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-}
-
-function primeHockeyV2AllOddsCache(
-  eventId: string | number | undefined,
-  event: PulseScoreEvent | null | undefined,
-): void {
-  const normalizedId = String(eventId ?? "").trim();
-  if (!normalizedId || !event) return;
-  const markets = buildHockeyV2AllOddsMarkets(event);
-  if (markets.length === 0) return;
-  hockeyV2AllOddsCache.set(normalizedId, {
-    builtAt: Date.now(),
-    markets,
-  });
-}
-
-function buildBaseballV2AllOddsMarkets(
-  event: PulseScoreEvent | null | undefined,
-): Array<{
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-}> {
-  return (Array.isArray(event?.markets) ? event.markets : [])
-    .map((market) => {
-      const choices = pulseScoreMarketSelections(market).map((selection) => ({
-        name: String(
-          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
-        ).trim(),
-        label: pulseScoreSelectionLabel(market, selection),
-        odds: pulseScoreSelectionOdd(selection),
-      }));
-      if (choices.length === 0) return null;
-      const line = pulseScoreSelectionLine(
-        market,
-        pulseScoreMarketSelections(market)[0] ?? null,
-      );
-      const rawName = String(
-        market.rawName ?? market.canonicalMarket ?? "Mercado",
-      ).trim();
-      return {
-        name:
-          line != null && !rawName.includes(String(line))
-            ? `${rawName} ${formatPulseScoreLine(line)}`
-            : rawName,
-        group: pulseScoreBaseballAllOddsGroup(market),
-        choices,
-      };
-    })
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-}
-
-function primeBaseballV2AllOddsCache(
-  eventId: string | number | undefined,
-  event: PulseScoreEvent | null | undefined,
-): void {
-  const normalizedId = String(eventId ?? "").trim();
-  if (!normalizedId || !event) return;
-  const markets = buildBaseballV2AllOddsMarkets(event);
-  if (markets.length === 0) return;
-  baseballV2AllOddsCache.set(normalizedId, {
-    builtAt: Date.now(),
-    markets,
-  });
-}
-
-function buildVolleyballV2AllOddsMarkets(
-  event: PulseScoreEvent | null | undefined,
-): Array<{
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-}> {
-  return (Array.isArray(event?.markets) ? event.markets : [])
-    .map((market) => {
-      const choices = pulseScoreMarketSelections(market).map((selection) => ({
-        name: String(
-          selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? "",
-        ).trim(),
-        label: pulseScoreSelectionLabel(market, selection),
-        odds: pulseScoreSelectionOdd(selection),
-      }));
-      if (choices.length === 0) return null;
-      const line = pulseScoreSelectionLine(
-        market,
-        pulseScoreMarketSelections(market)[0] ?? null,
-      );
-      const rawName = String(
-        market.rawName ?? market.canonicalMarket ?? "Mercado",
-      ).trim();
-      return {
-        name:
-          line != null && !rawName.includes(String(line))
-            ? `${rawName} ${formatPulseScoreLine(line)}`
-            : rawName,
-        group: pulseScoreVolleyballAllOddsGroup(market),
-        choices,
-      };
-    })
-    .filter(Boolean) as Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>;
-}
-
-function primeVolleyballV2AllOddsCache(
-  eventId: string | number | undefined,
-  event: PulseScoreEvent | null | undefined,
-): void {
-  const normalizedId = String(eventId ?? "").trim();
-  if (!normalizedId || !event) return;
-  const markets = buildVolleyballV2AllOddsMarkets(event);
-  if (markets.length === 0) return;
-  volleyballV2AllOddsCache.set(normalizedId, {
-    builtAt: Date.now(),
-    markets,
-  });
-}
-
-function buildBasketballMatchFromPulseScore(
-  event: PulseScoreEvent,
-  kind: "upcoming" | "live",
-): UpcomingMatch | LiveMatchState | null {
-  const providerId = String(event.eventId ?? "").trim();
-  if (!providerId) return null;
-  const eventData = buildPulseScoreBasketballMarkets(event);
-  const moneyline =
-    eventData.odds.home > 1.01 && eventData.odds.away > 1.01
-      ? { home: eventData.odds.home, away: eventData.odds.away }
-      : null;
-  const pHome = mrDogeNoVigHomeProb(moneyline);
-  const fallbackOdds = moneyline ?? mrDogeTwoWayOddsFromProb(pHome);
-  const { country, league } = splitPulseScoreLeague(event.league, event.country);
-  const { date, time } = toLisbonDateTime(event.startTime);
-  if (kind === "upcoming") {
-    return {
-      id: basketballV2MatchId(providerId),
-      home: String(event.home ?? "").trim(),
-      away: String(event.away ?? "").trim(),
-      league: String(league ?? "").trim(),
-      country: String(country ?? "").trim(),
-      date,
-      time,
-      sport: "basketball",
-      hasRealOdds: !!moneyline,
-      odds: {
-        home: fallbackOdds.home,
-        draw: 0,
-        away: fallbackOdds.away,
-      },
-      markets: eventData.markets,
-    };
-  }
-  const liveExtra = parsePulseScoreBasketballLiveExtra(event);
-  return {
-    id: basketballV2MatchId(providerId),
-    home: String(event.home ?? "").trim(),
-    away: String(event.away ?? "").trim(),
-    league: String(league ?? "").trim(),
-    country: String(country ?? "").trim(),
-    sport: "basketball",
-    homeScore: Number(event.score?.home ?? 0) || 0,
-    awayScore: Number(event.score?.away ?? 0) || 0,
-    minute: 0,
-    status:
-      String(event.matchClock?.period ?? event.score?.info ?? "").trim() ||
-      "LIVE",
-    hasRealOdds: !!moneyline,
-    odds: {
-      home: fallbackOdds.home,
-      draw: 0,
-      away: fallbackOdds.away,
-    },
-    markets: eventData.markets,
-    events: [],
-    date,
-    time,
-    _liveExtra: liveExtra,
-  };
-}
-
-function findPulseScoreEventTeamSelection(
-  market: PulseScoreMarket,
-  event: PulseScoreEvent,
-  side: "home" | "away",
-): PulseScoreSelection | null {
-  const exact = findPulseScoreSelection(
-    market,
-    side,
-    side === "home" ? "1" : "2",
-    side === "home" ? "team1" : "team2",
-    side === "home" ? "home team" : "away team",
-    side === "home" ? event.home : event.away,
-  );
-  if (exact) return exact;
-  return findPulseScoreBasketballTeamSelection(market, event, side);
-}
-
-function buildPulseScoreClockMeta(
-  event: PulseScoreEvent | null | undefined,
-  sources: Record<string, unknown>[],
-): {
-  clockStr?: string;
-  clockSec?: number;
-  clockRunning?: boolean;
-} {
-  const minute = Number(event?.matchClock?.minute ?? NaN);
-  const second = Number(event?.matchClock?.second ?? NaN);
-  const numericClockSec =
-    Number.isFinite(minute) && Number.isFinite(second)
-      ? Math.max(0, minute * 60 + second)
-      : null;
-  const sourceClockSec =
-    sources
-      .map((source) =>
-        readNumericField(source, [
-          "clockSeconds",
-          "clock_seconds",
-          "remainingSeconds",
-          "remaining_seconds",
-          "timeRemainingSeconds",
-          "time_remaining_seconds",
-        ]),
-      )
-      .find((value) => value != null) ?? null;
-  const clockStr =
-    Number.isFinite(minute) && Number.isFinite(second)
-      ? `${String(Math.max(0, minute)).padStart(2, "0")}:${String(Math.max(0, second)).padStart(2, "0")}`
-      : sources
-          .map((source) =>
-            readTextField(source, [
-              "clock",
-              "clockDisplay",
-              "clock_display",
-              "timeRemaining",
-              "time_remaining",
-            ]),
-          )
-          .find(Boolean);
-  return {
-    ...(clockStr ? { clockStr } : {}),
-    ...(numericClockSec != null || sourceClockSec != null
-      ? { clockSec: numericClockSec ?? sourceClockSec ?? undefined }
-      : {}),
-    ...(event?.live != null ? { clockRunning: !!event.live } : {}),
-  };
-}
-
-function readPulseScoreIndexedPairs(
-  sources: Record<string, unknown>[],
-  maxIndex: number,
-  homeCandidates: (index: number) => string[],
-  awayCandidates: (index: number) => string[],
-): Array<[number, number]> {
-  for (const source of sources) {
-    const pairs: Array<[number, number]> = [];
-    for (let index = 1; index <= maxIndex; index += 1) {
-      const home = readNumericField(source, homeCandidates(index));
-      const away = readNumericField(source, awayCandidates(index));
-      if (home == null || away == null) continue;
-      pairs[index - 1] = [home, away];
-    }
-    if (pairs.length > 0) {
-      return pairs.filter(Boolean);
-    }
-  }
-  return [];
-}
-
-function parsePulseScoreHockeyLiveExtra(
-  event: PulseScoreEvent | null | undefined,
-): {
-  periods?: Array<[number, number]>;
-  clockStr?: string;
-  clockSec?: number;
-  clockRunning?: boolean;
-} {
-  const sources: Record<string, unknown>[] = [];
-  if (event?.moreInfo && typeof event.moreInfo === "object") {
-    sources.push(event.moreInfo as Record<string, unknown>);
-  }
-  if (event?.statistics && typeof event.statistics === "object") {
-    sources.push(event.statistics as Record<string, unknown>);
-  }
-  const periods = readPulseScoreIndexedPairs(
-    sources,
-    5,
-    (index) => [
-      `p${index}Home`,
-      `p${index}_home`,
-      `period${index}Home`,
-      `period${index}_home`,
-      `homePeriod${index}`,
-      `home_period_${index}`,
-    ],
-    (index) => [
-      `p${index}Away`,
-      `p${index}_away`,
-      `period${index}Away`,
-      `period${index}_away`,
-      `awayPeriod${index}`,
-      `away_period_${index}`,
-    ],
-  );
-  return {
-    ...(periods.length > 0 ? { periods } : {}),
-    ...buildPulseScoreClockMeta(event, sources),
-  };
-}
-
-function parsePulseScoreBaseballLiveExtra(
-  event: PulseScoreEvent | null | undefined,
-): {
-  innings?: Array<[number, number]>;
-  outs?: number;
-} {
-  const sources: Record<string, unknown>[] = [];
-  if (event?.moreInfo && typeof event.moreInfo === "object") {
-    sources.push(event.moreInfo as Record<string, unknown>);
-  }
-  if (event?.statistics && typeof event.statistics === "object") {
-    sources.push(event.statistics as Record<string, unknown>);
-  }
-  const innings = readPulseScoreIndexedPairs(
-    sources,
-    12,
-    (index) => [
-      `inning${index}Home`,
-      `inning${index}_home`,
-      `homeInning${index}`,
-      `home_inning_${index}`,
-      `i${index}Home`,
-      `i${index}_home`,
-    ],
-    (index) => [
-      `inning${index}Away`,
-      `inning${index}_away`,
-      `awayInning${index}`,
-      `away_inning_${index}`,
-      `i${index}Away`,
-      `i${index}_away`,
-    ],
-  );
-  const outs =
-    sources
-      .map((source) =>
-        readNumericField(source, ["outs", "out", "currentOuts", "current_outs"]),
-      )
-      .find((value) => value != null) ?? null;
-  return {
-    ...(innings.length > 0 ? { innings } : {}),
-    ...(outs != null ? { outs } : {}),
-  };
-}
-
-function parsePulseScoreVolleyballLiveExtra(
-  event: PulseScoreEvent | null | undefined,
-): {
-  sets?: Array<[number, number]>;
-  currentPoints?: [number, number];
-} {
-  const sources: Record<string, unknown>[] = [];
-  if (event?.moreInfo && typeof event.moreInfo === "object") {
-    sources.push(event.moreInfo as Record<string, unknown>);
-  }
-  if (event?.statistics && typeof event.statistics === "object") {
-    sources.push(event.statistics as Record<string, unknown>);
-  }
-  const sets = readPulseScoreIndexedPairs(
-    sources,
-    5,
-    (index) => [
-      `set${index}Home`,
-      `set${index}_home`,
-      `homeSet${index}`,
-      `home_set_${index}`,
-    ],
-    (index) => [
-      `set${index}Away`,
-      `set${index}_away`,
-      `awaySet${index}`,
-      `away_set_${index}`,
-    ],
-  );
-  const currentHome =
-    sources
-      .map((source) =>
-        readNumericField(source, [
-          "currentSetHome",
-          "current_set_home",
-          "homeCurrentPoints",
-          "home_current_points",
-          "homePointsCurrentSet",
-        ]),
-      )
-      .find((value) => value != null) ?? null;
-  const currentAway =
-    sources
-      .map((source) =>
-        readNumericField(source, [
-          "currentSetAway",
-          "current_set_away",
-          "awayCurrentPoints",
-          "away_current_points",
-          "awayPointsCurrentSet",
-        ]),
-      )
-      .find((value) => value != null) ?? null;
-  return {
-    ...(sets.length > 0 ? { sets } : {}),
-    ...(currentHome != null && currentAway != null
-      ? { currentPoints: [currentHome, currentAway] as [number, number] }
-      : {}),
-  };
-}
-
-function pulseScoreHockeyScope(
-  market: PulseScoreMarket,
-): "game" | "period1" | "period2" | "period3" {
-  const text = normalizeFootballToken(
-    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
-  );
-  if (
-    text.includes("1st period") ||
-    text.includes("first period") ||
-    text.includes("period 1") ||
-    text.includes("p1")
-  ) {
-    return "period1";
-  }
-  if (
-    text.includes("2nd period") ||
-    text.includes("second period") ||
-    text.includes("period 2") ||
-    text.includes("p2")
-  ) {
-    return "period2";
-  }
-  if (
-    text.includes("3rd period") ||
-    text.includes("third period") ||
-    text.includes("period 3") ||
-    text.includes("p3")
-  ) {
-    return "period3";
-  }
-  return "game";
-}
-
-function pulseScoreBaseballScope(
-  market: PulseScoreMarket,
-): "game" | "f5" {
-  const text = normalizeFootballToken(
-    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
-  );
-  if (
-    text.includes("first 5") ||
-    text.includes("f5") ||
-    text.includes("5 innings")
-  ) {
-    return "f5";
-  }
-  return "game";
-}
-
-function pulseScoreVolleyballScope(
-  market: PulseScoreMarket,
-): "match" | "set1" | "set2" | "set3" {
-  const text = normalizeFootballToken(
-    `${market.period ?? ""} ${market.rawName ?? ""} ${market.canonicalMarket ?? ""}`,
-  );
-  if (
-    text.includes("1st set") ||
-    text.includes("first set") ||
-    text.includes("set 1")
-  ) {
-    return "set1";
-  }
-  if (
-    text.includes("2nd set") ||
-    text.includes("second set") ||
-    text.includes("set 2")
-  ) {
-    return "set2";
-  }
-  if (
-    text.includes("3rd set") ||
-    text.includes("third set") ||
-    text.includes("set 3")
-  ) {
-    return "set3";
-  }
-  return "match";
-}
-
-function buildPulseScoreHockeyMarkets(
-  event: PulseScoreEvent | null | undefined,
-): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
-  const base = event?.home && event?.away
-    ? (makeHockeyMarketsFromTeams(String(event.home), String(event.away)) as AdvancedMarkets)
-    : zerofillAdvancedMarkets();
-  const markets = {
-    ...base,
-    totalGoals: { ...base.totalGoals },
-    handicap: { ...base.handicap },
-    halfTime: { ...base.halfTime },
-    bothTeamsScore: { ...base.bothTeamsScore },
-    firstGoal: { ...base.firstGoal },
-    hockeyExtra: base.hockeyExtra
-      ? {
-          ...base.hockeyExtra,
-          period1: base.hockeyExtra.period1 ? { ...base.hockeyExtra.period1 } : undefined,
-          period2: { ...base.hockeyExtra.period2 },
-          period3: { ...base.hockeyExtra.period3 },
-          period1Total: { ...base.hockeyExtra.period1Total },
-          ...(base.hockeyExtra.period2Total
-            ? { period2Total: { ...base.hockeyExtra.period2Total } }
-            : {}),
-          ...(base.hockeyExtra.period3Total
-            ? { period3Total: { ...base.hockeyExtra.period3Total } }
-            : {}),
-          bothTeamsScoreGame: { ...base.hockeyExtra.bothTeamsScoreGame },
-          shotsOnGoal: { ...base.hockeyExtra.shotsOnGoal },
-          ...(base.hockeyExtra.drawNoBet
-            ? { drawNoBet: { ...base.hockeyExtra.drawNoBet } }
-            : {}),
-          ...(base.hockeyExtra.correctScore
-            ? { correctScore: [...base.hockeyExtra.correctScore] }
-            : {}),
-          ...(base.hockeyExtra.nextGoal
-            ? { nextGoal: { ...base.hockeyExtra.nextGoal } }
-            : {}),
-        }
-      : undefined,
-  } as AdvancedMarkets;
-  const moneyline = makeHockeyMoneylineFromTeams(
-    String(event?.home ?? ""),
-    String(event?.away ?? ""),
-  );
-  const gameTotals: Array<{ line: number; over: number; under: number }> = [];
-  const periodTotals: Record<"period1" | "period2" | "period3", Array<{ line: number; over: number; under: number }>> = {
-    period1: [],
-    period2: [],
-    period3: [],
-  };
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false || !event) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const scope = pulseScoreHockeyScope(market);
-    const home = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "home"));
-    const away = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "away"));
-    const draw = pulseScoreSelectionOdd(findPulseScoreSelection(market, "draw", "x"));
-    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
-    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
-    const line = pulseScoreSelectionLine(market, pulseScoreMarketSelections(market)[0] ?? null);
-    if (
-      (canonical.includes("match result") || raw.includes("result") || raw.includes("winner")) &&
-      home > 1.01 &&
-      away > 1.01
-    ) {
-      if (scope === "period1") {
-        markets.halfTime = { home, draw, away };
-        markets.hockeyExtra = {
-          ...(markets.hockeyExtra ?? base.hockeyExtra!),
-          ...(markets.hockeyExtra ?? base.hockeyExtra!),
-          period1: { home, draw, away },
-        };
-      } else if (scope === "period2") {
-        markets.hockeyExtra = {
-          ...(markets.hockeyExtra ?? base.hockeyExtra!),
-          period2: { home, draw, away },
-        };
-      } else if (scope === "period3") {
-        markets.hockeyExtra = {
-          ...(markets.hockeyExtra ?? base.hockeyExtra!),
-          period3: { home, draw, away },
-        };
-      } else {
-        moneyline.home = home;
-        moneyline.draw = draw;
-        moneyline.away = away;
-      }
-      continue;
-    }
-    if (
-      line != null &&
-      over > 1.01 &&
-      under > 1.01 &&
-      (canonical.includes("total") || canonical.includes("over under") || raw.includes("total"))
-    ) {
-      if (raw.includes("shots on goal") || canonical.includes("shots on goal")) {
-        markets.hockeyExtra = {
-          ...(markets.hockeyExtra ?? base.hockeyExtra!),
-          shotsOnGoal: { line, over, under },
-        };
-      } else if (scope === "game") {
-        gameTotals.push({ line, over, under });
-      } else {
-        periodTotals[scope].push({ line, over, under });
-      }
-      continue;
-    }
-    if (
-      line != null &&
-      home > 1.01 &&
-      away > 1.01 &&
-      (canonical.includes("handicap") || raw.includes("puck line") || raw.includes("spread"))
-    ) {
-      markets.handicap.homeMinusOne = home;
-      markets.handicap.awayPlusOne = away;
-      markets._spread = Math.abs(line);
-      continue;
-    }
-    if (canonical.includes("both teams to score") && over > 1.01 && under > 1.01) {
-      markets.bothTeamsScore = { yes: over, no: under };
-      markets.hockeyExtra = {
-        ...(markets.hockeyExtra ?? base.hockeyExtra!),
-        bothTeamsScoreGame: { yes: over, no: under },
-      };
-      continue;
-    }
-  }
-  const primaryTotal = pickBalancedBasketballTotal(gameTotals);
-  if (primaryTotal) {
-    markets._total = primaryTotal.line;
-    markets.totalGoals.over25 = primaryTotal.over;
-    markets.totalGoals.under25 = primaryTotal.under;
-    const lower = gameTotals.find((entry) => Math.abs(entry.line - (primaryTotal.line - 0.5)) < 1e-9);
-    const higher = gameTotals.find((entry) => Math.abs(entry.line - (primaryTotal.line + 0.5)) < 1e-9);
-    if (lower) {
-      markets.totalGoals.over15 = lower.over;
-      markets.totalGoals.under15 = lower.under;
-    }
-    if (higher) {
-      markets.totalGoals.over35 = higher.over;
-      markets.totalGoals.under35 = higher.under;
-    }
-  }
-  const p1 = pickBalancedBasketballTotal(periodTotals.period1);
-  if (p1) {
-    markets.hockeyExtra = { ...(markets.hockeyExtra ?? base.hockeyExtra!), period1Total: p1 };
-  }
-  const p2 = pickBalancedBasketballTotal(periodTotals.period2);
-  if (p2) {
-    markets.hockeyExtra = { ...(markets.hockeyExtra ?? base.hockeyExtra!), period2Total: p2 };
-  }
-  const p3 = pickBalancedBasketballTotal(periodTotals.period3);
-  if (p3) {
-    markets.hockeyExtra = { ...(markets.hockeyExtra ?? base.hockeyExtra!), period3Total: p3 };
-  }
-  return { odds: moneyline, markets };
-}
-
-function buildPulseScoreBaseballMarkets(
-  event: PulseScoreEvent | null | undefined,
-): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
-  const syntheticMoneyline = makeMLBMoneylineFromTeams(
-    String(event?.home ?? ""),
-    String(event?.away ?? ""),
-  );
-  const base = event?.home && event?.away
-    ? (makeMLBMarketsFromTeams(
-        String(event.home),
-        String(event.away),
-        syntheticMoneyline.home,
-        syntheticMoneyline.away,
-      ) as AdvancedMarkets)
-    : zerofillAdvancedMarkets();
-  const markets = {
-    ...base,
-    totalGoals: { ...base.totalGoals },
-    handicap: { ...base.handicap },
-    mlbExtra: base.mlbExtra
-      ? {
-          ...base.mlbExtra,
-          ...(base.mlbExtra.f5Result ? { f5Result: { ...base.mlbExtra.f5Result } } : {}),
-          ...(base.mlbExtra.f5Total ? { f5Total: { ...base.mlbExtra.f5Total } } : {}),
-        }
-      : undefined,
-  } as AdvancedMarkets;
-  const moneyline = { home: syntheticMoneyline.home, draw: 0, away: syntheticMoneyline.away };
-  const gameTotals: Array<{ line: number; over: number; under: number }> = [];
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false || !event) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const scope = pulseScoreBaseballScope(market);
-    const home = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "home"));
-    const away = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "away"));
-    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
-    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
-    const line = pulseScoreSelectionLine(market, pulseScoreMarketSelections(market)[0] ?? null);
-    if (
-      (canonical.includes("match result") || raw.includes("moneyline") || raw.includes("winner")) &&
-      home > 1.01 &&
-      away > 1.01
-    ) {
-      if (scope === "f5") {
-        markets.mlbExtra = {
-          ...(markets.mlbExtra ?? base.mlbExtra ?? {}),
-          f5Result: { home, away },
-        };
-      } else {
-        moneyline.home = home;
-        moneyline.away = away;
-      }
-      continue;
-    }
-    if (
-      line != null &&
-      over > 1.01 &&
-      under > 1.01 &&
-      (canonical.includes("total") || canonical.includes("over under") || raw.includes("total"))
-    ) {
-      if (scope === "f5") {
-        markets.mlbExtra = {
-          ...(markets.mlbExtra ?? base.mlbExtra ?? {}),
-          f5Total: { line, over, under },
-        };
-      } else {
-        gameTotals.push({ line, over, under });
-      }
-      continue;
-    }
-    if (
-      line != null &&
-      home > 1.01 &&
-      away > 1.01 &&
-      (canonical.includes("handicap") || raw.includes("run line") || raw.includes("spread"))
-    ) {
-      markets.handicap.homeMinusOne = home;
-      markets.handicap.awayPlusOne = away;
-      markets._spread = Math.abs(line);
-      continue;
-    }
-  }
-  const primaryTotal = pickBalancedBasketballTotal(gameTotals);
-  if (primaryTotal) {
-    markets._total = primaryTotal.line;
-    markets.totalGoals.over35 = primaryTotal.over;
-    markets.totalGoals.under35 = primaryTotal.under;
-    const lower = gameTotals.find((entry) => Math.abs(entry.line - (primaryTotal.line - 0.5)) < 1e-9);
-    const higher = gameTotals.find((entry) => Math.abs(entry.line - (primaryTotal.line + 0.5)) < 1e-9);
-    if (lower) {
-      markets.totalGoals.over25 = lower.over;
-      markets.totalGoals.under25 = lower.under;
-    }
-    if (higher) {
-      markets.totalGoals.over45 = higher.over;
-      markets.totalGoals.under45 = higher.under;
-    }
-  }
-  return { odds: moneyline, markets };
-}
-
-function mapVolleyballExactScoreKey(label: string): keyof NonNullable<NonNullable<AdvancedMarkets["volleyballExtra"]>["exactScore"]> | null {
-  const normalized = String(label ?? "").replace(/\s+/g, "");
-  if (normalized === "3-0") return "s30";
-  if (normalized === "3-1") return "s31";
-  if (normalized === "3-2") return "s32";
-  if (normalized === "0-3") return "s03";
-  if (normalized === "1-3") return "s13";
-  if (normalized === "2-3") return "s23";
-  return null;
-}
-
-function buildPulseScoreVolleyballMarkets(
-  event: PulseScoreEvent | null | undefined,
-): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
-  const liveExtra = parsePulseScoreVolleyballLiveExtra(event);
-  const completedSets = (liveExtra.sets ?? []).filter(
-    (entry) => Number.isFinite(entry[0]) && Number.isFinite(entry[1]),
-  );
-  const homeSetsWon = completedSets.filter(([home, away]) => home > away).length;
-  const awaySetsWon = completedSets.filter(([home, away]) => away > home).length;
-  const currentPoints = liveExtra.currentPoints ?? [0, 0];
-  let moneyline = { home: 0, draw: 0, away: 0 };
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false || !event) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const scope = pulseScoreVolleyballScope(market);
-    const home = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "home"));
-    const away = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "away"));
-    if (
-      scope === "match" &&
-      (canonical.includes("match result") || raw.includes("winner")) &&
-      home > 1.01 &&
-      away > 1.01
-    ) {
-      moneyline = { home, draw: 0, away };
-      break;
-    }
-  }
-  const implied = mrDogeNoVigHomeProb(
-    moneyline.home > 1.01 && moneyline.away > 1.01
-      ? { home: moneyline.home, away: moneyline.away }
-      : null,
-  );
-  const pSetHome = mc(
-    (implied +
-      estimateVolleyballSetWinProb(
-        homeSetsWon,
-        awaySetsWon,
-        currentPoints[0] ?? 0,
-        currentPoints[1] ?? 0,
-      )) /
-      2,
-    0.12,
-    0.88,
-  );
-  const extras = computeVolleyballExtras(pSetHome);
-  const markets = {
-    ...zerofillAdvancedMarkets(),
-    volleyballExtra: {
-      ...extras,
-      exactScore: { ...extras.exactScore },
-      set1: { ...extras.set1 },
-      set2: { ...extras.set2 },
-      set3: { ...extras.set3 },
-      pointsLines: [...extras.pointsLines],
-      setHandicap: { ...extras.setHandicap },
-      handicapPoints: { ...extras.handicapPoints },
-    },
-  } as AdvancedMarkets;
-  const matchPointsLines: Array<{ line: number; over: number; under: number }> = [];
-  for (const market of Array.isArray(event?.markets) ? event.markets : []) {
-    if (!market || market.isActive === false || !event) continue;
-    const canonical = normalizeFootballToken(market.canonicalMarket ?? "");
-    const raw = normalizeFootballToken(market.rawName ?? "");
-    const scope = pulseScoreVolleyballScope(market);
-    const home = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "home"));
-    const away = pulseScoreSelectionOdd(findPulseScoreEventTeamSelection(market, event, "away"));
-    const over = pulseScoreSelectionOdd(findPulseScoreSelection(market, "over"));
-    const under = pulseScoreSelectionOdd(findPulseScoreSelection(market, "under"));
-    const line = pulseScoreSelectionLine(market, pulseScoreMarketSelections(market)[0] ?? null);
-    if (
-      scope === "match" &&
-      (canonical.includes("match result") || raw.includes("winner")) &&
-      home > 1.01 &&
-      away > 1.01
-    ) {
-      moneyline = { home, draw: 0, away };
-      continue;
-    }
-    if (
-      scope !== "match" &&
-      (canonical.includes("match result") || raw.includes("winner")) &&
-      home > 1.01 &&
-      away > 1.01
-    ) {
-      const key = scope as "set1" | "set2" | "set3";
-      markets.volleyballExtra![key] = { home, away };
-      continue;
-    }
-    if (canonical.includes("correct score") || raw.includes("correct score")) {
-      for (const selection of pulseScoreMarketSelections(market)) {
-        const exactKey = mapVolleyballExactScoreKey(
-          String(selection.name ?? selection.rawName ?? selection.canonicalOutcome ?? ""),
-        );
-        const odd = pulseScoreSelectionOdd(selection);
-        if (exactKey && odd > 1.01) {
-          markets.volleyballExtra!.exactScore[exactKey] = odd;
-        }
-      }
-      continue;
-    }
-    if (
-      line != null &&
-      over > 1.01 &&
-      under > 1.01 &&
-      (canonical.includes("total") || canonical.includes("over under") || raw.includes("total"))
-    ) {
-      if (scope === "match" && (raw.includes("point") || canonical.includes("point"))) {
-        matchPointsLines.push({ line, over, under });
-      } else if (scope === "match") {
-        if (Math.abs(line - 2.5) < 1e-9) {
-          markets.totalGoals.over15 = over;
-          markets.totalGoals.under15 = under;
-        } else if (Math.abs(line - 3.5) < 1e-9) {
-          markets.totalGoals.over25 = over;
-          markets.totalGoals.under25 = under;
-        }
-      } else if (scope === "set2") {
-        markets.volleyballExtra!.set2PointsLines = [{ line, over, under }];
-      } else if (scope === "set3") {
-        markets.volleyballExtra!.set3PointsLines = [{ line, over, under }];
-      }
-      continue;
-    }
-    if (
-      line != null &&
-      home > 1.01 &&
-      away > 1.01 &&
-      (canonical.includes("handicap") || raw.includes("handicap") || raw.includes("spread"))
-    ) {
-      if (scope === "match" && (raw.includes("point") || canonical.includes("point"))) {
-        markets.volleyballExtra!.handicapPoints = { line, home, away };
-      } else if (scope === "match") {
-        markets.volleyballExtra!.setHandicap = { home, away };
-      } else if (scope === "set2") {
-        markets.volleyballExtra!.set2HandicapPoints = { line, home, away };
-      } else if (scope === "set3") {
-        markets.volleyballExtra!.set3HandicapPoints = { line, home, away };
-      }
-    }
-  }
-  const primaryPoints = pickBalancedBasketballTotal(matchPointsLines);
-  if (primaryPoints) {
-    markets._total = primaryPoints.line;
-    markets.bothTeamsScore = { yes: primaryPoints.over, no: primaryPoints.under };
-    markets.volleyballExtra!.pointsLines = uniqueBasketballTotalsLines(matchPointsLines);
-  }
-  return {
-    odds:
-      moneyline.home > 1.01 && moneyline.away > 1.01
-        ? moneyline
-        : mrDogeTwoWayOddsFromProb(
-            volleyballMatchWinProbFromSets(pSetHome, homeSetsWon, awaySetsWon),
-          ),
-    markets,
-  };
-}
-
-function buildHockeyMatchFromPulseScore(
-  event: PulseScoreEvent,
-  kind: "upcoming" | "live",
-): UpcomingMatch | LiveMatchState | null {
-  const providerId = String(event.eventId ?? "").trim();
-  if (!providerId) return null;
-  const eventData = buildPulseScoreHockeyMarkets(event);
-  const { country, league } = splitPulseScoreLeague(event.league, event.country);
-  const { date, time } = toLisbonDateTime(event.startTime);
-  if (kind === "upcoming") {
-    return {
-      id: hockeyV2MatchId(providerId),
-      home: String(event.home ?? "").trim(),
-      away: String(event.away ?? "").trim(),
-      league: String(league ?? "").trim(),
-      country: String(country ?? "").trim(),
-      date,
-      time,
-      sport: "hockey",
-      hasRealOdds: eventData.odds.home > 1.01 && eventData.odds.away > 1.01,
-      odds: eventData.odds,
-      markets: eventData.markets,
-    };
-  }
-  return {
-    id: hockeyV2MatchId(providerId),
-    home: String(event.home ?? "").trim(),
-    away: String(event.away ?? "").trim(),
-    league: String(league ?? "").trim(),
-    country: String(country ?? "").trim(),
-    sport: "hockey",
-    homeScore: Number(event.score?.home ?? 0) || 0,
-    awayScore: Number(event.score?.away ?? 0) || 0,
-    minute: 0,
-    status: String(event.matchClock?.period ?? event.score?.info ?? "").trim() || "LIVE",
-    hasRealOdds: eventData.odds.home > 1.01 && eventData.odds.away > 1.01,
-    odds: eventData.odds,
-    markets: eventData.markets,
-    events: [],
-    date,
-    time,
-    _liveExtra: parsePulseScoreHockeyLiveExtra(event),
-  };
-}
-
-function buildBaseballMatchFromPulseScore(
-  event: PulseScoreEvent,
-  kind: "upcoming" | "live",
-): UpcomingMatch | LiveMatchState | null {
-  const providerId = String(event.eventId ?? "").trim();
-  if (!providerId) return null;
-  const eventData = buildPulseScoreBaseballMarkets(event);
-  const { country, league } = splitPulseScoreLeague(event.league, event.country);
-  const { date, time } = toLisbonDateTime(event.startTime);
-  if (kind === "upcoming") {
-    return {
-      id: baseballV2MatchId(providerId),
-      home: String(event.home ?? "").trim(),
-      away: String(event.away ?? "").trim(),
-      league: String(league ?? "").trim(),
-      country: String(country ?? "").trim(),
-      date,
-      time,
-      sport: "baseball",
-      hasRealOdds: eventData.odds.home > 1.01 && eventData.odds.away > 1.01,
-      odds: eventData.odds,
-      markets: eventData.markets,
-    };
-  }
-  return {
-    id: baseballV2MatchId(providerId),
-    home: String(event.home ?? "").trim(),
-    away: String(event.away ?? "").trim(),
-    league: String(league ?? "").trim(),
-    country: String(country ?? "").trim(),
-    sport: "baseball",
-    homeScore: Number(event.score?.home ?? 0) || 0,
-    awayScore: Number(event.score?.away ?? 0) || 0,
-    minute: 0,
-    status: String(event.matchClock?.period ?? event.score?.info ?? "").trim() || "LIVE",
-    hasRealOdds: eventData.odds.home > 1.01 && eventData.odds.away > 1.01,
-    odds: eventData.odds,
-    markets: eventData.markets,
-    events: [],
-    date,
-    time,
-    _liveExtra: parsePulseScoreBaseballLiveExtra(event),
-  };
-}
-
-function buildVolleyballMatchFromPulseScore(
-  event: PulseScoreEvent,
-  kind: "upcoming" | "live",
-): UpcomingMatch | LiveMatchState | null {
-  const providerId = String(event.eventId ?? "").trim();
-  if (!providerId) return null;
-  const eventData = buildPulseScoreVolleyballMarkets(event);
-  const { country, league } = splitPulseScoreLeague(event.league, event.country);
-  const { date, time } = toLisbonDateTime(event.startTime);
-  if (kind === "upcoming") {
-    return {
-      id: volleyballV2MatchId(providerId),
-      home: String(event.home ?? "").trim(),
-      away: String(event.away ?? "").trim(),
-      league: String(league ?? "").trim(),
-      country: String(country ?? "").trim(),
-      date,
-      time,
-      sport: "volleyball",
-      hasRealOdds: eventData.odds.home > 1.01 && eventData.odds.away > 1.01,
-      odds: eventData.odds,
-      markets: eventData.markets,
-    };
-  }
-  return {
-    id: volleyballV2MatchId(providerId),
-    home: String(event.home ?? "").trim(),
-    away: String(event.away ?? "").trim(),
-    league: String(league ?? "").trim(),
-    country: String(country ?? "").trim(),
-    sport: "volleyball",
-    homeScore: Number(event.score?.home ?? 0) || 0,
-    awayScore: Number(event.score?.away ?? 0) || 0,
-    minute: 0,
-    status: String(event.matchClock?.period ?? event.score?.info ?? "").trim() || "LIVE",
-    hasRealOdds: eventData.odds.home > 1.01 && eventData.odds.away > 1.01,
-    odds: eventData.odds,
-    markets: eventData.markets,
-    events: [],
-    date,
-    time,
-    _liveExtra: parsePulseScoreVolleyballLiveExtra(event),
-  };
-}
-
-function buildTennisMatchFromPulseScore(
-  event: PulseScoreEvent,
-  kind: "upcoming" | "live",
-): UpcomingMatch | LiveMatchState | null {
-  const providerId = String(event.eventId ?? "").trim();
-  if (!providerId) return null;
-  const moneyline = pulseScoreTennisMoneyline(event);
-  const pHome = mrDogeNoVigHomeProb(
-    moneyline ? { home: moneyline.home, away: moneyline.away } : null,
-  );
-  const fallbackOdds = moneyline ?? mrDogeTwoWayOddsFromProb(pHome);
-  const { country, league } = splitPulseScoreLeague(event.league, event.country);
-  const { date, time } = toLisbonDateTime(event.startTime);
-  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, unknown>;
-  const liveExtra = parsePulseScoreTennisLiveExtra(event);
-  const sets = liveExtra.sets ?? [];
-  const inPlayNow = !!liveExtra.currentPoints || !!liveExtra.serving;
-  const completedSets = inPlayNow && sets.length > 0 ? sets.slice(0, -1) : sets;
-  const homeSetsWon = completedSets.filter(([home, away]) => home > away).length;
-  const awaySetsWon = completedSets.filter(([home, away]) => away > home).length;
-  if (kind === "live" && sets.length > 0) {
-    markets.tennisExtra = computeLiveTennisExtras(
-      pHome,
-      sets,
-      homeSetsWon,
-      awaySetsWon,
-      Math.max(1, homeSetsWon + awaySetsWon + 1),
-      liveExtra.currentPoints,
-      liveExtra.serving,
-    );
-  } else {
-    markets.tennisExtra = computeTennisExtras(pHome);
-  }
-  markets.tennisExtra = applyPulseScoreTennisExtras(markets.tennisExtra, event);
-  if (kind === "upcoming") {
-    return {
-      id: tennisV2MatchId(providerId),
-      home: String(event.home ?? "").trim(),
-      away: String(event.away ?? "").trim(),
-      league: String(league ?? "").trim(),
-      country: String(country ?? "").trim(),
-      date,
-      time,
-      sport: "tennis",
-      hasRealOdds: !!moneyline,
-      odds: fallbackOdds,
-      markets: markets as AdvancedMarkets,
-    };
-  }
-  return {
-    id: tennisV2MatchId(providerId),
-    home: String(event.home ?? "").trim(),
-    away: String(event.away ?? "").trim(),
-    league: String(league ?? "").trim(),
-    country: String(country ?? "").trim(),
-    sport: "tennis",
-    homeScore: homeSetsWon || Number(event.score?.home ?? 0) || 0,
-    awayScore: awaySetsWon || Number(event.score?.away ?? 0) || 0,
-    minute: 0,
-    status:
-      String(event.matchClock?.period ?? "").trim() ||
-      (sets.length > 0 ? `Set ${Math.max(1, homeSetsWon + awaySetsWon + 1)}` : "LIVE"),
-    hasRealOdds: !!moneyline,
-    odds: fallbackOdds,
-    markets: markets as AdvancedMarkets,
-    events: [],
-    date,
-    time,
-    _liveExtra: {
-      ...(sets.length > 0 ? { sets } : {}),
-      ...(liveExtra.currentPoints ? { currentPoints: liveExtra.currentPoints } : {}),
-      ...(liveExtra.serving ? { serving: liveExtra.serving } : {}),
-    },
-  };
-}
-
-async function loadPulseScoreEventsForSport(
-  sport: Bet62Sport,
-  kind: "upcoming" | "live",
-  limit = TENNIS_V2_PAGE_LIMIT,
-): Promise<PulseScoreEvent[]> {
-  const providerConfig = getSportProviderConfig(sport);
-  if (!isPulseScoreAvailable()) return [];
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) return [];
-  const events: PulseScoreEvent[] = [];
-  let page = 1;
-  const maxPages = kind === "live" ? 20 : 50;
-  while (page <= maxPages) {
-    const response =
-      kind === "live"
-        ? await client.listLiveEventsPage(providerConfig.bookmaker, providerConfig.pulseScoreSport, {
-            query: { page, limit },
-          })
-        : await client.listPrematchEventsPage(providerConfig.bookmaker, providerConfig.pulseScoreSport, {
-            query: { page, limit },
-          });
-    const batch = Array.isArray(response.events) ? response.events : [];
-    if (sport === "tennis") {
-      for (const event of batch) {
-        primeTennisV2AllOddsCache(event.eventId, event);
-      }
-    }
-    if (sport === "basketball") {
-      for (const event of batch) {
-        primeBasketballV2AllOddsCache(event.eventId, event);
-      }
-    }
-    if (sport === "ice_hockey") {
-      for (const event of batch) {
-        primeHockeyV2AllOddsCache(event.eventId, event);
-      }
-    }
-    if (sport === "baseball") {
-      for (const event of batch) {
-        primeBaseballV2AllOddsCache(event.eventId, event);
-      }
-    }
-    if (sport === "volleyball") {
-      for (const event of batch) {
-        primeVolleyballV2AllOddsCache(event.eventId, event);
-      }
-    }
-    events.push(...batch);
-    if (!response.hasNextPage || batch.length === 0) break;
-    page += 1;
-  }
-  return events;
-}
-
-async function buildTennisUpcomingFromV2(): Promise<UpcomingMatch[]> {
-  const events = await loadPulseScoreEventsForSport("tennis", "upcoming");
-  return events
-    .map((event) => buildTennisMatchFromPulseScore(event, "upcoming"))
-    .filter(Boolean) as UpcomingMatch[];
-}
-
-async function buildTennisLiveFromV2(): Promise<LiveMatchState[]> {
-  const events = await loadPulseScoreEventsForSport("tennis", "live");
-  return events
-    .map((event) => buildTennisMatchFromPulseScore(event, "live"))
-    .filter(Boolean) as LiveMatchState[];
-}
-
-async function buildBasketballUpcomingFromV2(): Promise<UpcomingMatch[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "basketball",
-    "upcoming",
-    BASKETBALL_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildBasketballMatchFromPulseScore(event, "upcoming"))
-    .filter(Boolean) as UpcomingMatch[];
-}
-
-async function buildBasketballLiveFromV2(): Promise<LiveMatchState[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "basketball",
-    "live",
-    BASKETBALL_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildBasketballMatchFromPulseScore(event, "live"))
-    .filter(Boolean) as LiveMatchState[];
-}
-
-async function buildHockeyUpcomingFromV2(): Promise<UpcomingMatch[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "ice_hockey",
-    "upcoming",
-    HOCKEY_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildHockeyMatchFromPulseScore(event, "upcoming"))
-    .filter(Boolean) as UpcomingMatch[];
-}
-
-async function buildHockeyLiveFromV2(): Promise<LiveMatchState[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "ice_hockey",
-    "live",
-    HOCKEY_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildHockeyMatchFromPulseScore(event, "live"))
-    .filter(Boolean) as LiveMatchState[];
-}
-
-async function buildBaseballUpcomingFromV2(): Promise<UpcomingMatch[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "baseball",
-    "upcoming",
-    BASEBALL_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildBaseballMatchFromPulseScore(event, "upcoming"))
-    .filter(Boolean) as UpcomingMatch[];
-}
-
-async function buildBaseballLiveFromV2(): Promise<LiveMatchState[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "baseball",
-    "live",
-    BASEBALL_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildBaseballMatchFromPulseScore(event, "live"))
-    .filter(Boolean) as LiveMatchState[];
-}
-
-async function buildVolleyballUpcomingFromV2(): Promise<UpcomingMatch[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "volleyball",
-    "upcoming",
-    VOLLEYBALL_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildVolleyballMatchFromPulseScore(event, "upcoming"))
-    .filter(Boolean) as UpcomingMatch[];
-}
-
-async function buildVolleyballLiveFromV2(): Promise<LiveMatchState[]> {
-  const events = await loadPulseScoreEventsForSport(
-    "volleyball",
-    "live",
-    VOLLEYBALL_V2_PAGE_LIMIT,
-  );
-  return events
-    .map((event) => buildVolleyballMatchFromPulseScore(event, "live"))
-    .filter(Boolean) as LiveMatchState[];
-}
-
-async function getTennisV2LiveCached(
-  forceFresh = false,
-): Promise<LiveMatchState[]> {
-  if (
-    !forceFresh &&
-    tennisV2LiveCache &&
-    Date.now() - tennisV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
-  ) {
-    return tennisV2LiveCache.matches;
-  }
-  if (!forceFresh && tennisV2LiveInFlight) return tennisV2LiveInFlight;
-  tennisV2LiveInFlight = buildTennisLiveFromV2()
-    .then((matches) => {
-      tennisV2LiveCache = { builtAt: Date.now(), matches };
-      return matches;
-    })
-    .finally(() => {
-      tennisV2LiveInFlight = null;
-    });
-  return tennisV2LiveInFlight;
-}
-
-async function getBasketballV2LiveCached(
-  forceFresh = false,
-): Promise<LiveMatchState[]> {
-  if (
-    !forceFresh &&
-    basketballV2LiveCache &&
-    Date.now() - basketballV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
-  ) {
-    return basketballV2LiveCache.matches;
-  }
-  if (!forceFresh && basketballV2LiveInFlight) return basketballV2LiveInFlight;
-  basketballV2LiveInFlight = buildBasketballLiveFromV2()
-    .then((matches) => {
-      basketballV2LiveCache = { builtAt: Date.now(), matches };
-      return matches;
-    })
-    .finally(() => {
-      basketballV2LiveInFlight = null;
-    });
-  return basketballV2LiveInFlight;
-}
-
-async function getHockeyV2LiveCached(
-  forceFresh = false,
-): Promise<LiveMatchState[]> {
-  if (
-    !forceFresh &&
-    hockeyV2LiveCache &&
-    Date.now() - hockeyV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
-  ) {
-    return hockeyV2LiveCache.matches;
-  }
-  if (!forceFresh && hockeyV2LiveInFlight) return hockeyV2LiveInFlight;
-  hockeyV2LiveInFlight = buildHockeyLiveFromV2()
-    .then((matches) => {
-      hockeyV2LiveCache = { builtAt: Date.now(), matches };
-      return matches;
-    })
-    .finally(() => {
-      hockeyV2LiveInFlight = null;
-    });
-  return hockeyV2LiveInFlight;
-}
-
-async function getBaseballV2LiveCached(
-  forceFresh = false,
-): Promise<LiveMatchState[]> {
-  if (
-    !forceFresh &&
-    baseballV2LiveCache &&
-    Date.now() - baseballV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
-  ) {
-    return baseballV2LiveCache.matches;
-  }
-  if (!forceFresh && baseballV2LiveInFlight) return baseballV2LiveInFlight;
-  baseballV2LiveInFlight = buildBaseballLiveFromV2()
-    .then((matches) => {
-      baseballV2LiveCache = { builtAt: Date.now(), matches };
-      return matches;
-    })
-    .finally(() => {
-      baseballV2LiveInFlight = null;
-    });
-  return baseballV2LiveInFlight;
-}
-
-async function getVolleyballV2LiveCached(
-  forceFresh = false,
-): Promise<LiveMatchState[]> {
-  if (
-    !forceFresh &&
-    volleyballV2LiveCache &&
-    Date.now() - volleyballV2LiveCache.builtAt < FOOTBALL_V2_LIVE_TTL_MS
-  ) {
-    return volleyballV2LiveCache.matches;
-  }
-  if (!forceFresh && volleyballV2LiveInFlight) return volleyballV2LiveInFlight;
-  volleyballV2LiveInFlight = buildVolleyballLiveFromV2()
-    .then((matches) => {
-      volleyballV2LiveCache = { builtAt: Date.now(), matches };
-      return matches;
-    })
-    .finally(() => {
-      volleyballV2LiveInFlight = null;
-    });
-  return volleyballV2LiveInFlight;
-}
-
-async function getTennisV2AllOdds(
-  eventId: string,
-): Promise<
-  Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>
-> {
-  const now = Date.now();
-  const cached = tennisV2AllOddsCache.get(eventId);
-  if (cached && now - cached.builtAt < TENNIS_V2_ALL_ODDS_TTL_MS) {
-    return cached.markets;
-  }
-  const existingRequest = tennisV2AllOddsInFlight.get(eventId);
-  if (existingRequest) return existingRequest;
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) {
-    return cached?.markets ?? [];
-  }
-  const request = (async () => {
-    try {
-      const liveEvent = await client.getLiveEventById(
-        TENNIS_PROVIDER_CONFIG.bookmaker,
-        eventId,
-      );
-      const prematchEvent =
-        liveEvent ??
-        (await client.getEventById(
-          TENNIS_PROVIDER_CONFIG.bookmaker,
-          TENNIS_PROVIDER_CONFIG.pulseScoreSport,
-          eventId,
-        ));
-      const markets = buildTennisV2AllOddsMarkets(prematchEvent);
-      tennisV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
-      return markets;
-    } catch (err) {
-      if (cached && now - cached.builtAt < TENNIS_V2_ALL_ODDS_STALE_TTL_MS) {
-        logger.warn(
-          { err, eventId },
-          "[tennis-v2] all-odds fetch failed — serving stale cache",
-        );
-        return cached.markets;
-      }
-      throw err;
-    } finally {
-      tennisV2AllOddsInFlight.delete(eventId);
-    }
-  })();
-  tennisV2AllOddsInFlight.set(eventId, request);
-  return request;
-}
-
-async function getBasketballV2AllOdds(
-  eventId: string,
-): Promise<
-  Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>
-> {
-  const now = Date.now();
-  const cached = basketballV2AllOddsCache.get(eventId);
-  if (cached && now - cached.builtAt < BASKETBALL_V2_ALL_ODDS_TTL_MS) {
-    return cached.markets;
-  }
-  const existingRequest = basketballV2AllOddsInFlight.get(eventId);
-  if (existingRequest) return existingRequest;
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) {
-    return cached?.markets ?? [];
-  }
-  const request = (async () => {
-    try {
-      const liveEvent = await client.getLiveEventById(
-        BASKETBALL_PROVIDER_CONFIG.bookmaker,
-        eventId,
-      );
-      const prematchEvent =
-        liveEvent ??
-        (await client.getEventById(
-          BASKETBALL_PROVIDER_CONFIG.bookmaker,
-          BASKETBALL_PROVIDER_CONFIG.pulseScoreSport,
-          eventId,
-        ));
-      const markets = buildBasketballV2AllOddsMarkets(prematchEvent);
-      basketballV2AllOddsCache.set(eventId, {
-        builtAt: Date.now(),
-        markets,
-      });
-      return markets;
-    } catch (err) {
-      if (
-        cached &&
-        now - cached.builtAt < BASKETBALL_V2_ALL_ODDS_STALE_TTL_MS
-      ) {
-        logger.warn(
-          { err, eventId },
-          "[basketball-v2] all-odds fetch failed — serving stale cache",
-        );
-        return cached.markets;
-      }
-      throw err;
-    } finally {
-      basketballV2AllOddsInFlight.delete(eventId);
-    }
-  })();
-  basketballV2AllOddsInFlight.set(eventId, request);
-  return request;
-}
-
-async function getFootballV2AllOdds(
-  eventId: string,
-): Promise<
-  Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>
-> {
-  const now = Date.now();
-  const cached = footballV2AllOddsCache.get(eventId);
-  if (cached && now - cached.builtAt < FOOTBALL_V2_ALL_ODDS_TTL_MS) {
-    return cached.markets;
-  }
-  const existingRequest = footballV2AllOddsInFlight.get(eventId);
-  if (existingRequest) return existingRequest;
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) {
-    return cached?.markets ?? [];
-  }
-  const request = (async () => {
-    try {
-      const liveEvent = await client.getLiveEventById(
-        FOOTBALL_PROVIDER_CONFIG.bookmaker,
-        eventId,
-      );
-      const prematchEvent =
-        liveEvent ??
-        (await client.getEventById(
-          FOOTBALL_PROVIDER_CONFIG.bookmaker,
-          FOOTBALL_PROVIDER_CONFIG.pulseScoreSport,
-          eventId,
-        ));
-      const markets = buildFootballV2AllOddsMarkets(prematchEvent);
-      footballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
-      return markets;
-    } catch (err) {
-      if (cached && now - cached.builtAt < FOOTBALL_V2_ALL_ODDS_STALE_TTL_MS) {
-        logger.warn(
-          { err, eventId },
-          "[football-v2] all-odds fetch failed — serving stale cache",
-        );
-        return cached.markets;
-      }
-      throw err;
-    } finally {
-      footballV2AllOddsInFlight.delete(eventId);
-    }
-  })();
-  footballV2AllOddsInFlight.set(eventId, request);
-  return request;
-}
-
-async function getHockeyV2AllOdds(
-  eventId: string,
-): Promise<
-  Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>
-> {
-  const now = Date.now();
-  const cached = hockeyV2AllOddsCache.get(eventId);
-  if (cached && now - cached.builtAt < HOCKEY_V2_ALL_ODDS_TTL_MS) {
-    return cached.markets;
-  }
-  const existingRequest = hockeyV2AllOddsInFlight.get(eventId);
-  if (existingRequest) return existingRequest;
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) {
-    return cached?.markets ?? [];
-  }
-  const request = (async () => {
-    try {
-      const liveEvent = await client.getLiveEventById(
-        HOCKEY_PROVIDER_CONFIG.bookmaker,
-        eventId,
-      );
-      const prematchEvent =
-        liveEvent ??
-        (await client.getEventById(
-          HOCKEY_PROVIDER_CONFIG.bookmaker,
-          HOCKEY_PROVIDER_CONFIG.pulseScoreSport,
-          eventId,
-        ));
-      const markets = buildHockeyV2AllOddsMarkets(prematchEvent);
-      hockeyV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
-      return markets;
-    } catch (err) {
-      if (cached && now - cached.builtAt < HOCKEY_V2_ALL_ODDS_STALE_TTL_MS) {
-        logger.warn(
-          { err, eventId },
-          "[hockey-v2] all-odds fetch failed — serving stale cache",
-        );
-        return cached.markets;
-      }
-      throw err;
-    } finally {
-      hockeyV2AllOddsInFlight.delete(eventId);
-    }
-  })();
-  hockeyV2AllOddsInFlight.set(eventId, request);
-  return request;
-}
-
-async function getBaseballV2AllOdds(
-  eventId: string,
-): Promise<
-  Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>
-> {
-  const now = Date.now();
-  const cached = baseballV2AllOddsCache.get(eventId);
-  if (cached && now - cached.builtAt < BASEBALL_V2_ALL_ODDS_TTL_MS) {
-    return cached.markets;
-  }
-  const existingRequest = baseballV2AllOddsInFlight.get(eventId);
-  if (existingRequest) return existingRequest;
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) {
-    return cached?.markets ?? [];
-  }
-  const request = (async () => {
-    try {
-      const liveEvent = await client.getLiveEventById(
-        BASEBALL_PROVIDER_CONFIG.bookmaker,
-        eventId,
-      );
-      const prematchEvent =
-        liveEvent ??
-        (await client.getEventById(
-          BASEBALL_PROVIDER_CONFIG.bookmaker,
-          BASEBALL_PROVIDER_CONFIG.pulseScoreSport,
-          eventId,
-        ));
-      const markets = buildBaseballV2AllOddsMarkets(prematchEvent);
-      baseballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
-      return markets;
-    } catch (err) {
-      if (cached && now - cached.builtAt < BASEBALL_V2_ALL_ODDS_STALE_TTL_MS) {
-        logger.warn(
-          { err, eventId },
-          "[baseball-v2] all-odds fetch failed — serving stale cache",
-        );
-        return cached.markets;
-      }
-      throw err;
-    } finally {
-      baseballV2AllOddsInFlight.delete(eventId);
-    }
-  })();
-  baseballV2AllOddsInFlight.set(eventId, request);
-  return request;
-}
-
-async function getVolleyballV2AllOdds(
-  eventId: string,
-): Promise<
-  Array<{
-    name: string;
-    group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
-  }>
-> {
-  const now = Date.now();
-  const cached = volleyballV2AllOddsCache.get(eventId);
-  if (cached && now - cached.builtAt < VOLLEYBALL_V2_ALL_ODDS_TTL_MS) {
-    return cached.markets;
-  }
-  const existingRequest = volleyballV2AllOddsInFlight.get(eventId);
-  if (existingRequest) return existingRequest;
-  const client = getPulseScoreClient();
-  if (!client.isConfigured()) {
-    return cached?.markets ?? [];
-  }
-  const request = (async () => {
-    try {
-      const liveEvent = await client.getLiveEventById(
-        VOLLEYBALL_PROVIDER_CONFIG.bookmaker,
-        eventId,
-      );
-      const prematchEvent =
-        liveEvent ??
-        (await client.getEventById(
-          VOLLEYBALL_PROVIDER_CONFIG.bookmaker,
-          VOLLEYBALL_PROVIDER_CONFIG.pulseScoreSport,
-          eventId,
-        ));
-      const markets = buildVolleyballV2AllOddsMarkets(prematchEvent);
-      volleyballV2AllOddsCache.set(eventId, { builtAt: Date.now(), markets });
-      return markets;
-    } catch (err) {
-      if (
-        cached &&
-        now - cached.builtAt < VOLLEYBALL_V2_ALL_ODDS_STALE_TTL_MS
-      ) {
-        logger.warn(
-          { err, eventId },
-          "[volleyball-v2] all-odds fetch failed — serving stale cache",
-        );
-        return cached.markets;
-      }
-      throw err;
-    } finally {
-      volleyballV2AllOddsInFlight.delete(eventId);
-    }
-  })();
-  volleyballV2AllOddsInFlight.set(eventId, request);
-  return request;
 }
 
 function mrDogeNoVigHomeProb(
@@ -11111,7 +6541,11 @@ export async function ensureFinishedMatchResult(
   // fallback needed here since finalizeStaleLiveMatch already persists the
   // full record (including extras.basketball.quarters/
   // extras.volleyball.sets, same shape read back below) up front.
-  if (/^pulsescore-(football|tennis|basketball|volleyball)-.+$/.test(matchId)) {
+  if (
+    /^(?:pulsescore-(?:football|tennis|basketball|volleyball)|goalapi-football|propline-[a-z0-9_-]+)-.+$/i.test(
+      matchId,
+    )
+  ) {
     const cached = finishedMatchResults.get(matchId);
     if (
       cached &&
@@ -12683,15 +8117,186 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   };
 }
 
+function providerMatchId(match: ProviderMatch): string {
+  return `${match.provider === "goal_api" ? "goalapi" : "propline"}-${match.sport}-${match.id}`;
+}
+
+function providerDateTime(kickoff?: string): { date: string; time: string } {
+  if (!kickoff) return { date: "", time: "" };
+  const timestamp = Date.parse(kickoff);
+  if (!Number.isFinite(timestamp)) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(timestamp));
+  const values: Record<string, string> = {};
+  for (const part of parts) values[part.type] = part.value;
+  return {
+    date: `${values["day"] ?? "01"}.${values["month"] ?? "01"}.${values["year"] ?? "1970"}`,
+    time: `${values["hour"] === "24" ? "00" : values["hour"] ?? "00"}:${values["minute"] ?? "00"}`,
+  };
+}
+
+function providerMatchStats(match: ProviderMatch): LiveMatchState["matchStats"] {
+  const rows: Array<{ name: string; home: string; away: string }> = [];
+  for (const item of match.statistics) {
+    const name = String(item["name"] ?? item["statistic"] ?? item["type"] ?? "").trim();
+    const home = item["home"] ?? item["homeValue"] ?? item["home_value"];
+    const away = item["away"] ?? item["awayValue"] ?? item["away_value"];
+    if (name && (home != null || away != null)) {
+      rows.push({ name, home: String(home ?? "-"), away: String(away ?? "-") });
+    }
+  }
+  return rows.length ? [{ title: "Estatísticas", rows }] : undefined;
+}
+
+function providerEvents(match: ProviderMatch): LiveMatchState["events"] {
+  return match.events.map((event) => ({
+    type: event.type,
+    team: event.team,
+    minute: event.minute,
+    player: event.player,
+    playerId: event.playerId,
+    detail: event.detail,
+  }));
+}
+
+function applyProviderProjection(
+  markets: AdvancedMarkets,
+  match: ProviderMatch,
+): { odds: { home: number; draw: number; away: number }; hasRealOdds: boolean; updatedAt?: number } {
+  const projection = projectBet62Odds(
+    match.odds,
+    { home: match.home, away: match.away },
+    match.isLive ? 6 * 60 * 60_000 : 15 * 60_000,
+  );
+  if (projection.markets["totalGoals"]) {
+    markets.totalGoals = { ...markets.totalGoals, ...(projection.markets["totalGoals"] as Partial<AdvancedMarkets["totalGoals"]>) };
+  }
+  for (const [key, value] of Object.entries(projection.markets)) {
+    if (key !== "totalGoals") Object.assign(markets as unknown as Record<string, unknown>, { [key]: value });
+  }
+  return {
+    odds: projection.moneyline ?? { home: 0, draw: 0, away: 0 },
+    hasRealOdds: providerMatchHasFreshOdds(match),
+    updatedAt: projection.freshestAt,
+  };
+}
+
+function buildProviderUpcoming(match: ProviderMatch): UpcomingMatch {
+  const { date, time } = providerDateTime(match.kickoffUtc);
+  const markets = zerofillAdvancedMarkets();
+  const projected = applyProviderProjection(markets, match);
+  return {
+    id: providerMatchId(match),
+    home: match.home,
+    away: match.away,
+    homeTeamId: match.homeTeamId,
+    awayTeamId: match.awayTeamId,
+    league: match.league,
+    country: match.country,
+    leagueId: match.leagueId,
+    date,
+    time,
+    sport: match.sport,
+    hasRealOdds: projected.hasRealOdds,
+    odds: projected.odds,
+    markets,
+    providerStatusText: match.status,
+  };
+}
+
+function buildProviderLive(match: ProviderMatch): LiveMatchState {
+  const markets = zerofillAdvancedMarkets();
+  const projected = applyProviderProjection(markets, match);
+  return {
+    id: providerMatchId(match),
+    home: match.home,
+    away: match.away,
+    homeTeamId: match.homeTeamId,
+    awayTeamId: match.awayTeamId,
+    league: match.league,
+    country: match.country,
+    sport: match.sport,
+    homeScore: match.homeScore,
+    awayScore: match.awayScore,
+    minute: match.minute,
+    status: match.status,
+    hasRealOdds: projected.hasRealOdds,
+    odds: projected.odds,
+    markets,
+    events: providerEvents(match),
+    matchStats: providerMatchStats(match),
+    _commentary: match.commentary,
+    _oddsUpdatedAt: projected.updatedAt,
+    _liveExtra: {
+      firstGoal: match.events.find((event) => /goal|score/i.test(event.type))?.team ?? "none",
+    },
+  };
+}
+
+async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
+  const goalRequest = getGoalFootballMatches({
+    from: new Date().toISOString().slice(0, 10),
+    to: getUpcomingFetchEndDate(),
+  }).then((matches) =>
+    matches
+      .filter((match) => !isBlockedLeague(match.league) && !isVirtualFootballLeague(match.league))
+      .map(buildProviderUpcoming)
+      .filter((match) => match.hasRealOdds),
+  ).catch(() => [] as UpcomingMatch[]);
+  const fallbackRequest = buildPropLineUpcoming("football");
+  const projected = await Promise.race([
+    goalRequest,
+    waitMs(6_000).then(() => [] as UpcomingMatch[]),
+  ]);
+  if (projected.length > 0) return projected;
+  logger.warn("[providers] Goal API football upcoming unavailable; using PropLine fallback");
+  return fallbackRequest;
+}
+
+async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
+  const matches = await getGoalFootballMatches({ live: true });
+  return matches
+    .filter((match) => !isBlockedLeague(match.league) && !isVirtualFootballLeague(match.league))
+    .map(buildProviderLive);
+}
+
+function proplineDateRange(): { from: string; to: string } {
+  return {
+    from: new Date().toISOString(),
+    to: new Date(Date.now() + 31 * 24 * 60 * 60_000).toISOString(),
+  };
+}
+
+async function buildPropLineUpcoming(sport: string): Promise<UpcomingMatch[]> {
+  const range = proplineDateRange();
+  const matches = await getPropLineMatches({ sport, ...range });
+  return matches.map(buildProviderUpcoming).filter((match) => match.hasRealOdds);
+}
+
+async function buildPropLineLive(sport: string): Promise<LiveMatchState[]> {
+  const matches = await getPropLineMatches({ sport, live: true });
+  const ordered = [...matches].sort(
+    (a, b) =>
+      Number(providerMatchHasFreshOdds(b)) - Number(providerMatchHasFreshOdds(a)) ||
+      b.odds.length - a.odds.length,
+  );
+  const visibleLimit =
+    sport === "tennis" || sport === "table-tennis" ? 24 : Number.POSITIVE_INFINITY;
+  const visible = ordered.slice(0, visibleLimit);
+  return visible.map(buildProviderLive);
+}
+
 // ─── Match builders ────────────────────────────────────────────────────────────
 
-// GOAL API removed 2026-09-20 (user decision) — football has no other real
-// data source, so this always returns empty. Kept as a thin named wrapper
-// (rather than deleted outright) so predictions.ts's dynamic
-// import("./matches.js") (see its by-matchId upcoming lookup) doesn't need
-// to change.
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return [];
+  return buildFootballUpcomingFromGoalApi();
 }
 
 // Prematch odds.list is a one-shot HTTP/WS call per match, NOT a
@@ -12704,11 +8309,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 // refresh cycle never bursts hundreds of requests at once. Raise
 // MRDOGE_PREMATCH_ODDS_MAX once the account's real rate limit is confirmed
 // against production traffic.
-// Mr. Doge's odds endpoint returns every market available for one match when
-// betTypes is omitted. Keep this high enough for a 15-day prematch window,
-// while still protecting the provider/account from an accidental unbounded
-// request burst on refresh.
-const MRDOGE_PREMATCH_ODDS_MAX = 500;
+const MRDOGE_PREMATCH_ODDS_MAX = 100;
 const MRDOGE_PREMATCH_ODDS_CONCURRENCY = 5;
 
 async function fetchMrDogePrematchOdds(
@@ -12774,12 +8375,12 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         footballCompetitionVisibilityBand(
           match.region.name,
           match.competition.name,
-        ) !== "blocked",
+        ) === "preferred",
     );
     const oddsByMatchId = await fetchMrDogePrematchOdds(
       mrdoge,
       eligibleMatches,
-      [],
+      [...MRDOGE_SOCCER_BET_TYPES],
     );
     let withRealOdds = 0;
     const built = eligibleMatches.map((m): UpcomingMatch => {
@@ -12833,9 +8434,7 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
           ...extended.exactGoals,
         };
       }
-      const hasRealOdds =
-        moneyline != null || hasPlayableMarketOdds(markets);
-      if (hasRealOdds) withRealOdds++;
+      if (moneyline != null) withRealOdds++;
       return {
         id: mrDogeMatchId("football", m),
         home: m.homeTeam.name,
@@ -12846,13 +8445,11 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
         regionFlagUrl: mrDogeRegionFlag(m.region.id),
         league: m.competition.name,
-        leagueId: String(m.competition.id),
         country: m.region.name,
-        regionId: String(m.region.id),
         date,
         time,
         sport: "football",
-        hasRealOdds,
+        hasRealOdds: moneyline != null,
         odds: moneyline ?? { home: 0, draw: 0, away: 0 },
         markets,
       };
@@ -12865,7 +8462,7 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
         footballCompetitionVisibilityBand(
           match.country ?? "",
           match.league ?? "",
-        ) !== "blocked",
+        ) === "preferred",
     );
     logger.info(
       {
@@ -12951,8 +8548,6 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
         ...extended.exactGoals,
       };
     }
-    const hasRealOdds =
-      moneyline != null || hasPlayableMarketOdds(markets);
     return {
       id: mrDogeMatchId("football", m),
       home: m.homeTeam.name,
@@ -12963,15 +8558,13 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
       regionFlagUrl: mrDogeRegionFlag(m.region.id),
       league: m.competition.name,
-      leagueId: String(m.competition.id),
       country: m.region.name,
-      regionId: String(m.region.id),
       sport: "football",
       homeScore: stats?.homeScore ?? 0,
       awayScore: stats?.awayScore ?? 0,
       minute: stats?.clock?.minute ?? 0,
       status,
-      hasRealOdds,
+      hasRealOdds: moneyline != null,
       odds: moneyline ?? { home: 0, draw: 0, away: 0 },
       markets,
       events: buildMrDogeTimelineEvents(m),
@@ -13015,9 +8608,7 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
           awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
           regionFlagUrl: mrDogeRegionFlag(m.region.id),
           league: m.competition.name,
-          leagueId: String(m.competition.id),
           country: m.region.name,
-          regionId: String(m.region.id),
           date,
           time,
           sport: bet62Sport,
@@ -13035,8 +8626,11 @@ function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () 
 
 const buildTennisUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("tennis", "tennis");
 const buildBasketballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("basketball", "basketball");
+const buildHockeyUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("hockey", "ice_hockey");
+const buildBaseballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("baseball", "baseball");
+const buildVolleyballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("volleyball", "volleyball");
 
-/** Shared live-match shell for the active MrDoge live sports below — each caller does its own
+/** Shared live-match shell for the 5 sports above — each caller does its own
  * `m.stats?.sport === "..."` narrowing (same pattern as football) and hands
  * back just the score/status/extras that differ per sport. */
 function buildMrDogeLiveMatches(
@@ -13059,9 +8653,7 @@ function buildMrDogeLiveMatches(
       awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
       regionFlagUrl: mrDogeRegionFlag(m.region.id),
       league: m.competition.name,
-      leagueId: String(m.competition.id),
       country: m.region.name,
-      regionId: String(m.region.id),
       sport: bet62Sport,
       homeScore,
       awayScore,
@@ -13098,6 +8690,45 @@ async function buildBasketballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       awayScore: stats?.awayScore ?? 0,
       status: mrDogeGenericStatus(stats?.clock),
       liveExtra: extractMrDogeBasketballLiveExtra(stats),
+    };
+  });
+}
+
+async function buildHockeyLiveFromMrDoge(): Promise<LiveMatchState[]> {
+  if (!CONFIG.MRDOGE_API_KEY) return [];
+  return buildMrDogeLiveMatches("hockey", "ice_hockey", (m) => {
+    const stats = m.stats?.sport === "ice_hockey" ? m.stats : null;
+    return {
+      homeScore: stats?.homeScore ?? 0,
+      awayScore: stats?.awayScore ?? 0,
+      status: mrDogeGenericStatus(stats?.clock),
+      liveExtra: extractMrDogeIceHockeyLiveExtra(stats),
+    };
+  });
+}
+
+async function buildBaseballLiveFromMrDoge(): Promise<LiveMatchState[]> {
+  if (!CONFIG.MRDOGE_API_KEY) return [];
+  return buildMrDogeLiveMatches("baseball", "baseball", (m) => {
+    const stats = m.stats?.sport === "baseball" ? m.stats : null;
+    return {
+      homeScore: stats?.homeScore ?? 0,
+      awayScore: stats?.awayScore ?? 0,
+      status: mrDogeGenericStatus(stats?.clock),
+      liveExtra: extractMrDogeBaseballLiveExtra(stats),
+    };
+  });
+}
+
+async function buildVolleyballLiveFromMrDoge(): Promise<LiveMatchState[]> {
+  if (!CONFIG.MRDOGE_API_KEY) return [];
+  return buildMrDogeLiveMatches("volleyball", "volleyball", (m) => {
+    const stats = m.stats?.sport === "volleyball" ? m.stats : null;
+    return {
+      homeScore: stats?.homeScore ?? 0,
+      awayScore: stats?.awayScore ?? 0,
+      status: mrDogeGenericStatus(stats?.clock),
+      liveExtra: extractMrDogeVolleyballLiveExtra(stats),
     };
   });
 }
@@ -13241,16 +8872,9 @@ async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
   try {
-    // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
-    // real data source again as of the same day (fixtures only — see
-    // buildFootballUpcomingFromMrDoge's own comment on odds).
     let football: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildFootballUpcomingFromMrDoge() });
-      }
-      football = chooseUpcomingProvider("football", candidates);
+      football = await buildFootballUpcomingFromGoalApi();
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
@@ -13259,49 +8883,17 @@ async function rebuildUpcomingCache(): Promise<void> {
       );
       football = _lastGoodFootballUpcoming;
     }
-    // api-tennis.com removed 2026-09-20 (user decision); Mr. Doge is
-    // tennis's real data source again as of the same day (fixtures only).
     let tennis: UpcomingMatch[] = [];
     try {
-      const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (useTennisV2()) {
-        tennisCandidates.push({
-          provider: "v2",
-          matches: await buildTennisUpcomingFromV2(),
-        });
-      }
-      if (CONFIG.MRDOGE_API_KEY) {
-        tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
-      }
-      tennis = chooseUpcomingProvider("tennis", tennisCandidates);
+      tennis = await buildPropLineUpcoming("tennis");
+      _lastGoodTennisUpcoming = tennis;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
     }
     _lastGoodTennisUpcoming = tennis;
-    // PropLine restored 2026-09-09 for basketball/hockey/volleyball/mma
-    // (football and tennis excluded from PropLine's scope per user decision
-    // — each gets its own separate, dedicated provider later).
-    // bzzoiro candidate removed 2026-09-18 (being retired — see config.ts's
-    // BZZOIRO_* removal plan): PropLine is basketball/hockey's sole real
-    // source again, same as before bzzoiro was added alongside it.
-    // PropLine removed 2026-09-20 (user decision): basketball, hockey,
-    // volleyball and mma have no other real data source, so each stays at
-    // an empty candidates list — chooseUpcomingProvider already returns []
-    // for that (same path exercised historically when every provider was
-    // removed at once, per the buildLivePayload comment below).
     let basketball: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (useBasketballV2()) {
-        candidates.push({
-          provider: "v2",
-          matches: await buildBasketballUpcomingFromV2(),
-        });
-      }
-      if (CONFIG.MRDOGE_API_KEY) {
-        candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
-      }
-      basketball = chooseUpcomingProvider("basketball", candidates);
+      basketball = await buildPropLineUpcoming("basketball");
       _lastGoodBasketballUpcoming = basketball;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] basketball upcoming failed this cycle — keeping last good prematch list");
@@ -13309,14 +8901,7 @@ async function rebuildUpcomingCache(): Promise<void> {
     }
     let hockey: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (useHockeyV2()) {
-        candidates.push({
-          provider: "v2",
-          matches: await buildHockeyUpcomingFromV2(),
-        });
-      }
-      hockey = chooseUpcomingProvider("hockey", candidates);
+      hockey = await buildPropLineUpcoming("hockey");
       _lastGoodHockeyUpcoming = hockey;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] hockey upcoming failed this cycle — keeping last good prematch list");
@@ -13324,44 +8909,21 @@ async function rebuildUpcomingCache(): Promise<void> {
     }
     let volleyball: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (useVolleyballV2()) {
-        candidates.push({
-          provider: "v2",
-          matches: await buildVolleyballUpcomingFromV2(),
-        });
-      }
-      volleyball = chooseUpcomingProvider("volleyball", candidates);
+      volleyball = await buildPropLineUpcoming("volleyball");
       _lastGoodVolleyballUpcoming = volleyball;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] volleyball upcoming failed this cycle — keeping last good prematch list");
       volleyball = _lastGoodVolleyballUpcoming;
     }
-    let baseball: UpcomingMatch[] = [];
-    try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      if (useBaseballV2()) {
-        candidates.push({
-          provider: "v2",
-          matches: await buildBaseballUpcomingFromV2(),
-        });
-      }
-      baseball = chooseUpcomingProvider("baseball", candidates);
-      _lastGoodBaseballUpcoming = baseball;
-    } catch (err) {
-      logger.error({ err }, "[tri-fallback] baseball upcoming failed this cycle — keeping last good prematch list");
-      baseball = _lastGoodBaseballUpcoming;
-    }
     let mma: UpcomingMatch[] = [];
     try {
-      const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-      mma = chooseUpcomingProvider("mma", candidates);
+      mma = await buildPropLineUpcoming("mma");
       _lastGoodMmaUpcoming = mma;
     } catch (err) {
       logger.error({ err }, "[tri-fallback] mma upcoming failed this cycle — keeping last good prematch list");
       mma = _lastGoodMmaUpcoming;
     }
-    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma];
+    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...mma];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
@@ -13387,68 +8949,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   }
   const allUpcoming = _allUpcomingCache;
 
-  if (CONFIG.MRDOGE_API_KEY) {
-    const liveOddsTargets = getMrDogeLiveMatches().filter((m) => !!m.stats?.sport);
-    const nonFootballTargets = liveOddsTargets
-      .filter(
-        (m) =>
-          m.stats?.sport !== "soccer" &&
-          m.stats?.sport !== "ice_hockey" &&
-          m.stats?.sport !== "baseball" &&
-          m.stats?.sport !== "volleyball",
-      )
-      .map((m) => ({ matchId: m.id, sport: String(m.stats!.sport) }));
-    const footballOddsTargets = liveOddsTargets
-      .filter((m) => m.stats?.sport === "soccer")
-      .filter(
-        (m) =>
-          footballCompetitionVisibilityBand(
-            m.region.name,
-            m.competition.name,
-          ) !== "blocked",
-      )
-      .sort(
-        (a, b) =>
-          Number(
-            footballCompetitionVisibilityBand(
-              a.region.name,
-              a.competition.name,
-            ) === "preferred",
-          ) -
-          Number(
-            footballCompetitionVisibilityBand(
-              b.region.name,
-              b.competition.name,
-            ) === "preferred",
-          ),
-      )
-      .slice(0, MRDOGE_LIVE_ODDS_MAX)
-      .map((m) => ({ matchId: m.id, sport: "soccer" }));
-    syncMrDogeOddsSubscriptions(
-      [
-        ...footballOddsTargets,
-        ...nonFootballTargets,
-      ],
-    );
-  }
-
-  // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
-  // All sports-data providers removed (2026-09-08) — every sport below runs
-  // with zero candidates, which chooseLiveProvider handles by returning [].
-  // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
-  // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
+  // ── REST provider path ───────────────────────────────────────────────────
+  // Goal API supplies football state; PropLine supplies odds and the other
+  // sports. The existing anti-flicker layer remains active below so a short
+  // provider outage does not erase the live board.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
-    // real live data source again as of the same day.
-    const candidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-    if (useFootballV2Live()) {
-      candidates.push({ provider: "v2", matches: await getFootballV2LiveCached() });
-    }
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildFootballLiveFromMrDoge() });
-    }
-    footballLiveRaw = chooseLiveProvider("football", candidates);
+    footballLiveRaw = await buildFootballLiveFromGoalApi();
   } catch (err) {
     logger.error(
       { err },
@@ -13456,82 +8963,68 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
-  const footballVisibleLive = footballLive
+  const footballPreferredLive = footballLive.filter(
+    (match) =>
+      footballCompetitionVisibilityBand(
+        match.country ?? "",
+        match.league ?? "",
+      ) === "preferred",
+  );
+  const footballFallbackLive = footballLive
     .filter(
       (match) =>
         footballCompetitionVisibilityBand(
           match.country ?? "",
           match.league ?? "",
-        ) !== "blocked",
+        ) === "fallback",
     )
-    .sort(
-      (a, b) =>
-        Number(
-          footballCompetitionVisibilityBand(
-            a.country ?? "",
-            a.league ?? "",
-          ) !== "preferred",
-        ) -
-        Number(
-          footballCompetitionVisibilityBand(
-            b.country ?? "",
-            b.league ?? "",
-          ) !== "preferred",
+    .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT);
+  const footballVisibleLive =
+    footballPreferredLive.length > 0
+      ? footballPreferredLive
+      : footballFallbackLive;
+  const [
+    footballOddsLiveRaw,
+    basketballLiveRaw,
+    hockeyLiveRaw,
+    baseballLiveRaw,
+    volleyballLiveRaw,
+    tennisLiveRaw,
+    mmaLiveRaw,
+    dartsLiveRaw,
+    cricketLiveRaw,
+    tableTennisLiveRaw,
+    snookerLiveRaw,
+  ] = await Promise.all([
+    buildPropLineLive("football"),
+    buildPropLineLive("basketball"),
+    buildPropLineLive("hockey"),
+    buildPropLineLive("baseball"),
+    buildPropLineLive("volleyball"),
+    buildPropLineLive("tennis"),
+    buildPropLineLive("mma"),
+    buildPropLineLive("darts"),
+    buildPropLineLive("cricket"),
+    buildPropLineLive("table-tennis"),
+    buildPropLineLive("snooker"),
+  ]);
+  const footballOddsLive = sportWithFallback("football-odds", footballOddsLiveRaw);
+  const footballWithOddsFallback = [
+    ...footballVisibleLive,
+    ...footballOddsLive.filter(
+      (candidate) =>
+        !footballVisibleLive.some(
+          (goalMatch) =>
+            liveMatchIdentityKey(goalMatch) === liveMatchIdentityKey(candidate),
         ),
-    );
-  // PropLine removed 2026-09-20 (user decision); Mr. Doge is basketball,
-  // hockey, baseball, and volleyball's real live source again as of the
-  // same day.
-  const basketballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (useBasketballV2()) {
-    basketballCandidates.push({
-      provider: "v2",
-      matches: await getBasketballV2LiveCached(),
-    });
-  }
-  if (CONFIG.MRDOGE_API_KEY) {
-    basketballCandidates.push({ provider: "mrdoge", matches: await buildBasketballLiveFromMrDoge() });
-  }
-  const basketballLive = sportWithFallback("basketball", chooseLiveProvider("basketball", basketballCandidates));
-  const hockeyCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (useHockeyV2()) {
-    hockeyCandidates.push({
-      provider: "v2",
-      matches: await getHockeyV2LiveCached(),
-    });
-  }
-  const hockeyLive = sportWithFallback("hockey", chooseLiveProvider("hockey", hockeyCandidates));
-  const baseballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (useBaseballV2()) {
-    baseballCandidates.push({
-      provider: "v2",
-      matches: await getBaseballV2LiveCached(),
-    });
-  }
-  const baseballLive = sportWithFallback("baseball", chooseLiveProvider("baseball", baseballCandidates));
-  const volleyballCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (useVolleyballV2()) {
-    volleyballCandidates.push({
-      provider: "v2",
-      matches: await getVolleyballV2LiveCached(),
-    });
-  }
-  const volleyballLiveItems = sportWithFallback("volleyball", chooseLiveProvider("volleyball", volleyballCandidates));
-  // api-tennis removed 2026-09-20 (user decision); Mr. Doge is tennis's
-  // real live source again as of the same day.
-  const tennisCandidates: Array<{ provider: string; matches: LiveMatchState[] }> = [];
-  if (useTennisV2()) {
-    tennisCandidates.push({
-      provider: "v2",
-      matches: await getTennisV2LiveCached(),
-    });
-  }
-  if (CONFIG.MRDOGE_API_KEY) {
-    tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisLiveFromMrDoge() });
-  }
-  const tennisLive = sportWithFallback("tennis", chooseLiveProvider("tennis", tennisCandidates));
-  // PropLine removed 2026-09-20 (user decision) — mma has no other source.
-  const mmaLive = sportWithFallback("mma", chooseLiveProvider("mma", []));
+    ),
+  ];
+  const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
+  const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
+  const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
+  const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
+  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
+  const mmaLive = sportWithFallback("mma", mmaLiveRaw);
   let handballLiveRaw: LiveMatchState[] = [];
   try {
   } catch (err) {
@@ -13541,19 +9034,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const handballLive = sportWithFallback("handball", handballLiveRaw);
-  let cricketLiveRaw: LiveMatchState[] = [];
-  try {
-  } catch (err) {
-    logger.error(
-      { err },
-      "[tri-fallback] cricket live failed this tick",
-    );
-  }
   const cricketLive = sportWithFallback("cricket", cricketLiveRaw);
+  const tableTennisLive = sportWithFallback("table-tennis", tableTennisLiveRaw);
+  const snookerLive = sportWithFallback("snooker", snookerLiveRaw);
   const boxingLive: LiveMatchState[] = [];
   const formula1Live: LiveMatchState[] = [];
-  // PropLine removed 2026-09-20 (user decision) — darts has no other source.
-  const dartsLive = sportWithFallback("darts", []);
+  const dartsLive = sportWithFallback("darts", dartsLiveRaw);
 
   // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
   // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
@@ -13561,7 +9047,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
   const livePart = mergeStickyLive([
-    ...footballVisibleLive,
+    ...footballWithOddsFallback,
     ...tennisLive,
     ...basketballLive,
     ...hockeyLive,
@@ -13570,6 +9056,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ...mmaLive,
     ...handballLive,
     ...cricketLive,
+    ...tableTennisLive,
+    ...snookerLive,
     ...boxingLive,
     ...formula1Live,
     ...dartsLive,
@@ -13597,8 +9085,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         !!m.hasRealOdds ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0 ||
-        hasPlayableMarketOdds(m.markets);
+        (m.odds?.away ?? 0) > 0;
       // Tennis always has computed odds even without a real bookmaker price — allow all.
       if (m.sport !== "tennis" && !hasVisibleOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
@@ -13673,9 +9160,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       home: m.home,
       away: m.away,
       league: m.league,
-      leagueId: m.leagueId,
       country: m.country,
-      regionId: m.regionId,
       sport: m.sport,
       homeScore: 0,
       awayScore: 0,
@@ -13777,7 +9262,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // are handled at market/button level, not by hiding the match itself.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     m.sport !== "football" ||
-    footballVisibleLive.some((visible) => String(visible.id) === String(m.id));
+    footballWithOddsFallback.some((visible) => String(visible.id) === String(m.id));
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -13821,11 +9306,31 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     };
   };
 
+  const sportOrder = new Map(
+    ["football", "tennis", "basketball", "baseball", "hockey", "volleyball"].map(
+      (sport, index) => [sport, index],
+    ),
+  );
+  const secondarySportCounts = new Map<string, number>();
   const dedupedLive = dedupeLiveMatchesByIdentity(
     filteredLive.map((match) =>
       applyOperationalDecision(match, liveDecisions.get(String(match.id))),
     ),
-  );
+  )
+    .filter((match) => match.hasRealOdds)
+    .sort(
+      (a, b) =>
+        (sportOrder.get(a.sport ?? "") ?? 99) -
+        (sportOrder.get(b.sport ?? "") ?? 99),
+    )
+    .filter((match) => {
+      if (sportOrder.has(match.sport ?? "")) return true;
+      const sport = match.sport ?? "other";
+      const count = secondarySportCounts.get(sport) ?? 0;
+      if (count >= 3) return false;
+      secondarySportCounts.set(sport, count + 1);
+      return true;
+    });
   const dedupedPrematch = dedupeLiveMatchesByIdentity(
     filteredPrematch.map((match) =>
       applyOperationalDecision(match, prematchDecisions.get(String(match.id))),
@@ -14304,93 +9809,6 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     let match =
       effectivePayload.matches.find((m) => String(m.id) === id) ?? null;
 
-    if (
-      forceFresh &&
-      match &&
-      String((match as any).sport ?? "football") === "football" &&
-      !isFootballV2MatchId(id)
-    ) {
-      try {
-        const rawId = extractProviderMatchId(id);
-        if (rawId) {
-          const odds = await getMrDogeClient().odds.list({
-            matchId: rawId,
-          });
-          const btts = extractMrDogeSoccerBtts(odds);
-          const extended = extractMrDogeSoccerExtendedMarkets(odds);
-          const enrichedMarkets = zerofillAdvancedMarkets();
-          Object.assign(
-            enrichedMarkets.totalGoals,
-            totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)),
-          );
-          if (btts) enrichedMarkets.bothTeamsScore = btts;
-          if (extended.doubleChance)
-            enrichedMarkets.doubleChance = extended.doubleChance;
-          if (extended.drawNoBet) enrichedMarkets.drawNoBet = extended.drawNoBet;
-          if (extended.asianHandicap)
-            enrichedMarkets.asianHandicap = extended.asianHandicap;
-          if (extended.halfTime) enrichedMarkets.halfTime = extended.halfTime;
-          if (extended.firstHalfTotal) {
-            enrichedMarkets.firstHalfTotal = extended.firstHalfTotal;
-            enrichedMarkets._total1H = extended.firstHalfTotal.line;
-          }
-          if (extended.secondHalf)
-            enrichedMarkets.secondHalf = extended.secondHalf;
-          if (extended.htft) enrichedMarkets.htft = extended.htft;
-          if (extended.correctScore)
-            enrichedMarkets.correctScore = extended.correctScore;
-          if (extended.europeanHandicap)
-            enrichedMarkets.europeanHandicap = extended.europeanHandicap;
-          if (extended.asianTotals) {
-            enrichedMarkets.asianTotals = {
-              o05: 0,
-              u05: 0,
-              o45: 0,
-              u45: 0,
-              o55: 0,
-              u55: 0,
-              o225: 0,
-              u225: 0,
-              o275: 0,
-              u275: 0,
-              ...extended.asianTotals,
-            };
-          }
-          if (extended.teamGoals) {
-            enrichedMarkets.teamGoals = {
-              ...(enrichedMarkets.teamGoals ?? {}),
-              ...extended.teamGoals,
-            };
-          }
-          if (extended.winToNil) enrichedMarkets.winToNil = extended.winToNil;
-          if (extended.cleanSheet)
-            enrichedMarkets.cleanSheet = extended.cleanSheet;
-          if (extended.goalOddEven)
-            enrichedMarkets.goalOddEven = extended.goalOddEven;
-          if (extended.exactGoals) {
-            enrichedMarkets.exactGoals = {
-              g0: 0,
-              g1: 0,
-              g2: 0,
-              g3: 0,
-              g4: 0,
-              g5plus: 0,
-              ...extended.exactGoals,
-            };
-          }
-          match = {
-            ...match,
-            markets: {
-              ...(match as any).markets,
-              ...enrichedMarkets,
-            },
-          };
-        }
-      } catch (err) {
-        logger.warn({ err, id }, "[mrdoge] live-match fresh enrich failed");
-      }
-    }
-
     res.json({ match });
   } catch {
     const fallback = getLivePayloadFallback();
@@ -14445,153 +9863,58 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
     "Cache-Control",
     "no-store, no-cache, must-revalidate, max-age=0",
   );
-  const rawRouteId = String(req.params["id"] ?? "");
-  const id = extractProviderMatchId(rawRouteId);
-  const sport = String(req.query["sport"] ?? "football").toLowerCase();
-  if (
-    !id ||
-    !["football", "soccer", "tennis", "basketball", "hockey", "baseball", "volleyball"].includes(sport)
-  ) {
+  const id = String(req.params["id"] ?? "");
+  if (!id) {
     res.json({ markets: [] });
     return;
   }
 
-  if (isFootballV2MatchId(rawRouteId) && useFootballV2Odds()) {
-    try {
-      res.json({ markets: await getFootballV2AllOdds(id) });
-      return;
-    } catch (err) {
-      logger.warn({ err, id, sport }, "[football-v2] all-odds fetch failed");
-      res.status(503).json({
-        markets: [],
-        error: "pulsescore_odds_temporarily_unavailable",
-      });
-      return;
-    }
-  }
-
-  if (isTennisV2MatchId(rawRouteId) && useTennisV2() && sport === "tennis") {
-    try {
-      res.json({ markets: await getTennisV2AllOdds(id) });
-      return;
-    } catch (err) {
-      logger.warn({ err, id, sport }, "[tennis-v2] all-odds fetch failed");
-      res.status(503).json({
-        markets: [],
-        error: "pulsescore_odds_temporarily_unavailable",
-      });
-      return;
-    }
-  }
-
-  if (
-    isBasketballV2MatchId(rawRouteId) &&
-    useBasketballV2() &&
-    sport === "basketball"
-  ) {
-    try {
-      res.json({ markets: await getBasketballV2AllOdds(id) });
-      return;
-    } catch (err) {
-      logger.warn({ err, id, sport }, "[basketball-v2] all-odds fetch failed");
-      res.status(503).json({
-        markets: [],
-        error: "pulsescore_odds_temporarily_unavailable",
-      });
-      return;
-    }
-  }
-
-  if (
-    isHockeyV2MatchId(rawRouteId) &&
-    useHockeyV2() &&
-    sport === "hockey"
-  ) {
-    try {
-      res.json({ markets: await getHockeyV2AllOdds(id) });
-      return;
-    } catch (err) {
-      logger.warn({ err, id, sport }, "[hockey-v2] all-odds fetch failed");
-      res.status(503).json({
-        markets: [],
-        error: "pulsescore_odds_temporarily_unavailable",
-      });
-      return;
-    }
-  }
-
-  if (
-    isBaseballV2MatchId(rawRouteId) &&
-    useBaseballV2() &&
-    sport === "baseball"
-  ) {
-    try {
-      res.json({ markets: await getBaseballV2AllOdds(id) });
-      return;
-    } catch (err) {
-      logger.warn({ err, id, sport }, "[baseball-v2] all-odds fetch failed");
-      res.status(503).json({
-        markets: [],
-        error: "pulsescore_odds_temporarily_unavailable",
-      });
-      return;
-    }
-  }
-
-  if (
-    isVolleyballV2MatchId(rawRouteId) &&
-    useVolleyballV2() &&
-    sport === "volleyball"
-  ) {
-    try {
-      res.json({ markets: await getVolleyballV2AllOdds(id) });
-      return;
-    } catch (err) {
-      logger.warn({ err, id, sport }, "[volleyball-v2] all-odds fetch failed");
-      res.status(503).json({
-        markets: [],
-        error: "pulsescore_odds_temporarily_unavailable",
-      });
-      return;
-    }
-  }
-
-  if (
-    sport === "hockey" ||
-    sport === "baseball" ||
-    sport === "volleyball"
-  ) {
-    res.status(503).json({
-      markets: [],
-      error: "pulsescore_odds_temporarily_unavailable",
-    });
-    return;
-  }
-
   try {
-    const cached = getMrDogeOdds(id);
-    const markets =
-      cached && cached.length > 0
-        ? cached
-        : await getMrDogeClient().odds.list({
-            matchId: id,
-          });
-    res.json({
-      markets: markets
-        .map((market) => mapMrDogeMarketToAllOdds(market))
-        .filter(Boolean),
-    });
+    const live = await getLivePayloadCached(false);
+    let match: LiveMatchState | UpcomingMatch | null =
+      live.matches.find((item) => String(item.id) === id) ?? null;
+    if (!match) {
+      const upcoming = await getUpcomingAll();
+      const all = [
+        ...upcoming.football, ...upcoming.tennis, ...upcoming.basketball,
+        ...upcoming.hockey, ...upcoming.volleyball, ...upcoming.baseball,
+        ...upcoming.mma, ...upcoming.darts,
+      ];
+      match = all.find((item) => String(item.id) === id) ?? null;
+    }
+    const raw = (match?.markets as unknown as Record<string, unknown> | undefined)?.["_allOdds"];
+    res.json({ markets: mapProviderMarketsToAllOdds(raw) });
   } catch (err) {
-    logger.warn({ err, id, sport }, "[mrdoge] all-odds fetch failed");
-    // An upstream timeout is not the same thing as a match having no extra
-    // markets. Surface a temporary failure so the frontend does not present
-    // a partial/native-only catalogue as if it were complete.
-    res.status(503).json({
-      markets: [],
-      error: "mrdoge_odds_temporarily_unavailable",
-    });
+    logger.warn({ err, id }, "[providers] all-odds fetch failed");
+    res.json({ markets: [] });
   }
 });
+
+async function sendPropLineSportOdds(
+  sport: keyof UpcomingTopCache,
+  res: Response,
+): Promise<void> {
+  const [upcoming, live] = await Promise.all([
+    getUpcomingAll(),
+    getLivePayloadCached(false),
+  ]);
+  const upcomingRows = Array.isArray(upcoming[sport])
+    ? upcoming[sport] as UpcomingMatch[]
+    : [];
+  const liveRows = live.matches.filter((match) => match.sport === sport);
+  res.json({ odds: [...liveRows, ...upcomingRows] });
+}
+
+router.get("/tennis-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("tennis", res));
+router.get("/basketball-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("basketball", res));
+router.get("/hockey-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("hockey", res));
+router.get("/mlb-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("baseball", res));
+router.get("/volleyball-odds", async (_req: Request, res: Response) =>
+  sendPropLineSportOdds("volleyball", res));
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
@@ -14797,142 +10120,70 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // GET / handler). Same chooseUpcomingProvider quality gate
   // rebuildUpcomingCache already uses, for consistency between the two
   // caches.
-  // GOAL API removed 2026-09-20 (user decision); Mr. Doge is football's
-  // real data source again as of the same day (see rebuildUpcomingCache's
-  // matching comment).
-  // Publish each sport into a shared working cache as soon as its provider
-  // finishes. MrDoge prematch hydration can involve hundreds of odds.list
-  // calls (especially tennis); waiting for every sport before assigning
-  // upcomingTopCache made the route's 9s cold-start fallback return an empty
-  // list even after football was already ready.
-  const workingCache: UpcomingTopCache = upcomingTopCache ?? {
-    football: [],
-    tennis: [],
-    basketball: [],
-    hockey: [],
-    volleyball: [],
-    baseball: [],
-    mma: [],
-    darts: [],
-    boxing: [],
-    cricket: [],
-    handball: [],
-    formula1: [],
-    fetchedAt: 0,
-  };
-  workingCache.fetchedAt = 0;
-  upcomingTopCache = workingCache;
-
   let football: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (useFootballV2Odds() || useFootballV2State()) {
-      candidates.push({
-        provider: "v2",
-        matches: await buildFootballUpcomingFromV2(),
-      });
-    }
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({
-        provider: "mrdoge",
-        matches: await buildFootballUpcomingFromMrDoge(),
-      });
-    }
-    football = chooseUpcomingProvider("football", candidates);
-    workingCache.football = football;
+    football = await buildFootballUpcomingFromGoalApi();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
   let tennis: UpcomingMatch[] = [];
   try {
-    const tennisCandidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (useTennisV2()) {
-      tennisCandidates.push({
-        provider: "v2",
-        matches: await buildTennisUpcomingFromV2(),
-      });
-    }
-    if (CONFIG.MRDOGE_API_KEY) {
-      tennisCandidates.push({ provider: "mrdoge", matches: await buildTennisUpcomingFromMrDoge() });
-    }
-    tennis = chooseUpcomingProvider("tennis", tennisCandidates);
-    workingCache.tennis = tennis;
+    tennis = await buildPropLineUpcoming("tennis");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
   }
-  // PropLine removed 2026-09-20 (user decision); Mr. Doge is basketball,
-  // hockey, baseball, and volleyball's real data source again as of the
-  // same day (fixtures only). mma and darts have no Mr. Doge equivalent
-  // (see lib/config.ts's MRDOGE_API_KEY comment) and stay empty.
   let basketball: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (useBasketballV2()) {
-      candidates.push({
-        provider: "v2",
-        matches: await buildBasketballUpcomingFromV2(),
-      });
-    }
-    if (CONFIG.MRDOGE_API_KEY) {
-      candidates.push({ provider: "mrdoge", matches: await buildBasketballUpcomingFromMrDoge() });
-    }
-    basketball = chooseUpcomingProvider("basketball", candidates);
-    workingCache.basketball = basketball;
+    basketball = await buildPropLineUpcoming("basketball");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
   }
   let hockey: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (useHockeyV2()) {
-      candidates.push({
-        provider: "v2",
-        matches: await buildHockeyUpcomingFromV2(),
-      });
-    }
-    hockey = chooseUpcomingProvider("hockey", candidates);
-    workingCache.hockey = hockey;
+    hockey = await buildPropLineUpcoming("hockey");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] hockey fetch failed");
   }
   let volleyball: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (useVolleyballV2()) {
-      candidates.push({
-        provider: "v2",
-        matches: await buildVolleyballUpcomingFromV2(),
-      });
-    }
-    volleyball = chooseUpcomingProvider("volleyball", candidates);
-    workingCache.volleyball = volleyball;
+    volleyball = await buildPropLineUpcoming("volleyball");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] volleyball fetch failed");
   }
   let baseball: UpcomingMatch[] = [];
   try {
-    const candidates: Array<{ provider: string; matches: UpcomingMatch[] }> = [];
-    if (useBaseballV2()) {
-      candidates.push({
-        provider: "v2",
-        matches: await buildBaseballUpcomingFromV2(),
-      });
-    }
-    baseball = chooseUpcomingProvider("baseball", candidates);
-    workingCache.baseball = baseball;
+    baseball = await buildPropLineUpcoming("baseball");
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] baseball fetch failed");
   }
   let mma: UpcomingMatch[] = [];
   let darts: UpcomingMatch[] = [];
+  try {
+    mma = await buildPropLineUpcoming("mma");
+    darts = await buildPropLineUpcoming("darts");
+  } catch (err) {
+    logger.error({ err }, "[refreshUpcomingTop] PropLine mma/darts fetch failed");
+  }
   rememberUpcomingFootballEligibility(football);
   rememberUpcomingEligibility([
     ...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma, ...darts,
   ]);
-  workingCache.mma = mma;
-  workingCache.darts = darts;
-  workingCache.fetchedAt = Date.now();
-  return workingCache;
+  upcomingTopCache = {
+    football,
+    tennis,
+    basketball,
+    hockey,
+    volleyball,
+    baseball,
+    mma,
+    darts,
+    boxing: [],
+    cricket: [],
+    handball: [],
+    formula1: [],
+    fetchedAt: Date.now(),
+  };
+  return upcomingTopCache;
 }
 
 async function getUpcomingAll(): Promise<UpcomingTopCache> {
@@ -14960,7 +10211,7 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const UPCOMING_DEFAULT_PRIORITY_DAYS = 15;
+const UPCOMING_DEFAULT_PRIORITY_DAYS = 7;
 const UPCOMING_MONTH_EDGE_DAY = 21;
 const UPCOMING_NEXT_MONTH_VISIBLE_DAY = 8;
 
@@ -15011,64 +10262,34 @@ function getUpcomingFetchEndDate(nowMs = Date.now()): string {
     .slice(0, 10);
 }
 
+function stableCatalogId(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) || 1;
+}
+
 router.get("/catalog", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "");
-  const range = String(req.query["range"] ?? "default");
-  const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
-  const { startDate, endDate } = mrDogeCatalogDateWindow(range);
-
-  if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport) {
-    const diagnostic: MatchCatalogDiagnostic = !CONFIG.MRDOGE_API_KEY
-      ? {
-          code: "not_configured",
-          message: "O catálogo MrDoge não está configurado neste ambiente.",
-        }
-      : {
-          code: "unsupported_sport",
-          message: "Este desporto não está disponível no catálogo MrDoge.",
-        };
-    res.json({
-      sport,
-      provider: "mrdoge",
-      regions: [] as MatchCatalogRegion[],
-      diagnostic,
-    });
-    return;
-  }
-
   try {
-    const mrdoge = getMrDogeClient();
-    const lateWindow = mrDogeLateCatalogDateWindow();
-    const [regions, lateMatches] = await Promise.all([
-      mrdoge.regions.list({
-        sports: [mrdogeSport],
-        status: ["live", "upcoming"],
-        startDate,
-        endDate,
-        locale: "pt-BR",
-        timezone: "Europe/Lisbon",
-      }),
-      mrdoge.matches.list({
-        sports: [mrdogeSport],
-        status: ["upcoming"],
-        startDate: lateWindow.startDate,
-        endDate: lateWindow.endDate,
-        limit: 1,
-        locale: "pt-BR",
-        timezone: "Europe/Lisbon",
-      }),
-    ]);
-
-    const normalized = [...regions]
-      .map(
-        (region): MatchCatalogRegion => ({
-          id: region.id,
-          name: region.name,
-          eventCount: region.eventCount ?? 0,
-          competitionCount: region.competitionCount ?? 0,
-          flagUrl: mrDogeRegionFlag(region.id),
-        }),
-      )
+    const matches = _allUpcomingCache.filter((match) => match.sport === sport);
+    const grouped = new Map<string, { events: number; leagues: Set<string> }>();
+    for (const match of matches) {
+      const country = match.country || "International";
+      const item = grouped.get(country) ?? { events: 0, leagues: new Set<string>() };
+      item.events++;
+      item.leagues.add(match.league);
+      grouped.set(country, item);
+    }
+    const normalized = [...grouped.entries()]
+      .map(([name, item]): MatchCatalogRegion => ({
+        id: stableCatalogId(name),
+        name,
+        eventCount: item.events,
+        competitionCount: item.leagues.size,
+      }))
       .sort(
         (a, b) =>
           b.eventCount - a.eventCount ||
@@ -15076,171 +10297,53 @@ router.get("/catalog", async (req: Request, res: Response) => {
           a.name.localeCompare(b.name, "pt-BR"),
       );
 
-    const eventCount = normalized.reduce((total, region) => total + region.eventCount, 0);
-    const diagnostic: MatchCatalogDiagnostic = eventCount === 0
-      ? {
-          code: "empty_window",
-          message: "A MrDoge não publicou partidas para este desporto nesta janela.",
-          startDate,
-          endDate,
-          eventCount: 0,
-        }
-      : lateMatches.data.length === 0
-        ? {
-            code: "partial_window",
-            message: "Há partidas próximas, mas a MrDoge ainda não publicou jogos entre o 8.º e o 15.º dia.",
-            startDate: lateWindow.startDate,
-            endDate: lateWindow.endDate,
-            eventCount,
-          }
-        : {
-          code: "ok",
-          message: eventCount === 1
-            ? "1 partida disponível na janela consultada."
-            : `${eventCount} partidas disponíveis na janela consultada.`,
-          startDate,
-          endDate,
-          eventCount,
-        };
-
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({ sport, provider: "mrdoge", regions: normalized, diagnostic });
+    res.json({ sport, provider: "bet62", regions: normalized });
   } catch (err) {
-    logger.warn({ err, sport }, "[mrdoge] catalog regions failed");
-    res.status(200).json({
-      sport,
-      provider: "mrdoge",
-      regions: [] as MatchCatalogRegion[],
-      diagnostic: {
-        code: "provider_error",
-        message: "Não foi possível consultar o catálogo MrDoge agora.",
-        startDate,
-        endDate,
-      } satisfies MatchCatalogDiagnostic,
-    });
+    logger.warn({ err, sport }, "[providers] catalog regions failed");
+    res.status(200).json({ sport, provider: "bet62", regions: [] as MatchCatalogRegion[] });
   }
 });
 
 router.get("/catalog/competitions", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "");
-  const range = String(req.query["range"] ?? "default");
   const regionId = Number(req.query["regionId"] ?? 0);
-  const mrdogeSport = MRDOGE_SPORT_BY_BET62[sport];
-  const { startDate, endDate } = mrDogeCatalogDateWindow(range);
-
-  if (!CONFIG.MRDOGE_API_KEY || !mrdogeSport || !Number.isFinite(regionId) || regionId <= 0) {
-    res.json({
-      sport,
-      regionId,
-      provider: "mrdoge",
-      competitions: [] as MatchCatalogCompetition[],
-      diagnostic: {
-        code: !CONFIG.MRDOGE_API_KEY
-          ? "not_configured"
-          : !mrdogeSport
-            ? "unsupported_sport"
-            : "provider_error",
-        message: !CONFIG.MRDOGE_API_KEY
-          ? "O catálogo MrDoge não está configurado neste ambiente."
-          : !mrdogeSport
-            ? "Este desporto não está disponível no catálogo MrDoge."
-            : "A região selecionada é inválida.",
-      } satisfies MatchCatalogDiagnostic,
-    });
+  if (!Number.isFinite(regionId) || regionId <= 0) {
+    res.json({ sport, regionId, provider: "bet62", competitions: [] as MatchCatalogCompetition[] });
     return;
   }
 
   try {
-    const mrdoge = getMrDogeClient();
-    const competitions = await mrdoge.competitions.list({
-      sports: [mrdogeSport],
-      regionIds: [regionId],
-      status: ["live", "upcoming"],
-      startDate,
-      endDate,
-      limit: 200,
-      locale: "pt-BR",
-      timezone: "Europe/Lisbon",
-    });
-
-    const normalized = [...competitions]
-      .map(
-        (competition): MatchCatalogCompetition => ({
-          id: competition.id,
-          name: competition.name,
-          regionId: competition.regionId,
-          eventCount: competition.eventCount ?? 0,
-        }),
-      )
+    const matches = _allUpcomingCache
+      .filter((match) => match.sport === sport)
+      .filter((match) => stableCatalogId(match.country || "International") === regionId);
+    const grouped = new Map<string, number>();
+    for (const match of matches) grouped.set(match.league, (grouped.get(match.league) ?? 0) + 1);
+    const normalized = [...grouped.entries()]
+      .map(([name, eventCount]): MatchCatalogCompetition => ({
+        id: stableCatalogId(`${regionId}:${name}`),
+        name,
+        regionId,
+        eventCount,
+      }))
       .sort(
         (a, b) =>
           b.eventCount - a.eventCount ||
           a.name.localeCompare(b.name, "pt-BR"),
       );
 
-    const eventCount = normalized.reduce((total, competition) => total + competition.eventCount, 0);
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({
-      sport,
-      regionId,
-      provider: "mrdoge",
-      competitions: normalized,
-      diagnostic: {
-        code: eventCount > 0 ? "ok" : "empty_window",
-        message: eventCount > 0
-          ? eventCount === 1
-            ? "1 partida disponível na janela consultada."
-            : `${eventCount} partidas disponíveis na janela consultada.`
-          : "A MrDoge não publicou partidas para esta região nesta janela.",
-        startDate,
-        endDate,
-        eventCount,
-      } satisfies MatchCatalogDiagnostic,
-    });
+    res.json({ sport, regionId, provider: "bet62", competitions: normalized });
   } catch (err) {
-    logger.warn({ err, sport, regionId }, "[mrdoge] catalog competitions failed");
+    logger.warn({ err, sport, regionId }, "[providers] catalog competitions failed");
     res.status(200).json({
       sport,
       regionId,
-      provider: "mrdoge",
+      provider: "bet62",
       competitions: [] as MatchCatalogCompetition[],
-      diagnostic: {
-        code: "provider_error",
-        message: "Não foi possível consultar as competições MrDoge agora.",
-        startDate,
-        endDate,
-      } satisfies MatchCatalogDiagnostic,
     });
   }
 });
-
-function hasPlayableMarketOdds(
-  value: unknown,
-  key?: string,
-): boolean {
-  if (typeof value === "number") {
-    if (
-      key === "line" ||
-      key === "_spread" ||
-      key === "_total" ||
-      key === "_total1H" ||
-      key === "_spreadLine" ||
-      key === "currentSetNum"
-    ) {
-      return false;
-    }
-    return Number.isFinite(value) && value > 1.01;
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => hasPlayableMarketOdds(item));
-  }
-  if (value && typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>).some(
-      ([childKey, childValue]) => hasPlayableMarketOdds(childValue, childKey),
-    );
-  }
-  return false;
-}
 
 router.get("/upcoming", async (req: Request, res: Response) => {
   res.setHeader(
@@ -15326,71 +10429,33 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   }
   const UPCOMING_POST_KICKOFF_GRACE_MS = 30 * 60 * 1000;
   const now = Date.now();
-  const rejectionCounts: Record<string, number> = {};
-  const reject = (reason: string): false => {
-    rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1;
-    return false;
-  };
-  const visibilityWindowEndMs = getUpcomingVisibilityWindowEndMs(now);
-  const filtered = matches.filter((m) => {
-    if (
-      !(
-        (m.hasRealOdds ?? false) ||
+  const filtered = matches.filter(
+    (m) =>
+      ((m.hasRealOdds ?? false) ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0 ||
-        hasPlayableMarketOdds(m.markets) ||
-        m.allowNoOddsVisibility === true
-      )
-    ) {
-      return reject("no_playable_odds");
-    }
-    if (isPlaceholderTeamName(m.home) || isPlaceholderTeamName(m.away)) {
-      return reject("placeholder_team");
-    }
-    if (finishedMatchResults.has(String(m.id))) return reject("finished_cache");
-    if (liveIds.has(String(m.id))) return reject("same_live_id");
-    if (liveIdentityKeys.has(normalizeUpcomingVisibilityKey(m))) {
-      return reject("same_live_identity");
-    }
-    const kickoffMs = parseUpcomingKickoffMs(m);
-    if (
-      kickoffMs != null &&
-      now - kickoffMs > UPCOMING_POST_KICKOFF_GRACE_MS
-    ) {
-      return reject("past_kickoff");
-    }
-    // Default view keeps 15 days ahead, but once we're late in the
-    // current month (day 21+) it stretches just enough to surface the
-    // opening fixtures of the next month too (up to day 8).
-    if (
-      range !== "month" &&
-      kickoffMs != null &&
-      kickoffMs > visibilityWindowEndMs
-    ) {
-      return reject("outside_visibility_window");
-    }
-    return true;
-  });
-  (globalThis as any).__upcomingVisibilityDebug = {
-    updatedAt: now,
-    sport,
-    range,
-    input: matches.length,
-    visible: filtered.length,
-    rejectionCounts,
-    visibilityWindowEnd: new Date(visibilityWindowEndMs).toISOString(),
-    samples: matches.slice(0, 5).map((m) => ({
-      id: m.id,
-      date: m.date,
-      time: m.time,
-      kickoff: (() => {
+        (m.odds?.away ?? 0) > 0) &&
+      !isPlaceholderTeamName(m.home) &&
+      !isPlaceholderTeamName(m.away) &&
+      !finishedMatchResults.has(String(m.id)) &&
+      !liveIds.has(String(m.id)) &&
+      !liveIdentityKeys.has(normalizeUpcomingVisibilityKey(m)) &&
+      (() => {
         const kickoffMs = parseUpcomingKickoffMs(m);
-        return kickoffMs == null ? null : new Date(kickoffMs).toISOString();
+        if (kickoffMs == null) return true;
+        return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
+      })() &&
+      (() => {
+        // Default view keeps at least 7 days ahead, but once we're late in
+        // the current month (day 21+) it stretches just enough to surface
+        // the opening fixtures of the next month too (up to day 8), per the
+        // user's prematch-window request.
+        if (range === "month") return true;
+        const kickoffMs = parseUpcomingKickoffMs(m);
+        if (kickoffMs == null) return true;
+        return kickoffMs <= getUpcomingVisibilityWindowEndMs(now);
       })(),
-      hasRealOdds: m.hasRealOdds,
-    })),
-  };
+  );
   res.json({ matches: filtered });
 });
 
@@ -18279,11 +13344,49 @@ router.get("/top-scorers/:leagueId", async (_req: Request, res: Response) => {
   res.json({ scorers: [] });
 });
 
-router.get("/lineups/:matchId", async (_req: Request, res: Response) => {
+router.get("/lineups/:matchId", async (req: Request, res: Response) => {
+  const matchId = String(req.params["matchId"] ?? "");
+  if (!matchId.startsWith("goalapi-")) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  const id = extractProviderMatchId(matchId);
+  const raw = await getGoalFixtureResource(id, "lineups");
+  const root = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+  const data = root["data"] && typeof root["data"] === "object"
+    ? root["data"] as Record<string, unknown>
+    : root;
+  const mapSide = (value: unknown) => {
+    const side = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+    const mapPlayers = (rows: unknown) => Array.isArray(rows)
+      ? rows.map((row) => {
+          const player = row && typeof row === "object" ? row as Record<string, unknown> : {};
+          return {
+            id: String(player["playerId"] ?? player["id"] ?? ""),
+            name: String(player["lineupPlayer"] ?? player["playerName"] ?? player["name"] ?? ""),
+            number: player["lineupNumber"] ?? player["number"] ?? null,
+            position: String(player["lineupPosition"] ?? player["position"] ?? ""),
+          };
+        }).filter((player) => player.name)
+      : [];
+    return {
+      starters: mapPlayers(side["startingLineups"] ?? side["starters"]),
+      bench: mapPlayers(side["substitutes"] ?? side["bench"]),
+      formation: side["formation"] ?? null,
+    };
+  };
   res.json({
-    confirmed: false,
-    home: { starters: [], bench: [] },
-    away: { starters: [], bench: [] },
+    confirmed: data["hasLineups"] === true,
+    home: mapSide(data["home"]),
+    away: mapSide(data["away"]),
   });
 });
 

@@ -78,7 +78,6 @@ export const MRDOGE_SOCCER_BET_TYPES = [
   "SOCCER_BOTH_TEAMS_TO_SCORE",
   "SOCCER_DOUBLE_CHANCE",
   "SOCCER_MATCH_RESULT_NODRAW",
-  "SOCCER_FIRST_HALF_RESULT_NODRAW",
   "SOCCER_CORRECT_SCORE_EXTENDED",
   "SOCCER_FIRST_HALF_RESULT",
   "SOCCER_FIRST_HALF_UNDER_OVER",
@@ -95,7 +94,6 @@ export const MRDOGE_SOCCER_BET_TYPES = [
   "SOCCER_MATCH_RESULT_ASIAN",
   "SOCCER_ASIAN_UNDER_OVER",
   "SOCCER_NUMBER_OF_GOALS",
-  "SOCCER_TEAM_TO_SCORE_GOAL_N",
 ] as const;
 
 export function mrDogeMatchId(bet62Sport: string, match: Match): string {
@@ -270,9 +268,7 @@ function mrDogeParseOverUnderLine(
   line: MrDogeMarketLine,
 ): { side: "over" | "under"; line: number } | null {
   const code = mrDogeLineCode(line);
-  const caption = mrDogeLineCaption(line);
-  const displayName = String(market.displayName ?? "");
-  const text = `${caption} ${displayName}`.trim();
+  const text = `${mrDogeLineCaption(line)} ${String(market.displayName ?? "")}`.trim();
   const side =
     code === "O" || code.startsWith("O") || /\bover\b|mais de/i.test(text)
       ? "over"
@@ -287,7 +283,7 @@ function mrDogeParseOverUnderLine(
   const lineValue =
     fromCode != null
       ? Number(fromCode[2])
-      : mrDogeParseNumericValue(caption) ??
+      : mrDogeParseNumericValue(text) ??
         mrDogeReadNumericCandidate(raw["line"]) ??
         mrDogeReadNumericCandidate(raw["handicap"]) ??
         mrDogeReadNumericCandidate(raw["spread"]) ??
@@ -299,8 +295,7 @@ function mrDogeParseOverUnderLine(
         mrDogeReadNumericCandidate(marketAny["spread"]) ??
         mrDogeReadNumericCandidate(marketAny["value"]) ??
         mrDogeReadNumericCandidate(marketAny["point"]) ??
-        mrDogeReadNumericCandidate(marketAny["points"]) ??
-        mrDogeParseNumericValue(displayName);
+        mrDogeReadNumericCandidate(marketAny["points"]);
   if (!Number.isFinite(lineValue)) return null;
   return { side, line: lineValue };
 }
