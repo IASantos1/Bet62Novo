@@ -798,7 +798,7 @@ function sportMonksEvents(
               : "",
         minute:
           Number(event.minute ?? 0) +
-          Number(event.extra_minute ?? 0 || 0),
+          Number(event.extra_minute ?? 0),
         player: String(event.player_name ?? ""),
         playerId:
           event.player_id == null ? undefined : String(event.player_id),
@@ -9237,7 +9237,7 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
             sportMonksCountryName(fixture),
             sportMonksLeagueName(fixture),
           ) === "preferred",
-      });
+      );
     const oddsByFixtureId = await fetchSportMonksOddsBatch(
       visibleFixtures
         .map((fixture) =>
