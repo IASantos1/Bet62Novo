@@ -2571,6 +2571,67 @@ const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
 const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
 const FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT = 8;
 
+const SPORTMONKS_PREFERRED_LEAGUE_IDS = new Set<string>([
+  "2", // Champions League
+  "5", // Europa League
+  "8", // Premier League
+  "9", // Championship
+  "24", // FA Cup
+  "27", // Carabao Cup
+  "72", // Eredivisie
+  "82", // Bundesliga
+  "109", // DFB Pokal
+  "208", // Belgium Pro League
+  "301", // Ligue 1
+  "384", // Serie A
+  "387", // Serie B
+  "390", // Coppa Italia
+  "462", // Liga Portugal
+  "564", // La Liga
+  "567", // La Liga 2
+  "570", // Copa Del Rey
+  "636", // Argentina Liga Profesional
+  "648", // Brazil Serie A
+  "711", // CAF WC Qualifiers
+  "714", // WC Qualification Asia
+  "717", // WC Qualification Concacaf
+  "720", // WC Qualification Europe
+  "723", // WC Qualification Oceania
+  "726", // WC Qualification South America
+  "729", // WC Qualification Intercontinental Playoffs
+  "732", // World Cup
+  "779", // MLS
+  "1114", // Copa America
+  "1117", // AFCON
+  "1118", // AFCON Qualifiers
+]);
+
+const SPORTMONKS_FALLBACK_LEAGUE_IDS = new Set<string>([
+  "181", // Austria Bundesliga
+  "271", // Denmark Superliga
+  "501", // Scotland Premiership
+  "573", // Allsvenskan
+  "591", // Switzerland Super League
+  "600", // Turkey Super Lig
+  "944", // Saudi Pro League
+]);
+
+function footballVisibilityBandForFixtureLike(args: {
+  leagueId?: string | null;
+  country?: string | null;
+  league?: string | null;
+}): "blocked" | "preferred" | "fallback" {
+  const leagueId = String(args.leagueId ?? "").trim();
+  if (leagueId) {
+    if (SPORTMONKS_PREFERRED_LEAGUE_IDS.has(leagueId)) return "preferred";
+    if (SPORTMONKS_FALLBACK_LEAGUE_IDS.has(leagueId)) return "fallback";
+  }
+  return footballCompetitionVisibilityBand(
+    String(args.country ?? ""),
+    String(args.league ?? ""),
+  );
+}
+
 function isMajorWomensLeague(name: string): boolean {
   const lower = String(name ?? "")
     .toLowerCase()
@@ -8632,18 +8693,22 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       });
     const preferredFixtures = eligibleFixtures.filter(
       (fixture) =>
-        footballCompetitionVisibilityBand(
-          sportMonksCountryName(fixture),
-          sportMonksLeagueName(fixture),
-        ) === "preferred",
+        footballVisibilityBandForFixtureLike({
+          leagueId:
+            fixture.league_id == null ? undefined : String(fixture.league_id),
+          country: sportMonksCountryName(fixture),
+          league: sportMonksLeagueName(fixture),
+        }) === "preferred",
     );
     const fallbackFixtures = eligibleFixtures
       .filter(
         (fixture) =>
-          footballCompetitionVisibilityBand(
-            sportMonksCountryName(fixture),
-            sportMonksLeagueName(fixture),
-          ) === "fallback",
+          footballVisibilityBandForFixtureLike({
+            leagueId:
+              fixture.league_id == null ? undefined : String(fixture.league_id),
+            country: sportMonksCountryName(fixture),
+            league: sportMonksLeagueName(fixture),
+          }) === "fallback",
       )
       .slice(0, FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT);
     const visibleFixtures =
@@ -8911,18 +8976,20 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const footballLive = sportWithFallback("football", footballLiveRaw);
   const footballPreferredLive = footballLive.filter(
     (match) =>
-      footballCompetitionVisibilityBand(
-        match.country ?? "",
-        match.league ?? "",
-      ) === "preferred",
+      footballVisibilityBandForFixtureLike({
+        leagueId: match.leagueId,
+        country: match.country,
+        league: match.league,
+      }) === "preferred",
   );
   const footballFallbackLive = footballLive
     .filter(
       (match) =>
-        footballCompetitionVisibilityBand(
-          match.country ?? "",
-          match.league ?? "",
-        ) === "fallback",
+        footballVisibilityBandForFixtureLike({
+          leagueId: match.leagueId,
+          country: match.country,
+          league: match.league,
+        }) === "fallback",
     )
     .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT);
   const footballVisibleLive =
