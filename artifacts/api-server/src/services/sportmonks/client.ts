@@ -6,7 +6,8 @@ type SportMonksEnvelope<T> = {
     count?: number;
     per_page?: number;
     current_page?: number;
-    next_page?: number | null;
+    next_page?: number | string | null;
+    next_cursor?: string | null;
     has_more?: boolean;
   };
   subscription?: unknown;
@@ -325,6 +326,85 @@ async function sportMonksFetch<T>(
   return value;
 }
 
+async function sportMonksFetchEnvelope<T>(
+  path: string,
+  args: {
+    query?: Record<string, string | number | boolean | undefined>;
+    ttlMs?: number;
+  } = {},
+): Promise<SportMonksEnvelope<T>> {
+  const url = buildUrl(path, args.query);
+  const ttlMs = args.ttlMs ?? 0;
+  const now = Date.now();
+  const cached = responseCache.get(url);
+  if (cached && cached.expiresAt > now) {
+    return cached.value as SportMonksEnvelope<T>;
+  }
+
+  const resp = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const payload = (await resp.json().catch(() => ({}))) as SportMonksEnvelope<T> & {
+    message?: string;
+    error?: string;
+  };
+  if (!resp.ok) {
+    const message =
+      payload.message ||
+      payload.error ||
+      `SportMonks respondeu ${resp.status} em ${path}`;
+    throw Object.assign(new Error(message), { status: resp.status });
+  }
+  if (ttlMs > 0) {
+    responseCache.set(url, { value: payload, expiresAt: now + ttlMs });
+  }
+  return payload;
+}
+
+function sportMonksArray<T>(data: T[] | T | undefined): T[] {
+  return Array.isArray(data) ? data : data ? [data] : [];
+}
+
+async function sportMonksFetchAllPages<T>(
+  path: string,
+  args: {
+    query?: Record<string, string | number | boolean | undefined>;
+    ttlMs?: number;
+    maxPages?: number;
+  } = {},
+): Promise<T[]> {
+  const maxPages = Math.max(1, args.maxPages ?? 8);
+  const rows: T[] = [];
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const payload = await sportMonksFetchEnvelope<T[] | T>(path, {
+      query: {
+        per_page: 50,
+        page,
+        ...(args.query ?? {}),
+      },
+      ttlMs: args.ttlMs,
+    });
+
+    rows.push(...sportMonksArray(payload.data));
+
+    if (!payload.pagination?.has_more) break;
+  }
+
+  return rows;
+}
+
+export async function getSportMonksLivescores(include?: string): Promise<SportMonksFixture[]> {
+  return sportMonksFetchAllPages<SportMonksFixture>("/football/livescores", {
+    query: include ? { include } : undefined,
+    ttlMs: 5_000,
+    maxPages: 4,
+  });
+}
+
 export async function getSportMonksInplayLivescores(include?: string): Promise<SportMonksFixture[]> {
   const data = await sportMonksFetch<SportMonksFixture[] | SportMonksFixture>(
     "/football/livescores/inplay",
@@ -335,6 +415,16 @@ export async function getSportMonksInplayLivescores(include?: string): Promise<S
   );
   const rows = Array.isArray(data) ? data : data ? [data] : [];
   if (rows.length > 0) return rows;
+
+  const livescores = await getSportMonksLivescores(include).catch(
+    () => [] as SportMonksFixture[],
+  );
+  const liveRows = livescores.filter(
+    (fixture) =>
+      !sportMonksIsUpcomingState(fixture) &&
+      !sportMonksIsFinishedState(fixture),
+  );
+  if (liveRows.length > 0) return liveRows;
 
   const fallback = await getSportMonksFixturesBetween({
     startDate: sportMonksFallbackDate(-1),
@@ -354,14 +444,14 @@ export async function getSportMonksFixturesBetween(args: {
   endDate: string;
   include?: string;
 }): Promise<SportMonksFixture[]> {
-  const data = await sportMonksFetch<SportMonksFixture[] | SportMonksFixture>(
+  return sportMonksFetchAllPages<SportMonksFixture>(
     `/football/fixtures/between/${args.startDate}/${args.endDate}`,
     {
       query: args.include ? { include: args.include } : undefined,
       ttlMs: 120_000,
+      maxPages: 8,
     },
   );
-  return Array.isArray(data) ? data : data ? [data] : [];
 }
 
 export async function getSportMonksFixtureById(args: {
@@ -384,14 +474,14 @@ export async function getSportMonksFixturesByTeamRange(args: {
   endDate: string;
   include?: string;
 }): Promise<SportMonksFixture[]> {
-  const data = await sportMonksFetch<SportMonksFixture[] | SportMonksFixture>(
+  return sportMonksFetchAllPages<SportMonksFixture>(
     `/football/fixtures/between/${args.startDate}/${args.endDate}/${encodeURIComponent(String(args.teamId))}`,
     {
       query: args.include ? { include: args.include } : undefined,
       ttlMs: 120_000,
+      maxPages: 4,
     },
   );
-  return Array.isArray(data) ? data : data ? [data] : [];
 }
 
 export async function getSportMonksLiveStandingsByLeague(
