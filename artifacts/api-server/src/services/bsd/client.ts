@@ -204,6 +204,35 @@ export type BSDBestXiResponse = {
   lineup?: Array<Record<string, unknown>>;
 };
 
+export type BSDPlayer = {
+  id?: number | string | null;
+  name?: string | null;
+  short_name?: string | null;
+  position?: string | null;
+  nationality?: string | null;
+  nationality_code?: string | null;
+  country_name?: string | null;
+  birth_date?: string | null;
+  date_of_birth?: string | null;
+  height?: number | string | null;
+  weight?: number | string | null;
+  preferred_foot?: string | null;
+  shirt_number?: number | string | null;
+  market_value?: number | string | null;
+  team_id?: number | string | null;
+  team_name?: string | null;
+  current_team?: {
+    id?: number | string | null;
+    name?: string | null;
+  } | null;
+  contract_until?: string | null;
+};
+
+export type BSDPlayerStatRow = Record<string, unknown>;
+export type BSDTransferRow = Record<string, unknown>;
+export type BSDCareerRow = Record<string, unknown>;
+export type BSDNationalTeamRow = Record<string, unknown>;
+
 export type BSDIncidentsResponse = Array<Record<string, unknown>> | {
   incidents?: Array<Record<string, unknown>>;
 };
@@ -443,6 +472,67 @@ export async function getBsdLeagueBestXi(args: {
     {
       ttlMs: 30 * 60_000,
     },
+  ).catch(() => null);
+}
+
+export async function getBsdPlayerById(
+  playerId: string | number,
+): Promise<BSDPlayer | null> {
+  return bsdFetch<BSDPlayer>(`/players/${encodeURIComponent(String(playerId))}/`, {
+    ttlMs: 24 * 60 * 60_000,
+  }).catch(() => null);
+}
+
+export async function getBsdPlayerStats(args: {
+  playerId: string | number;
+  seasonId?: string | number;
+  teamId?: string | number;
+  leagueId?: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+}): Promise<BSDPlayerStatRow[]> {
+  return fetchAllPages<BSDPlayerStatRow>(`/players/${encodeURIComponent(String(args.playerId))}/stats/`, {
+    query: {
+      ...(args.seasonId != null ? { season_id: args.seasonId } : {}),
+      ...(args.teamId != null ? { team_id: args.teamId } : {}),
+      ...(args.leagueId != null ? { league_id: args.leagueId } : {}),
+      ...(args.dateFrom ? { date_from: args.dateFrom } : {}),
+      ...(args.dateTo ? { date_to: args.dateTo } : {}),
+      limit: args.limit ?? 100,
+      offset: 0,
+    },
+    ttlMs: 10 * 60_000,
+    maxPages: 5,
+  }).catch(() => []);
+}
+
+export async function getBsdPlayerTransfers(
+  playerId: string | number,
+): Promise<BSDTransferRow[]> {
+  return fetchAllPages<BSDTransferRow>(`/players/${encodeURIComponent(String(playerId))}/transfers/`, {
+    query: { limit: 100, offset: 0 },
+    ttlMs: 24 * 60 * 60_000,
+    maxPages: 3,
+  }).catch(() => []);
+}
+
+export async function getBsdPlayerCareer(
+  playerId: string | number,
+): Promise<BSDCareerRow[]> {
+  return fetchAllPages<BSDCareerRow>(`/players/${encodeURIComponent(String(playerId))}/career/`, {
+    query: { limit: 100, offset: 0 },
+    ttlMs: 24 * 60 * 60_000,
+    maxPages: 3,
+  }).catch(() => []);
+}
+
+export async function getBsdPlayerNationalTeam(
+  playerId: string | number,
+): Promise<BSDNationalTeamRow | null> {
+  return bsdFetch<BSDNationalTeamRow>(
+    `/players/${encodeURIComponent(String(playerId))}/national-team/`,
+    { ttlMs: 24 * 60 * 60_000 },
   ).catch(() => null);
 }
 

@@ -15,6 +15,11 @@ import {
   getBsdLeagueTopScorers,
   getBsdLiveEvents,
   getBsdOddsForEvent,
+  getBsdPlayerById,
+  getBsdPlayerCareer,
+  getBsdPlayerNationalTeam,
+  getBsdPlayerStats,
+  getBsdPlayerTransfers,
   type BSDEvent,
   type BSDH2HResponse,
   type BSDLineupsResponse,
@@ -723,6 +728,149 @@ function mapBestXi(payload: Record<string, unknown> | null | undefined) {
   };
 }
 
+function getNestedRecord(
+  row: Record<string, unknown>,
+  ...keys: string[]
+): Record<string, unknown> | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
+function pickText(row: Record<string, unknown>, keys: string[], fallback = ""): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return fallback;
+}
+
+function pickDate(row: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.slice(0, 10);
+  }
+  return "";
+}
+
+function sumStat(rows: Record<string, unknown>[], keys: string[]): number {
+  return rows.reduce((sum, row) => {
+    for (const key of keys) {
+      if (row[key] != null) return sum + parseNumber(row[key]);
+    }
+    return sum;
+  }, 0);
+}
+
+function sortByDateDesc(rows: Record<string, unknown>[], keys: string[]) {
+  return [...rows].sort((a, b) => {
+    const daRaw = new Date(pickText(a, keys)).getTime();
+    const dbRaw = new Date(pickText(b, keys)).getTime();
+    const da = Number.isFinite(daRaw) ? daRaw : 0;
+    const db = Number.isFinite(dbRaw) ? dbRaw : 0;
+    return db - da;
+  });
+}
+
+function getNationalityFlagUrl(code: string | null | undefined): string | null {
+  const normalized = String(code ?? "").trim().toLowerCase();
+  if (!normalized) return null;
+  return `https://flagcdn.com/w40/${normalized}.png`;
+}
+
+function getSeasonRowId(row: Record<string, unknown>): string {
+  const season = getNestedRecord(row, "season");
+  return pickText(season ?? row, ["id", "season_id", "seasonId"]);
+}
+
+function resolveSeasonScope(statsRows: Record<string, unknown>[]) {
+  const bySeason = new Map<string, number>();
+  for (const row of statsRows) {
+    const seasonId = getSeasonRowId(row);
+    if (!seasonId) continue;
+    bySeason.set(seasonId, (bySeason.get(seasonId) ?? 0) + 1);
+  }
+  return Array.from(bySeason.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function mapRecentMatch(row: Record<string, unknown>, playerTeamId: string | null) {
+  const event = getNestedRecord(row, "event", "fixture", "match");
+  const homeTeam = getNestedRecord(row, "home_team", "homeTeam");
+  const awayTeam = getNestedRecord(row, "away_team", "awayTeam");
+  const team = getNestedRecord(row, "team");
+  const teamId = pickText(team ?? row, ["id", "team_id", "teamId"]);
+  const homeTeamId = pickText(homeTeam ?? row, ["id", "home_team_id", "homeTeamId"]);
+  const awayTeamId = pickText(awayTeam ?? row, ["id", "away_team_id", "awayTeamId"]);
+  const homeName =
+    pickText(homeTeam ?? row, ["name", "home_team_name", "homeTeam"]) ||
+    pickText(event ?? row, ["home_team", "home_team_name"]);
+  const awayName =
+    pickText(awayTeam ?? row, ["name", "away_team_name", "awayTeam"]) ||
+    pickText(event ?? row, ["away_team", "away_team_name"]);
+  const isHome =
+    (playerTeamId && homeTeamId === playerTeamId) ||
+    (teamId && homeTeamId === teamId);
+  const teamScore = isHome
+    ? parseNumber((event ?? row)["home_score"] ?? row["home_score"])
+    : parseNumber((event ?? row)["away_score"] ?? row["away_score"]);
+  const opponentScore = isHome
+    ? parseNumber((event ?? row)["away_score"] ?? row["away_score"])
+    : parseNumber((event ?? row)["home_score"] ?? row["home_score"]);
+  return {
+    fixtureId: pickText(event ?? row, ["id", "event_id", "fixture_id"], pickText(row, ["id"])),
+    date: pickDate(event ?? row, ["event_date", "date", "match_date", "played_at"]),
+    opponent: isHome ? awayName : homeName,
+    competition: pickText(
+      getNestedRecord(row, "league", "competition") ?? event ?? row,
+      ["name", "league_name", "competition_name", "league"],
+    ),
+    isHome,
+    teamScore: Number.isFinite(teamScore) ? teamScore : null,
+    opponentScore: Number.isFinite(opponentScore) ? opponentScore : null,
+    goals: parseNumber(row["goals"] ?? row["goals_scored"]),
+    assists: parseNumber(row["assists"]),
+    yellowCards: parseNumber(row["yellow_cards"] ?? row["yellowCards"]),
+    redCards: parseNumber(row["red_cards"] ?? row["redCards"]),
+    minutesPlayed: parseNumber(row["minutes"] ?? row["minutes_played"]) || null,
+    rating: (() => {
+      const rating = parseNumber(row["rating"] ?? row["match_rating"]);
+      return rating > 0 ? rating : null;
+    })(),
+  };
+}
+
+function mapTransfer(row: Record<string, unknown>) {
+  const fromTeam = getNestedRecord(row, "from_team", "fromTeam");
+  const toTeam = getNestedRecord(row, "to_team", "toTeam");
+  return {
+    id: pickText(row, ["id"], `${pickText(row, ["date", "transfer_date"])}-${pickText(row, ["to_team_name", "to"])}`),
+    date: pickDate(row, ["date", "transfer_date", "moved_at"]),
+    fromTeam: pickText(fromTeam ?? row, ["name", "from_team_name", "from"]),
+    toTeam: pickText(toTeam ?? row, ["name", "to_team_name", "to"]),
+    fee: pickText(row, ["fee", "fee_eur", "amount"]),
+    type: pickText(row, ["type", "transfer_type"]),
+  };
+}
+
+function mapCareerRow(row: Record<string, unknown>) {
+  return {
+    season: pickText(row, ["season_name", "season", "year"]),
+    team: pickText(getNestedRecord(row, "team") ?? row, ["name", "team_name", "team"]),
+    competition: pickText(
+      getNestedRecord(row, "league", "competition") ?? row,
+      ["name", "league_name", "competition_name", "competition"],
+    ),
+    appearances: parseNumber(row["appearances"] ?? row["apps"]) || null,
+    goals: parseNumber(row["goals"]) || null,
+    assists: parseNumber(row["assists"]) || null,
+  };
+}
+
 async function getCatalogEvents(range: string): Promise<BSDEvent[]> {
   const dateFrom = todayIsoDate(0);
   const dateTo = todayIsoDate(range === "month" ? 30 : 7);
@@ -1334,7 +1482,192 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
 });
 
 router.get("/player-profile/:id", async (_req: Request, res: Response) => {
-  res.status(404).json({ error: "player profile unavailable" });
+  try {
+    const sport = String(_req.query["sport"] ?? "football").trim().toLowerCase();
+    if (sport !== "football") {
+      return res.status(404).json({ error: "player profile unavailable" });
+    }
+    if (!bsdEnabled()) {
+      return res.status(503).json({ error: "player profile unavailable" });
+    }
+
+    const playerId = String(_req.params["id"] ?? "").trim();
+    if (!playerId) {
+      return res.status(400).json({ error: "player id required" });
+    }
+
+    const requestedSeasonId = String(_req.query["seasonId"] ?? "").trim() || undefined;
+    const requestedTeamId = String(_req.query["teamId"] ?? "").trim() || undefined;
+    const requestedLeagueId = String(_req.query["leagueId"] ?? "").trim() || undefined;
+    const requestedDateFrom = String(_req.query["dateFrom"] ?? "").trim() || undefined;
+    const requestedDateTo = String(_req.query["dateTo"] ?? "").trim() || undefined;
+
+    const profile = await getBsdPlayerById(playerId);
+    if (!profile) {
+      return res.status(404).json({ error: "player profile unavailable" });
+    }
+
+    const profileTeam = profile.current_team ?? null;
+    const profileTeamId =
+      requestedTeamId ??
+      (profileTeam?.id != null && `${profileTeam.id}`.trim() !== ""
+        ? String(profileTeam.id)
+        : profile.team_id != null && `${profile.team_id}`.trim() !== ""
+          ? String(profile.team_id)
+          : undefined);
+
+    const [allStatsRows, transferRows, careerRows, nationalTeamRow] = await Promise.all([
+      getBsdPlayerStats({
+        playerId,
+        seasonId: requestedSeasonId,
+        teamId: profileTeamId,
+        leagueId: requestedLeagueId,
+        dateFrom: requestedDateFrom,
+        dateTo: requestedDateTo,
+        limit: 100,
+      }).then((rows) => rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))),
+      getBsdPlayerTransfers(playerId).then((rows) =>
+        rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object")),
+      ),
+      getBsdPlayerCareer(playerId).then((rows) =>
+        rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object")),
+      ),
+      getBsdPlayerNationalTeam(playerId).then((row) =>
+        row && typeof row === "object" ? (row as Record<string, unknown>) : null,
+      ),
+    ]);
+
+    const seasonScope = requestedSeasonId ?? resolveSeasonScope(allStatsRows);
+    const seasonRows =
+      seasonScope != null
+        ? allStatsRows.filter((row) => getSeasonRowId(row) === seasonScope)
+        : allStatsRows;
+    const statsRows = seasonRows.length > 0 ? seasonRows : allStatsRows;
+    const fallbackCareer = careerRows[0] ?? null;
+    const fallbackCompetitionSource = statsRows[0] ?? fallbackCareer ?? {};
+    const statsTeamId =
+      pickText(getNestedRecord(statsRows[0] ?? {}, "team") ?? (statsRows[0] ?? {}), [
+        "id",
+        "team_id",
+        "teamId",
+      ]) || undefined;
+    const derivedTeamId =
+      profileTeamId ?? statsTeamId;
+
+    const recentMatchesMap = new Map<
+      string,
+      {
+        fixtureId: string;
+        date: string;
+        opponent: string;
+        competition: string;
+        isHome: boolean;
+        teamScore: number | null;
+        opponentScore: number | null;
+        goals: number;
+        assists: number;
+        yellowCards: number;
+        redCards: number;
+        minutesPlayed: number | null;
+        rating: number | null;
+      }
+    >();
+    for (const row of sortByDateDesc(statsRows, [
+      "event_date",
+      "date",
+      "match_date",
+      "played_at",
+      "updated_at",
+    ])) {
+      const mapped = mapRecentMatch(row, derivedTeamId ?? null);
+      if (!mapped.fixtureId && !mapped.date && !mapped.opponent) continue;
+      const key = mapped.fixtureId || `${mapped.date}-${mapped.opponent}`;
+      if (!recentMatchesMap.has(key)) {
+        recentMatchesMap.set(key, mapped);
+      }
+      if (recentMatchesMap.size >= 8) break;
+    }
+
+    const height = parseNumber(profile.height);
+    const weight = parseNumber(profile.weight);
+    const shirtNumber = parseNumber(profile.shirt_number);
+    const marketValue = parseNumber(profile.market_value);
+    const nationalTeam = nationalTeamRow
+      ? {
+          team: pickText(getNestedRecord(nationalTeamRow, "team") ?? nationalTeamRow, [
+            "name",
+            "team_name",
+            "national_team",
+            "team",
+          ]) || null,
+          appearances: (() => {
+            const value = parseNumber(
+              nationalTeamRow["appearances"] ??
+                nationalTeamRow["caps"] ??
+                nationalTeamRow["matches"],
+            );
+            return value > 0 ? value : null;
+          })(),
+          goals: (() => {
+            const value = parseNumber(nationalTeamRow["goals"]);
+            return value > 0 ? value : null;
+          })(),
+        }
+      : null;
+
+    res.json({
+      id: String(profile.id ?? playerId),
+      sport: "football",
+      name: text(profile.name, `Jogador ${playerId}`),
+      imageUrl: `https://sports.bzzoiro.com/img/player/${encodeURIComponent(playerId)}/`,
+      nationality: text(profile.nationality ?? profile.country_name) || null,
+      nationalityFlagUrl: getNationalityFlagUrl(profile.nationality_code),
+      position: text(profile.position) || null,
+      height: height > 0 ? height : null,
+      weight: weight > 0 ? weight : null,
+      dateOfBirth: text(profile.birth_date ?? profile.date_of_birth) || null,
+      preferredFoot: text(profile.preferred_foot) || null,
+      shirtNumber: shirtNumber > 0 ? shirtNumber : null,
+      marketValue: marketValue > 0 ? marketValue : null,
+      contractUntil: text(profile.contract_until) || null,
+      team:
+        text(profileTeam?.name ?? profile.team_name) ||
+        pickText(getNestedRecord(fallbackCareer ?? {}, "team") ?? (fallbackCareer ?? {}), [
+          "name",
+          "team_name",
+          "team",
+        ]) ||
+        null,
+      teamLogoUrl: derivedTeamId ? toTeamLogo(derivedTeamId) ?? null : null,
+      competition:
+        pickText(
+          getNestedRecord(fallbackCompetitionSource, "league", "competition") ??
+            fallbackCompetitionSource,
+          ["name", "league_name", "competition_name", "league", "competition"],
+        ) || null,
+      season: seasonScope,
+      seasonStats: {
+        appearances: statsRows.length > 0 ? statsRows.length : null,
+        goals: statsRows.length > 0 ? sumStat(statsRows, ["goals", "goals_scored"]) : null,
+        assists: statsRows.length > 0 ? sumStat(statsRows, ["assists"]) : null,
+        yellowCards:
+          statsRows.length > 0 ? sumStat(statsRows, ["yellow_cards", "yellowCards"]) : null,
+        redCards: statsRows.length > 0 ? sumStat(statsRows, ["red_cards", "redCards"]) : null,
+        minutesPlayed:
+          statsRows.length > 0 ? sumStat(statsRows, ["minutes", "minutes_played"]) : null,
+      },
+      recentMatches: Array.from(recentMatchesMap.values()),
+      transfers: sortByDateDesc(transferRows, ["date", "transfer_date", "moved_at"])
+        .map(mapTransfer)
+        .slice(0, 20),
+      career: careerRows.map(mapCareerRow).slice(0, 20),
+      nationalTeam,
+    });
+  } catch (error) {
+    res
+      .status(formatErrorStatus(error, 500))
+      .json({ error: "player profile unavailable" });
+  }
 });
 
 router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
