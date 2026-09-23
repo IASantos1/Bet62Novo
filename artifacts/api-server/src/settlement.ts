@@ -4215,7 +4215,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  return false;
+  return /^football-v\d+-/i.test(String(matchId ?? "").trim());
 }
 
 export function parseSelectionKickoffTimestamp(

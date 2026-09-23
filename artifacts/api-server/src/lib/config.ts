@@ -30,6 +30,10 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
+const BZZOIRO_API_TOKEN = process.env["BZZOIRO_API_TOKEN"] ?? "";
+const BZZOIRO_BASE_URL =
+  process.env["BZZOIRO_BASE_URL"]?.trim() || "https://sports.bzzoiro.com/api/v2/";
+
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
@@ -47,6 +51,8 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
+  BZZOIRO_API_TOKEN,
+  BZZOIRO_BASE_URL,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
