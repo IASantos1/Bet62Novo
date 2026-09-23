@@ -43,14 +43,6 @@ import {
   extractMrDogeBaseballLiveExtra,
   extractMrDogeVolleyballLiveExtra,
 } from "../services/mrdoge/common.js";
-import {
-  getGoalFootballMatches,
-  getPropLineMatches,
-  projectBet62Odds,
-  providerMatchHasFreshOdds,
-  type ProviderMatch,
-} from "../services/providers/bet62.js";
-import { getGoalFixtureResource } from "../services/goal/client.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
@@ -687,7 +679,7 @@ export type LiveMatchState = {
   _baseOddsAreReal?: boolean;
   // Debounced score-decrease guard (football/GOAL API only) — a candidate
   // lower score seen once, held back from display until the same value
-  // repeats on the very next poll (see buildFootballLiveFromGoalApi).
+  // repeats on the very next poll in the live football builder.
   // Cleared once the pending value is confirmed or superseded.
   _pendingScoreHome?: number;
   _pendingScoreAway?: number;
@@ -6640,8 +6632,7 @@ const LIVE_MARGIN = 0.06; // 6% house margin (vig)
 /** Same Poisson grid backs 1X2, Over/Under 2.5 and BTTS — a live goal
  * distribution is one model, not three. Previously only 1X2 was derived
  * this way; Over/Under 2.5 and BTTS were GOAL API's raw live odds passed
- * straight through (services/goalapi/common.ts's extractGoalApiOverUnder25/
- * extractGoalApiBothTeamsToScore, called from buildFootballLiveFromGoalApi).
+ * straight through from the previous removed provider stack.
  * That meant the bettor could see the provider's own live price on those
  * two markets — this function is what replaces that: BET62's model derives
  * every live football market, the provider's odds become log-only
@@ -7013,9 +7004,7 @@ function applyTieredMarketDrift(
       ? (() => {
           // Football: same score/time-aware Poisson grid as the 1X2 anchor
           // above — not the team-name-only recalcLiveBothTeamsScore other
-          // sports use below, and never the provider's own live BTTS price
-          // (buildFootballLiveFromGoalApi keeps that as reference-only, see
-          // LiveMatchState._liveExtra.providerReferenceOdds).
+          // sports use below, and never a provider reference-only BTTS price.
           if (liveFootballMarkets) {
             if (liveFootballMarkets.bttsYes <= 0) return state.markets.bothTeamsScore;
             return { yes: s1(liveFootballMarkets.bttsYes), no: s1(liveFootballMarkets.bttsNo) };
@@ -8117,186 +8106,10 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   };
 }
 
-function providerMatchId(match: ProviderMatch): string {
-  return `${match.provider === "goal_api" ? "goalapi" : "propline"}-${match.sport}-${match.id}`;
-}
-
-function providerDateTime(kickoff?: string): { date: string; time: string } {
-  if (!kickoff) return { date: "", time: "" };
-  const timestamp = Date.parse(kickoff);
-  if (!Number.isFinite(timestamp)) return { date: "", time: "" };
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Europe/Lisbon",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(timestamp));
-  const values: Record<string, string> = {};
-  for (const part of parts) values[part.type] = part.value;
-  return {
-    date: `${values["day"] ?? "01"}.${values["month"] ?? "01"}.${values["year"] ?? "1970"}`,
-    time: `${values["hour"] === "24" ? "00" : values["hour"] ?? "00"}:${values["minute"] ?? "00"}`,
-  };
-}
-
-function providerMatchStats(match: ProviderMatch): LiveMatchState["matchStats"] {
-  const rows: Array<{ name: string; home: string; away: string }> = [];
-  for (const item of match.statistics) {
-    const name = String(item["name"] ?? item["statistic"] ?? item["type"] ?? "").trim();
-    const home = item["home"] ?? item["homeValue"] ?? item["home_value"];
-    const away = item["away"] ?? item["awayValue"] ?? item["away_value"];
-    if (name && (home != null || away != null)) {
-      rows.push({ name, home: String(home ?? "-"), away: String(away ?? "-") });
-    }
-  }
-  return rows.length ? [{ title: "Estatísticas", rows }] : undefined;
-}
-
-function providerEvents(match: ProviderMatch): LiveMatchState["events"] {
-  return match.events.map((event) => ({
-    type: event.type,
-    team: event.team,
-    minute: event.minute,
-    player: event.player,
-    playerId: event.playerId,
-    detail: event.detail,
-  }));
-}
-
-function applyProviderProjection(
-  markets: AdvancedMarkets,
-  match: ProviderMatch,
-): { odds: { home: number; draw: number; away: number }; hasRealOdds: boolean; updatedAt?: number } {
-  const projection = projectBet62Odds(
-    match.odds,
-    { home: match.home, away: match.away },
-    match.isLive ? CONFIG.PUSH_ODDS_MAX_AGE_MS : CONFIG.PREMATCH_ODDS_MAX_AGE_MS,
-  );
-  if (projection.markets["totalGoals"]) {
-    markets.totalGoals = { ...markets.totalGoals, ...(projection.markets["totalGoals"] as Partial<AdvancedMarkets["totalGoals"]>) };
-  }
-  for (const [key, value] of Object.entries(projection.markets)) {
-    if (key !== "totalGoals") Object.assign(markets as unknown as Record<string, unknown>, { [key]: value });
-  }
-  return {
-    odds: projection.moneyline ?? { home: 0, draw: 0, away: 0 },
-    hasRealOdds: providerMatchHasFreshOdds(match),
-    updatedAt: projection.freshestAt,
-  };
-}
-
-function buildProviderUpcoming(match: ProviderMatch): UpcomingMatch {
-  const { date, time } = providerDateTime(match.kickoffUtc);
-  const markets = zerofillAdvancedMarkets();
-  const projected = applyProviderProjection(markets, match);
-  return {
-    id: providerMatchId(match),
-    home: match.home,
-    away: match.away,
-    homeTeamId: match.homeTeamId,
-    awayTeamId: match.awayTeamId,
-    league: match.league,
-    country: match.country,
-    leagueId: match.leagueId,
-    date,
-    time,
-    sport: match.sport,
-    hasRealOdds: projected.hasRealOdds,
-    odds: projected.odds,
-    markets,
-    providerStatusText: match.status,
-  };
-}
-
-function buildProviderLive(match: ProviderMatch): LiveMatchState {
-  const markets = zerofillAdvancedMarkets();
-  const projected = applyProviderProjection(markets, match);
-  return {
-    id: providerMatchId(match),
-    home: match.home,
-    away: match.away,
-    homeTeamId: match.homeTeamId,
-    awayTeamId: match.awayTeamId,
-    league: match.league,
-    country: match.country,
-    sport: match.sport,
-    homeScore: match.homeScore,
-    awayScore: match.awayScore,
-    minute: match.minute,
-    status: match.status,
-    hasRealOdds: projected.hasRealOdds,
-    odds: projected.odds,
-    markets,
-    events: providerEvents(match),
-    matchStats: providerMatchStats(match),
-    _commentary: match.commentary,
-    _oddsUpdatedAt: projected.updatedAt,
-    _liveExtra: {
-      firstGoal: match.events.find((event) => /goal|score/i.test(event.type))?.team ?? "none",
-    },
-  };
-}
-
-async function buildFootballUpcomingFromGoalApi(): Promise<UpcomingMatch[]> {
-  const goalRequest = getGoalFootballMatches({
-    from: new Date().toISOString().slice(0, 10),
-    to: getUpcomingFetchEndDate(),
-  }).then((matches) =>
-    matches
-      .filter((match) => !isBlockedLeague(match.league) && !isVirtualFootballLeague(match.league))
-      .map(buildProviderUpcoming)
-      .filter((match) => match.hasRealOdds),
-  ).catch(() => [] as UpcomingMatch[]);
-  const fallbackRequest = buildPropLineUpcoming("football");
-  const projected = await Promise.race([
-    goalRequest,
-    waitMs(6_000).then(() => [] as UpcomingMatch[]),
-  ]);
-  if (projected.length > 0) return projected;
-  logger.warn("[providers] Goal API football upcoming unavailable; using PropLine fallback");
-  return fallbackRequest;
-}
-
-async function buildFootballLiveFromGoalApi(): Promise<LiveMatchState[]> {
-  const matches = await getGoalFootballMatches({ live: true });
-  return matches
-    .filter((match) => !isBlockedLeague(match.league) && !isVirtualFootballLeague(match.league))
-    .map(buildProviderLive);
-}
-
-function proplineDateRange(): { from: string; to: string } {
-  return {
-    from: new Date().toISOString(),
-    to: new Date(Date.now() + 31 * 24 * 60 * 60_000).toISOString(),
-  };
-}
-
-async function buildPropLineUpcoming(sport: string): Promise<UpcomingMatch[]> {
-  const range = proplineDateRange();
-  const matches = await getPropLineMatches({ sport, ...range });
-  return matches.map(buildProviderUpcoming).filter((match) => match.hasRealOdds);
-}
-
-async function buildPropLineLive(sport: string): Promise<LiveMatchState[]> {
-  const matches = await getPropLineMatches({ sport, live: true });
-  const ordered = [...matches].sort(
-    (a, b) =>
-      Number(providerMatchHasFreshOdds(b)) - Number(providerMatchHasFreshOdds(a)) ||
-      b.odds.length - a.odds.length,
-  );
-  const visibleLimit =
-    sport === "tennis" || sport === "table-tennis" ? 24 : Number.POSITIVE_INFINITY;
-  const visible = ordered.slice(0, visibleLimit);
-  return visible.map(buildProviderLive);
-}
-
 // ─── Match builders ────────────────────────────────────────────────────────────
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return buildFootballUpcomingFromGoalApi();
+  return buildFootballUpcomingFromMrDoge();
 }
 
 // Prematch odds.list is a one-shot HTTP/WS call per match, NOT a
@@ -8866,7 +8679,7 @@ let _lastGoodTennisUpcoming: UpcomingMatch[] = [];
 let _lastGoodBasketballUpcoming: UpcomingMatch[] = [];
 let _lastGoodHockeyUpcoming: UpcomingMatch[] = [];
 let _lastGoodVolleyballUpcoming: UpcomingMatch[] = [];
-let _lastGoodMmaUpcoming: UpcomingMatch[] = [];
+let _lastGoodBaseballUpcoming: UpcomingMatch[] = [];
 
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
@@ -8874,56 +8687,56 @@ async function rebuildUpcomingCache(): Promise<void> {
   try {
     let football: UpcomingMatch[] = [];
     try {
-      football = await buildFootballUpcomingFromGoalApi();
+      football = await buildFootballUpcomingFromMrDoge();
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
         { err },
-        "[tri-fallback] football upcoming failed this cycle — keeping last good prematch list",
+        "[mrdoge] football upcoming failed this cycle — keeping last good prematch list",
       );
       football = _lastGoodFootballUpcoming;
     }
     let tennis: UpcomingMatch[] = [];
     try {
-      tennis = await buildPropLineUpcoming("tennis");
+      tennis = await buildTennisUpcomingFromMrDoge();
       _lastGoodTennisUpcoming = tennis;
     } catch (err) {
-      logger.error({ err }, "[tri-fallback] tennis upcoming failed this cycle");
+      logger.error({ err }, "[mrdoge] tennis upcoming failed this cycle");
+      tennis = _lastGoodTennisUpcoming;
     }
-    _lastGoodTennisUpcoming = tennis;
     let basketball: UpcomingMatch[] = [];
     try {
-      basketball = await buildPropLineUpcoming("basketball");
+      basketball = await buildBasketballUpcomingFromMrDoge();
       _lastGoodBasketballUpcoming = basketball;
     } catch (err) {
-      logger.error({ err }, "[tri-fallback] basketball upcoming failed this cycle — keeping last good prematch list");
+      logger.error({ err }, "[mrdoge] basketball upcoming failed this cycle — keeping last good prematch list");
       basketball = _lastGoodBasketballUpcoming;
     }
     let hockey: UpcomingMatch[] = [];
     try {
-      hockey = await buildPropLineUpcoming("hockey");
+      hockey = await buildHockeyUpcomingFromMrDoge();
       _lastGoodHockeyUpcoming = hockey;
     } catch (err) {
-      logger.error({ err }, "[tri-fallback] hockey upcoming failed this cycle — keeping last good prematch list");
+      logger.error({ err }, "[mrdoge] hockey upcoming failed this cycle — keeping last good prematch list");
       hockey = _lastGoodHockeyUpcoming;
     }
     let volleyball: UpcomingMatch[] = [];
     try {
-      volleyball = await buildPropLineUpcoming("volleyball");
+      volleyball = await buildVolleyballUpcomingFromMrDoge();
       _lastGoodVolleyballUpcoming = volleyball;
     } catch (err) {
-      logger.error({ err }, "[tri-fallback] volleyball upcoming failed this cycle — keeping last good prematch list");
+      logger.error({ err }, "[mrdoge] volleyball upcoming failed this cycle — keeping last good prematch list");
       volleyball = _lastGoodVolleyballUpcoming;
     }
-    let mma: UpcomingMatch[] = [];
+    let baseball: UpcomingMatch[] = [];
     try {
-      mma = await buildPropLineUpcoming("mma");
-      _lastGoodMmaUpcoming = mma;
+      baseball = await buildBaseballUpcomingFromMrDoge();
+      _lastGoodBaseballUpcoming = baseball;
     } catch (err) {
-      logger.error({ err }, "[tri-fallback] mma upcoming failed this cycle — keeping last good prematch list");
-      mma = _lastGoodMmaUpcoming;
+      logger.error({ err }, "[mrdoge] baseball upcoming failed this cycle — keeping last good prematch list");
+      baseball = _lastGoodBaseballUpcoming;
     }
-    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...mma];
+    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
@@ -8949,17 +8762,17 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   }
   const allUpcoming = _allUpcomingCache;
 
-  // ── REST provider path ───────────────────────────────────────────────────
-  // Goal API supplies football state; PropLine supplies odds and the other
-  // sports. The existing anti-flicker layer remains active below so a short
-  // provider outage does not erase the live board.
+  // ── Legacy provider path ────────────────────────────────────────────────
+  // MrDoge is the only active sportsbook provider on this route. The
+  // existing anti-flicker layer remains active below so a short provider
+  // outage does not erase the live board.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    footballLiveRaw = await buildFootballLiveFromGoalApi();
+    footballLiveRaw = await buildFootballLiveFromMrDoge();
   } catch (err) {
     logger.error(
       { err },
-      "[tri-fallback] football live failed this tick",
+      "[mrdoge] football live failed this tick",
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
@@ -8984,47 +8797,24 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       ? footballPreferredLive
       : footballFallbackLive;
   const [
-    footballOddsLiveRaw,
     basketballLiveRaw,
     hockeyLiveRaw,
     baseballLiveRaw,
     volleyballLiveRaw,
     tennisLiveRaw,
-    mmaLiveRaw,
-    dartsLiveRaw,
-    cricketLiveRaw,
-    tableTennisLiveRaw,
-    snookerLiveRaw,
   ] = await Promise.all([
-    buildPropLineLive("football"),
-    buildPropLineLive("basketball"),
-    buildPropLineLive("hockey"),
-    buildPropLineLive("baseball"),
-    buildPropLineLive("volleyball"),
-    buildPropLineLive("tennis"),
-    buildPropLineLive("mma"),
-    buildPropLineLive("darts"),
-    buildPropLineLive("cricket"),
-    buildPropLineLive("table-tennis"),
-    buildPropLineLive("snooker"),
+    buildBasketballLiveFromMrDoge(),
+    buildHockeyLiveFromMrDoge(),
+    buildBaseballLiveFromMrDoge(),
+    buildVolleyballLiveFromMrDoge(),
+    buildTennisLiveFromMrDoge(),
   ]);
-  const footballOddsLive = sportWithFallback("football-odds", footballOddsLiveRaw);
-  const footballWithOddsFallback = [
-    ...footballVisibleLive,
-    ...footballOddsLive.filter(
-      (candidate) =>
-        !footballVisibleLive.some(
-          (goalMatch) =>
-            liveMatchIdentityKey(goalMatch) === liveMatchIdentityKey(candidate),
-        ),
-    ),
-  ];
   const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
   const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
   const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
   const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
   const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
-  const mmaLive = sportWithFallback("mma", mmaLiveRaw);
+  const mmaLive: LiveMatchState[] = [];
   let handballLiveRaw: LiveMatchState[] = [];
   try {
   } catch (err) {
@@ -9034,12 +8824,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     );
   }
   const handballLive = sportWithFallback("handball", handballLiveRaw);
-  const cricketLive = sportWithFallback("cricket", cricketLiveRaw);
-  const tableTennisLive = sportWithFallback("table-tennis", tableTennisLiveRaw);
-  const snookerLive = sportWithFallback("snooker", snookerLiveRaw);
+  const cricketLive: LiveMatchState[] = [];
+  const tableTennisLive: LiveMatchState[] = [];
+  const snookerLive: LiveMatchState[] = [];
   const boxingLive: LiveMatchState[] = [];
   const formula1Live: LiveMatchState[] = [];
-  const dartsLive = sportWithFallback("darts", dartsLiveRaw);
+  const dartsLive: LiveMatchState[] = [];
 
   // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
   // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
@@ -9047,7 +8837,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
   const livePart = mergeStickyLive([
-    ...footballWithOddsFallback,
+    ...footballVisibleLive,
     ...tennisLive,
     ...basketballLive,
     ...hockeyLive,
@@ -10111,48 +9901,42 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // caches.
   let football: UpcomingMatch[] = [];
   try {
-    football = await buildFootballUpcomingFromGoalApi();
+    football = await buildFootballUpcomingFromMrDoge();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
   let tennis: UpcomingMatch[] = [];
   try {
-    tennis = await buildPropLineUpcoming("tennis");
+    tennis = await buildTennisUpcomingFromMrDoge();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
   }
   let basketball: UpcomingMatch[] = [];
   try {
-    basketball = await buildPropLineUpcoming("basketball");
+    basketball = await buildBasketballUpcomingFromMrDoge();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
   }
   let hockey: UpcomingMatch[] = [];
   try {
-    hockey = await buildPropLineUpcoming("hockey");
+    hockey = await buildHockeyUpcomingFromMrDoge();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] hockey fetch failed");
   }
   let volleyball: UpcomingMatch[] = [];
   try {
-    volleyball = await buildPropLineUpcoming("volleyball");
+    volleyball = await buildVolleyballUpcomingFromMrDoge();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] volleyball fetch failed");
   }
   let baseball: UpcomingMatch[] = [];
   try {
-    baseball = await buildPropLineUpcoming("baseball");
+    baseball = await buildBaseballUpcomingFromMrDoge();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] baseball fetch failed");
   }
-  let mma: UpcomingMatch[] = [];
-  let darts: UpcomingMatch[] = [];
-  try {
-    mma = await buildPropLineUpcoming("mma");
-    darts = await buildPropLineUpcoming("darts");
-  } catch (err) {
-    logger.error({ err }, "[refreshUpcomingTop] PropLine mma/darts fetch failed");
-  }
+  const mma: UpcomingMatch[] = [];
+  const darts: UpcomingMatch[] = [];
   rememberUpcomingFootballEligibility(football);
   rememberUpcomingEligibility([
     ...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma, ...darts,
@@ -13194,8 +12978,7 @@ router.get(
 // every live football market not yet real-priced by PropLine. Removed per
 // explicit instruction: live football must show ONLY real PropLine odds,
 // never a fabricated placeholder — the same "honest empty gap" principle
-// buildFootballUpcomingFromGoalApi's prematch baseline already follows (see
-// its own revert comment). buildFootballLiveFromGoalApi now seeds every live
+// the current football builders follow. Live matches now seed every live
 // match with zerofillAdvancedMarkets()/{home:0,draw:0,away:0} instead of a
 // synthetic anchor, and liveFootballOddsSync.ts's runPropLineLiveFootballOddsSync
 // is the sole writer of live football odds/markets going forward — a market
@@ -13334,48 +13117,11 @@ router.get("/top-scorers/:leagueId", async (_req: Request, res: Response) => {
 });
 
 router.get("/lineups/:matchId", async (req: Request, res: Response) => {
-  const matchId = String(req.params["matchId"] ?? "");
-  if (!matchId.startsWith("goalapi-")) {
-    res.json({
-      confirmed: false,
-      home: { starters: [], bench: [] },
-      away: { starters: [], bench: [] },
-    });
-    return;
-  }
-  const id = extractProviderMatchId(matchId);
-  const raw = await getGoalFixtureResource(id, "lineups");
-  const root = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? raw as Record<string, unknown>
-    : {};
-  const data = root["data"] && typeof root["data"] === "object"
-    ? root["data"] as Record<string, unknown>
-    : root;
-  const mapSide = (value: unknown) => {
-    const side = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-    const mapPlayers = (rows: unknown) => Array.isArray(rows)
-      ? rows.map((row) => {
-          const player = row && typeof row === "object" ? row as Record<string, unknown> : {};
-          return {
-            id: String(player["playerId"] ?? player["id"] ?? ""),
-            name: String(player["lineupPlayer"] ?? player["playerName"] ?? player["name"] ?? ""),
-            number: player["lineupNumber"] ?? player["number"] ?? null,
-            position: String(player["lineupPosition"] ?? player["position"] ?? ""),
-          };
-        }).filter((player) => player.name)
-      : [];
-    return {
-      starters: mapPlayers(side["startingLineups"] ?? side["starters"]),
-      bench: mapPlayers(side["substitutes"] ?? side["bench"]),
-      formation: side["formation"] ?? null,
-    };
-  };
+  void req;
   res.json({
-    confirmed: data["hasLineups"] === true,
-    home: mapSide(data["home"]),
-    away: mapSide(data["away"]),
+    confirmed: false,
+    home: { starters: [], bench: [] },
+    away: { starters: [], bench: [] },
   });
 });
 

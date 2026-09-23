@@ -1,6 +1,5 @@
-// BET62 Fase 0 (hybrid GOAL API + PulseScore architecture, 2026-09-10) —
-// football market suspension, extracted verbatim from
-// buildFootballLiveFromGoalApi (routes/matches.ts) into its own testable
+// BET62 Fase 0 — football market suspension, extracted verbatim from the
+// live football builder in routes/matches.ts into its own testable
 // module. Same rules, same behavior — goal/red-card tiers via
 // footballSuspensionDelayMs (lib/config.ts) — just isolated instead of
 // inlined inside the GOAL API builder, so a future second provider's

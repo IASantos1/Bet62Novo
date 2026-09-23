@@ -4976,8 +4976,8 @@ export default function AdminPage() {
                                         }
                                         label={
                                           event.pulse_score_price_status === "real"
-                                            ? "PulseScore: Real"
-                                            : "PulseScore: Estimado"
+                                            ? "Preço: Real"
+                                            : "Preço: Estimado"
                                         }
                                       />
                                     </div>

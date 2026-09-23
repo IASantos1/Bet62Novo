@@ -176,10 +176,9 @@ app.post(
   },
 );
 
-// Goal API + PropLine webhooks are not wired in this migration phase yet.
-// The current backend uses REST/bootstrap flows plus the normalized Bet62
-// routes, so there is no raw-body webhook endpoint to mount here for either
-// provider today.
+// Sportsbook provider webhooks are not wired here right now. The current
+// backend uses the normalized Bet62 routes, so there is no extra raw-body
+// sportsbook webhook endpoint to mount here today.
 //
 // The casino callbacks remain separate in routes/casino.ts and use normal
 // JSON parsing there, so no additional raw-body route is needed in app.ts.
