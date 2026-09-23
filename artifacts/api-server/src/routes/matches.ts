@@ -840,9 +840,8 @@ export type LiveMatchState = {
   homeLogoUrl?: string;
   awayLogoUrl?: string;
   regionFlagUrl?: string;
-  // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
-  // populated on the same fixture object every other football field here
-  // comes from).
+  // Football only — venue/referee-style metadata from the enriched football
+  // fixture source (currently SportMonks on the football overlay path).
   stadium?: string;
   referee?: string;
   league: string;
@@ -873,10 +872,9 @@ export type LiveMatchState = {
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
-  // Match statistics panel (football/GOAL API only) — possession/shots/
-  // corners/fouls, shaped for the frontend's existing generic stats-row
-  // renderer (home.tsx's V2StatsGroup type, previously fed by the deleted
-  // SportsAPI Pro V2 integration and always empty since).
+  // Match statistics panel (football only) — possession/shots/corners/fouls,
+  // shaped for the frontend's existing generic stats-row renderer and now
+  // primarily hydrated from SportMonks when available.
   matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
   // Live text commentary feed (football/GOAL API only) — free-text
   // play-by-play narration ("Long An in possession", "PVF-CAND dangerous
@@ -12430,15 +12428,11 @@ router.get("/football-results-stats", async (_req: Request, res: Response) => {
 // from the active provider path — makeTennisBaseOdds' _tennisPreMatchOdds cache
 // simply never gets a hit any more and falls through to its neutral default.
 
-// GOAL API's leagueId (fx.leagueId, populated on the football
-// upcoming/live builders) lets this route return a real table instead of
-// buildLeagueStandings' fully synthetic ELO-seeded generator — same
-// "real data patches synthetic" convention every other GOAL API-backed
-// route in this file follows. Falls back to the synthetic table on any
-// failure or when no leagueId is given (non-football, or GOAL API not
-// configured).
-// GOAL API removed 2026-09-20 (user decision) — always falls through to the
-// synthetic ELO-seeded table below now.
+// SportMonks league/season context (fed by the football upcoming/live
+// builders, with an extra on-demand resolver fallback below) lets this route
+// return a real table instead of buildLeagueStandings' synthetic ELO-seeded
+// generator. Falls back to the synthetic table on any failure or when no
+// SportMonks league/season context is available.
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
   const leagueId = String(req.query["leagueId"] ?? "").trim();
@@ -13753,11 +13747,9 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
-// Used to be sourced from SportMonks (numeric ids); that provider was
-// removed and left this hardcoded to 404 ever since. GOAL API's /players/:id
-// (confirmed real 2026-09-09) is the real replacement — ids are opaque cuid
-// strings, not numbers, hence the frontend's playerId type moving from
-// number to string alongside this fix.
+// Football player profile is sourced directly from SportMonks. The frontend
+// already treats the player id as an opaque string, so the route just proxies
+// the provider payload when that id is known from lineup/event context.
 router.get("/player-profile/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"] ?? "").trim();
   if (!id || !sportMonksEnabled()) {
@@ -13862,8 +13854,8 @@ router.get("/lineups/:matchId", async (req: Request, res: Response) => {
   res.json(mapSportMonksLineups(fixture));
 });
 
-// GOAL API's own model-computed match-outcome probabilities — a distinct
-// data source from this file's odds-derived "Biblioteca de Combinações"
+// SportMonks model-computed match-outcome probabilities — a distinct data
+// source from this file's odds-derived "Biblioteca de Combinações"
 // (predictions.ts's publishCombosForMatch, which works off match.odds/
 // markets, not this endpoint). Informational only — feeds the "Previsão"
 // card, not settlement.
