@@ -54,8 +54,6 @@ const router: IRouter = Router();
 function extractProviderMatchId(rawId: string): string {
   return String(rawId ?? "")
     .replace(/^[a-z]+-v\d+-/i, "")
-    .replace(/^goalapi-[a-z_]+-/i, "")
-    .replace(/^propline-[a-z_]+-/i, "")
     .replace(/^mrdoge-[a-z_]+-/i, "")
     .replace(/^sportmonks-[a-z_]+-/i, "");
 }
@@ -221,10 +219,8 @@ export type AdvancedMarkets = {
   asianHandicap?: { line: number; home: number; away: number };
   // European Handicap — a real 3-way result market on the handicap-adjusted
   // score (the draw outcome pays its own price, unlike `handicap` below
-  // which voids/pushes on an exact-margin tie). See
-  // services/propline/common.ts's extractProplineEuropeanHandicap for the
-  // real PropLine shape this comes from and the sign convention `line`
-  // uses.
+  // which voids/pushes on an exact-margin tie). `line` uses the signed
+  // home-minus-away convention.
   europeanHandicap?: { line: number; home: number; draw: number; away: number };
   asianTotals?: {
     o05: number;
@@ -250,8 +246,8 @@ export type AdvancedMarkets = {
     aa: number;
   };
   correctScore?: Record<string, number>;
-  // Anytime Goalscorer — one row per real player name, PulseScore/bwin only
-  // (confirmed real, 2026-08-08). `player` matches exactly what the frontend
+  // Anytime Goalscorer — one row per real player name. `player` matches
+  // exactly what the frontend
   // must send back as the "pg:{player}" selection key for
   // settlement.ts's parseSelectionPlayerMarket/getFootballGoalEventsFromExtras
   // to auto-settle it against the live goal-incident feed's player names.
@@ -271,25 +267,22 @@ export type AdvancedMarkets = {
     o105: number;
     u105: number;
   };
-  // Per-team corners over/under — real PulseScore market
-  // (HOME/AWAY_CORNERS_OVER_UNDER), unlike `corners` above (combined match
+  // Per-team corners over/under — unlike `corners` above (combined match
   // total) each team has its own natural range, so a single dynamic
   // `{line, over, under}` (whichever line the book actually offers) fits
   // better than fixed shared slots.
   homeCorners?: { line: number; over: number; under: number };
   awayCorners?: { line: number; over: number; under: number };
-  // Corners handicap (Asian-style spread on corner count) — real PropLine
-  // market `corners_spread`, same shape as `asianHandicap` above.
+  // Corners handicap (Asian-style spread on corner count), same shape as
+  // `asianHandicap` above.
   cornersHandicap?: { line: number; home: number; away: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
-  // Per-team cards over/under — real PropLine market `team_cards`, same
-  // shape/rationale as homeCorners/awayCorners above.
+  // Per-team cards over/under, same shape/rationale as homeCorners/
+  // awayCorners above.
   homeCards?: { line: number; over: number; under: number };
   awayCards?: { line: number; over: number; under: number };
-  // Winning Margin — real PropLine market `winning_margin`, ten named
-  // buckets (home/away By 1/2/3/4+, a scoring draw, and a 0-0 "no goal").
-  // See services/propline/common.ts's extractProplineWinningMargin for the
-  // parsing/matching rationale.
+  // Winning Margin — ten named buckets (home/away By 1/2/3/4+, a scoring
+  // draw, and a 0-0 "no goal"). Parsed as explicit score-difference bands.
   winningMargin?: {
     home1: number;
     home2: number;
@@ -302,27 +295,23 @@ export type AdvancedMarkets = {
     drawScoring: number;
     noGoal: number;
   };
-  // 2+ Goals (player) — real PropLine market `2plus_goals`, same shape as
-  // anytimeGoalscorer. sel key prefix `2g:{player}`.
+  // 2+ Goals (player), same shape as anytimeGoalscorer. sel key prefix
+  // `2g:{player}`.
   twoPlusGoals?: Array<{ player: string; odds: number }>;
-  // Goal or Assist (player) — real PropLine market `goal_or_assist`, same
-  // shape as anytimeGoalscorer. sel key prefix `ga:{player}`.
+  // Goal or Assist (player), same shape as anytimeGoalscorer. sel key
+  // prefix `ga:{player}`.
   goalOrAssist?: Array<{ player: string; odds: number }>;
-  // Player Assists (1+) — real PropLine market `player_assists`, shaped
-  // like team_corners/team_cards (Over/Under + point=0.5, player in
-  // `description`) but only "Over" is a real bettable market — see
-  // extractProplineGoalscorerMatchedToRoster's own comment. sel key
-  // prefix `pa:{player}`, settled by the existing assist grading (reads
-  // real assistName off goal events, matched to the same GOAL API roster
-  // spelling this odds list already uses).
+  // Player Assists (1+), shaped like team_corners/team_cards
+  // (Over/Under + point=0.5, player in `description`) but only "Over" is
+  // bettable. sel key prefix `pa:{player}`, settled by the existing assist
+  // grading using goal-event assister names.
   playerAssists?: Array<{ player: string; odds: number }>;
-  // 2+ Assists (player) — real PropLine market `player_2plus_assists`, same
-  // shape as anytimeGoalscorer. sel key prefix `2a:{player}`.
+  // 2+ Assists (player), same shape as anytimeGoalscorer. sel key prefix
+  // `2a:{player}`.
   playerTwoPlusAssists?: Array<{ player: string; odds: number }>;
-  // H2H Early Payout — real PropLine market `h2h_early_payout`, same shape
-  // as the plain 1X2 but its own price (a bookmaker promo condition that
-  // never changes the underlying result). sel keys h2hep-home/h2hep-draw/
-  // h2hep-away, settled identically to the plain 1X2.
+  // H2H Early Payout, same shape as the plain 1X2 but its own price
+  // (a bookmaker promo condition that never changes the underlying result).
+  // sel keys h2hep-home/h2hep-draw/h2hep-away, settled identically to 1X2.
   h2hEarlyPayout?: { home: number; draw: number; away: number };
   // Sport-specific extras
   _spread?: number;
@@ -405,15 +394,13 @@ export type AdvancedMarkets = {
     score1st?: Array<{ label: string; odds: number }>;
     score2nd?: Array<{ label: string; odds: number }>;
     score3rd?: Array<{ label: string; odds: number }>;
-    // Real PulseScore live markets with no prior equivalent field — see
-    // extractTennisLiveExtra in services/pulsescore/tennis.ts.
+    // Real live markets with no prior equivalent field in the older schema.
     totalSets?: { line: number; over: number; under: number };
     straightSetsWinner?: { yes: number; no: number };
     goTheDistance?: { yes: number; no: number };
     finalSetTieBreakOrExtra?: { yes: number; no: number };
-    // Real PropLine data (2026-09-19, player_aces market key) — per-player
-    // aces prop, settled off api-tennis's own statistics[] "Aces" stat_name
-    // (confirmed real via a production call, see the tennis plan's Fase 0).
+    // Per-player aces prop, settled off api-tennis's own statistics[] "Aces"
+    // stat_name.
     homeAces?: { line: number; over: number; under: number };
     awayAces?: { line: number; over: number; under: number };
   };
@@ -675,7 +662,7 @@ export type LiveMatchState = {
   // the anchor is set, since the displayed odds/_baseOdds never are
   // either). Lets a reader tell a genuine two-source odds disagreement
   // apart from one side just never having had a real market price to
-  // begin with — see PulseScore's odds shadow-compare (shadowMatchSync.ts).
+  // begin with — see the provider odds shadow-compare.
   _baseOddsAreReal?: boolean;
   // Debounced score-decrease guard (football/GOAL API only) — a candidate
   // lower score seen once, held back from display until the same value
@@ -756,10 +743,9 @@ export type LiveMatchState = {
     // Real "home" | "away" | "none" — fg-home/fg-away/fg-none settlement
     // (settlement.ts) reads this off the persisted extras. Computed from
     // footballGoalLog's first (lowest-minute) entry — added 2026-09-18
-    // alongside PropLine's real first_team_to_score market: this field was
-    // declared and read by settlement everywhere already, just never once
-    // set for GOAL API football, so a first_team_to_score bet would have
-    // sat "pending" forever with no way to ever grade.
+    // alongside the first-team-to-score market: this field was declared and
+    // read by settlement everywhere already, just never once set, so such a
+    // bet would have sat "pending" forever with no way to ever grade.
     firstGoal?: "home" | "away" | "none";
     // Per-team football stats
     cornersHome?: number;
@@ -1946,11 +1932,10 @@ function getFootballLiveDisappearGraceMs(
       statusLow.includes("overtime") ||
       statusLow.includes("penalties") ||
       statusLow.includes("penalty") ||
-      // PulseScore football only ever sets status to the coarse "LIVE"/"HT"
-      // (see buildFootballLiveFromPulseScore) — none of the descriptive
-      // phrases above, written for the old Statpal pipeline, ever match it.
-      // Confirmed in production (2026-08-08): without this, a PulseScore
-      // match minute 88+ that vanishes from the feed (finished) never got
+      // Some football providers only ever set status to the coarse
+      // "LIVE"/"HT" — none of the descriptive phrases above, written for the
+      // old pipeline, ever match it. Confirmed in production: without this,
+      // a match minute 88+ that vanishes from the feed (finished) never got
       // the fast grace and instead sat for up to 130-180 minutes before
       // finalizeStaleLiveMatch/settlement ever ran. "HT" deliberately
       // excluded — a match reported paused isn't a finish candidate.
@@ -2715,9 +2700,8 @@ function makeOddsFromTeams(
 // showPen) both already existed, but nothing ever populated either field —
 // confirmed via a full-file search, 2026-08-11 — so a knockout match tied
 // after 90' had no ET markets to show even on ticks where it correctly
-// stayed live (see buildFootballLiveFromPulseScore's ET-detection changes
-// for the other half of this bug: it usually didn't even stay live that
-// long). Reuses soccerPoissonModel — extra time is a shorter window for the
+// stayed live. Reuses soccerPoissonModel — extra time is a shorter window
+// for the
 // same two teams' scoring rates, not a different game needing its own model.
 function computeFootballEtExtra(
   homeName: string,
@@ -4681,7 +4665,7 @@ function computeLiveTennisExtras(
       // liveSetHandicap is priced off exactSetsProbs.h20 (probability home
       // sweeps 2-0) — the exact probability a -1.5 sets line needs, so that
       // fixed line is the correct synthetic default (real data overrides
-      // this whenever PulseScore actually prices Sets Handicap for this
+      // this whenever the provider actually prices Sets Handicap for this
       // match — see extractSetHandicap). Missing this field entirely
       // silently rendered "Casa +undefined" in the UI (TS would have
       // caught it — esbuild's build step doesn't type-check, only tsc
@@ -4915,7 +4899,7 @@ function computeVolleyballExtras(
 
 // Estimate of P(home wins the CURRENT set), used only when unibetau hasn't
 // priced a real "Match Odds" market for a live volleyball match (see
-// buildVolleyballLiveFromPulseScore below and volleyball.ts's header for why
+// the live volleyball builder below for why
 // that's the common case, not the exception, right now). Two components:
 // a Beta(1,1)-smoothed read of the sets record so far (mean-reverts to 0.5
 // with no sets played, shifts toward whoever's leading as sets accumulate),
@@ -5395,7 +5379,7 @@ function makeHockeyMarketsFromTeams(
 // makeHockeyMarketsFromTeams above computes a full-match moneyline internally
 // (plH/plA) but only exposes it repurposed as the synthetic handicap odds —
 // no full-match home/draw/away triple is returned anywhere. Needed as the
-// synthetic fallback for buildHockeyUpcomingFromPulseScore when bwin hasn't
+// synthetic fallback for hockey upcoming when bwin hasn't
 // priced an event's 3-Way Result market yet, mirroring
 // makeBasketballMoneylineFromTeams's role for basketball but modeling a real
 // regulation-time draw (impossible in basketball, routine in hockey) via the
@@ -5469,7 +5453,7 @@ function makeMmaMarketsFromTeams(home: string, away: string): AdvancedMarkets {
 // Two-way (no draw) synthetic moneyline for baseball's upcoming builder —
 // same seeded-margin approach makeMLBMarketsFromTeams already uses
 // internally for its run-line synthetic (marginMean/marginSd), just
-// surfaced as a standalone {home, away} price for when PulseScore hasn't
+// surfaced as a standalone {home, away} price for when the provider hasn't
 // priced the match yet.
 function makeMLBMoneylineFromTeams(
   home: string,
@@ -6059,8 +6043,8 @@ setInterval(() => {
 // Used to poll Statpal's volleyball live endpoint every 3s independently of
 // buildLivePayload (so removing volleyball from the live pipeline didn't stop
 // this — it kept calling Statpal on its own timer). Volleyball has no live
-// data source at all now (explicit user decision, 2026-08-06: PulseScore-only
-// on the live page); removed outright rather than left polling a provider
+// data source at all now (explicit user decision); removed outright rather
+// than left polling a provider
 // with nothing to broadcast to.
 
 // Proactively keep the live payload cache warm even with no SSE/WS clients
@@ -6127,11 +6111,10 @@ const V2_FOOTBALL_ODDS_TTL = 30 * 60_000;
 
 // Live state: stable odds across refreshes
 //
-// Football's automatic settlement trigger (buildFootballLiveFromPulseScore's
+// Football's automatic settlement trigger (the live builder's
 // disappearance-based grace-period GC calling finalizeStaleLiveMatch — see
-// that function) was temporarily gone between the 2026-08-06 provider
-// disconnect and football's 2026-08-07 PulseScore re-instatement. Restored
-// now — football bets settle the same way they did before the disconnect.
+// that function) was temporarily gone during an earlier provider swap.
+// Restored now — football bets settle the same way they did before.
 // settlement.ts's separate per-sport scan chain (volleyball/NHL/NBA/MLB,
 // now removed along with StatPal) never covered football either way; this
 // GC path is football's only settlement trigger, same as it's always been.
@@ -6337,7 +6320,7 @@ export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<voi
   // placeholder zero, with no real per-set data ever recorded either, means
   // this match was NEVER actually tracked with real data before
   // disappearing from the live feed (poor provider coverage for an obscure
-  // fixture — confirmed real for low-tier ITF tennis, PulseScore's own
+  // fixture — confirmed real for low-tier ITF tennis, the provider's own
   // "occasional checkpoint updates" behavior for those). Settling that as a
   // genuine "lost" for whatever was bet on it is provably wrong. Reported
   // in production (2026-08-10): 3 different obscure ITF matches in one
@@ -6368,7 +6351,7 @@ export async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<voi
   // written when hockey had no live pipeline into this function at all and
   // baseball's only live data came from the now-removed StatPal NHL/MLB
   // feeds through a separate cache, never through liveMatchState — baseball
-  // has since gained its own PulseScore live pipeline that does call this
+  // has since gained its own live pipeline that does call this
   // function). Kept defensive either way: the exact same fabricated-0-0 gap
   // tennis/basketball/volleyball had would apply to hockey too the moment it
   // gets a live pipeline built on this same disappearance-based pattern —
@@ -6512,29 +6495,18 @@ export async function ensureFinishedMatchResult(
   // (settlement.ts's expireStalePendingBets()) — a known, accepted
   // consequence of the removal.
 
-  // ── PulseScore football/tennis/basketball/volleyball match IDs
-  // (pulsescore-{sport}-{id}) ──────────────────────────────────────────────
+  // ── MrDoge match IDs (mrdoge-{sport}-{id}) ──────────────────────────────
   // DB-only recovery path: finalizeStaleLiveMatch() already writes a
   // complete record (score + sport-specific extras) via
   // persistFinishedMatchRecord the moment one of these matches finishes
   // while the server is running, so this only matters after a restart wipes
   // the in-memory finishedMatchResults cache before a pending bet's
-  // settlement cycle gets to it. Confirmed missing entirely for football/
-  // tennis (2026-08-08 audit) — isProviderManagedMatchId() never recognized
-  // this prefix, so this function was never even called for these ids from
-  // the settlement cycle's ensure-loop; a bet on a match that finished
-  // across a restart had no way to recover its result. basketball/
-  // volleyball had the IDENTICAL gap (2026-08-11 audit, triggered by a user
-  // asking whether volleyball settlement was even configured) — their
-  // pulsescore-basketball-/pulsescore-volleyball- ids were never added to
-  // isProviderManagedMatchId at all when those two sports' PulseScore live
-  // pipelines shipped (2026-08-08/09), so this branch is now generalized to
-  // cover all four instead of being duplicated per sport. No live-feed
-  // fallback needed here since finalizeStaleLiveMatch already persists the
-  // full record (including extras.basketball.quarters/
-  // extras.volleyball.sets, same shape read back below) up front.
+  // settlement cycle gets to it. No live-feed fallback is needed here since
+  // finalizeStaleLiveMatch already persists the full record (including
+  // extras.basketball.quarters/extras.volleyball.sets, same shape read back
+  // below) up front.
   if (
-    /^(?:pulsescore-(?:football|tennis|basketball|volleyball)|goalapi-football|propline-[a-z0-9_-]+)-.+$/i.test(
+    /^mrdoge-(?:football|tennis|basketball|hockey|baseball|volleyball)-.+$/i.test(
       matchId,
     )
   ) {
@@ -6577,7 +6549,7 @@ export async function ensureFinishedMatchResult(
   }
 
   // ── GoalServe match IDs (gs-{sport}-{id}) ─────────────────────────────
-  // Same DB-only recovery pattern as pulsescore- above: when a GoalServe
+  // Same DB-only recovery pattern as the active live providers above: when a GoalServe
   // match finishes while the server is live, finalizeStaleLiveMatch() has
   // already persisted a complete record. Across a restart we just read it
   // back from matchResultsTable to repopulate finishedMatchResults.
@@ -8656,7 +8628,7 @@ let _allUpcomingCache: UpcomingMatch[] = [];
 let _allUpcomingCacheBuiltAt = 0;
 
 /** Read-only snapshot for callers outside this module (e.g. the admin
- * Eventos table) that need team names / PulseScore price status for
+ * Eventos table) that need team names / price status for
  * pré-jogo fixtures without triggering their own fetch — this cache is
  * already kept warm by every /live poll (buildLivePayload's cache-warm
  * check above). */
@@ -8668,9 +8640,9 @@ let _upcomingRebuildInProgress = false;
 
 // Last good per-sport slice — kept separately from _allUpcomingCache so a
 // single sport's builder throwing (a bug in the per-event transform, not
-// just a network hiccup — the underlying getPulseScoreXUpcoming() fetchers
-// already fall back to their own stale cache on error, see football.ts/
-// tennis.ts/basketball.ts) doesn't wipe that sport's "Em Breve" listings to
+// just a network hiccup — the underlying provider fetchers already fall
+// back to their own stale cache on error) doesn't wipe that sport's "Em
+// Breve" listings to
 // empty for this whole 30s cache window. That wipe-then-refill cycle is
 // exactly what showed up on the site as prematch matches "appearing and
 // disappearing".
@@ -8901,8 +8873,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         // "still upcoming" again.
         !liveMatchState.has(String(m.id)) &&
         // Football no longer stays in liveMatchState at all once FT is
-        // detected — it's deleted immediately (see isFulltimeFreeze in
-        // buildFootballLiveFromPulseScore, added right after the fix above)
+        // detected — it's deleted immediately (see isFulltimeFreeze,
+        // added right after the fix above)
         // so it leaves "Ao Vivo" right away instead of lingering. That
         // silently broke the liveMatchState check just above: the instant a
         // football match finished, it vanished from liveMatchState too,
@@ -8924,8 +8896,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     .slice(0, 50);
 
   // Starting-soon matches must never be promoted into the live section with a
-  // fabricated 0-0 / "Em Jogo" placeholder. In the hybrid runtime a match
-  // only appears live when Goal API or PropLine actually report it as live.
+  // fabricated 0-0 / "Em Jogo" placeholder. A match only appears live when
+  // an active provider actually reports it as live.
   // promotedTennis stays declared (always empty) because the competition
   // catalog sync below still references it structurally.
   const promotedTennis: LiveMatchState[] = [];
@@ -9035,7 +9007,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
-  // Football live now comes from Goal API with PropLine odds fallback. Keep
+  // Football live now comes from the active provider stack. Keep
   // visible fixtures in the live board even when odds are temporarily
   // suspended/interrupted; that state is handled at market/button level,
   // not by hiding the match itself.
@@ -9669,7 +9641,7 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
   }
 });
 
-async function sendPropLineSportOdds(
+async function sendSportOdds(
   sport: keyof UpcomingTopCache,
   res: Response,
 ): Promise<void> {
@@ -9685,15 +9657,15 @@ async function sendPropLineSportOdds(
 }
 
 router.get("/tennis-odds", async (_req: Request, res: Response) =>
-  sendPropLineSportOdds("tennis", res));
+  sendSportOdds("tennis", res));
 router.get("/basketball-odds", async (_req: Request, res: Response) =>
-  sendPropLineSportOdds("basketball", res));
+  sendSportOdds("basketball", res));
 router.get("/hockey-odds", async (_req: Request, res: Response) =>
-  sendPropLineSportOdds("hockey", res));
+  sendSportOdds("hockey", res));
 router.get("/mlb-odds", async (_req: Request, res: Response) =>
-  sendPropLineSportOdds("baseball", res));
+  sendSportOdds("baseball", res));
 router.get("/volleyball-odds", async (_req: Request, res: Response) =>
-  sendPropLineSportOdds("volleyball", res));
+  sendSportOdds("volleyball", res));
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
@@ -10237,7 +10209,7 @@ router.get("/", async (_req: Request, res: Response) => {
   // 2026-08-06) — see rebuildUpcomingCache/buildLivePayload for the full
   // rationale. This legacy route isn't used by the frontend's actual live
   // (/live) or prematch (/upcoming) pages, so it's just short-circuited
-  // rather than left calling Statpal/PulseScore for a response nothing reads.
+  // rather than left calling old dead providers for a response nothing reads.
   res.json({ live: [], upcoming: [] });
 });
 
@@ -12089,8 +12061,7 @@ router.get("/football-results-stats", async (_req: Request, res: Response) => {
 // getTennisOdds() (SportsAPI Pro V2 getUpcomingLeagueEventsV2/getPreMatchOddsV2
 // tennis odds + /tennis-odds route) and refreshTennisV2LeagueCache were
 // removed with the rest of SportsAPI Pro. Tennis prematch odds now come
-// exclusively from PulseScore (buildTennisUpcomingFromPulseScore /
-// extractTennisOverride) — makeTennisBaseOdds' _tennisPreMatchOdds cache
+// from the active provider path — makeTennisBaseOdds' _tennisPreMatchOdds cache
 // simply never gets a hit any more and falls through to its neutral default.
 
 // GOAL API's leagueId (fx.leagueId, populated on the football
@@ -12975,14 +12946,14 @@ router.get(
 // ─── Background Market Drift Engine — RETIRED 2026-09-19 ───────────────────
 // This setInterval used to run calculateLiveFootballMarkets/
 // applyTieredMarketDrift every 1-2s to synthesize a Poisson-model price for
-// every live football market not yet real-priced by PropLine. Removed per
-// explicit instruction: live football must show ONLY real PropLine odds,
+// every live football market not yet real-priced by the provider. Removed per
+// explicit instruction: live football must show ONLY real odds,
 // never a fabricated placeholder — the same "honest empty gap" principle
 // the current football builders follow. Live matches now seed every live
 // match with zerofillAdvancedMarkets()/{home:0,draw:0,away:0} instead of a
-// synthetic anchor, and liveFootballOddsSync.ts's runPropLineLiveFootballOddsSync
-// is the sole writer of live football odds/markets going forward — a market
-// PropLine hasn't priced simply stays at its zero/empty baseline rather than
+// synthetic anchor, and the live football odds sync is the sole writer of
+// live football odds/markets going forward — a market the provider hasn't
+// priced simply stays at its zero/empty baseline rather than
 // drifting a fake number. calculateLiveFootballMarkets/applyTieredMarketDrift
 // are left in place, unused, in case this needs revisiting.
 
@@ -13073,11 +13044,7 @@ router.get("/confrontos", async (req: Request, res: Response) => {
 
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
 // Used to be sourced from SportMonks team schedules; that provider was
-// removed. Football now resolves it via GOAL API: the frontend passes the
-// fixture's matchId + which side (home/away) it wants, so this resolves
-// that side's real team id off the fixture (goalapi-football-<fixtureId>)
-// and asks GOAL API for that team's upcoming fixtures directly.
-// GOAL API removed 2026-09-20 (user decision) — always empty now.
+// removed. This endpoint currently returns empty data by design.
 router.get("/team-upcoming", async (_req: Request, res: Response) => {
   res.json({ fixtures: [] });
 });

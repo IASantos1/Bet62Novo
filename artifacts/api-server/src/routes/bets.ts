@@ -1796,7 +1796,7 @@ router.post(
     // Checked by `liveState.sport === "football"` rather than a hardcoded
     // matchId prefix — this used to only recognize the dead "football-v2-"
     // (Statpal) id scheme, so the later provider-specific live football ids
-    // ("pulsescore-football-...") got the full global max stake with no
+    // got the full global max stake with no
     // tier-based cap at all. Prefers the tier already computed by whichever
     // builder populated liveMatchState (matchTier), recomputing only as a
     // defensive fallback.

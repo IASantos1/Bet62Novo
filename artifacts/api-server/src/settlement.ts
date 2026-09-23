@@ -697,9 +697,8 @@ function settleAsianSideHandicapOutcome(
 
 /** European Handicap — a real 3-way result market on the handicap-adjusted
  * score, unlike settleAsianSideHandicapOutcome above: an exact-margin tie
- * is a real, payable "draw" outcome here, never a void/push (see
- * services/propline/common.ts's extractProplineEuropeanHandicap for the
- * real PropLine market this grades and its sign convention — `line` is
+ * is a real, payable "draw" outcome here, never a void/push. The signed
+ * handicap `line`
  * subtracted from the home score before comparing). */
 function settleEuropeanHandicapOutcome(
   home: number,
@@ -2670,9 +2669,7 @@ export function scoreOutcomeForSel(
     if (!extra?.firstGoal) return null;
     winning = s === `fg-${extra.firstGoal}`;
   }
-  // ── Winning margin (final score buckets — real PropLine market
-  // `winning_margin`, see services/propline/common.ts's
-  // extractProplineWinningMargin) ────────────────────────────────────────
+  // ── Winning margin (final score buckets) ───────────────────────────────
   else if (/^wm-(h[1-3]|h4p|a[1-3]|a4p|draw|nogoal)$/.test(s)) {
     const diff = home - away;
     if (diff === 0) {
@@ -3044,8 +3041,7 @@ export function scoreOutcomeForSel(
     if (totalSets === line) voided = true;
     else winning = dir === "o" ? totalSets > line : totalSets < line;
   }
-  // ── Total tiebreaks O/U (real PropLine market key `total_tiebreaks`,
-  // confirmed 2026-09-19) — a tiebreak happened in a set iff its final score
+  // ── Total tiebreaks O/U — a tiebreak happened in a set iff its final score
   // is 7-6/6-7 (tennis's only way to reach 7 games without a 2-game-clear
   // margin, same rule tb-yes/no above already relies on). Resolves only
   // once the match is fully over (any remaining set could still add a
@@ -3060,13 +3056,12 @@ export function scoreOutcomeForSel(
     if (tiebreakCount === line) voided = true;
     else winning = dir === "o" ? tiebreakCount > line : tiebreakCount < line;
   }
-  // ── Player aces O/U, by side (real PropLine market key `player_aces`,
-  // confirmed 2026-09-19) — settled off api-tennis's own statistics[] "Aces"
+  // ── Player aces O/U, by side — settled off api-tennis's own statistics[] "Aces"
   // stat_name (extractApiTennisAces), never a fabricated count. `tacesh`
   // is the home player, `tacesa` the away player — no player-name matching
   // needed since api-tennis already resolves the stat to home/away
   // directly (unlike football's goalscorer markets, which need roster
-  // matching because PropLine and GOAL API spell names differently). ───────
+  // matching because provider feeds can spell names differently). ──────────
   else if (/^(tacesh|tacesa)-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^(tacesh|tacesa)-([ou])-(\d+(?:\.\d+)?)$/)!;
     const side = m[1] === "tacesh" ? 0 : 1;
@@ -3658,8 +3653,8 @@ export function scoreOutcomeForSel(
   else if (s === "home") winning = home > away;
   else if (s === "away") winning = away > home;
   else if (s === "draw") winning = home === away;
-  // ── H2H Early Payout (real PropLine market `h2h_early_payout` — the
-  // "early payout" promo never changes what the bet resolves on, so this
+  // ── H2H Early Payout — the "early payout" promo never changes what the
+  // bet resolves on, so this
   // grades identically to the plain 1X2 above) ──────────────────────────────
   else if (s === "h2hep-home") winning = home > away;
   else if (s === "h2hep-away") winning = away > home;
@@ -3690,7 +3685,7 @@ export function scoreOutcomeForSel(
   // Grading needs to know which round the fight actually ended in, read
   // from extra.extras.mma.endedInRound (mirroring the existing
   // extras.basketball.quarters/extras.tennis.sets pattern for sport-
-  // specific supplementary stats). No PulseScore /results sample for MMA
+  // specific supplementary stats). No live results sample for MMA
   // has been seen yet to confirm that field ever actually gets populated —
   // deliberately returns null (stays pending) rather than guess when it's
   // absent, same as every other "insufficient data" branch in this
@@ -4129,61 +4124,19 @@ function providerMatchIdPrefixesForSport(
 ): string[] {
   switch (sport) {
     case "football":
-      // pulsescore-football is the current live prefix (buildFootballLiveFromPulseScore
-      // in matches.ts) — football-v2 (old SportsAPI Pro) is dead (no code creates that
-      // prefix anymore, confirmed 2026-08-08) but kept for any pre-migration matchIds
-      // still sitting in finishedMatchResults/historical bets. Without pulsescore-football
-      // here, resultMatchesSelectionSport() rejected every current football match before
-      // even attempting a team-name match, silently breaking the fuzzy-lookup fallback
-      // (findLiveResultByTeams/findResultByTeams) for 100% of today's football bets.
-      // gs-soccer added 2026 — GoalServe primary provider; uses soccer internally
-      // for historical football, so prefix is gs-soccer-XXX even after normalization.
-      return ["goalapi-football", "propline-football", "pulsescore-football", "football-v2", "gs-soccer", "gs-futsal"];
+      return ["mrdoge-football", "gs-soccer", "gs-football"];
     case "tennis":
-      // pulsescore-tennis is the current live prefix (buildTennisLiveFromPulseScore);
-      // tennis-v1 (Statpal V1) and tennis-v2 (legacy SportsAPI V2) are both dead now but
-      // kept for the same pre-migration reason as football-v2 above.
-      return ["propline-tennis", "pulsescore-tennis", "tennis-v1", "tennis-v2", "gs-tennis"];
+      return ["mrdoge-tennis", "gs-tennis"];
     case "basketball":
-      // pulsescore-basketball is the current live prefix
-      // (buildBasketballLiveFromPulseScore in matches.ts, switched from bwin
-      // 2026-08-08) — bball-v2 (old SportsAPI Pro) is dead but kept for any
-      // pre-migration matchIds still sitting in finishedMatchResults/
-      // historical bets. Missing here until 2026-08-11 (audit finding,
-      // triggered by a user asking whether volleyball settlement was even
-      // configured — basketball had the identical gap): same bug class as
-      // football-v2's own comment above — resultMatchesSelectionSport()
-      // rejected every current basketball match before even attempting a
-      // team-name match, AND isProviderManagedMatchId() below never drove
-      // ensureFinishedMatchResult() for one either, silently breaking both
-      // the fuzzy-lookup fallback and the active "confirm this match is
-      // really finished" check for 100% of today's basketball bets.
-      return ["propline-basketball", "pulsescore-basketball", "bball-v2", "gs-basketball"];
+      return ["mrdoge-basketball", "gs-basketball"];
     case "baseball":
-      // Missing "pulsescore-baseball" until 2026-08-28 (found while wiring
-      // real onexbet markets into baseball this session) — same bug class
-      // already diagnosed and fixed for basketball/volleyball above (see
-      // basketball's comment): buildBaseballLiveFromPulseScore (matches.ts)
-      // has used `pulsescore-baseball-${eventId}` as baseball's live matchId
-      // since that pipeline shipped, but this list never had it, silently
-      // breaking the fuzzy team-name-lookup fallback for every current
-      // baseball bet — baseball-v2/mlb-v2 are the dead pre-migration prefixes.
-      return ["propline-baseball", "pulsescore-baseball", "baseball-v2", "mlb-v2", "gs-baseball"];
+      return ["mrdoge-baseball", "gs-baseball"];
     case "hockey":
-      // Same gap as baseball above, same fix — hockey-v2 is the dead
-      // pre-migration prefix.
-      return ["propline-hockey", "pulsescore-hockey", "hockey-v2", "gs-hockey"];
+      return ["mrdoge-hockey", "gs-hockey"];
     case "mma":
-      // New sport (2026-08-28) — no pre-migration prefix exists, this is
-      // the only one buildMmaUpcomingFromPulseScore ever creates.
-      return ["propline-mma", "pulsescore-mma", "gs-mma"];
+      return ["gs-mma"];
     case "volleyball":
-      // pulsescore-volleyball is the current live AND prematch prefix
-      // (buildVolleyballLiveFromPulseScore/buildVolleyballUpcomingFromPulseScore
-      // in matches.ts, built 2026-08-09) — volley-live/volley-odds are the
-      // dead Statpal-era prefixes, kept for pre-migration matchIds only.
-      // Same missing-prefix bug as basketball above (see its comment).
-      return ["propline-volleyball", "pulsescore-volleyball", "volley-live", "volley-odds", "gs-volleyball"];
+      return ["mrdoge-volleyball", "gs-volleyball"];
     case "handball":
       return ["gs-handball"];
     case "cricket":
@@ -4201,7 +4154,7 @@ function providerMatchIdPrefixesForSport(
     case "futsal":
       return ["gs-futsal"];
     case "darts":
-      return ["propline-darts", "gs-darts"];
+      return ["gs-darts"];
   }
 }
 
@@ -4290,30 +4243,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  // tennis-v1 must be included so ensureFinishedMatchResult (with DB fallback) is called
-  // nhl/nba/mlb are the prefixes that were used by StatPal-native scan functions
-  // (scanNHLForFinished/scanNBAForFinished/scanMLBForFinished, removed along with
-  // the rest of the StatPal integration — kept here only for DB-fallback lookup
-  // of historical results on old pending bets, same as tennis-v1/tennis-v2 above)
-  // pulsescore-football/pulsescore-tennis added 2026-08-08 — ensureFinishedMatchResult
-  // gained a DB-recovery branch for these (matches.ts) but it was never reachable from
-  // the settlement cycle's ensure-loop since this regex never matched the current live
-  // id format, only the dead pre-migration ones above.
-  // pulsescore-basketball/pulsescore-volleyball added 2026-08-11 (audit finding —
-  // same gap as football/tennis had, just never caught until a user asked whether
-  // volleyball settlement was even configured): without these, the settlement
-  // cycle's "ensure this match's result exists" loop (routes/matches.ts's
-  // ensureFinishedMatchResult) never ran for a basketball/volleyball match unless
-  // finishedMatchResults already happened to have it from finalizeStaleLiveMatch's
-  // own disappearance-based GC — the active safety net football/tennis already had
-  // was silently missing for these two sports since their PulseScore live pipelines
-  // shipped (basketball 2026-08-08, volleyball 2026-08-09).
-  // pulsescore-hockey/pulsescore-baseball added 2026-08-28 — same exact gap,
-  // found while wiring real onexbet markets into both sports this session
-  // (see providerMatchIdPrefixesForSport's matching comment above).
-  // pulsescore-mma added the same day — new sport, built from scratch.
-  // gs-* prefixes: GoalServe (2026). Supported for all migrated sports.
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v1|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds|nhl|nba|mlb)-\d+$|^(goalapi-football|propline-(football|tennis|basketball|volleyball|hockey|baseball|mma|darts))-.+$|^pulsescore-(football|tennis|basketball|volleyball|hockey|baseball|mma)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
+  return /^mrdoge-(football|tennis|basketball|hockey|baseball|volleyball)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }
@@ -6382,12 +6312,11 @@ async function expireStalePendingBets(): Promise<void> {
  * for pending bets on those formats any more, same tradeoff as tennis
  * above).
  *
- * Football is NOT scanned here anymore — since the PulseScore migration
- * (2026-08-05), football matches carry "pulsescore-football-*" ids, not
+ * Football is NOT scanned here anymore — live football no longer uses
  * Statpal's main_id, so scanDailyForFinished() (which keyed off main_id) had
  * become dead weight: it never matched any bet's matchId, just burned
  * Statpal quota. Football settlement is instead triggered directly inside
- * buildFootballLiveFromPulseScore()'s disappearance-based GC (matches.ts),
+ * the live football disappearance-based GC (matches.ts),
  * via the same finalizeStaleLiveMatch()/enqueueMatchSettlement() path.
  *
  * Uses self-scheduling setTimeout (not setInterval) so each cycle only starts

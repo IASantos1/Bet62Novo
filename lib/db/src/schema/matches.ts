@@ -1,15 +1,14 @@
 import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 
-// BET62 Fase 0 (hybrid GOAL API + PulseScore architecture, 2026-09-10) —
-// canonical match entity, independent of any single provider's id. Mirrors
+// BET62 Fase 0 — canonical match entity, independent of any single
+// provider's id. Mirrors
 // the competitions/providerCompetitions pattern already established in
 // this schema (competitions.ts + providerCompetitions.ts) — this is the
 // same pattern, one level down, for individual matches instead of whole
-// competitions. GOAL API is the only real provider today, so every row
-// here starts as a 1:1 mirror of a GOAL API fixture (confidence 100, no
-// real matching ambiguity yet) — this table exists now so the join point
-// is ready the moment a second match-data or odds provider (PulseScore)
-// needs to be reconciled against the same match.
+// competitions. Every row starts as a canonical internal match record with
+// confidence 100 when ingested from a single source. This table exists so
+// the join point is ready whenever multiple providers need to be reconciled
+// against the same match.
 //
 // competitionId is a plain nullable reference (no FK constraint) rather
 // than a hard foreign key into competitions — the live competition catalog

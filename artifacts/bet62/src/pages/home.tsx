@@ -625,7 +625,7 @@ function teamNamePt(name: string): string {
 
 // Odds-button team labels used the last word of the full name (e.g.
 // "Manchester United" -> "United"), which works for most club names but
-// breaks for PropLine's international team names: "Macedónia do Norte" ->
+// breaks for some international team names: "Macedónia do Norte" ->
 // "Norte" (meaningless alone), "Chile (W)" -> "(W)" (the whole label is
 // just the gender marker), and two teams sharing a mascot word both
 // collapsing to the same label ("Ust Golden Spikers" / "DLSU Green
@@ -1536,7 +1536,7 @@ const LEAGUE_LOGOS: Record<string, string> = {
 // Brazil-specific substrings ("brasileirao"/"campeonato brasileiro") the
 // keys/patterns require, so "Serie A" (7 chars) stayed the only, and thus
 // longest, match. The match's real `country` (bwin sends this reliably —
-// see countryForPulseScoreFootballEvent on the backend) is a strictly
+// see the backend country resolver) is a strictly
 // better signal than trying to hand-enumerate every regional/lower-tier
 // Brazilian league name variant, so it's used here as a veto: a candidate
 // logo key whose own known country conflicts with the match's real country
@@ -3931,16 +3931,16 @@ type AdvancedMarkets = {
   };
   homeCorners?: { line: number; over: number; under: number };
   awayCorners?: { line: number; over: number; under: number };
-  // Corners handicap (Asian-style spread on corner count) — real PropLine
-  // market `corners_spread`, same shape/settlement as asianHandicap above.
+  // Corners handicap (Asian-style spread on corner count), same
+  // shape/settlement as asianHandicap above.
   // sel keys corh-home/corh-away; label must carry the signed line.
   cornersHandicap?: { line: number; home: number; away: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
-  // Per-team cards over/under — real PropLine market `team_cards`, same
+  // Per-team cards over/under, same
   // shape/rationale as homeCorners/awayCorners above.
   homeCards?: { line: number; over: number; under: number };
   awayCards?: { line: number; over: number; under: number };
-  // Winning Margin — real PropLine market `winning_margin`, ten named
+  // Winning Margin — ten named
   // buckets. sel keys wm-h1/h2/h3/h4p, wm-a1/a2/a3/a4p, wm-draw, wm-nogoal.
   winningMargin?: {
     home1: number;
@@ -3954,15 +3954,15 @@ type AdvancedMarkets = {
     drawScoring: number;
     noGoal: number;
   };
-  // 2+ Goals (player) — real PropLine market `2plus_goals`. sel key prefix `2g:{player}`.
+  // 2+ Goals (player). sel key prefix `2g:{player}`.
   twoPlusGoals?: Array<{ player: string; odds: number }>;
-  // Goal or Assist (player) — real PropLine market `goal_or_assist`. sel key prefix `ga:{player}`.
+  // Goal or Assist (player). sel key prefix `ga:{player}`.
   goalOrAssist?: Array<{ player: string; odds: number }>;
-  // Player Assists (1+) — real PropLine market `player_assists`. sel key prefix `pa:{player}`.
+  // Player Assists (1+). sel key prefix `pa:{player}`.
   playerAssists?: Array<{ player: string; odds: number }>;
-  // 2+ Assists (player) — real PropLine market `player_2plus_assists`. sel key prefix `2a:{player}`.
+  // 2+ Assists (player). sel key prefix `2a:{player}`.
   playerTwoPlusAssists?: Array<{ player: string; odds: number }>;
-  // H2H Early Payout — real PropLine market `h2h_early_payout`, same shape
+  // H2H Early Payout, same shape
   // as the plain 1X2 (sel keys h2hep-home/h2hep-draw/h2hep-away).
   h2hEarlyPayout?: { home: number; draw: number; away: number };
   // Second half result market (who wins just the 2nd half)
@@ -6867,8 +6867,8 @@ export default function Home({
       status === "pause"
     )
       return "HT";
-    // Backend sets status "FT" when PulseScore's clock is stuck at/past
-    // 90:00 for 20s+ (see buildFootballLiveFromPulseScore's isFulltimeFreeze)
+    // Backend sets status "FT" when the provider clock is stuck at/past
+    // 90:00 for 20s+
     // — the match is very likely over even though it hasn't left the
     // live-events feed yet. Without this, minute would push it into the
     // "2P" fallback below and the clock label would just show a frozen
@@ -7286,7 +7286,7 @@ export default function Home({
         return {
           ...anyUpdated,
           // tennisExtra is deliberately never included in the live list
-          // payload (see buildTennisLiveFromPulseScore in matches.ts) —
+          // payload —
           // it's only computed on demand by the per-match hydration fetch
           // above. Without this fallback, every periodic live-list sync
           // tick (this effect) overwrote it with the list's plain markets
@@ -7314,7 +7314,7 @@ export default function Home({
       (expandedMatch.sport ?? "football") === "football";
     // Tennis's tennisExtra (total sets, straight-sets/go-the-distance, exact
     // set score, etc.) is deliberately never included in the live list
-    // payload — buildTennisLiveFromPulseScore only stashes a bare `markets`
+    // payload — the live list only stashes a bare `markets`
     // shell there and computes tennisExtra on demand, only for this
     // per-match fetch (see GET /live-match/:id in matches.ts). Bailing out
     // on `hasMarkets` alone skipped this fetch for every tennis match ever
@@ -12041,7 +12041,7 @@ export default function Home({
               </div>
             )}
             {/* ── MMA: "vai até o limite" + total de rounds, alongside the
-                standard moneyline above (real PulseScore odds, no synthetic
+                standard moneyline above (real provider odds, no synthetic
                 model) ── */}
             {sport === "mma" && match.mmaExtra?.toDistance && (
               <div className="flex gap-1 w-full mt-1">
@@ -19254,7 +19254,7 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
-                    {/* Aces — jogador da casa (real PropLine player_aces market) */}
+                    {/* Aces — jogador da casa */}
                     {((m as any).tennisExtra as any).homeAces?.over > 0 && (
                       <MarketGroup
                         title={`Aces — ${match.home} — O/U ${((m as any).tennisExtra as any).homeAces.line}`}
@@ -19277,7 +19277,7 @@ export default function Home({
                         />
                       </MarketGroup>
                     )}
-                    {/* Aces — jogador visitante (real PropLine player_aces market) */}
+                    {/* Aces — jogador visitante */}
                     {((m as any).tennisExtra as any).awayAces?.over > 0 && (
                       <MarketGroup
                         title={`Aces — ${match.away} — O/U ${((m as any).tennisExtra as any).awayAces.line}`}

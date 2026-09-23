@@ -3,11 +3,10 @@ import { matchesTable } from "./matches.js";
 
 // BET62 Fase 0 — maps one provider's native match id to the canonical
 // match it represents. Same shape as providerCompetitions.ts, one level
-// down. GOAL API is the only provider writing rows here today (confidence
-// "single_source" — there is nothing to disambiguate against yet); once a
-// second provider (PulseScore) needs to be joined to the same match, its
-// rows land here too and the matching engine (not yet built — see the
-// Fase 0 plan) decides the confidence level instead of assuming 100%.
+// down. A single-source ingest can write rows here with confidence
+// "single_source"; once multiple providers need to be joined to the same
+// match, the matching engine decides the confidence level instead of
+// assuming 100%.
 export const matchProviderMappingTable = pgTable("match_provider_mapping", {
   id: serial("id").primaryKey(),
   provider: text("provider").notNull(),
