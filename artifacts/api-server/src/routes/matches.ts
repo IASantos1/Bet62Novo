@@ -10,9 +10,13 @@ import {
   getBsdEvents,
   getBsdLeagueBestXi,
   getBsdLeagueById,
+  getBsdLeagueSeasons,
   getBsdLeagueSeason,
   getBsdLeagueStandings,
+  getBsdLeagueTopStat,
   getBsdLeagueTopScorers,
+  getBsdLeagueVenues,
+  getBsdLeagues,
   getBsdLiveEvents,
   getBsdOddsForEvent,
   getBsdPlayerById,
@@ -22,11 +26,14 @@ import {
   getBsdPlayerTransfers,
   type BSDEvent,
   type BSDH2HResponse,
+  type BSDLeague,
   type BSDLineupsResponse,
   type BSDOddsRow,
   type BSDPredictionResponse,
   type BSDStandingRow,
   type BSDStatsResponse,
+  type BSDTopScorerRow,
+  type BSDVenue,
 } from "../services/bsd/client.js";
 
 type Odds1X2 = {
@@ -681,6 +688,63 @@ function mapStandingZone(zone: BSDStandingRow["zone"]): StandingZone {
 
 type StandingZone = "promotion" | "european" | "safe" | "relegationPlayoff" | "relegation";
 
+function mapStandingLegendEntry(
+  row:
+    | {
+        key?: string | null;
+        label?: string | null;
+        type?: string | null;
+        from?: number | string | null;
+        to?: number | string | null;
+      }
+    | null
+    | undefined,
+) {
+  return {
+    key: text(row?.key) || null,
+    label: text(row?.label) || null,
+    type: text(row?.type) || null,
+    from: row?.from != null ? parseNumber(row.from) : null,
+    to: row?.to != null ? parseNumber(row.to) : null,
+  };
+}
+
+function mapStandingZones(
+  zones:
+    | Array<{
+        key?: string | null;
+        label?: string | null;
+        type?: string | null;
+        from?: number | string | null;
+        to?: number | string | null;
+      }>
+    | Record<
+        string,
+        Array<{
+          key?: string | null;
+          label?: string | null;
+          type?: string | null;
+          from?: number | string | null;
+          to?: number | string | null;
+        }>
+      >
+    | null
+    | undefined,
+) {
+  if (Array.isArray(zones)) {
+    return zones.map((row) => mapStandingLegendEntry(row));
+  }
+  if (zones && typeof zones === "object") {
+    return Object.fromEntries(
+      Object.entries(zones).map(([groupName, rows]) => [
+        groupName,
+        Array.isArray(rows) ? rows.map((row) => mapStandingLegendEntry(row)) : [],
+      ]),
+    );
+  }
+  return [];
+}
+
 function mapStandingsRows(rows: BSDStandingRow[]) {
   return rows.map((row) => ({
     pos: parseNumber(row.position),
@@ -694,6 +758,73 @@ function mapStandingsRows(rows: BSDStandingRow[]) {
     pts: parseNumber(row.points ?? row.pts),
     zone: mapStandingZone(row.zone),
   }));
+}
+
+function mapLeagueSummary(row: BSDLeague) {
+  const id = parseNumber(row.id);
+  return {
+    id: id > 0 ? id : null,
+    name: text(row.name, "Liga"),
+    country: text(row.country, "Internacional"),
+    isWomen: Boolean(row.is_women),
+    active:
+      row.is_active != null ? Boolean(row.is_active) : row.active != null ? Boolean(row.active) : true,
+    logoUrl: toLeagueLogo(row.id),
+  };
+}
+
+function mapSeasonSummary(season: Record<string, unknown>) {
+  const stages = Array.isArray(season["stages"])
+    ? (season["stages"] as Array<Record<string, unknown>>)
+    : [];
+  return {
+    id: season["id"] != null ? String(season["id"]) : null,
+    name: text(season["name"]) || null,
+    year: season["year"] != null ? String(season["year"]) : null,
+    startDate: text(season["start_date"]) || null,
+    endDate: text(season["end_date"]) || null,
+    isCurrent: Boolean(season["is_current"]),
+    stages: stages.map((stage) => ({
+      stage: text(stage["stage"]) || null,
+      stageName: text(stage["stage_name"]) || null,
+      matches: stage["matches"] != null ? parseNumber(stage["matches"]) : null,
+      rounds: stage["rounds"] != null ? parseNumber(stage["rounds"]) : null,
+      startDate: text(stage["start_date"]) || null,
+      endDate: text(stage["end_date"]) || null,
+    })),
+  };
+}
+
+function mapTopStatRows(rows: BSDTopScorerRow[]) {
+  return rows.map((row) => ({
+    rank: parseNumber(row.rank),
+    playerId: row.player_id != null ? String(row.player_id) : null,
+    name: text(row.player_name),
+    teamId: row.team_id != null ? String(row.team_id) : null,
+    team: text(row.team_name),
+    value: parseNumber(row.value),
+    matches: parseNumber(row.matches),
+    position: text(row.position),
+    imageUrl: toPlayerImage(row.player_id),
+  }));
+}
+
+function mapVenue(row: BSDVenue) {
+  return {
+    id: row.id != null ? String(row.id) : null,
+    name: text(row.name) || null,
+    city: text(row.city) || null,
+    country: text(row.country) || null,
+    capacity: row.capacity != null ? parseNumber(row.capacity) : null,
+    surface: text(row.surface) || null,
+    teamId: row.team_id != null ? String(row.team_id) : null,
+    team: text(row.team_name) || null,
+    hostCountryCode: text(row.host_country_code) || null,
+    hostsFinal: row.hosts_final != null ? Boolean(row.hosts_final) : null,
+    hostsOpening: row.hosts_opening != null ? Boolean(row.hosts_opening) : null,
+    hostsThirdPlace: row.hosts_third_place != null ? Boolean(row.hosts_third_place) : null,
+    round: row.round != null ? parseNumber(row.round) : null,
+  };
 }
 
 function mapLeagueEventCard(event: BSDEvent) {
@@ -1242,10 +1373,11 @@ router.get("/league-standings", async (req: Request, res: Response) => {
   try {
     const leagueId = String(req.query["leagueId"] ?? "").trim();
     if (!leagueId) return sendJson(res, { league: null, teams: [], groups: [] });
-    const season = await getBsdLeagueSeason(leagueId);
+    const requestedSeasonId = String(req.query["seasonId"] ?? "").trim() || undefined;
+    const season = requestedSeasonId ? null : await getBsdLeagueSeason(leagueId);
     const standings = await getBsdLeagueStandings({
       leagueId,
-      seasonId: season?.id != null ? String(season.id) : undefined,
+      seasonId: requestedSeasonId ?? (season?.id != null ? String(season.id) : undefined),
     });
     const groups = Array.isArray(standings?.groups)
       ? standings.groups.map((group) => ({
@@ -1264,9 +1396,10 @@ router.get("/league-standings", async (req: Request, res: Response) => {
       league: leagueId,
       teams,
       groups,
+      zones: mapStandingZones(standings?.zones),
     });
   } catch (error) {
-    res.status(formatErrorStatus(error, 500)).json({ league: null, teams: [], groups: [] });
+    res.status(formatErrorStatus(error, 500)).json({ league: null, teams: [], groups: [], zones: [] });
   }
 });
 
@@ -1277,15 +1410,27 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "league id required" });
     }
     const today = todayIsoDate(0);
-    const [league, season] = await Promise.all([
+    const requestedSeasonId = String(req.query["seasonId"] ?? "").trim() || undefined;
+    const requestedRoundNumber = String(req.query["round"] ?? "").trim() || undefined;
+    const topStat = String(req.query["topStat"] ?? "scorers").trim().toLowerCase();
+    const [league, season, seasons] = await Promise.all([
       getBsdLeagueById(leagueId),
-      getBsdLeagueSeason(leagueId),
+      requestedSeasonId ? Promise.resolve(null) : getBsdLeagueSeason(leagueId),
+      getBsdLeagueSeasons(leagueId).catch(() => []),
     ]);
     const seasonId =
-      season?.id != null && `${season.id}`.trim() !== ""
+      requestedSeasonId ??
+      (season?.id != null && `${season.id}`.trim() !== ""
         ? String(season.id)
-        : undefined;
-    const [standings, upcoming, results, topScorers, bestXi] = await Promise.all([
+        : undefined);
+    const safeTopStat =
+      topStat === "assists" ||
+      topStat === "yellowcards" ||
+      topStat === "redcards" ||
+      topStat === "fouls"
+        ? topStat
+        : "scorers";
+    const [standings, upcoming, results, topRows, bestXi, venues] = await Promise.all([
       getBsdLeagueStandings({ leagueId, seasonId }),
       getBsdEvents({
         leagueId,
@@ -1302,28 +1447,24 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
         limit: 20,
         offset: 0,
       }).catch(() => ({ results: [] as BSDEvent[] })),
-      getBsdLeagueTopScorers({ leagueId, seasonId, limit: 10 }).catch(() => []),
-      seasonId ? getBsdLeagueBestXi({ leagueId, seasonId }).catch(() => null) : Promise.resolve(null),
+      getBsdLeagueTopStat({ leagueId, stat: safeTopStat, seasonId, limit: 10 }).catch(() => []),
+      seasonId
+        ? getBsdLeagueBestXi({ leagueId, seasonId, roundNumber: requestedRoundNumber }).catch(() => null)
+        : Promise.resolve(null),
+      getBsdLeagueVenues({ leagueId, seasonId }).catch(() => []),
     ]);
 
     res.json({
-      header: {
-        id: Number(league?.id ?? leagueId),
-        name: text(league?.name, `Liga ${leagueId}`),
-        country: text(league?.country),
-        isWomen: Boolean(league?.is_women),
-        logoUrl: toLeagueLogo(leagueId),
-      },
-      season: season
-        ? {
-            id: season.id != null ? String(season.id) : null,
-            name: text(season.name),
-            year: season.year != null ? String(season.year) : null,
-            startDate: text(season.start_date),
-            endDate: text(season.end_date),
-            isCurrent: Boolean(season.is_current),
-          }
-        : null,
+      header: mapLeagueSummary(league ?? { id: leagueId, name: `Liga ${leagueId}` }),
+      season:
+        seasonId != null
+          ? mapSeasonSummary(
+              (seasons.find((row) => String(row.id ?? "") === seasonId) ?? season ?? {
+                id: seasonId,
+              }) as Record<string, unknown>,
+            )
+          : null,
+      seasons: seasons.map((row) => mapSeasonSummary(row as unknown as Record<string, unknown>)),
       standings: {
         table: mapStandingsRows(
           Array.isArray(standings?.standings) ? standings.standings : [],
@@ -1340,6 +1481,7 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
               ),
             }))
           : [],
+        zones: mapStandingZones(standings?.zones),
       },
       fixtures: Array.isArray(upcoming.results)
         ? upcoming.results.map(mapLeagueEventCard)
@@ -1347,19 +1489,10 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
       results: Array.isArray(results.results)
         ? results.results.map(mapLeagueEventCard)
         : [],
-      topScorers: topScorers.map((row) => ({
-        rank: parseNumber(row.rank),
-        playerId: row.player_id != null ? String(row.player_id) : null,
-        name: text(row.player_name),
-        teamId: row.team_id != null ? String(row.team_id) : null,
-        team: text(row.team_name),
-        value: parseNumber(row.value),
-        matches: parseNumber(row.matches),
-        position: text(row.position),
-        imageUrl:
-          toPlayerImage(row.player_id),
-      })),
+      topStat: safeTopStat,
+      topScorers: mapTopStatRows(topRows),
       bestXi: mapBestXi(bestXi as Record<string, unknown> | null),
+      venues: venues.map(mapVenue),
     });
   } catch (error) {
     res
@@ -1368,8 +1501,56 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/leagues", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdLeagues({
+      country: String(req.query["country"] ?? "").trim() || undefined,
+      isWomen:
+        req.query["isWomen"] != null
+          ? String(req.query["isWomen"]).trim().toLowerCase() === "true"
+          : undefined,
+      includeInactive:
+        req.query["includeInactive"] != null
+          ? String(req.query["includeInactive"]).trim().toLowerCase() === "true"
+          : undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      leagues: Array.isArray(payload.results) ? payload.results.map(mapLeagueSummary) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, leagues: [] });
+  }
+});
+
 router.get("/football-leagues", async (_req: Request, res: Response) => {
   try {
+    const hasDirectoryFilters =
+      _req.query["country"] != null ||
+      _req.query["isWomen"] != null ||
+      _req.query["includeInactive"] != null ||
+      _req.query["limit"] != null ||
+      _req.query["offset"] != null;
+    if (hasDirectoryFilters) {
+      const payload = await getBsdLeagues({
+        country: String(_req.query["country"] ?? "").trim() || undefined,
+        isWomen:
+          _req.query["isWomen"] != null
+            ? String(_req.query["isWomen"]).trim().toLowerCase() === "true"
+            : undefined,
+        includeInactive:
+          _req.query["includeInactive"] != null
+            ? String(_req.query["includeInactive"]).trim().toLowerCase() === "true"
+            : undefined,
+        limit: Math.max(1, Math.min(200, parseNumber(_req.query["limit"] ?? 50))),
+        offset: Math.max(0, parseNumber(_req.query["offset"] ?? 0)),
+      });
+      return sendJson(res, {
+        leagues: Array.isArray(payload.results) ? payload.results.map(mapLeagueSummary) : [],
+      });
+    }
     const range = String(_req.query["range"] ?? "week").trim().toLowerCase();
     const events = await getCatalogEvents(range);
     const grouped = new Map<string, { id: number; name: string; country: string; eventCount: number }>();
@@ -1394,6 +1575,90 @@ router.get("/football-leagues", async (_req: Request, res: Response) => {
     });
   } catch {
     sendJson(res, { leagues: [] });
+  }
+});
+
+router.get("/leagues/:id/seasons", async (req: Request, res: Response) => {
+  try {
+    const leagueId = String(req.params["id"] ?? "").trim();
+    if (!leagueId) return res.status(400).json({ error: "league id required" });
+    const seasons = await getBsdLeagueSeasons(leagueId);
+    sendJson(res, { seasons: seasons.map((row) => mapSeasonSummary(row as unknown as Record<string, unknown>)) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ seasons: [] });
+  }
+});
+
+router.get("/leagues/:id/season", async (req: Request, res: Response) => {
+  try {
+    const leagueId = String(req.params["id"] ?? "").trim();
+    if (!leagueId) return res.status(400).json({ error: "league id required" });
+    const season = await getBsdLeagueSeason(leagueId);
+    sendJson(res, { season: season ? mapSeasonSummary(season as unknown as Record<string, unknown>) : null });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ season: null });
+  }
+});
+
+router.get("/leagues/:id/top/:stat", async (req: Request, res: Response) => {
+  try {
+    const leagueId = String(req.params["id"] ?? "").trim();
+    const stat = String(req.params["stat"] ?? "").trim().toLowerCase();
+    if (!leagueId) return res.status(400).json({ error: "league id required" });
+    if (!["scorers", "assists", "yellowcards", "redcards", "fouls"].includes(stat)) {
+      return res.status(400).json({ error: "invalid top stat" });
+    }
+    const rows = await getBsdLeagueTopStat({
+      leagueId,
+      stat: stat as "scorers" | "assists" | "yellowcards" | "redcards" | "fouls",
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(50, parseNumber(req.query["limit"] ?? 20))),
+    });
+    sendJson(res, { stat, rows: mapTopStatRows(rows) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ stat: null, rows: [] });
+  }
+});
+
+router.get("/leagues/:id/bestxi/:seasonId/:roundNumber?", async (req: Request, res: Response) => {
+  try {
+    const leagueId = String(req.params["id"] ?? "").trim();
+    const seasonId = String(req.params["seasonId"] ?? "").trim();
+    const roundNumber = String(req.params["roundNumber"] ?? "").trim() || undefined;
+    if (!leagueId || !seasonId) return res.status(400).json({ error: "league and season required" });
+    const payload = await getBsdLeagueBestXi({ leagueId, seasonId, roundNumber });
+    sendJson(res, mapBestXi(payload as Record<string, unknown> | null));
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json(mapBestXi(null));
+  }
+});
+
+router.get("/leagues/:id/venues", async (req: Request, res: Response) => {
+  try {
+    const leagueId = String(req.params["id"] ?? "").trim();
+    if (!leagueId) return res.status(400).json({ error: "league id required" });
+    const venues = await getBsdLeagueVenues({
+      leagueId,
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      hostCountryCode: String(req.query["hostCountryCode"] ?? "").trim() || undefined,
+      hostsFinal:
+        req.query["hostsFinal"] != null
+          ? String(req.query["hostsFinal"]).trim().toLowerCase() === "true"
+          : undefined,
+      hostsOpening:
+        req.query["hostsOpening"] != null
+          ? String(req.query["hostsOpening"]).trim().toLowerCase() === "true"
+          : undefined,
+      hostsThirdPlace:
+        req.query["hostsThirdPlace"] != null
+          ? String(req.query["hostsThirdPlace"]).trim().toLowerCase() === "true"
+          : undefined,
+      round: String(req.query["round"] ?? "").trim() || undefined,
+    });
+    sendJson(res, { venues: venues.map(mapVenue) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ venues: [] });
   }
 });
 
@@ -1684,25 +1949,18 @@ router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
   try {
     const leagueId = String(req.params["leagueId"] ?? "").trim();
     if (!leagueId) return sendJson(res, { scorers: [] });
-    const season = await getBsdLeagueSeason(leagueId);
+    const requestedSeasonId = String(req.query["seasonId"] ?? "").trim() || undefined;
+    const season = requestedSeasonId ? null : await getBsdLeagueSeason(leagueId);
     const scorers = await getBsdLeagueTopScorers({
       leagueId,
-      seasonId: season?.id != null ? String(season.id) : undefined,
-      limit: 20,
+      seasonId: requestedSeasonId ?? (season?.id != null ? String(season.id) : undefined),
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(50, parseNumber(req.query["limit"] ?? 20))),
     });
     sendJson(
       res,
       {
-        scorers: scorers.map((row) => ({
-          rank: parseNumber(row.rank),
-          playerId: row.player_id != null ? String(row.player_id) : null,
-          name: text(row.player_name),
-          teamId: row.team_id != null ? String(row.team_id) : null,
-          team: text(row.team_name),
-          value: parseNumber(row.value),
-          matches: parseNumber(row.matches),
-          position: text(row.position),
-        })),
+        scorers: mapTopStatRows(scorers),
       },
     );
   } catch (error) {

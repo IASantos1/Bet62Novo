@@ -90,7 +90,25 @@ export type BSDStandingsResponse = {
     standings?: BSDStandingRow[];
     rows?: BSDStandingRow[];
   }>;
-  zones?: unknown;
+  zones?:
+    | Array<{
+        key?: string | null;
+        label?: string | null;
+        type?: string | null;
+        from?: number | string | null;
+        to?: number | string | null;
+      }>
+    | Record<
+        string,
+        Array<{
+          key?: string | null;
+          label?: string | null;
+          type?: string | null;
+          from?: number | string | null;
+          to?: number | string | null;
+        }>
+      >
+    | null;
 };
 
 export type BSDSeason = {
@@ -108,6 +126,8 @@ export type BSDLeague = {
   name?: string | null;
   country?: string | null;
   is_women?: boolean | null;
+  active?: boolean | null;
+  is_active?: boolean | null;
 };
 
 export type BSDTopScorerRow = {
@@ -119,6 +139,22 @@ export type BSDTopScorerRow = {
   team_name?: string | null;
   value?: number | string | null;
   matches?: number | string | null;
+};
+
+export type BSDVenue = {
+  id?: number | string | null;
+  name?: string | null;
+  city?: string | null;
+  country?: string | null;
+  capacity?: number | string | null;
+  surface?: string | null;
+  team_id?: number | string | null;
+  team_name?: string | null;
+  host_country_code?: string | null;
+  hosts_final?: boolean | null;
+  hosts_opening?: boolean | null;
+  hosts_third_place?: boolean | null;
+  round?: number | string | null;
 };
 
 export type BSDPredictionResponse = {
@@ -416,6 +452,40 @@ export async function getBsdLeagueSeason(
   }).catch(() => null);
 }
 
+export async function getBsdLeagues(args?: {
+  country?: string;
+  isWomen?: boolean;
+  includeInactive?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDLeague>> {
+  return bsdFetch<PaginatedResponse<BSDLeague>>("/leagues/", {
+    query: {
+      ...(args?.country ? { country: args.country } : {}),
+      ...(args?.isWomen != null ? { is_women: args.isWomen } : {}),
+      ...(args?.includeInactive != null
+        ? { include_inactive: args.includeInactive }
+        : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 5 * 60_000,
+  }).catch(() => ({ results: [] as BSDLeague[] }));
+}
+
+export async function getBsdLeagueSeasons(
+  leagueId: string | number,
+): Promise<BSDSeason[]> {
+  const payload = await bsdFetch<PaginatedResponse<BSDSeason> | BSDSeason[]>(
+    `/leagues/${encodeURIComponent(String(leagueId))}/seasons/`,
+    {
+      ttlMs: 60 * 60_000,
+    },
+  ).catch(() => ({ results: [] as BSDSeason[] }));
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
 export async function getBsdLeagueById(
   leagueId: string | number,
 ): Promise<BSDLeague | null> {
@@ -440,6 +510,7 @@ export async function getBsdLeagueStandings(args: {
 export async function getBsdLeagueTopScorers(args: {
   leagueId: string | number;
   seasonId?: string | number;
+  teamId?: string | number;
   limit?: number;
 }): Promise<BSDTopScorerRow[]> {
   const payload = await bsdFetch<PaginatedResponse<BSDTopScorerRow>>(
@@ -447,6 +518,31 @@ export async function getBsdLeagueTopScorers(args: {
     {
       query: {
         ...(args.seasonId != null ? { season_id: args.seasonId } : {}),
+        ...(args.teamId != null ? { team_id: args.teamId } : {}),
+        limit: args.limit ?? 20,
+        offset: 0,
+      },
+      ttlMs: 10 * 60_000,
+    },
+  ).catch(() => ({ results: [] as BSDTopScorerRow[] }));
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
+export async function getBsdLeagueTopStat(args: {
+  leagueId: string | number;
+  stat: "scorers" | "assists" | "yellowcards" | "redcards" | "fouls";
+  seasonId?: string | number;
+  teamId?: string | number;
+  limit?: number;
+}): Promise<BSDTopScorerRow[]> {
+  const payload = await bsdFetch<PaginatedResponse<BSDTopScorerRow>>(
+    `/leagues/${encodeURIComponent(String(args.leagueId))}/top/${encodeURIComponent(
+      String(args.stat),
+    )}/`,
+    {
+      query: {
+        ...(args.seasonId != null ? { season_id: args.seasonId } : {}),
+        ...(args.teamId != null ? { team_id: args.teamId } : {}),
         limit: args.limit ?? 20,
         offset: 0,
       },
@@ -473,6 +569,46 @@ export async function getBsdLeagueBestXi(args: {
       ttlMs: 30 * 60_000,
     },
   ).catch(() => null);
+}
+
+export async function getBsdLeagueVenues(args: {
+  leagueId: string | number;
+  seasonId?: string | number;
+  hostCountryCode?: string;
+  hostsFinal?: boolean;
+  hostsOpening?: boolean;
+  hostsThirdPlace?: boolean;
+  round?: string | number;
+}): Promise<BSDVenue[]> {
+  const path =
+    args.seasonId != null && `${args.seasonId}`.trim() !== ""
+      ? `/leagues/${encodeURIComponent(String(args.leagueId))}/seasons/${encodeURIComponent(
+          String(args.seasonId),
+        )}/venues/`
+      : `/leagues/${encodeURIComponent(String(args.leagueId))}/venues/`;
+  const payload = await bsdFetch<PaginatedResponse<BSDVenue> | BSDVenue[]>(path, {
+    query:
+      args.seasonId != null && `${args.seasonId}`.trim() !== ""
+        ? {
+            ...(args.hostCountryCode
+              ? { host_country_code: args.hostCountryCode }
+              : {}),
+            ...(args.hostsFinal != null ? { hosts_final: args.hostsFinal } : {}),
+            ...(args.hostsOpening != null
+              ? { hosts_opening: args.hostsOpening }
+              : {}),
+            ...(args.hostsThirdPlace != null
+              ? { hosts_third_place: args.hostsThirdPlace }
+              : {}),
+            ...(args.round != null ? { round: args.round } : {}),
+          }
+        : args.seasonId != null
+          ? { season_id: args.seasonId }
+          : undefined,
+    ttlMs: 30 * 60_000,
+  }).catch(() => ({ results: [] as BSDVenue[] }));
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.results) ? payload.results : [];
 }
 
 export async function getBsdPlayerById(
