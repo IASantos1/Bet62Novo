@@ -162,10 +162,6 @@ function sportMonksOddsLabelKey(row: SportMonksOdd): string {
   );
 }
 
-function sportMonksIsOpenOdd(row: SportMonksOdd): boolean {
-  return !(row.stopped || row.suspended);
-}
-
 function sportMonksChooseBookmakerOdds(rows: SportMonksOdd[]): SportMonksOdd[] {
   if (rows.length === 0) return [];
   const preferred = normalizeSportEntityName(CONFIG.SPORTMONKS_ODDS_BOOKMAKER);
@@ -301,9 +297,11 @@ function sportMonksApplyFootballOdds(
   };
 
   for (const row of rows) {
-    if (!sportMonksIsOpenOdd(row)) continue;
     const price = sportMonksOddsDecimal(row);
     if (!(price > 1.001)) continue;
+    // SportMonks in-play often keeps the last quoted bookmaker price on rows
+    // temporarily flagged as suspended/stopped. Preserve that snapshot so the
+    // match does not lose all visible football odds during a live pause.
     const marketKey = sportMonksOddsMarketKey(row);
     const label = String(row.label ?? row.name ?? "").trim();
     const labelKey = sportMonksOddsLabelKey(row);
