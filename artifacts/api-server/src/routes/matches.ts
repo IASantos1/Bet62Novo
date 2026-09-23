@@ -15,37 +15,6 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import type { Match, Market } from "@mrdoge/node";
-import { getMrDogeClient } from "../services/mrdoge/client.js";
-import {
-  getMrDogeLiveMatches,
-  startMrDogeLiveSync,
-} from "../services/mrdoge/liveSync.js";
-import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
-import {
-  MRDOGE_SOCCER_BET_TYPES,
-  MRDOGE_SPORT_BY_BET62,
-  mrDogeMatchId,
-  mrDogeRegionFlag,
-  mrDogeStartTimeToLisbon,
-  mrDogeSoccerStatus,
-  mrDogeTeamLogo,
-  mrDogeGenericStatus,
-  totalGoalsMapToFields,
-  extractMrDogeSoccerMoneyline,
-  extractMrDogeGenericMoneyline,
-  extractMrDogeSoccerTotalGoals,
-  extractMrDogeSoccerBtts,
-  extractMrDogeSoccerExtendedMarkets,
-  extractMrDogeSoccerLiveExtra,
-  buildMrDogeSoccerMatchStats,
-  buildMrDogeTimelineEvents,
-  extractMrDogeTennisLiveExtra,
-  extractMrDogeBasketballLiveExtra,
-  extractMrDogeIceHockeyLiveExtra,
-  extractMrDogeBaseballLiveExtra,
-  extractMrDogeVolleyballLiveExtra,
-} from "../services/mrdoge/common.js";
 import {
   getSportMonksFixtureById,
   getSportMonksFixturesBetween,
@@ -82,7 +51,6 @@ const router: IRouter = Router();
 function extractProviderMatchId(rawId: string): string {
   return String(rawId ?? "")
     .replace(/^[a-z]+-v\d+-/i, "")
-    .replace(/^mrdoge-[a-z_]+-/i, "")
     .replace(/^sportmonks-[a-z_]+-/i, "");
 }
 
@@ -154,24 +122,6 @@ function sportMonksTimerSeconds(timer: string | null | undefined): number {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function sportMonksVsMrDogeMatch(
-  fixture: SportMonksFixture,
-  match: Match,
-): boolean {
-  const teams = sportMonksTeams(fixture);
-  if (!teams.home || !teams.away) return false;
-  const sameHome =
-    normalizeSportEntityName(String(teams.home.name ?? "")) ===
-    normalizeSportEntityName(String(match.homeTeam?.name ?? ""));
-  const sameAway =
-    normalizeSportEntityName(String(teams.away.name ?? "")) ===
-    normalizeSportEntityName(String(match.awayTeam?.name ?? ""));
-  if (!sameHome || !sameAway) return false;
-  const smTime = sportMonksTimestampMs(fixture);
-  const mrTime = Date.parse(String(match.startTime ?? ""));
-  if (!Number.isFinite(smTime) || !Number.isFinite(mrTime)) return true;
-  return Math.abs(smTime - mrTime) <= 90 * 60_000;
-}
 
 function sportMonksOddsDecimal(row: SportMonksOdd): number {
   const value = Number(row.value ?? row.dp3 ?? NaN);
@@ -210,10 +160,6 @@ function sportMonksOddsLabelKey(row: SportMonksOdd): string {
   return normalizeSportEntityName(
     String(row.label ?? row.name ?? row.original_label ?? ""),
   );
-}
-
-function sportMonksIsOpenOdd(row: SportMonksOdd): boolean {
-  return !(row.stopped || row.suspended);
 }
 
 function sportMonksChooseBookmakerOdds(rows: SportMonksOdd[]): SportMonksOdd[] {
@@ -351,9 +297,11 @@ function sportMonksApplyFootballOdds(
   };
 
   for (const row of rows) {
-    if (!sportMonksIsOpenOdd(row)) continue;
     const price = sportMonksOddsDecimal(row);
     if (!(price > 1.001)) continue;
+    // SportMonks in-play often keeps the last quoted bookmaker price on rows
+    // temporarily flagged as suspended/stopped. Preserve that snapshot so the
+    // match does not lose all visible football odds during a live pause.
     const marketKey = sportMonksOddsMarketKey(row);
     const label = String(row.label ?? row.name ?? "").trim();
     const labelKey = sportMonksOddsLabelKey(row);
@@ -712,10 +660,29 @@ function sportMonksApplyFootballOdds(
     markets.awayCorners = awayCorners[0];
   }
 
-  hasRealOdds =
+  const hasResultOdds =
     resultOdds.home > 1 &&
     resultOdds.draw > 1 &&
     resultOdds.away > 1;
+  const hasMeaningfulDerivedMarket =
+    markets.doubleChance.homeOrDraw > 1 ||
+    markets.doubleChance.awayOrDraw > 1 ||
+    markets.doubleChance.homeOrAway > 1 ||
+    markets.bothTeamsScore.yes > 1 ||
+    markets.bothTeamsScore.no > 1 ||
+    markets.totalGoals.over05 > 1 ||
+    markets.totalGoals.over15 > 1 ||
+    markets.totalGoals.over25 > 1 ||
+    markets.totalGoals.under05 > 1 ||
+    markets.totalGoals.under15 > 1 ||
+    markets.totalGoals.under25 > 1 ||
+    markets.drawNoBet.home > 1 ||
+    markets.drawNoBet.away > 1 ||
+    markets.asianHandicap.home > 1 ||
+    markets.asianHandicap.away > 1 ||
+    Object.values(markets.correctScore).some((price) => Number(price) > 1);
+
+  hasRealOdds = hasResultOdds || hasMeaningfulDerivedMarket;
 
   return {
     hasRealOdds,
@@ -949,81 +916,7 @@ function sportMonksVsBet62Match(
   if (!matchDate) return true;
   const smTime = sportMonksTimestampMs(fixture);
   if (!Number.isFinite(smTime)) return true;
-  return mrDogeStartTimeToLisbon(new Date(smTime).toISOString()).date === matchDate;
-}
-
-function mrDogeAllOddsGroup(market: Market): string {
-  const betType = String((market as any).betType ?? "").toUpperCase();
-  const name = String(market.displayName ?? "").toLowerCase();
-  if (
-    betType.includes("CORRECT_SCORE") ||
-    betType.includes("NUMBER_OF_GOALS") ||
-    name.includes("correct score")
-  ) {
-    return "Placar";
-  }
-  if (
-    betType.includes("FIRST_HALF") ||
-    betType.includes("SECOND_HALF") ||
-    betType.includes("HALFTIME") ||
-    name.includes("1st half") ||
-    name.includes("2nd half")
-  ) {
-    return "Tempos";
-  }
-  if (
-    betType.includes("ASIAN") ||
-    betType.includes("HANDICAP") ||
-    betType.includes("NODRAW")
-  ) {
-    return "Asiático";
-  }
-  if (
-    betType.includes("UNDER_OVER") ||
-    betType.includes("TOTAL") ||
-    betType.includes("GOALS") ||
-    betType.includes("TO_SCORE")
-  ) {
-    return "Golos";
-  }
-  if (
-    betType.includes("DOUBLE_CHANCE") ||
-    betType.includes("BOTH_TEAMS_TO_SCORE") ||
-    betType.includes("WIN_TO_NIL") ||
-    betType.includes("CLEAN_SHEET")
-  ) {
-    return "Especiais";
-  }
-  return "Principal";
-}
-
-function mapMrDogeMarketToAllOdds(market: Market): {
-  name: string;
-  group: string;
-  choices: Array<{ name: string; label: string; odds: number }>;
-} | null {
-  const lines = Array.isArray((market as any).lines) ? ((market as any).lines as Array<Record<string, unknown>>) : [];
-  const choices = lines
-    .filter((line) => {
-      const price = Number(line["price"] ?? 0);
-      const available = line["isAvailable"];
-      return Number.isFinite(price) && price > 1.01 && available !== false;
-    })
-    .map((line) => {
-      const code = String(line["code"] ?? line["caption"] ?? "");
-      const caption = String(line["caption"] ?? line["code"] ?? "");
-      return {
-        name: code || caption,
-        label: caption || code,
-        odds: Number(line["price"] ?? 0),
-      };
-    });
-  if (choices.length === 0) return null;
-  return {
-    name: String(market.displayName ?? (market as any).betType ?? "Mercado"),
-    group: mrDogeAllOddsGroup(market),
-    choices,
-  };
+  return formatIsoToLisbonDateTime(new Date(smTime).toISOString()).date === matchDate;
 }
 
 function mapProviderMarketsToAllOdds(value: unknown): Array<{
@@ -2693,6 +2586,68 @@ function footballLeagueAllowedStrict(
 
 const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
 const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
+const FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT = 8;
+
+const SPORTMONKS_PREFERRED_LEAGUE_IDS = new Set<string>([
+  "2", // Champions League
+  "5", // Europa League
+  "8", // Premier League
+  "9", // Championship
+  "24", // FA Cup
+  "27", // Carabao Cup
+  "72", // Eredivisie
+  "82", // Bundesliga
+  "109", // DFB Pokal
+  "208", // Belgium Pro League
+  "301", // Ligue 1
+  "384", // Serie A
+  "387", // Serie B
+  "390", // Coppa Italia
+  "462", // Liga Portugal
+  "564", // La Liga
+  "567", // La Liga 2
+  "570", // Copa Del Rey
+  "636", // Argentina Liga Profesional
+  "648", // Brazil Serie A
+  "711", // CAF WC Qualifiers
+  "714", // WC Qualification Asia
+  "717", // WC Qualification Concacaf
+  "720", // WC Qualification Europe
+  "723", // WC Qualification Oceania
+  "726", // WC Qualification South America
+  "729", // WC Qualification Intercontinental Playoffs
+  "732", // World Cup
+  "779", // MLS
+  "1114", // Copa America
+  "1117", // AFCON
+  "1118", // AFCON Qualifiers
+]);
+
+const SPORTMONKS_FALLBACK_LEAGUE_IDS = new Set<string>([
+  "181", // Austria Bundesliga
+  "271", // Denmark Superliga
+  "501", // Scotland Premiership
+  "573", // Allsvenskan
+  "591", // Switzerland Super League
+  "600", // Turkey Super Lig
+  "944", // Saudi Pro League
+]);
+
+function footballVisibilityBandForFixtureLike(args: {
+  leagueId?: string | null;
+  country?: string | null;
+  league?: string | null;
+}): "blocked" | "preferred" | "fallback" {
+  const leagueId = String(args.leagueId ?? "").trim();
+  if (leagueId) {
+    if (SPORTMONKS_PREFERRED_LEAGUE_IDS.has(leagueId)) return "preferred";
+    if (SPORTMONKS_FALLBACK_LEAGUE_IDS.has(leagueId)) return "fallback";
+  }
+  return footballCompetitionVisibilityBand(
+    String(args.country ?? ""),
+    String(args.league ?? ""),
+  );
+}
 
 function isMajorWomensLeague(name: string): boolean {
   const lower = String(name ?? "")
@@ -2898,6 +2853,18 @@ export function footballMarketTier(
   return 4;
 }
 
+export function footballMarketTierMaxStake(
+  tier: FootballMarketTier,
+  baseMaxStake: number,
+): number {
+  const normalizedBase = Number.isFinite(baseMaxStake) && baseMaxStake > 0
+    ? baseMaxStake
+    : 0;
+  const multiplier =
+    tier === 1 ? 1 : tier === 2 ? 0.75 : tier === 3 ? 0.5 : 0.25;
+  return Math.max(1, Number((normalizedBase * multiplier).toFixed(2)));
+}
+
 const ZERO_TOTAL_GOALS: AdvancedMarkets["totalGoals"] = {
   over05: 0,
   under05: 0,
@@ -2992,220 +2959,25 @@ function mrDogeTwoWayOddsFromProb(
   return { home: home!, draw: 0, away: away! };
 }
 
-function buildMrDogeTennisMarkets(
-  match: Match,
-  odds: { home: number; draw: number; away: number } | null,
-): { markets: AdvancedMarkets; fallbackOdds: { home: number; draw: number; away: number } } {
-  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, any>;
-  const stats = match.stats?.sport === "tennis" ? match.stats : null;
-  const pHome = mrDogeNoVigHomeProb(odds);
-  if (stats) {
-    const liveExtra = extractMrDogeTennisLiveExtra(stats);
-    const sets = liveExtra.sets ?? [];
-    const inPlayNow = !!liveExtra.currentPoints || !!liveExtra.serving;
-    const completedSets = inPlayNow ? sets.slice(0, -1) : sets;
-    const homeSetsWon = completedSets.filter(([home, away]) => home > away).length;
-    const awaySetsWon = completedSets.filter(([home, away]) => away > home).length;
-    markets.tennisExtra = computeLiveTennisExtras(
-      pHome,
-      sets,
-      homeSetsWon,
-      awaySetsWon,
-      Math.max(1, homeSetsWon + awaySetsWon + 1),
-      liveExtra.currentPoints,
-      liveExtra.serving,
-    );
-  } else {
-    markets.tennisExtra = computeTennisExtras(pHome);
+function hashStr(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
   }
-  return {
-    markets: markets as AdvancedMarkets,
-    fallbackOdds: mrDogeTwoWayOddsFromProb(pHome),
-  };
-}
-
-function buildMrDogeVolleyballMarkets(
-  match: Match,
-  odds: { home: number; draw: number; away: number } | null,
-): { markets: AdvancedMarkets; fallbackOdds: { home: number; draw: number; away: number } } {
-  const markets = zerofillAdvancedMarkets() as AdvancedMarkets & Record<string, any>;
-  const stats = match.stats?.sport === "volleyball" ? match.stats : null;
-  const liveExtra = extractMrDogeVolleyballLiveExtra(stats);
-  const vollSets = liveExtra.vollSets ?? [];
-  const homeSetsWon = vollSets.filter(([home, away]) => home > away).length;
-  const awaySetsWon = vollSets.filter(([home, away]) => away > home).length;
-  const currentPts = liveExtra.currentPts ?? [0, 0];
-  const implied = mrDogeNoVigHomeProb(odds);
-  const pSetHome = mc(
-    (implied +
-      estimateVolleyballSetWinProb(
-        homeSetsWon,
-        awaySetsWon,
-        currentPts[0] ?? 0,
-        currentPts[1] ?? 0,
-      )) /
-      2,
-    0.12,
-    0.88,
-  );
-  markets.volleyballExtra = computeVolleyballExtras(pSetHome);
-  return {
-    markets: markets as AdvancedMarkets,
-    fallbackOdds: mrDogeTwoWayOddsFromProb(
-      volleyballMatchWinProbFromSets(pSetHome, homeSetsWon, awaySetsWon),
-    ),
-  };
-}
-
-function buildMrDogeSyntheticMarkets(
-  bet62Sport: string,
-  match: Match,
-  odds: { home: number; draw: number; away: number } | null,
-): { markets: AdvancedMarkets; fallbackOdds: { home: number; draw: number; away: number } } {
-  switch (bet62Sport) {
-    case "tennis":
-      return buildMrDogeTennisMarkets(match, odds);
-    case "basketball":
-      return {
-        markets: makeBasketballMarketsFromTeams(match.homeTeam.name, match.awayTeam.name),
-        fallbackOdds: {
-          ...makeBasketballMoneylineFromTeams(match.homeTeam.name, match.awayTeam.name),
-          draw: 0,
-        },
-      };
-    case "hockey":
-      return {
-        markets: makeHockeyMarketsFromTeams(match.homeTeam.name, match.awayTeam.name),
-        fallbackOdds: makeHockeyMoneylineFromTeams(match.homeTeam.name, match.awayTeam.name),
-      };
-    case "baseball":
-      return {
-        markets: makeMLBMarketsFromTeams(
-          match.homeTeam.name,
-          match.awayTeam.name,
-          odds?.home,
-          odds?.away,
-        ),
-        fallbackOdds: {
-          ...makeMLBMoneylineFromTeams(match.homeTeam.name, match.awayTeam.name),
-          draw: 0,
-        },
-      };
-    case "volleyball":
-      return buildMrDogeVolleyballMarkets(match, odds);
-    default:
-      return {
-        markets: zerofillAdvancedMarkets(),
-        fallbackOdds: { home: 0, draw: 0, away: 0 },
-      };
-  }
-}
-
-// Stake headroom by market tier — a multiplier applied on top of the admin's
-// global max stake (never above it). Tier 4 caps exposure on leagues nobody
-// is really betting big on; Tier 1 gets the full admin-configured ceiling.
-const MARKET_TIER_STAKE_MULTIPLIER: Record<FootballMarketTier, number> = {
-  1: 1,
-  2: 0.75,
-  3: 0.5,
-  4: 0.25,
-};
-
-export function footballMarketTierMaxStake(
-  tier: FootballMarketTier,
-  globalMaxStake: number,
-): number {
-  return Math.round(globalMaxStake * MARKET_TIER_STAKE_MULTIPLIER[tier] * 100) / 100;
-}
-
-// ─── Odds helpers ──────────────────────────────────────────────────────────────
-
-function parseFloat2(v: string | undefined): number {
-  const n = parseFloat(v ?? "");
-  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
-}
-
-// ─── Probabilistic odds engine ─────────────────────────────────────────────────
-
-const mc = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-const mr = (n: number) => Math.round(n * 100) / 100;
-
-function probsToDecimalOdds(probs: number[], overround: number): number[] {
-  const s = probs.reduce((a, b) => a + b, 0);
-  const base =
-    s > 0 ? probs.map((p) => p / s) : probs.map(() => 1 / probs.length);
-  return base.map((p) => mr(mc(1 / Math.max(1e-9, p * overround), 1.01, 100)));
-}
-
-function modelErf(x: number): number {
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  const t = 1 / (1 + 0.3275911 * ax);
-  const y =
-    1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
-      t +
-      0.254829592) *
-      t *
-      Math.exp(-ax * ax);
-  return sign * y;
-}
-
-function normalCdf(z: number): number {
-  return 0.5 * (1 + modelErf(z / Math.SQRT2));
-}
-
-function poissonPmf(lambda: number, maxK: number): number[] {
-  const out = new Array<number>(maxK + 1).fill(0);
-  if (!Number.isFinite(lambda) || lambda < 0) return out;
-  out[0] = Math.exp(-lambda);
-  for (let k = 1; k <= maxK; k++) out[k] = (out[k - 1]! * lambda) / k;
-  return out;
-}
-
-function poissonCdf(lambda: number, k: number): number {
-  return poissonPmf(lambda, Math.max(0, Math.floor(k))).reduce(
-    (a, b) => a + b,
-    0,
-  );
-}
-
-function hashStr(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function seededRng(seed: string): (n: number) => number {
-  const h = hashStr(seed);
-  return (n: number) => {
-    const x = Math.sin((h + n) * 9999) * 10000;
-    return x - Math.floor(x);
-  };
-}
-
-function canonName(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
+  return hash;
 }
 
 function getTeamElo(name: string): number {
-  const n = canonName(name);
+  const n = normalizeSportEntityName(name);
+  if (!n) return 1500;
   const known: Record<string, number> = {
-    "manchester city": 1910,
-    "man city": 1910,
-    "manchester utd": 1760,
-    "manchester united": 1760,
-    "man utd": 1760,
+    "manchester city": 1900,
+    "man city": 1900,
+    "manchester united": 1780,
+    "man united": 1780,
     liverpool: 1860,
+
+
     arsenal: 1830,
     chelsea: 1760,
     tottenham: 1750,
@@ -6645,6 +6417,26 @@ function lisbonOffsetHours(): number {
   return diff; // typically +0 (Nov–Mar) or +1 (Mar–Oct)
 }
 
+function formatIsoToLisbonDateTime(iso: string): { date: string; time: string } {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const map: Record<string, string> = {};
+  for (const part of parts) map[part.type] = part.value;
+  return {
+    date: `${map["day"] ?? "00"}.${map["month"] ?? "00"}.${map["year"] ?? "0000"}`,
+    time: `${map["hour"] ?? "00"}:${map["minute"] ?? "00"}`,
+  };
+}
+
 /**
  * Extract country name from a SportsAPI V2 event's tournament.
  * Prefers category.country.name (most specific), falls back to category.name.
@@ -7397,103 +7189,6 @@ export async function ensureFinishedMatchResult(
   // below and resolve only via the 72h stale-bet void/refund path
   // (settlement.ts's expireStalePendingBets()) — a known, accepted
   // consequence of the removal.
-
-  // ── MrDoge match IDs (mrdoge-{sport}-{id}) ──────────────────────────────
-  // DB-only recovery path: finalizeStaleLiveMatch() already writes a
-  // complete record (score + sport-specific extras) via
-  // persistFinishedMatchRecord the moment one of these matches finishes
-  // while the server is running, so this only matters after a restart wipes
-  // the in-memory finishedMatchResults cache before a pending bet's
-  // settlement cycle gets to it. No live-feed fallback is needed here since
-  // finalizeStaleLiveMatch already persists the full record (including
-  // extras.basketball.quarters/extras.volleyball.sets, same shape read back
-  // below) up front.
-  if (
-    /^mrdoge-(?:football|tennis|basketball|hockey|baseball|volleyball)-.+$/i.test(
-      matchId,
-    )
-  ) {
-    const cached = finishedMatchResults.get(matchId);
-    if (
-      cached &&
-      typeof cached.home === "number" &&
-      typeof cached.away === "number"
-    )
-      return true;
-    try {
-      if (db) {
-        const [row] = await db
-          .select()
-          .from(matchResultsTable)
-          .where(eq(matchResultsTable.matchId, matchId))
-          .limit(1);
-        if (row && typeof row.home === "number" && typeof row.away === "number") {
-          const record = {
-            home: row.home,
-            away: row.away,
-            htHome: row.htHome ?? undefined,
-            htAway: row.htAway ?? undefined,
-            homeTeam: row.homeTeam ?? "",
-            awayTeam: row.awayTeam ?? "",
-            status: row.status ?? undefined,
-            cornersTotal: row.cornersTotal ?? undefined,
-            cardsTotal: row.cardsTotal ?? undefined,
-            firstGoal:
-              (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
-            extras: row.extras ?? undefined,
-            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
-          };
-          finishedMatchResults.set(matchId, record);
-          return true;
-        }
-      }
-    } catch {}
-    return false;
-  }
-
-  // ── GoalServe match IDs (gs-{sport}-{id}) ─────────────────────────────
-  // Same DB-only recovery pattern as the active live providers above: when a GoalServe
-  // match finishes while the server is live, finalizeStaleLiveMatch() has
-  // already persisted a complete record. Across a restart we just read it
-  // back from matchResultsTable to repopulate finishedMatchResults.
-  if (/^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(matchId)) {
-    const cached = finishedMatchResults.get(matchId);
-    if (
-      cached &&
-      typeof cached.home === "number" &&
-      typeof cached.away === "number"
-    )
-      return true;
-    try {
-      if (db) {
-        const [row] = await db
-          .select()
-          .from(matchResultsTable)
-          .where(eq(matchResultsTable.matchId, matchId))
-          .limit(1);
-        if (row && typeof row.home === "number" && typeof row.away === "number") {
-          const record = {
-            home: row.home,
-            away: row.away,
-            htHome: row.htHome ?? undefined,
-            htAway: row.htAway ?? undefined,
-            homeTeam: row.homeTeam ?? "",
-            awayTeam: row.awayTeam ?? "",
-            status: row.status ?? undefined,
-            cornersTotal: row.cornersTotal ?? undefined,
-            cardsTotal: row.cardsTotal ?? undefined,
-            firstGoal:
-              (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
-            extras: row.extras ?? undefined,
-            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
-          };
-          finishedMatchResults.set(matchId, record);
-          return true;
-        }
-      }
-    } catch {}
-    return false;
-  }
 
   return false;
 }
@@ -8996,224 +8691,6 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 // bettor sees first) and fetched in small concurrent batches so one
 // refresh cycle never bursts hundreds of requests at once. Raise
 // MRDOGE_PREMATCH_ODDS_MAX once the account's real rate limit is confirmed
-// against production traffic.
-const MRDOGE_PREMATCH_ODDS_MAX = 100;
-const MRDOGE_PREMATCH_ODDS_CONCURRENCY = 5;
-
-async function fetchMrDogePrematchOdds(
-  mrdoge: ReturnType<typeof getMrDogeClient>,
-  matches: Match[],
-  betTypes: string[],
-): Promise<Map<string, Market[]>> {
-  const result = new Map<string, Market[]>();
-  const targets = [...matches]
-    .sort((a, b) => a.startTime.localeCompare(b.startTime))
-    .slice(0, MRDOGE_PREMATCH_ODDS_MAX);
-  let failCount = 0;
-  let firstErr: unknown = null;
-  for (let i = 0; i < targets.length; i += MRDOGE_PREMATCH_ODDS_CONCURRENCY) {
-    const batch = targets.slice(i, i + MRDOGE_PREMATCH_ODDS_CONCURRENCY);
-    const settled = await Promise.allSettled(
-      batch.map((m) =>
-        betTypes.length > 0
-          ? mrdoge.odds.list({ matchId: m.id, betTypes })
-          : mrdoge.odds.list({ matchId: m.id }),
-      ),
-    );
-    settled.forEach((r, idx) => {
-      if (r.status === "fulfilled") {
-        result.set(batch[idx]!.id, r.value);
-      } else {
-        failCount++;
-        firstErr ??= r.reason;
-      }
-    });
-  }
-  // One summary line per refresh cycle (not per-match — this can run against
-  // up to MRDOGE_PREMATCH_ODDS_MAX matches) so a systemic odds.list failure
-  // (rate limit, wrong betType, tier restriction) is visible in Railway logs
-  // instead of silently degrading to every match showing no price.
-  logger.info(
-    { queried: targets.length, succeeded: result.size, failed: failCount, err: firstErr ?? undefined },
-    "[mrdoge] prematch odds.list batch done",
-  );
-  return result;
-}
-
-// Mr. Doge (api.mrdoge.co) — football phase 1 (2026-09-20), phase 2
-// (same day): prematch odds now wired via odds.list (see
-// fetchMrDogePrematchOdds's own comment on the request-volume cap).
-// Matches this doesn't have a real capture kept anywhere the bettor sees
-// them: routes/matches.ts's own /upcoming filter already hides any match
-// without hasRealOdds/a nonzero price, same as every other provider.
-async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  try {
-    const mrdoge = getMrDogeClient();
-    const startDate = new Date().toISOString().slice(0, 10);
-    const endDate = getUpcomingFetchEndDate();
-    const [matches, sportMonksFixtures] = await Promise.all([
-      mrdoge.matches.listAll({
-        sports: ["soccer"],
-        status: ["upcoming"],
-        startDate,
-        endDate,
-      }),
-      sportMonksEnabled()
-        ? getSportMonksFixturesBetween({
-            startDate,
-            endDate,
-            include: "participants;league.country;state;venue",
-          }).catch(() => [] as SportMonksFixture[])
-        : Promise.resolve([] as SportMonksFixture[]),
-    ]);
-    const eligibleMatches = matches.filter(
-      (match) =>
-        footballCompetitionVisibilityBand(
-          match.region.name,
-          match.competition.name,
-        ) === "preferred",
-    );
-    const oddsByMatchId = await fetchMrDogePrematchOdds(
-      mrdoge,
-      eligibleMatches,
-      [...MRDOGE_SOCCER_BET_TYPES],
-    );
-    const sportMonksByMrDogeId = new Map<string, SportMonksFixture>();
-    for (const match of eligibleMatches) {
-      const found = sportMonksFixtures.find((fixture) =>
-        sportMonksVsMrDogeMatch(fixture, match),
-      );
-      if (found) sportMonksByMrDogeId.set(match.id, found);
-    }
-    let withRealOdds = 0;
-    const built = eligibleMatches.map((m): UpcomingMatch => {
-      const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
-      const odds = oddsByMatchId.get(m.id);
-      const moneyline = extractMrDogeSoccerMoneyline(odds);
-      const btts = extractMrDogeSoccerBtts(odds);
-      const extended = extractMrDogeSoccerExtendedMarkets(odds);
-      const sportMonksFixture = sportMonksByMrDogeId.get(m.id);
-      const sportMonksTeamsData = sportMonksFixture
-        ? sportMonksTeams(sportMonksFixture)
-        : { home: null, away: null };
-      const markets = zerofillAdvancedMarkets();
-      Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
-      if (btts) markets.bothTeamsScore = btts;
-      if (extended.doubleChance) markets.doubleChance = extended.doubleChance;
-      if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
-      if (extended.asianHandicap) markets.asianHandicap = extended.asianHandicap;
-      if (extended.halfTime) markets.halfTime = extended.halfTime;
-      if (extended.firstHalfTotal) {
-        markets.firstHalfTotal = extended.firstHalfTotal;
-        markets._total1H = extended.firstHalfTotal.line;
-      }
-      if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
-      if (extended.htft) markets.htft = extended.htft;
-      if (extended.correctScore) markets.correctScore = extended.correctScore;
-      if (extended.europeanHandicap) markets.europeanHandicap = extended.europeanHandicap;
-      if (extended.asianTotals) {
-        markets.asianTotals = {
-          o05: 0,
-          u05: 0,
-          o45: 0,
-          u45: 0,
-          o55: 0,
-          u55: 0,
-          o225: 0,
-          u225: 0,
-          o275: 0,
-          u275: 0,
-          ...extended.asianTotals,
-        };
-      }
-      if (extended.teamGoals) markets.teamGoals = { ...(markets.teamGoals ?? {}), ...extended.teamGoals };
-      if (extended.winToNil) markets.winToNil = extended.winToNil;
-      if (extended.cleanSheet) markets.cleanSheet = extended.cleanSheet;
-      if (extended.goalOddEven) markets.goalOddEven = extended.goalOddEven;
-      if (extended.exactGoals) {
-        markets.exactGoals = {
-          g0: 0,
-          g1: 0,
-          g2: 0,
-          g3: 0,
-          g4: 0,
-          g5plus: 0,
-          ...extended.exactGoals,
-        };
-      }
-      if (moneyline != null) withRealOdds++;
-      return {
-        id: mrDogeMatchId("football", m),
-        home: String(sportMonksTeamsData.home?.name ?? m.homeTeam.name),
-        away: String(sportMonksTeamsData.away?.name ?? m.awayTeam.name),
-        homeTeamId: String(m.homeTeam.id),
-        awayTeamId: String(m.awayTeam.id),
-        homeLogoUrl:
-          String(sportMonksTeamsData.home?.image_path ?? "").trim() ||
-          mrDogeTeamLogo(m.homeTeam.id),
-        awayLogoUrl:
-          String(sportMonksTeamsData.away?.image_path ?? "").trim() ||
-          mrDogeTeamLogo(m.awayTeam.id),
-        regionFlagUrl: mrDogeRegionFlag(m.region.id),
-        league: sportMonksFixture ? sportMonksLeagueName(sportMonksFixture) || m.competition.name : m.competition.name,
-        country: sportMonksFixture ? sportMonksCountryName(sportMonksFixture) || m.region.name : m.region.name,
-        date,
-        time,
-        sport: "football",
-        hasRealOdds: moneyline != null,
-        odds: moneyline ?? { home: 0, draw: 0, away: 0 },
-        markets,
-        leagueId:
-          sportMonksFixture?.league_id == null
-            ? undefined
-            : String(sportMonksFixture.league_id),
-        seasonId:
-          sportMonksFixture?.season_id == null
-            ? undefined
-            : String(sportMonksFixture.season_id),
-        stadium: String(sportMonksFixture?.venue?.name ?? "").trim() || undefined,
-        _sportMonksFixtureId:
-          sportMonksFixture?.id == null ? undefined : String(sportMonksFixture.id),
-        _sportMonksSeasonId:
-          sportMonksFixture?.season_id == null
-            ? undefined
-            : String(sportMonksFixture.season_id),
-        _sportMonksHomeTeamId:
-          sportMonksTeamsData.home?.id == null
-            ? undefined
-            : String(sportMonksTeamsData.home.id),
-        _sportMonksAwayTeamId:
-          sportMonksTeamsData.away?.id == null
-            ? undefined
-            : String(sportMonksTeamsData.away.id),
-      };
-    });
-    // GET /upcoming's own filter (routes/matches.ts) hides any match
-    // without hasRealOdds/a nonzero price — this is the number that
-    // actually survives to the frontend, distinct from `matches.length`.
-    const visible = built.filter(
-      (match) =>
-        footballCompetitionVisibilityBand(
-          match.country ?? "",
-          match.league ?? "",
-        ) === "preferred",
-    );
-    logger.info(
-      {
-        fixtures: matches.length,
-        eligibleFixtures: eligibleMatches.length,
-        withRealOdds,
-        visible: visible.length,
-      },
-      "[mrdoge] football upcoming built",
-    );
-    return visible;
-  } catch (err) {
-    logger.error({ err }, "[mrdoge] football upcoming fetch failed");
-    return [];
-  }
-}
 
 async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
   if (!sportMonksEnabled()) return [];
@@ -9225,19 +8702,34 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       endDate,
       include: "participants;league.country;state;venue",
     }).catch(() => [] as SportMonksFixture[]);
-    const visibleFixtures = fixtures
+    const eligibleFixtures = fixtures
       .filter((fixture) => !sportMonksIsFinished(fixture))
       .filter((fixture) => {
         const kickoffMs = sportMonksTimestampMs(fixture);
         return kickoffMs == null || kickoffMs >= Date.now() - 30 * 60 * 1000;
-      })
+      });
+    const preferredFixtures = eligibleFixtures.filter(
+      (fixture) =>
+        footballVisibilityBandForFixtureLike({
+          leagueId:
+            fixture.league_id == null ? undefined : String(fixture.league_id),
+          country: sportMonksCountryName(fixture),
+          league: sportMonksLeagueName(fixture),
+        }) === "preferred",
+    );
+    const fallbackFixtures = eligibleFixtures
       .filter(
         (fixture) =>
-          footballCompetitionVisibilityBand(
-            sportMonksCountryName(fixture),
-            sportMonksLeagueName(fixture),
-          ) === "preferred",
-      );
+          footballVisibilityBandForFixtureLike({
+            leagueId:
+              fixture.league_id == null ? undefined : String(fixture.league_id),
+            country: sportMonksCountryName(fixture),
+            league: sportMonksLeagueName(fixture),
+          }) === "fallback",
+      )
+      .slice(0, FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT);
+    const visibleFixtures =
+      preferredFixtures.length > 0 ? preferredFixtures : fallbackFixtures;
     const oddsByFixtureId = await fetchSportMonksOddsBatch(
       visibleFixtures
         .map((fixture) =>
@@ -9252,7 +8744,7 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
         if (!teams.home?.name || !teams.away?.name) return null;
         const kickoffMs = sportMonksTimestampMs(fixture);
         const kickoff = kickoffMs
-          ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString())
+          ? formatIsoToLisbonDateTime(new Date(kickoffMs).toISOString())
           : { date: "", time: "" };
         const parsedOdds = sportMonksApplyFootballOdds(
           oddsByFixtureId.get(String(fixture.id)) ?? [],
@@ -9314,398 +8806,6 @@ async function buildFootballUpcoming(): Promise<UpcomingMatch[]> {
   return buildFootballUpcomingFromSportMonks();
 }
 
-// Mr. Doge live football — reads the shared in-memory map liveSync.ts's
-// single matches.subscribeLive connection maintains (no per-tick REST call
-// here), and drives the per-match odds.subscribe lifecycle every tick via
-// syncMrDogeOddsSubscriptions so odds streaming always tracks whichever
-// matches are actually live right now.
-async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  // getMrDogeLiveMatches() now shares one map across all 6 subscribed
-  // sports (MRDOGE_LIVE_SPORTS), so each sport's builder must filter its
-  // own. m.stats.sport is the reliable machine discriminant (a real zod
-  // literal, e.g. "soccer") — unlike m.sport.name, which is a localized
-  // DISPLAY string (confirmed via the real Sport/Region type; Region's own
-  // doc comment gives "England"/"Inglaterra" as an example) that silently
-  // dropped every match the first time this filtered on it instead.
-  const matches = getMrDogeLiveMatches().filter((m) => m.stats?.sport === "soccer");
-  const sportMonksFixtures = sportMonksEnabled()
-    ? await getSportMonksInplayLivescores(
-        "participants;league.country;state;venue;events;statistics.type;ballCoordinates",
-      ).catch(() => [] as SportMonksFixture[])
-    : [];
-  const sportMonksByMrDogeId = new Map<string, SportMonksFixture>();
-  for (const match of matches) {
-    const found = sportMonksFixtures.find((fixture) =>
-      sportMonksVsMrDogeMatch(fixture, match),
-    );
-    if (found) sportMonksByMrDogeId.set(match.id, found);
-  }
-  return matches.map((m): LiveMatchState => {
-    const stats = m.stats?.sport === "soccer" ? m.stats : null;
-    const { status, phase } = mrDogeSoccerStatus(stats?.clock);
-    const odds = getMrDogeOdds(m.id);
-    const moneyline = extractMrDogeSoccerMoneyline(odds);
-    const btts = extractMrDogeSoccerBtts(odds);
-    const extended = extractMrDogeSoccerExtendedMarkets(odds);
-    const sportMonksFixture = sportMonksByMrDogeId.get(m.id);
-    const sportMonksTeamsData = sportMonksFixture
-      ? sportMonksTeams(sportMonksFixture)
-      : { home: null, away: null };
-    const markets = zerofillAdvancedMarkets();
-    const liveExtra = extractMrDogeSoccerLiveExtra(stats);
-    Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
-    if (btts) markets.bothTeamsScore = btts;
-    if (extended.doubleChance) markets.doubleChance = extended.doubleChance;
-    if (extended.drawNoBet) markets.drawNoBet = extended.drawNoBet;
-    if (extended.asianHandicap) markets.asianHandicap = extended.asianHandicap;
-    if (extended.halfTime) markets.halfTime = extended.halfTime;
-    if (extended.firstHalfTotal) {
-      markets.firstHalfTotal = extended.firstHalfTotal;
-      markets._total1H = extended.firstHalfTotal.line;
-    }
-    if (extended.secondHalf) markets.secondHalf = extended.secondHalf;
-    if (extended.htft) markets.htft = extended.htft;
-    if (extended.correctScore) markets.correctScore = extended.correctScore;
-    if (extended.europeanHandicap) markets.europeanHandicap = extended.europeanHandicap;
-    if (extended.asianTotals) {
-      markets.asianTotals = {
-        o05: 0,
-        u05: 0,
-        o45: 0,
-        u45: 0,
-        o55: 0,
-        u55: 0,
-        o225: 0,
-        u225: 0,
-        o275: 0,
-        u275: 0,
-        ...extended.asianTotals,
-      };
-    }
-    if (extended.teamGoals) markets.teamGoals = { ...(markets.teamGoals ?? {}), ...extended.teamGoals };
-    if (extended.winToNil) markets.winToNil = extended.winToNil;
-    if (extended.cleanSheet) markets.cleanSheet = extended.cleanSheet;
-    if (extended.goalOddEven) markets.goalOddEven = extended.goalOddEven;
-    if (extended.exactGoals) {
-      markets.exactGoals = {
-        g0: 0,
-        g1: 0,
-        g2: 0,
-        g3: 0,
-        g4: 0,
-        g5plus: 0,
-        ...extended.exactGoals,
-      };
-    }
-    return {
-      id: mrDogeMatchId("football", m),
-      home: String(sportMonksTeamsData.home?.name ?? m.homeTeam.name),
-      away: String(sportMonksTeamsData.away?.name ?? m.awayTeam.name),
-      homeTeamId: String(m.homeTeam.id),
-      awayTeamId: String(m.awayTeam.id),
-      homeLogoUrl:
-        String(sportMonksTeamsData.home?.image_path ?? "").trim() ||
-        mrDogeTeamLogo(m.homeTeam.id),
-      awayLogoUrl:
-        String(sportMonksTeamsData.away?.image_path ?? "").trim() ||
-        mrDogeTeamLogo(m.awayTeam.id),
-      regionFlagUrl: mrDogeRegionFlag(m.region.id),
-      league: sportMonksFixture ? sportMonksLeagueName(sportMonksFixture) || m.competition.name : m.competition.name,
-      country: sportMonksFixture ? sportMonksCountryName(sportMonksFixture) || m.region.name : m.region.name,
-      sport: "football",
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      minute: stats?.clock?.minute ?? 0,
-      status,
-      hasRealOdds: moneyline != null,
-      odds: moneyline ?? { home: 0, draw: 0, away: 0 },
-      markets,
-      events:
-        sportMonksFixture && sportMonksEvents(sportMonksFixture).length > 0
-          ? sportMonksEvents(sportMonksFixture)
-          : buildMrDogeTimelineEvents(m),
-      redCardsHome: stats?.homeRedCards ?? 0,
-      redCardsAway: stats?.awayRedCards ?? 0,
-      matchStats:
-        sportMonksFixture && sportMonksMatchStats(sportMonksFixture)
-          ? sportMonksMatchStats(sportMonksFixture)
-          : buildMrDogeSoccerMatchStats(stats),
-      stadium: String(sportMonksFixture?.venue?.name ?? "").trim() || undefined,
-      leagueId:
-        sportMonksFixture?.league_id == null
-          ? undefined
-          : String(sportMonksFixture.league_id),
-      seasonId:
-        sportMonksFixture?.season_id == null
-          ? undefined
-          : String(sportMonksFixture.season_id),
-      _ballPosition: sportMonksFixture
-        ? sportMonksLatestBallPosition(sportMonksFixture)
-        : null,
-      _sportMonksFixtureId:
-        sportMonksFixture?.id == null ? undefined : String(sportMonksFixture.id),
-      _sportMonksSeasonId:
-        sportMonksFixture?.season_id == null
-          ? undefined
-          : String(sportMonksFixture.season_id),
-      _sportMonksHomeTeamId:
-        sportMonksTeamsData.home?.id == null
-          ? undefined
-          : String(sportMonksTeamsData.home.id),
-      _sportMonksAwayTeamId:
-        sportMonksTeamsData.away?.id == null
-          ? undefined
-          : String(sportMonksTeamsData.away.id),
-      _liveExtra: { phase, ...liveExtra },
-    };
-  });
-}
-
-async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
-  if (!sportMonksEnabled()) return [];
-  try {
-    const fixtures = await getSportMonksInplayLivescores(
-      "participants;league.country;state;venue;events;statistics.type;scores;ballCoordinates",
-    ).catch(() => [] as SportMonksFixture[]);
-    const oddsByFixtureId = await fetchSportMonksOddsBatch(
-      fixtures
-        .map((fixture) =>
-          fixture.id == null ? "" : String(fixture.id),
-        )
-        .filter(Boolean),
-      "inplay",
-    );
-    return fixtures
-      .map((fixture): LiveMatchState | null => {
-        const teams = sportMonksTeams(fixture);
-        if (!teams.home?.name || !teams.away?.name) return null;
-        const { homeScore, awayScore } = sportMonksScoreline(fixture);
-        const parsedOdds = sportMonksApplyFootballOdds(
-          oddsByFixtureId.get(String(fixture.id)) ?? [],
-          {
-            home: String(teams.home.name),
-            away: String(teams.away.name),
-          },
-        );
-        return {
-          id: `sportmonks-football-${String(fixture.id)}`,
-          home: String(teams.home.name),
-          away: String(teams.away.name),
-          homeTeamId: teams.home.id == null ? undefined : String(teams.home.id),
-          awayTeamId: teams.away.id == null ? undefined : String(teams.away.id),
-          homeLogoUrl: String(teams.home.image_path ?? "").trim() || undefined,
-          awayLogoUrl: String(teams.away.image_path ?? "").trim() || undefined,
-          league: sportMonksLeagueName(fixture),
-          country: sportMonksCountryName(fixture),
-          sport: "football",
-          homeScore,
-          awayScore,
-          minute: sportMonksMinute(fixture),
-          status: sportMonksMatchStatus(fixture),
-          hasRealOdds: parsedOdds.hasRealOdds,
-          odds: parsedOdds.odds,
-          markets: parsedOdds.markets,
-          events: sportMonksEvents(fixture),
-          redCardsHome: 0,
-          redCardsAway: 0,
-          matchStats: sportMonksMatchStats(fixture),
-          stadium: String(fixture.venue?.name ?? "").trim() || undefined,
-          referee: String(fixture.referee?.name ?? fixture.referee?.display_name ?? "").trim() || undefined,
-          leagueId:
-            fixture.league_id == null ? undefined : String(fixture.league_id),
-          seasonId:
-            fixture.season_id == null ? undefined : String(fixture.season_id),
-          _ballPosition: sportMonksLatestBallPosition(fixture),
-          _sportMonksFixtureId:
-            fixture.id == null ? undefined : String(fixture.id),
-          _sportMonksSeasonId:
-            fixture.season_id == null ? undefined : String(fixture.season_id),
-          _sportMonksHomeTeamId:
-            teams.home.id == null ? undefined : String(teams.home.id),
-          _sportMonksAwayTeamId:
-            teams.away.id == null ? undefined : String(teams.away.id),
-          _liveExtra: {
-            phase:
-              sportMonksMatchStatus(fixture) === "HT"
-                ? "HT"
-                : sportMonksMatchStatus(fixture) === "ET"
-                  ? "ET"
-                  : sportMonksMatchStatus(fixture) === "PEN"
-                    ? "PEN"
-                    : /2nd half/i.test(sportMonksMatchStatus(fixture))
-                      ? "2H"
-                      : "1H",
-          },
-        };
-      })
-      .filter((fixture): fixture is LiveMatchState => fixture != null);
-  } catch (err) {
-    logger.error({ err }, "[sportmonks] football live fetch failed");
-    return [];
-  }
-}
-
-async function buildFootballLive(): Promise<LiveMatchState[]> {
-  return buildFootballLiveFromSportMonks();
-}
-
-// Tennis/basketball/hockey/baseball/volleyball — MRDoge provides the live
-// fixture/clock backbone while BET62 hydrates the full market surface with a
-// hybrid model: real top-line odds when MRDoge exposes them, and the
-// codebase's existing sport-specific market builders for the deeper tabs.
-function makeMrDogeUpcomingBuilder(bet62Sport: string, mrDogeSport: string): () => Promise<UpcomingMatch[]> {
-  return async function buildUpcoming(): Promise<UpcomingMatch[]> {
-    if (!CONFIG.MRDOGE_API_KEY) return [];
-    try {
-      const mrdoge = getMrDogeClient();
-      const startDate = new Date().toISOString().slice(0, 10);
-      const endDate = getUpcomingFetchEndDate();
-      const matches = await mrdoge.matches.listAll({
-        sports: [mrDogeSport],
-        status: ["upcoming"],
-        startDate,
-        endDate,
-      });
-      const oddsByMatchId = await fetchMrDogePrematchOdds(mrdoge, matches, []);
-      return matches.map((m): UpcomingMatch => {
-        const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
-        const moneyline = extractMrDogeGenericMoneyline(oddsByMatchId.get(m.id));
-        const hybrid = buildMrDogeSyntheticMarkets(bet62Sport, m, moneyline);
-        return {
-          id: mrDogeMatchId(bet62Sport, m),
-          home: m.homeTeam.name,
-          away: m.awayTeam.name,
-          homeTeamId: String(m.homeTeam.id),
-          awayTeamId: String(m.awayTeam.id),
-          homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
-          awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
-          regionFlagUrl: mrDogeRegionFlag(m.region.id),
-          league: m.competition.name,
-          country: m.region.name,
-          date,
-          time,
-          sport: bet62Sport,
-          hasRealOdds: moneyline != null,
-          odds: moneyline ?? hybrid.fallbackOdds,
-          markets: hybrid.markets,
-        };
-      });
-    } catch (err) {
-      logger.error({ err, sport: bet62Sport }, "[mrdoge] upcoming fetch failed");
-      return [];
-    }
-  };
-}
-
-const buildTennisUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("tennis", "tennis");
-const buildBasketballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("basketball", "basketball");
-const buildHockeyUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("hockey", "ice_hockey");
-const buildBaseballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("baseball", "baseball");
-const buildVolleyballUpcomingFromMrDoge = makeMrDogeUpcomingBuilder("volleyball", "volleyball");
-
-/** Shared live-match shell for the 5 sports above — each caller does its own
- * `m.stats?.sport === "..."` narrowing (same pattern as football) and hands
- * back just the score/status/extras that differ per sport. */
-function buildMrDogeLiveMatches(
-  bet62Sport: string,
-  mrDogeSport: string,
-  mapExtra: (m: Match) => { homeScore: number; awayScore: number; status: string; liveExtra: object },
-): LiveMatchState[] {
-  const matches = getMrDogeLiveMatches().filter((m) => m.stats?.sport === mrDogeSport);
-  return matches.map((m): LiveMatchState => {
-    const { homeScore, awayScore, status, liveExtra } = mapExtra(m);
-    const moneyline = extractMrDogeGenericMoneyline(getMrDogeOdds(m.id));
-    const hybrid = buildMrDogeSyntheticMarkets(bet62Sport, m, moneyline);
-    return {
-      id: mrDogeMatchId(bet62Sport, m),
-      home: m.homeTeam.name,
-      away: m.awayTeam.name,
-      homeTeamId: String(m.homeTeam.id),
-      awayTeamId: String(m.awayTeam.id),
-      homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
-      awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
-      regionFlagUrl: mrDogeRegionFlag(m.region.id),
-      league: m.competition.name,
-      country: m.region.name,
-      sport: bet62Sport,
-      homeScore,
-      awayScore,
-      minute: 0,
-      status,
-      hasRealOdds: moneyline != null,
-      odds: moneyline ?? hybrid.fallbackOdds,
-      markets: hybrid.markets,
-      events: [],
-      _liveExtra: liveExtra,
-    };
-  });
-}
-
-async function buildTennisLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("tennis", "tennis", (m) => {
-    const stats = m.stats?.sport === "tennis" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeTennisLiveExtra(stats),
-    };
-  });
-}
-
-async function buildBasketballLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("basketball", "basketball", (m) => {
-    const stats = m.stats?.sport === "basketball" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeBasketballLiveExtra(stats),
-    };
-  });
-}
-
-async function buildHockeyLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("hockey", "ice_hockey", (m) => {
-    const stats = m.stats?.sport === "ice_hockey" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeIceHockeyLiveExtra(stats),
-    };
-  });
-}
-
-async function buildBaseballLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("baseball", "baseball", (m) => {
-    const stats = m.stats?.sport === "baseball" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeBaseballLiveExtra(stats),
-    };
-  });
-}
-
-async function buildVolleyballLiveFromMrDoge(): Promise<LiveMatchState[]> {
-  if (!CONFIG.MRDOGE_API_KEY) return [];
-  return buildMrDogeLiveMatches("volleyball", "volleyball", (m) => {
-    const stats = m.stats?.sport === "volleyball" ? m.stats : null;
-    return {
-      homeScore: stats?.homeScore ?? 0,
-      awayScore: stats?.awayScore ?? 0,
-      status: mrDogeGenericStatus(stats?.clock),
-      liveExtra: extractMrDogeVolleyballLiveExtra(stats),
-    };
-  });
-}
 
 
 
@@ -9836,11 +8936,6 @@ let _upcomingRebuildInProgress = false;
 // exactly what showed up on the site as prematch matches "appearing and
 // disappearing".
 let _lastGoodFootballUpcoming: UpcomingMatch[] = [];
-let _lastGoodTennisUpcoming: UpcomingMatch[] = [];
-let _lastGoodBasketballUpcoming: UpcomingMatch[] = [];
-let _lastGoodHockeyUpcoming: UpcomingMatch[] = [];
-let _lastGoodVolleyballUpcoming: UpcomingMatch[] = [];
-let _lastGoodBaseballUpcoming: UpcomingMatch[] = [];
 
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
@@ -9853,51 +8948,11 @@ async function rebuildUpcomingCache(): Promise<void> {
     } catch (err) {
       logger.error(
         { err },
-        "[mrdoge] football upcoming failed this cycle — keeping last good prematch list",
+        "[sportmonks] football upcoming failed this cycle — keeping last good prematch list",
       );
       football = _lastGoodFootballUpcoming;
     }
-    let tennis: UpcomingMatch[] = [];
-    try {
-      tennis = await buildTennisUpcomingFromMrDoge();
-      _lastGoodTennisUpcoming = tennis;
-    } catch (err) {
-      logger.error({ err }, "[mrdoge] tennis upcoming failed this cycle");
-      tennis = _lastGoodTennisUpcoming;
-    }
-    let basketball: UpcomingMatch[] = [];
-    try {
-      basketball = await buildBasketballUpcomingFromMrDoge();
-      _lastGoodBasketballUpcoming = basketball;
-    } catch (err) {
-      logger.error({ err }, "[mrdoge] basketball upcoming failed this cycle — keeping last good prematch list");
-      basketball = _lastGoodBasketballUpcoming;
-    }
-    let hockey: UpcomingMatch[] = [];
-    try {
-      hockey = await buildHockeyUpcomingFromMrDoge();
-      _lastGoodHockeyUpcoming = hockey;
-    } catch (err) {
-      logger.error({ err }, "[mrdoge] hockey upcoming failed this cycle — keeping last good prematch list");
-      hockey = _lastGoodHockeyUpcoming;
-    }
-    let volleyball: UpcomingMatch[] = [];
-    try {
-      volleyball = await buildVolleyballUpcomingFromMrDoge();
-      _lastGoodVolleyballUpcoming = volleyball;
-    } catch (err) {
-      logger.error({ err }, "[mrdoge] volleyball upcoming failed this cycle — keeping last good prematch list");
-      volleyball = _lastGoodVolleyballUpcoming;
-    }
-    let baseball: UpcomingMatch[] = [];
-    try {
-      baseball = await buildBaseballUpcomingFromMrDoge();
-      _lastGoodBaseballUpcoming = baseball;
-    } catch (err) {
-      logger.error({ err }, "[mrdoge] baseball upcoming failed this cycle — keeping last good prematch list");
-      baseball = _lastGoodBaseballUpcoming;
-    }
-    const all = [...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball];
+    const all = [...football];
     rememberUpcomingFootballEligibility(football);
     rememberUpcomingEligibility(all);
     _allUpcomingCache = all;
@@ -9924,98 +8979,45 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const allUpcoming = _allUpcomingCache;
 
   // ── Live provider path ──────────────────────────────────────────────────
-  // Football now builds from SportMonks; the other sports still use the
-  // legacy MrDoge path below. The anti-flicker layer remains active so a
-  // short provider outage does not erase the live board.
-  await startMrDogeLiveSync().catch((err) => {
-    logger.warn({ err }, "[mrdoge] live sync ensure failed");
-  });
+  // Runtime is football-only for now; live and prematch come exclusively
+  // from SportMonks.
   let footballLiveRaw: LiveMatchState[] = [];
   try {
     footballLiveRaw = await buildFootballLive();
   } catch (err) {
     logger.error(
       { err },
-      "[mrdoge] football live failed this tick",
+      "[sportmonks] football live failed this tick",
     );
   }
   const footballLive = sportWithFallback("football", footballLiveRaw);
   const footballPreferredLive = footballLive.filter(
     (match) =>
-      footballCompetitionVisibilityBand(
-        match.country ?? "",
-        match.league ?? "",
-      ) === "preferred",
+      footballVisibilityBandForFixtureLike({
+        leagueId: match.leagueId,
+        country: match.country,
+        league: match.league,
+      }) === "preferred",
   );
   const footballFallbackLive = footballLive
     .filter(
       (match) =>
-        footballCompetitionVisibilityBand(
-          match.country ?? "",
-          match.league ?? "",
-        ) === "fallback",
+        footballVisibilityBandForFixtureLike({
+          leagueId: match.leagueId,
+          country: match.country,
+          league: match.league,
+        }) === "fallback",
     )
     .slice(0, FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT);
   const footballVisibleLive =
     footballPreferredLive.length > 0
       ? footballPreferredLive
       : footballFallbackLive;
-  const [
-    basketballLiveRaw,
-    hockeyLiveRaw,
-    baseballLiveRaw,
-    volleyballLiveRaw,
-    tennisLiveRaw,
-  ] = await Promise.all([
-    buildBasketballLiveFromMrDoge(),
-    buildHockeyLiveFromMrDoge(),
-    buildBaseballLiveFromMrDoge(),
-    buildVolleyballLiveFromMrDoge(),
-    buildTennisLiveFromMrDoge(),
-  ]);
-  const basketballLive = sportWithFallback("basketball", basketballLiveRaw);
-  const hockeyLive = sportWithFallback("hockey", hockeyLiveRaw);
-  const baseballLive = sportWithFallback("baseball", baseballLiveRaw);
-  const volleyballLiveItems = sportWithFallback("volleyball", volleyballLiveRaw);
-  const tennisLive = sportWithFallback("tennis", tennisLiveRaw);
-  const mmaLive: LiveMatchState[] = [];
-  let handballLiveRaw: LiveMatchState[] = [];
-  try {
-  } catch (err) {
-    logger.error(
-      { err },
-      "[tri-fallback] handball live failed this tick",
-    );
-  }
-  const handballLive = sportWithFallback("handball", handballLiveRaw);
-  const cricketLive: LiveMatchState[] = [];
-  const tableTennisLive: LiveMatchState[] = [];
-  const snookerLive: LiveMatchState[] = [];
-  const boxingLive: LiveMatchState[] = [];
-  const formula1Live: LiveMatchState[] = [];
-  const dartsLive: LiveMatchState[] = [];
 
-  // ── Live feed order (explicit request): Futebol → Ténis → Basquete →
-  // Hóquei de Gelo → Beisebol → Voleibol → Handebol → Críquete → outros
   // mergeStickyLive: re-injects any match seen in the last 5 min that the API
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
-  const livePart = mergeStickyLive([
-    ...footballVisibleLive,
-    ...tennisLive,
-    ...basketballLive,
-    ...hockeyLive,
-    ...baseballLive,
-    ...volleyballLiveItems,
-    ...mmaLive,
-    ...handballLive,
-    ...cricketLive,
-    ...tableTennisLive,
-    ...snookerLive,
-    ...boxingLive,
-    ...formula1Live,
-    ...dartsLive,
-  ]);
+  const livePart = mergeStickyLive([...footballVisibleLive]);
 
   const liveIds = new Set(livePart.map((m) => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
@@ -10039,8 +9041,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         !!m.hasRealOdds ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0;
-      // Tennis always has computed odds even without a real bookmaker price — allow all.
+        (m.odds?.away ?? 0) > 0 ||
+        ((m.sport ?? "football") === "football" && !!m._sportMonksFixtureId);
+      // Tennis always has computed odds even without a real bookmaker price.
+      // Football SportMonks fixtures must also remain visible even when the
+      // odds snapshot is temporarily empty/interrupted.
       if (m.sport !== "tennis" && !hasVisibleOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
       const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
@@ -10205,7 +9210,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // not by hiding the match itself.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     m.sport !== "football" ||
-    footballWithOddsFallback.some((visible) => String(visible.id) === String(m.id));
+    livePart.some((visible) => String(visible.id) === String(m.id));
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -10260,7 +9265,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       applyOperationalDecision(match, liveDecisions.get(String(match.id))),
     ),
   )
-    .filter((match) => match.hasRealOdds)
+    .filter(
+      (match) =>
+        match.hasRealOdds ||
+        (match.sport === "football" && !!match._sportMonksFixtureId),
+    )
     .sort(
       (a, b) =>
         (sportOrder.get(a.sport ?? "") ?? 99) -
@@ -10681,11 +9690,6 @@ router.get("/live-filler", async (_req: Request, res: Response) => {
 
     const all: UpcomingMatch[] = [
       ...cache.football,
-      ...cache.basketball,
-      ...cache.tennis,
-      ...cache.hockey,
-      ...cache.volleyball,
-      ...cache.baseball,
     ].filter(
       (m) =>
         (
@@ -10775,17 +9779,6 @@ router.get("/upcoming-match/:id", async (req: Request, res: Response) => {
 
   const flattenUpcoming = (cache: UpcomingTopCache): UpcomingMatch[] => [
     ...cache.football,
-    ...cache.tennis,
-    ...cache.basketball,
-    ...cache.hockey,
-    ...cache.volleyball,
-    ...cache.baseball,
-    ...cache.mma,
-    ...cache.darts,
-    ...cache.boxing,
-    ...cache.cricket,
-    ...cache.handball,
-    ...cache.formula1,
   ];
 
   try {
@@ -10818,11 +9811,7 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
       live.matches.find((item) => String(item.id) === id) ?? null;
     if (!match) {
       const upcoming = await getUpcomingAll();
-      const all = [
-        ...upcoming.football, ...upcoming.tennis, ...upcoming.basketball,
-        ...upcoming.hockey, ...upcoming.volleyball, ...upcoming.baseball,
-        ...upcoming.mma, ...upcoming.darts,
-      ];
+      const all = [...upcoming.football];
       match = all.find((item) => String(item.id) === id) ?? null;
     }
     const raw = (match?.markets as unknown as Record<string, unknown> | undefined)?.["_allOdds"];
@@ -10832,32 +9821,6 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
     res.json({ markets: [] });
   }
 });
-
-async function sendSportOdds(
-  sport: keyof UpcomingTopCache,
-  res: Response,
-): Promise<void> {
-  const [upcoming, live] = await Promise.all([
-    getUpcomingAll(),
-    getLivePayloadCached(false),
-  ]);
-  const upcomingRows = Array.isArray(upcoming[sport])
-    ? upcoming[sport] as UpcomingMatch[]
-    : [];
-  const liveRows = live.matches.filter((match) => match.sport === sport);
-  res.json({ odds: [...liveRows, ...upcomingRows] });
-}
-
-router.get("/tennis-odds", async (_req: Request, res: Response) =>
-  sendSportOdds("tennis", res));
-router.get("/basketball-odds", async (_req: Request, res: Response) =>
-  sendSportOdds("basketball", res));
-router.get("/hockey-odds", async (_req: Request, res: Response) =>
-  sendSportOdds("hockey", res));
-router.get("/mlb-odds", async (_req: Request, res: Response) =>
-  sendSportOdds("baseball", res));
-router.get("/volleyball-odds", async (_req: Request, res: Response) =>
-  sendSportOdds("volleyball", res));
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
 router.get("/live-stream", (req: Request, res: Response) => {
@@ -10927,17 +9890,6 @@ router.get("/live-stream", (req: Request, res: Response) => {
 // ─── Top-level upcoming cache — 60s TTL so repeated 30s polls are instant ─────
 type UpcomingTopCache = {
   football: UpcomingMatch[];
-  tennis: UpcomingMatch[];
-  basketball: UpcomingMatch[];
-  hockey: UpcomingMatch[];
-  volleyball: UpcomingMatch[];
-  baseball: UpcomingMatch[];
-  mma: UpcomingMatch[];
-  darts: UpcomingMatch[];
-  boxing: UpcomingMatch[];
-  cricket: UpcomingMatch[];
-  handball: UpcomingMatch[];
-  formula1: UpcomingMatch[];
   fetchedAt: number;
 };
 let upcomingTopCache: UpcomingTopCache | null = null;
@@ -11069,55 +10021,10 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
-  let tennis: UpcomingMatch[] = [];
-  try {
-    tennis = await buildTennisUpcomingFromMrDoge();
-  } catch (err) {
-    logger.error({ err }, "[refreshUpcomingTop] tennis fetch failed");
-  }
-  let basketball: UpcomingMatch[] = [];
-  try {
-    basketball = await buildBasketballUpcomingFromMrDoge();
-  } catch (err) {
-    logger.error({ err }, "[refreshUpcomingTop] basketball fetch failed");
-  }
-  let hockey: UpcomingMatch[] = [];
-  try {
-    hockey = await buildHockeyUpcomingFromMrDoge();
-  } catch (err) {
-    logger.error({ err }, "[refreshUpcomingTop] hockey fetch failed");
-  }
-  let volleyball: UpcomingMatch[] = [];
-  try {
-    volleyball = await buildVolleyballUpcomingFromMrDoge();
-  } catch (err) {
-    logger.error({ err }, "[refreshUpcomingTop] volleyball fetch failed");
-  }
-  let baseball: UpcomingMatch[] = [];
-  try {
-    baseball = await buildBaseballUpcomingFromMrDoge();
-  } catch (err) {
-    logger.error({ err }, "[refreshUpcomingTop] baseball fetch failed");
-  }
-  const mma: UpcomingMatch[] = [];
-  const darts: UpcomingMatch[] = [];
   rememberUpcomingFootballEligibility(football);
-  rememberUpcomingEligibility([
-    ...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball, ...mma, ...darts,
-  ]);
+  rememberUpcomingEligibility([...football]);
   upcomingTopCache = {
     football,
-    tennis,
-    basketball,
-    hockey,
-    volleyball,
-    baseball,
-    mma,
-    darts,
-    boxing: [],
-    cricket: [],
-    handball: [],
-    formula1: [],
     fetchedAt: Date.now(),
   };
   return upcomingTopCache;
@@ -11297,49 +10204,13 @@ router.get("/upcoming", async (req: Request, res: Response) => {
           () =>
             upcomingTopCache ?? {
               football: [],
-              tennis: [],
-              basketball: [],
-              hockey: [],
-              volleyball: [],
-              baseball: [],
-              mma: [],
-              darts: [],
-              boxing: [],
-              cricket: [],
-              handball: [],
-              formula1: [],
               fetchedAt: Date.now(),
             },
         ),
       ]);
   let matches: UpcomingMatch[];
   if (sport === "football") matches = cache.football;
-  else if (sport === "tennis") matches = cache.tennis;
-  else if (sport === "basketball") matches = cache.basketball;
-  else if (sport === "hockey") matches = cache.hockey;
-  else if (sport === "volleyball") matches = cache.volleyball;
-  else if (sport === "baseball") matches = cache.baseball;
-  else if (sport === "mma") matches = cache.mma;
-  else if (sport === "darts") matches = cache.darts;
-  else if (sport === "boxing") matches = cache.boxing;
-  else if (sport === "cricket") matches = cache.cricket;
-  else if (sport === "handball") matches = cache.handball;
-  else if (sport === "formula1") matches = cache.formula1;
-  else
-    matches = [
-      ...cache.football,
-      ...cache.tennis,
-      ...cache.basketball,
-      ...cache.hockey,
-      ...cache.volleyball,
-      ...cache.baseball,
-      ...cache.mma,
-      ...cache.darts,
-      ...cache.boxing,
-      ...cache.cricket,
-      ...cache.handball,
-      ...cache.formula1,
-    ];
+  else matches = [...cache.football];
   const isPlaceholderTeamName = (name: string): boolean => {
     const n = String(name ?? "").trim();
     if (!n) return true;
@@ -14562,7 +13433,9 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
     .map((fixture) => {
       const teams = sportMonksTeams(fixture);
       const kickoffMs = sportMonksTimestampMs(fixture);
-      const kickoff = kickoffMs ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString()) : { date: "", time: "" };
+      const kickoff = kickoffMs
+        ? formatIsoToLisbonDateTime(new Date(kickoffMs).toISOString())
+        : { date: "", time: "" };
       return {
         id: String(fixture.id ?? ""),
         home: String(teams.home?.name ?? ""),

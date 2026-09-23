@@ -17,7 +17,15 @@ COPY scripts/preinstall.cjs scripts/preinstall.cjs
 
 RUN pnpm install --frozen-lockfile
 
-COPY . .
+COPY tsconfig.json tsconfig.json
+COPY tsconfig.base.json tsconfig.base.json
+COPY .npmrc .npmrc
+COPY artifacts/api-server artifacts/api-server
+COPY artifacts/bet62 artifacts/bet62
+COPY lib/api-client-react lib/api-client-react
+COPY lib/api-zod lib/api-zod
+COPY lib/db lib/db
+COPY scripts scripts
 
 RUN pnpm --filter @workspace/bet62 run build \
   && pnpm --filter @workspace/api-server run build
