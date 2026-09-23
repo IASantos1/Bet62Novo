@@ -3405,7 +3405,7 @@ type SidebarCatalogCompetition = {
   eventCount: number;
 };
 
-const MRDOGE_CATALOG_SPORTS = new Set<string>();
+const MRDOGE_CATALOG_SPORTS = new Set<string>(["football"]);
 
 type SidebarTreeContentProps = {
   selectedSport: string;
@@ -3550,6 +3550,10 @@ function SidebarTreeContent({
                       <button
                         key={`${regionKey}:${competition.id}`}
                         onClick={() => {
+                          if (sportKey === "football" && competition.id > 0) {
+                            window.location.assign(`/liga/${competition.id}`);
+                            return;
+                          }
                           setSelectedLeague?.(
                             active ? null : competition.name,
                           );

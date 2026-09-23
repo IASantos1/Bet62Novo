@@ -100,6 +100,14 @@ export type BSDSeason = {
   start_date?: string | null;
   end_date?: string | null;
   is_current?: boolean | null;
+  stages?: Array<Record<string, unknown>> | null;
+};
+
+export type BSDLeague = {
+  id?: number | string | null;
+  name?: string | null;
+  country?: string | null;
+  is_women?: boolean | null;
 };
 
 export type BSDTopScorerRow = {
@@ -188,6 +196,12 @@ export type BSDLineupsResponse = {
   formation_away?: string | null;
   confirmed?: boolean | null;
   predicted?: boolean | null;
+};
+
+export type BSDBestXiResponse = {
+  formation?: string | null;
+  players?: Array<Record<string, unknown>>;
+  lineup?: Array<Record<string, unknown>>;
 };
 
 export type BSDIncidentsResponse = Array<Record<string, unknown>> | {
@@ -373,6 +387,14 @@ export async function getBsdLeagueSeason(
   }).catch(() => null);
 }
 
+export async function getBsdLeagueById(
+  leagueId: string | number,
+): Promise<BSDLeague | null> {
+  return bsdFetch<BSDLeague>(`/leagues/${encodeURIComponent(String(leagueId))}/`, {
+    ttlMs: 24 * 60 * 60_000,
+  }).catch(() => null);
+}
+
 export async function getBsdLeagueStandings(args: {
   leagueId: string | number;
   seasonId?: string | number;
@@ -403,6 +425,25 @@ export async function getBsdLeagueTopScorers(args: {
     },
   ).catch(() => ({ results: [] as BSDTopScorerRow[] }));
   return Array.isArray(payload.results) ? payload.results : [];
+}
+
+export async function getBsdLeagueBestXi(args: {
+  leagueId: string | number;
+  seasonId: string | number;
+  roundNumber?: string | number;
+}): Promise<BSDBestXiResponse | null> {
+  const suffix =
+    args.roundNumber != null && `${args.roundNumber}`.trim() !== ""
+      ? `/${encodeURIComponent(String(args.roundNumber))}/`
+      : "/";
+  return bsdFetch<BSDBestXiResponse>(
+    `/leagues/${encodeURIComponent(String(args.leagueId))}/bestxi/${encodeURIComponent(
+      String(args.seasonId),
+    )}${suffix}`,
+    {
+      ttlMs: 30 * 60_000,
+    },
+  ).catch(() => null);
 }
 
 export async function getBsdEventPrediction(

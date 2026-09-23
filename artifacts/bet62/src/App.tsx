@@ -23,6 +23,7 @@ import {
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import LivePage from "@/pages/live";
+import LeaguePage from "@/pages/league";
 import SplashScreen from "@/components/SplashScreen";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
@@ -91,6 +92,12 @@ function Router() {
       <Route path="/perfil">{() => <Home initialTab="profile" />}</Route>
       <Route path="/ao-vivo">{() => <LivePage />}</Route>
       <Route path="/live">{() => <LivePage />}</Route>
+      <Route path="/liga/:id">
+        {(params) => <LeaguePage leagueId={params.id} />}
+      </Route>
+      <Route path="/league/:id">
+        {(params) => <LeaguePage leagueId={params.id} />}
+      </Route>
       <Route path="/admin">
         {() => (
           <Suspense

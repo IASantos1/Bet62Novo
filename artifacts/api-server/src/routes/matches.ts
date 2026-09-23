@@ -8,6 +8,8 @@ import {
   getBsdEventPrediction,
   getBsdEventStats,
   getBsdEvents,
+  getBsdLeagueBestXi,
+  getBsdLeagueById,
   getBsdLeagueSeason,
   getBsdLeagueStandings,
   getBsdLeagueTopScorers,
@@ -15,7 +17,6 @@ import {
   getBsdOddsForEvent,
   type BSDEvent,
   type BSDH2HResponse,
-  type BSDIncidentsResponse,
   type BSDLineupsResponse,
   type BSDOddsRow,
   type BSDPredictionResponse,
@@ -680,6 +681,70 @@ function mapStandingsRows(rows: BSDStandingRow[]) {
   }));
 }
 
+function mapLeagueEventCard(event: BSDEvent) {
+  const { date, time } = toDateParts(event.event_date ?? null);
+  return {
+    id: toMatchId(event.id),
+    eventId: String(event.id),
+    home: text(event.home_team_name ?? event.home_team),
+    away: text(event.away_team_name ?? event.away_team),
+    homeScore: parseNumber(event.home_score),
+    awayScore: parseNumber(event.away_score),
+    status: mapStatus(text(event.status)),
+    date,
+    time,
+    roundNumber: parseNumber(event.round_number),
+    roundName: text(event.round_name),
+    groupName: text(event.group_name),
+  };
+}
+
+function mapBestXi(payload: Record<string, unknown> | null | undefined) {
+  const players = Array.isArray(payload?.["players"])
+    ? (payload?.["players"] as Array<Record<string, unknown>>)
+    : Array.isArray(payload?.["lineup"])
+      ? (payload?.["lineup"] as Array<Record<string, unknown>>)
+      : [];
+  return {
+    formation: text(payload?.["formation"]) || undefined,
+    players: players.map((row) => ({
+      id: row["player_id"] != null ? String(row["player_id"]) : String(row["id"] ?? ""),
+      name: text(row["player_name"] ?? row["name"]),
+      team: text(row["team_name"] ?? row["team"]),
+      position: text(row["position"] ?? row["position_name"]),
+      rating: row["rating"] != null ? Number(row["rating"]) : null,
+      shirtNumber:
+        row["shirt_number"] != null ? String(row["shirt_number"]) : null,
+      imageUrl:
+        row["player_id"] != null
+          ? `https://sports.bzzoiro.com/img/player/${encodeURIComponent(String(row["player_id"]))}/`
+          : null,
+    })),
+  };
+}
+
+async function getCatalogEvents(range: string): Promise<BSDEvent[]> {
+  const dateFrom = todayIsoDate(0);
+  const dateTo = todayIsoDate(range === "month" ? 30 : 7);
+  const [live, upcoming] = await Promise.all([
+    getBsdLiveEvents().catch(() => []),
+    getBsdEvents({
+      status: "upcoming",
+      dateFrom,
+      dateTo,
+      limit: 200,
+      offset: 0,
+    })
+      .then((payload) => payload.results ?? [])
+      .catch(() => [] as BSDEvent[]),
+  ]);
+  const deduped = new Map<string, BSDEvent>();
+  for (const event of [...live, ...upcoming]) {
+    deduped.set(String(event.id), event);
+  }
+  return Array.from(deduped.values());
+}
+
 function mapLineupPlayers(rows: unknown[]): Array<{
   name: string;
   shortName?: string;
@@ -851,11 +916,73 @@ router.get("/live-stream", async (_req: Request, res: Response) => {
 });
 
 router.get("/catalog", async (_req: Request, res: Response) => {
-  sendJson(res, { regions: [] });
+  try {
+    const sport = String(_req.query["sport"] ?? "football").trim().toLowerCase();
+    if (sport !== "football") return sendJson(res, { regions: [] });
+    const range = String(_req.query["range"] ?? "week").trim().toLowerCase();
+    const events = await getCatalogEvents(range);
+    const byCountry = new Map<string, { id: number; name: string; eventCount: number; competitionIds: Set<string> }>();
+    for (const event of events) {
+      const country = text(event.country_name ?? event.country, "Internacional");
+      const leagueId = String(event.league_id ?? "");
+      const current =
+        byCountry.get(country) ??
+        {
+          id: byCountry.size + 1,
+          name: country,
+          eventCount: 0,
+          competitionIds: new Set<string>(),
+        };
+      current.eventCount += 1;
+      if (leagueId) current.competitionIds.add(leagueId);
+      byCountry.set(country, current);
+    }
+    sendJson(res, {
+      regions: Array.from(byCountry.values())
+        .map((region) => ({
+          id: region.id,
+          name: region.name,
+          eventCount: region.eventCount,
+          competitionCount: region.competitionIds.size,
+        }))
+        .sort((a, b) => b.eventCount - a.eventCount || a.name.localeCompare(b.name)),
+    });
+  } catch {
+    sendJson(res, { regions: [] });
+  }
 });
 
-router.get("/catalog/competitions", async (_req: Request, res: Response) => {
-  sendJson(res, { competitions: [] });
+router.get("/catalog/competitions", async (req: Request, res: Response) => {
+  try {
+    const sport = String(req.query["sport"] ?? "football").trim().toLowerCase();
+    if (sport !== "football") return sendJson(res, { competitions: [] });
+    const regionId = parseNumber(req.query["regionId"]);
+    const range = String(req.query["range"] ?? "week").trim().toLowerCase();
+    const events = await getCatalogEvents(range);
+    const countries = Array.from(
+      new Set(events.map((event) => text(event.country_name ?? event.country, "Internacional"))),
+    ).sort((a, b) => a.localeCompare(b));
+    const targetCountry = regionId > 0 ? countries[regionId - 1] : "";
+    const grouped = new Map<string, { id: number; name: string; regionId: number; eventCount: number }>();
+    for (const event of events) {
+      const country = text(event.country_name ?? event.country, "Internacional");
+      if (targetCountry && country !== targetCountry) continue;
+      const leagueName = text(event.league_name ?? event.league, "Liga");
+      const leagueId = parseNumber(event.league_id) || grouped.size + 1;
+      const current =
+        grouped.get(`${leagueId}`) ??
+        { id: leagueId, name: leagueName, regionId: regionId || 1, eventCount: 0 };
+      current.eventCount += 1;
+      grouped.set(`${leagueId}`, current);
+    }
+    sendJson(res, {
+      competitions: Array.from(grouped.values()).sort(
+        (a, b) => b.eventCount - a.eventCount || a.name.localeCompare(b.name),
+      ),
+    });
+  } catch {
+    sendJson(res, { competitions: [] });
+  }
 });
 
 router.get("/upcoming", async (_req: Request, res: Response) => {
@@ -987,8 +1114,133 @@ router.get("/league-standings", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/leagues/:id/page", async (req: Request, res: Response) => {
+  try {
+    const leagueId = String(req.params["id"] ?? "").trim();
+    if (!leagueId) {
+      return res.status(400).json({ error: "league id required" });
+    }
+    const today = todayIsoDate(0);
+    const [league, season] = await Promise.all([
+      getBsdLeagueById(leagueId),
+      getBsdLeagueSeason(leagueId),
+    ]);
+    const seasonId =
+      season?.id != null && `${season.id}`.trim() !== ""
+        ? String(season.id)
+        : undefined;
+    const [standings, upcoming, results, topScorers, bestXi] = await Promise.all([
+      getBsdLeagueStandings({ leagueId, seasonId }),
+      getBsdEvents({
+        leagueId,
+        seasonId,
+        status: "upcoming",
+        dateFrom: today,
+        limit: 20,
+        offset: 0,
+      }).catch(() => ({ results: [] as BSDEvent[] })),
+      getBsdEvents({
+        leagueId,
+        seasonId,
+        status: "finished",
+        limit: 20,
+        offset: 0,
+      }).catch(() => ({ results: [] as BSDEvent[] })),
+      getBsdLeagueTopScorers({ leagueId, seasonId, limit: 10 }).catch(() => []),
+      seasonId ? getBsdLeagueBestXi({ leagueId, seasonId }).catch(() => null) : Promise.resolve(null),
+    ]);
+
+    res.json({
+      header: {
+        id: Number(league?.id ?? leagueId),
+        name: text(league?.name, `Liga ${leagueId}`),
+        country: text(league?.country),
+        isWomen: Boolean(league?.is_women),
+        logoUrl: `https://sports.bzzoiro.com/img/league/${encodeURIComponent(leagueId)}/`,
+      },
+      season: season
+        ? {
+            id: season.id != null ? String(season.id) : null,
+            name: text(season.name),
+            year: season.year != null ? String(season.year) : null,
+            startDate: text(season.start_date),
+            endDate: text(season.end_date),
+            isCurrent: Boolean(season.is_current),
+          }
+        : null,
+      standings: {
+        table: mapStandingsRows(
+          Array.isArray(standings?.standings) ? standings.standings : [],
+        ),
+        groups: Array.isArray(standings?.groups)
+          ? standings.groups.map((group) => ({
+              name: text(group.name, "Grupo"),
+              table: mapStandingsRows(
+                Array.isArray(group.standings)
+                  ? group.standings
+                  : Array.isArray(group.rows)
+                    ? group.rows
+                    : [],
+              ),
+            }))
+          : [],
+      },
+      fixtures: Array.isArray(upcoming.results)
+        ? upcoming.results.map(mapLeagueEventCard)
+        : [],
+      results: Array.isArray(results.results)
+        ? results.results.map(mapLeagueEventCard)
+        : [],
+      topScorers: topScorers.map((row) => ({
+        rank: parseNumber(row.rank),
+        playerId: row.player_id != null ? String(row.player_id) : null,
+        name: text(row.player_name),
+        teamId: row.team_id != null ? String(row.team_id) : null,
+        team: text(row.team_name),
+        value: parseNumber(row.value),
+        matches: parseNumber(row.matches),
+        position: text(row.position),
+        imageUrl:
+          row.player_id != null
+            ? `https://sports.bzzoiro.com/img/player/${encodeURIComponent(String(row.player_id))}/`
+            : null,
+      })),
+      bestXi: mapBestXi(bestXi as Record<string, unknown> | null),
+    });
+  } catch (error) {
+    res
+      .status(formatErrorStatus(error, 500))
+      .json({ error: "league page unavailable" });
+  }
+});
+
 router.get("/football-leagues", async (_req: Request, res: Response) => {
-  sendJson(res, { leagues: [] });
+  try {
+    const range = String(_req.query["range"] ?? "week").trim().toLowerCase();
+    const events = await getCatalogEvents(range);
+    const grouped = new Map<string, { id: number; name: string; country: string; eventCount: number }>();
+    for (const event of events) {
+      const leagueId = parseNumber(event.league_id) || grouped.size + 1;
+      const key = String(leagueId);
+      const current =
+        grouped.get(key) ??
+        {
+          id: leagueId,
+          name: text(event.league_name ?? event.league, "Liga"),
+          country: text(event.country_name ?? event.country, "Internacional"),
+          eventCount: 0,
+        };
+      current.eventCount += 1;
+      grouped.set(key, current);
+    }
+    sendJson(res, {
+      leagues: Array.from(grouped.values()).sort(
+        (a, b) => b.eventCount - a.eventCount || a.name.localeCompare(b.name),
+      ),
+    });
+  } catch {
+    sendJson(res, { leagues: [] });
+  }
 });
 
 router.get("/football-livescores", async (_req: Request, res: Response) => {
