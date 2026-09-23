@@ -35,31 +35,6 @@ const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3";
 const SPORTMONKS_ODDS_BOOKMAKER =
   process.env["SPORTMONKS_ODDS_BOOKMAKER"]?.trim() || "bet365";
-
-// Mr. Doge remains available only as a legacy compatibility module while
-// deployments migrate; it is deliberately not selected by the match routes.
-// The old comments below document the SDK for the isolated compatibility code.
-//
-// Mr. Doge (api.mrdoge.co, @mrdoge/node) — legacy provider
-// (matches.subscribeLive pushes deltas for every live match matching a
-// sports filter in ONE connection, rather than one poll per sport). Auth
-// is a Bearer-style `sk_live_...` key passed to the SDK constructor, not a
-// header this codebase builds itself. Confirmed real via the account's own
-// Business-tier key and the actual published package's shipped .d.ts
-// (not just doc prose) 2026-09-20: matches.list/subscribeLive cover
-// soccer/basketball/american_football/baseball/ice_hockey/volleyball/
-// handball/tennis — darts and MMA (two of BET62's 8 sports) are NOT
-// covered by this provider, no code here can produce real data for them
-// until a separate source is found. odds.list/odds.subscribe (Business
-// tier) are a separate per-match resource, keyed by matchId, not embedded
-// on Match — only 3 market sysnames are confirmed real so far
-// (SOCCER_MATCH_RESULT[_PRELIVE], SOCCER_UNDER_OVER,
-// SOCCER_BOTH_TEAMS_TO_SCORE); betType is an open string at the protocol
-// level (no enum to enumerate from), so any other market requires a real
-// API probe before being wired in — never guess a sysname the way an
-// earlier provider mapping did and shipped a misclassified BTTS/corners
-// market.
-const MRDOGE_API_KEY = process.env["MRDOGE_API_KEY"] ?? "";
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
@@ -80,7 +55,6 @@ export const CONFIG = {
   SPORTMONKS_API_TOKEN,
   SPORTMONKS_BASE_URL,
   SPORTMONKS_ODDS_BOOKMAKER,
-  MRDOGE_API_KEY,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,

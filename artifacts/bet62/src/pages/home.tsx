@@ -6376,7 +6376,6 @@ export default function Home({
     (matchId: string | number | undefined | null): string => {
       return String(matchId ?? "")
         .replace(/^[a-z]+-v\d+-/i, "")
-        .replace(/^mrdoge-[a-z_]+-/i, "")
         .replace(/^sportmonks-[a-z_]+-/i, "");
     },
     [],
