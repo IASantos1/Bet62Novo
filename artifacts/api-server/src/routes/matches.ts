@@ -19,21 +19,38 @@ import {
   getBsdLeagues,
   getBsdLiveEvents,
   getBsdOddsForEvent,
+  getBsdEntitySocial,
   getBsdPlayerById,
   getBsdPlayerCareer,
   getBsdPlayerNationalTeam,
+  getBsdPlayers,
   getBsdPlayerStats,
   getBsdPlayerTransfers,
+  getBsdTeamById,
+  getBsdTeamFixtures,
+  getBsdTeams,
+  getBsdTeamSquad,
+  getBsdTransfers,
+  getBsdTransfersLedger,
+  getBsdTransfersRoutes,
+  getBsdWorldCupSquadByTeam,
+  getBsdWorldCupSquads,
   type BSDEvent,
   type BSDH2HResponse,
   type BSDLeague,
   type BSDLineupsResponse,
   type BSDOddsRow,
+  type BSDPlayer,
   type BSDPredictionResponse,
   type BSDStandingRow,
   type BSDStatsResponse,
+  type BSDTeam,
   type BSDTopScorerRow,
+  type BSDTransferLedgerRow,
+  type BSDTransferRouteRow,
+  type BSDTransferRow,
   type BSDVenue,
+  type BSDWorldCupSquadRow,
 } from "../services/bsd/client.js";
 
 type Odds1X2 = {
@@ -827,6 +844,136 @@ function mapVenue(row: BSDVenue) {
   };
 }
 
+function parseBooleanQuery(value: unknown): boolean | undefined {
+  if (value == null) return undefined;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (["true", "1", "yes", "sim"].includes(normalized)) return true;
+  if (["false", "0", "no", "nao", "não"].includes(normalized)) return false;
+  return undefined;
+}
+
+function mapTeamSummary(row: BSDTeam) {
+  return {
+    id: row.id != null ? String(row.id) : null,
+    name: text(row.name) || null,
+    shortName: text(row.short_name) || null,
+    countryCode: text(row.country_code) || null,
+    country: text(row.country_name ?? row.country) || null,
+    leagueId: row.league_id != null ? String(row.league_id) : null,
+    seasonId: row.season_id != null ? String(row.season_id) : null,
+    venueId: row.venue_id != null ? String(row.venue_id) : null,
+    venue: text(row.venue_name) || null,
+    coach: text(row.coach_name ?? row.manager_name) || null,
+    isWomen: Boolean(row.is_women),
+    colours: {
+      primary: text(row.primary_color) || null,
+      secondary: text(row.secondary_color) || null,
+    },
+    imageUrl: row.id != null ? toTeamLogo(row.id) ?? null : null,
+  };
+}
+
+function mapSquadPlayer(row: Record<string, unknown>) {
+  return {
+    id: pickText(row, ["player_id", "id"]) || null,
+    name: pickText(row, ["player_name", "name"]) || null,
+    shortName: pickText(row, ["short_name"]) || null,
+    position: pickText(row, ["position", "position_name"]) || null,
+    shirtNumber:
+      row["shirt_number"] != null ? parseNumber(row["shirt_number"]) : null,
+    nationality: pickText(row, ["nationality", "country_name"]) || null,
+    nationalityCode: pickText(row, ["nationality_code", "country_code"]) || null,
+    availability: pickText(row, ["availability"]) || "available",
+    injuryType: pickText(row, ["injury_type"]) || null,
+    injuryExpectedReturn: pickDate(row, ["injury_expected_return"]) || null,
+    imageUrl: toPlayerImage(row["player_id"] ?? row["id"]),
+  };
+}
+
+function mapTransferFeedRow(row: BSDTransferRow) {
+  const mapped = mapTransfer(row);
+  return {
+    ...mapped,
+    playerId: pickText(row, ["player_id"]) || null,
+    playerName: pickText(row, ["player_name", "name"]) || null,
+    fromTeamId: pickText(getNestedRecord(row, "from_team") ?? row, ["id", "from_team_id"]) || null,
+    toTeamId: pickText(getNestedRecord(row, "to_team") ?? row, ["id", "to_team_id"]) || null,
+    playerImageUrl: toPlayerImage(row["player_id"]),
+  };
+}
+
+function mapLedgerRow(row: BSDTransferLedgerRow) {
+  return {
+    teamId: pickText(row, ["team_id", "id"]) || null,
+    team: pickText(row, ["team_name", "name"]) || null,
+    imageUrl: toTeamLogo(row["team_id"] ?? row["id"]) ?? null,
+    grossSpendEur: row["gross_spend_eur"] != null ? parseNumber(row["gross_spend_eur"]) : null,
+    grossIncomeEur: row["gross_income_eur"] != null ? parseNumber(row["gross_income_eur"]) : null,
+    netSpendEur: row["net_spend_eur"] != null ? parseNumber(row["net_spend_eur"]) : null,
+    loanDependencyPct: row["loan_dependency_pct"] != null ? parseNumber(row["loan_dependency_pct"]) : null,
+    squadSize: row["squad_size"] != null ? parseNumber(row["squad_size"]) : null,
+    turnoverPct: row["turnover_pct"] != null ? parseNumber(row["turnover_pct"]) : null,
+    ageIn: row["age_in"] != null ? parseNumber(row["age_in"]) : null,
+    ageOut: row["age_out"] != null ? parseNumber(row["age_out"]) : null,
+    incoming: getNestedRecord(row, "incoming"),
+    outgoings: getNestedRecord(row, "outgoings"),
+  };
+}
+
+function mapTransferRoute(row: BSDTransferRouteRow) {
+  return {
+    fromTeamId: pickText(getNestedRecord(row, "from_team") ?? row, ["id", "from_team_id"]) || null,
+    fromTeam: pickText(getNestedRecord(row, "from_team") ?? row, ["name", "from_team_name", "from"]) || null,
+    toTeamId: pickText(getNestedRecord(row, "to_team") ?? row, ["id", "to_team_id"]) || null,
+    toTeam: pickText(getNestedRecord(row, "to_team") ?? row, ["name", "to_team_name", "to"]) || null,
+    moves: row["moves"] != null ? parseNumber(row["moves"]) : null,
+    loans: row["loans"] != null ? parseNumber(row["loans"]) : null,
+    feesEur: row["fees_eur"] != null ? parseNumber(row["fees_eur"]) : null,
+    players: Array.isArray(row["players"])
+      ? (row["players"] as Array<Record<string, unknown>>).map((player) => ({
+          id: pickText(player, ["player_id", "id"]) || null,
+          name: pickText(player, ["player_name", "name"]) || null,
+          imageUrl: toPlayerImage(player["player_id"] ?? player["id"]),
+        }))
+      : [],
+  };
+}
+
+function mapWorldCupSquadRow(row: BSDWorldCupSquadRow) {
+  const players = Array.isArray(row["players"])
+    ? (row["players"] as Array<Record<string, unknown>>).map((player) => ({
+        id: pickText(player, ["player_id", "id"]) || null,
+        name: pickText(player, ["player_name", "name"]) || null,
+        position: pickText(player, ["position", "position_name"]) || null,
+        status: pickText(player, ["status", "availability"]) || null,
+        imageUrl: toPlayerImage(player["player_id"] ?? player["id"]),
+      }))
+    : [];
+  return {
+    teamId: pickText(row, ["team_id", "id"]) || null,
+    team: pickText(row, ["team_name", "name"]) || null,
+    group: pickText(row, ["group"]) || null,
+    status: pickText(row, ["status"]) || null,
+    hasPlayer:
+      row["has_player"] != null ? Boolean(row["has_player"]) : null,
+    imageUrl: toTeamLogo(row["team_id"] ?? row["id"]) ?? null,
+    players,
+  };
+}
+
+function mapSocialItem(row: Record<string, unknown>) {
+  return {
+    id: pickText(row, ["id"]) || null,
+    type: pickText(row, ["type"]) || null,
+    title: pickText(row, ["title", "text", "caption"]) || null,
+    url: pickText(row, ["url", "link"]) || null,
+    publishedAt: pickText(row, ["published_at", "created_at", "date"]) || null,
+    source: pickText(row, ["source", "provider"]) || null,
+    thumbnailUrl: pickText(row, ["thumbnail_url", "image_url"]) || null,
+  };
+}
+
 function mapLeagueEventCard(event: BSDEvent) {
   const { date, time } = toDateParts(event.event_date ?? null);
   return {
@@ -839,8 +986,11 @@ function mapLeagueEventCard(event: BSDEvent) {
     status: mapStatus(text(event.status)),
     date,
     time,
+    stage: text(event.stage) || null,
+    stageName: text(event.stage_name) || null,
     roundNumber: parseNumber(event.round_number),
     roundName: text(event.round_name),
+    roundLabel: text(event.round_label) || null,
     groupName: text(event.group_name),
   };
 }
@@ -1678,6 +1828,181 @@ router.get("/football-livescores", async (_req: Request, res: Response) => {
   }
 });
 
+router.get("/teams", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdTeams({
+      countryCode: String(req.query["countryCode"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      inCompetition: parseBooleanQuery(req.query["inCompetition"]),
+      isWomen: parseBooleanQuery(req.query["isWomen"]),
+      name: String(req.query["name"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      teams: Array.isArray(payload.results) ? payload.results.map(mapTeamSummary) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, teams: [] });
+  }
+});
+
+router.get("/teams/:id", async (req: Request, res: Response) => {
+  try {
+    const teamId = String(req.params["id"] ?? "").trim();
+    if (!teamId) return res.status(400).json({ error: "team id required" });
+    const team = await getBsdTeamById(teamId);
+    if (!team) return res.status(404).json({ error: "team unavailable" });
+    sendJson(res, mapTeamSummary(team));
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ error: "team unavailable" });
+  }
+});
+
+router.get("/teams/:id/squad", async (req: Request, res: Response) => {
+  try {
+    const teamId = String(req.params["id"] ?? "").trim();
+    if (!teamId) return res.status(400).json({ error: "team id required" });
+    const rows = await getBsdTeamSquad(teamId);
+    sendJson(res, {
+      squad: rows
+        .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
+        .map(mapSquadPlayer),
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ squad: [] });
+  }
+});
+
+router.get("/teams/:id/fixtures", async (req: Request, res: Response) => {
+  try {
+    const teamId = String(req.params["id"] ?? "").trim();
+    if (!teamId) return res.status(400).json({ error: "team id required" });
+    const payload = await getBsdTeamFixtures({
+      teamId,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      status: String(req.query["status"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      fixtures: Array.isArray(payload.results) ? payload.results.map(mapLeagueEventCard) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, fixtures: [] });
+  }
+});
+
+router.get("/teams/:id/social", async (req: Request, res: Response) => {
+  try {
+    const teamId = String(req.params["id"] ?? "").trim();
+    if (!teamId) return res.status(400).json({ error: "team id required" });
+    const rows = await getBsdEntitySocial({
+      entity: "teams",
+      id: teamId,
+      type: String(req.query["type"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 20))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, { items: rows.map(mapSocialItem) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ items: [] });
+  }
+});
+
+router.get("/players", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdPlayers({
+      name: String(req.query["name"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      nationalTeamId: String(req.query["nationalTeamId"] ?? "").trim() || undefined,
+      nationalityCode: String(req.query["nationalityCode"] ?? "").trim() || undefined,
+      position: String(req.query["position"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      players: Array.isArray(payload.results)
+        ? payload.results.map((row: BSDPlayer) => ({
+            id: row.id != null ? String(row.id) : null,
+            name: text(row.name) || null,
+            shortName: text(row.short_name) || null,
+            position: text(row.position) || null,
+            nationality: text(row.nationality ?? row.country_name) || null,
+            nationalityCode: text(row.nationality_code) || null,
+            teamId:
+              row.current_team?.id != null
+                ? String(row.current_team.id)
+                : row.team_id != null
+                  ? String(row.team_id)
+                  : null,
+            team:
+              text(row.current_team?.name ?? row.team_name) || null,
+            imageUrl: toPlayerImage(row.id),
+          }))
+        : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, players: [] });
+  }
+});
+
+router.get("/players/:id", async (req: Request, res: Response) => {
+  try {
+    const playerId = String(req.params["id"] ?? "").trim();
+    if (!playerId) return res.status(400).json({ error: "player id required" });
+    const player = await getBsdPlayerById(playerId);
+    if (!player) return res.status(404).json({ error: "player unavailable" });
+    sendJson(res, {
+      id: player.id != null ? String(player.id) : playerId,
+      name: text(player.name) || null,
+      shortName: text(player.short_name) || null,
+      position: text(player.position) || null,
+      nationality: text(player.nationality ?? player.country_name) || null,
+      nationalityCode: text(player.nationality_code) || null,
+      birthDate: text(player.birth_date ?? player.date_of_birth) || null,
+      height: player.height != null ? parseNumber(player.height) : null,
+      weight: player.weight != null ? parseNumber(player.weight) : null,
+      preferredFoot: text(player.preferred_foot) || null,
+      shirtNumber: player.shirt_number != null ? parseNumber(player.shirt_number) : null,
+      marketValue: player.market_value != null ? parseNumber(player.market_value) : null,
+      teamId:
+        player.current_team?.id != null
+          ? String(player.current_team.id)
+          : player.team_id != null
+            ? String(player.team_id)
+            : null,
+      team: text(player.current_team?.name ?? player.team_name) || null,
+      imageUrl: toPlayerImage(player.id ?? playerId),
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ error: "player unavailable" });
+  }
+});
+
+router.get("/players/:id/social", async (req: Request, res: Response) => {
+  try {
+    const playerId = String(req.params["id"] ?? "").trim();
+    if (!playerId) return res.status(400).json({ error: "player id required" });
+    const rows = await getBsdEntitySocial({
+      entity: "players",
+      id: playerId,
+      type: String(req.query["type"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 20))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, { items: rows.map(mapSocialItem) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ items: [] });
+  }
+});
+
 router.get("/football-daily/:offset", async (req: Request, res: Response) => {
   try {
     const offset = parseNumber(req.params["offset"] ?? 0);
@@ -1706,6 +2031,93 @@ router.get("/football-daily/:offset", async (req: Request, res: Response) => {
     sendJson(res, { leagues: Array.from(leagues.values()) });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ leagues: [] });
+  }
+});
+
+router.get("/transfers", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdTransfers({
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      playerId: String(req.query["playerId"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      fromTeamId: String(req.query["fromTeamId"] ?? "").trim() || undefined,
+      toTeamId: String(req.query["toTeamId"] ?? "").trim() || undefined,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      minFee: String(req.query["minFee"] ?? "").trim() || undefined,
+      hasFee: parseBooleanQuery(req.query["hasFee"]),
+      ordering: String(req.query["ordering"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      transfers: Array.isArray(payload.results) ? payload.results.map(mapTransferFeedRow) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, transfers: [] });
+  }
+});
+
+router.get("/transfers/ledger", async (req: Request, res: Response) => {
+  try {
+    const rows = await getBsdTransfersLedger({
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+    });
+    sendJson(res, { rows: rows.map(mapLedgerRow) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ rows: [] });
+  }
+});
+
+router.get("/transfers/routes", async (req: Request, res: Response) => {
+  try {
+    const rows = await getBsdTransfersRoutes({
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      minMoves: Math.max(1, parseNumber(req.query["minMoves"] ?? 2)),
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+    });
+    sendJson(res, { routes: rows.map(mapTransferRoute) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ routes: [] });
+  }
+});
+
+router.get("/worldcup/squads", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdWorldCupSquads({
+      team: String(req.query["team"] ?? "").trim() || undefined,
+      group: String(req.query["group"] ?? "").trim() || undefined,
+      status: String(req.query["status"] ?? "").trim() || undefined,
+      hasPlayer: parseBooleanQuery(req.query["hasPlayer"]),
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      squads: Array.isArray(payload.results)
+        ? payload.results.map(mapWorldCupSquadRow)
+        : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, squads: [] });
+  }
+});
+
+router.get("/worldcup/squads/:teamId", async (req: Request, res: Response) => {
+  try {
+    const teamId = String(req.params["teamId"] ?? "").trim();
+    if (!teamId) return res.status(400).json({ error: "team id required" });
+    const payload = await getBsdWorldCupSquadByTeam(teamId);
+    sendJson(res, { squad: payload ? mapWorldCupSquadRow(payload) : null });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ squad: null });
   }
 });
 

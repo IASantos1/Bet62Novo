@@ -37,8 +37,11 @@ export type BSDEvent = {
   venue_name?: string | null;
   referee?: string | null;
   referee_name?: string | null;
+  stage?: string | null;
+  stage_name?: string | null;
   round_number?: number | string | null;
   round_name?: string | null;
+  round_label?: string | null;
   group_name?: string | null;
   live_websocket?: boolean | null;
   websocket_plus?: boolean | null;
@@ -157,6 +160,30 @@ export type BSDVenue = {
   round?: number | string | null;
 };
 
+export type BSDTeam = {
+  id?: number | string | null;
+  name?: string | null;
+  short_name?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
+  country?: string | null;
+  league_id?: number | string | null;
+  season_id?: number | string | null;
+  venue_id?: number | string | null;
+  venue_name?: string | null;
+  coach_name?: string | null;
+  manager_name?: string | null;
+  primary_color?: string | null;
+  secondary_color?: string | null;
+  is_women?: boolean | null;
+};
+
+export type BSDTeamSquadRow = Record<string, unknown>;
+export type BSDTransferRow = Record<string, unknown>;
+export type BSDTransferLedgerRow = Record<string, unknown>;
+export type BSDTransferRouteRow = Record<string, unknown>;
+export type BSDWorldCupSquadRow = Record<string, unknown>;
+
 export type BSDPredictionResponse = {
   id?: number | string | null;
   event?: {
@@ -265,7 +292,6 @@ export type BSDPlayer = {
 };
 
 export type BSDPlayerStatRow = Record<string, unknown>;
-export type BSDTransferRow = Record<string, unknown>;
 export type BSDCareerRow = Record<string, unknown>;
 export type BSDNationalTeamRow = Record<string, unknown>;
 
@@ -607,6 +633,237 @@ export async function getBsdLeagueVenues(args: {
           : undefined,
     ttlMs: 30 * 60_000,
   }).catch(() => ({ results: [] as BSDVenue[] }));
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
+export async function getBsdTeams(args?: {
+  countryCode?: string;
+  leagueId?: string | number;
+  seasonId?: string | number;
+  inCompetition?: boolean;
+  isWomen?: boolean;
+  name?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDTeam>> {
+  return bsdFetch<PaginatedResponse<BSDTeam>>("/teams/", {
+    query: {
+      ...(args?.countryCode ? { country_code: args.countryCode } : {}),
+      ...(args?.leagueId != null ? { league_id: args.leagueId } : {}),
+      ...(args?.seasonId != null ? { season_id: args.seasonId } : {}),
+      ...(args?.inCompetition != null
+        ? { in_competition: args.inCompetition }
+        : {}),
+      ...(args?.isWomen != null ? { is_women: args.isWomen } : {}),
+      ...(args?.name ? { name: args.name } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 10 * 60_000,
+  }).catch(() => ({ results: [] as BSDTeam[] }));
+}
+
+export async function getBsdTeamById(
+  teamId: string | number,
+): Promise<BSDTeam | null> {
+  return bsdFetch<BSDTeam>(`/teams/${encodeURIComponent(String(teamId))}/`, {
+    ttlMs: 30 * 60_000,
+  }).catch(() => null);
+}
+
+export async function getBsdTeamSquad(
+  teamId: string | number,
+): Promise<BSDTeamSquadRow[]> {
+  return fetchAllPages<BSDTeamSquadRow>(`/teams/${encodeURIComponent(String(teamId))}/squad/`, {
+    query: { limit: 100, offset: 0 },
+    ttlMs: 10 * 60_000,
+    maxPages: 3,
+  }).catch(() => []);
+}
+
+export async function getBsdTeamFixtures(args: {
+  teamId: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+  leagueId?: string | number;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDEvent>> {
+  return bsdFetch<PaginatedResponse<BSDEvent>>(
+    `/teams/${encodeURIComponent(String(args.teamId))}/fixtures/`,
+    {
+      query: {
+        ...(args.dateFrom ? { date_from: args.dateFrom } : {}),
+        ...(args.dateTo ? { date_to: args.dateTo } : {}),
+        ...(args.leagueId != null ? { league_id: args.leagueId } : {}),
+        ...(args.status ? { status: args.status } : {}),
+        limit: args.limit ?? 50,
+        offset: args.offset ?? 0,
+      },
+      ttlMs: 10 * 60_000,
+    },
+  ).catch(() => ({ results: [] as BSDEvent[] }));
+}
+
+export async function getBsdPlayers(args?: {
+  name?: string;
+  teamId?: string | number;
+  nationalTeamId?: string | number;
+  nationalityCode?: string;
+  position?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDPlayer>> {
+  return bsdFetch<PaginatedResponse<BSDPlayer>>("/players/", {
+    query: {
+      ...(args?.name ? { name: args.name } : {}),
+      ...(args?.teamId != null ? { team_id: args.teamId } : {}),
+      ...(args?.nationalTeamId != null
+        ? { national_team_id: args.nationalTeamId }
+        : {}),
+      ...(args?.nationalityCode
+        ? { nationality_code: args.nationalityCode }
+        : {}),
+      ...(args?.position ? { position: args.position } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 10 * 60_000,
+  }).catch(() => ({ results: [] as BSDPlayer[] }));
+}
+
+export async function getBsdTransfers(args?: {
+  leagueId?: string | number;
+  playerId?: string | number;
+  teamId?: string | number;
+  fromTeamId?: string | number;
+  toTeamId?: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+  minFee?: string | number;
+  hasFee?: boolean;
+  ordering?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDTransferRow>> {
+  return bsdFetch<PaginatedResponse<BSDTransferRow>>("/transfers/", {
+    query: {
+      ...(args?.leagueId != null ? { league_id: args.leagueId } : {}),
+      ...(args?.playerId != null ? { player_id: args.playerId } : {}),
+      ...(args?.teamId != null ? { team_id: args.teamId } : {}),
+      ...(args?.fromTeamId != null ? { from_team_id: args.fromTeamId } : {}),
+      ...(args?.toTeamId != null ? { to_team_id: args.toTeamId } : {}),
+      ...(args?.dateFrom ? { date_from: args.dateFrom } : {}),
+      ...(args?.dateTo ? { date_to: args.dateTo } : {}),
+      ...(args?.minFee != null ? { min_fee: args.minFee } : {}),
+      ...(args?.hasFee != null ? { has_fee: args.hasFee } : {}),
+      ...(args?.ordering ? { ordering: args.ordering } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 10 * 60_000,
+  }).catch(() => ({ results: [] as BSDTransferRow[] }));
+}
+
+export async function getBsdTransfersLedger(args: {
+  teamId?: string | number;
+  leagueId?: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<BSDTransferLedgerRow[]> {
+  const payload = await bsdFetch<PaginatedResponse<BSDTransferLedgerRow> | BSDTransferLedgerRow[]>(
+    "/transfers/ledger/",
+    {
+      query: {
+        ...(args.teamId != null ? { team_id: args.teamId } : {}),
+        ...(args.leagueId != null ? { league_id: args.leagueId } : {}),
+        ...(args.dateFrom ? { date_from: args.dateFrom } : {}),
+        ...(args.dateTo ? { date_to: args.dateTo } : {}),
+      },
+      ttlMs: 30 * 60_000,
+    },
+  ).catch(() => ({ results: [] as BSDTransferLedgerRow[] }));
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
+export async function getBsdTransfersRoutes(args: {
+  teamId?: string | number;
+  leagueId?: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+  minMoves?: number;
+  limit?: number;
+}): Promise<BSDTransferRouteRow[]> {
+  const payload = await bsdFetch<PaginatedResponse<BSDTransferRouteRow>>(
+    "/transfers/routes/",
+    {
+      query: {
+        ...(args.teamId != null ? { team_id: args.teamId } : {}),
+        ...(args.leagueId != null ? { league_id: args.leagueId } : {}),
+        ...(args.dateFrom ? { date_from: args.dateFrom } : {}),
+        ...(args.dateTo ? { date_to: args.dateTo } : {}),
+        ...(args.minMoves != null ? { min_moves: args.minMoves } : {}),
+        limit: args.limit ?? 50,
+        offset: 0,
+      },
+      ttlMs: 30 * 60_000,
+    },
+  ).catch(() => ({ results: [] as BSDTransferRouteRow[] }));
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
+export async function getBsdWorldCupSquads(args?: {
+  team?: string | number;
+  group?: string;
+  status?: string;
+  hasPlayer?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDWorldCupSquadRow>> {
+  return bsdFetch<PaginatedResponse<BSDWorldCupSquadRow>>("/worldcup/squads/", {
+    query: {
+      ...(args?.team != null ? { team: args.team } : {}),
+      ...(args?.group ? { group: args.group } : {}),
+      ...(args?.status ? { status: args.status } : {}),
+      ...(args?.hasPlayer != null ? { has_player: args.hasPlayer } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 30 * 60_000,
+  }).catch(() => ({ results: [] as BSDWorldCupSquadRow[] }));
+}
+
+export async function getBsdWorldCupSquadByTeam(
+  teamId: string | number,
+): Promise<BSDWorldCupSquadRow | null> {
+  return bsdFetch<BSDWorldCupSquadRow>(
+    `/worldcup/squads/${encodeURIComponent(String(teamId))}/`,
+    {
+      ttlMs: 30 * 60_000,
+    },
+  ).catch(() => null);
+}
+
+export async function getBsdEntitySocial(args: {
+  entity: "teams" | "players" | "events";
+  id: string | number;
+  type?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<Array<Record<string, unknown>>> {
+  const payload = await bsdFetch<
+    PaginatedResponse<Record<string, unknown>> | Array<Record<string, unknown>>
+  >(`/${args.entity}/${encodeURIComponent(String(args.id))}/social/`, {
+    query: {
+      ...(args.type ? { type: args.type } : {}),
+      limit: args.limit ?? 20,
+      offset: args.offset ?? 0,
+    },
+    ttlMs: 10 * 60_000,
+  }).catch(() => ({ results: [] as Array<Record<string, unknown>> }));
   if (Array.isArray(payload)) return payload;
   return Array.isArray(payload.results) ? payload.results : [];
 }
