@@ -460,7 +460,9 @@ export async function getBsdLiveEvents(args?: {
   seasonId?: string | number;
   teamId?: string | number;
 }): Promise<BSDEvent[]> {
-  const payload = await bsdFetch<PaginatedResponse<BSDEvent> | BSDEvent[]>("/events/live/", {
+  const payload = await bsdFetch<
+    PaginatedResponse<BSDEvent> | BSDEvent[] | { count?: number; events?: BSDEvent[] }
+  >("/events/live/", {
     query: {
       ...(args?.leagueId != null ? { league_id: args.leagueId } : {}),
       ...(args?.seasonId != null ? { season_id: args.seasonId } : {}),
@@ -469,7 +471,9 @@ export async function getBsdLiveEvents(args?: {
     ttlMs: 10_000,
   });
   if (Array.isArray(payload)) return payload;
-  return Array.isArray(payload.results) ? payload.results : [];
+  if ("results" in payload && Array.isArray(payload.results)) return payload.results;
+  if ("events" in payload && Array.isArray(payload.events)) return payload.events;
+  return [];
 }
 
 export async function getBsdEvents(args?: {

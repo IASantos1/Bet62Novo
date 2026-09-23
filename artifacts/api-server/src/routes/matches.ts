@@ -279,7 +279,8 @@ function toPlayerImage(playerId: string | number | null | undefined): string | n
 function mapStatus(status: string): string {
   const normalized = status.trim().toLowerCase();
   if (!normalized) return "unknown";
-  if (normalized === "live") return "live";
+  if (normalized === "live" || normalized === "inprogress") return "live";
+  if (normalized === "notstarted") return "upcoming";
   if (normalized === "upcoming") return "upcoming";
   if (normalized === "finished") return "finished";
   if (normalized === "cancelled") return "cancelled";
@@ -592,13 +593,48 @@ async function enrichEvent(event: BSDEvent): Promise<LiveMatchState> {
   return mapMatchFromEvent(event, { oddsRows, incidents, stats });
 }
 
+async function enrichEventsInBatches(
+  events: BSDEvent[],
+  args?: {
+    maxItems?: number;
+    batchSize?: number;
+  },
+): Promise<LiveMatchState[]> {
+  const maxItems = Math.max(1, args?.maxItems ?? 60);
+  const batchSize = Math.max(1, args?.batchSize ?? 10);
+  const limited = events.slice(0, maxItems);
+  const out: LiveMatchState[] = [];
+
+  for (let index = 0; index < limited.length; index += batchSize) {
+    const batch = limited.slice(index, index + batchSize);
+    const matches = await Promise.all(batch.map((event) => enrichEvent(event)));
+    out.push(...matches);
+  }
+
+  return out;
+}
+
 async function buildLiveMatches(): Promise<LiveMatchState[]> {
   if (!bsdEnabled()) {
     liveMatchState.clear();
     return [];
   }
-  const events = await getBsdLiveEvents().catch(() => []);
-  const matches = await Promise.all(events.slice(0, 20).map((event) => enrichEvent(event)));
+  let events: BSDEvent[] = [];
+  try {
+    events = await getBsdLiveEvents();
+    console.log("[BSD LIVE]", {
+      count: events.length,
+      statuses: events.reduce<Record<string, number>>((acc, event) => {
+        const key = String(event.status ?? "").trim().toLowerCase() || "unknown";
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+    });
+  } catch (error) {
+    console.error("[BSD LIVE] failed", error);
+    throw error;
+  }
+  const matches = await enrichEventsInBatches(events, { maxItems: 100, batchSize: 10 });
   liveMatchState.clear();
   for (const match of matches) {
     liveMatchState.set(String(match.id), match);
@@ -611,15 +647,27 @@ export async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     upcomingSnapshot = [];
     return [];
   }
-  const payload = await getBsdEvents({
-    status: "upcoming",
-    dateFrom: todayIsoDate(0),
-    dateTo: todayIsoDate(30),
-    limit: 40,
-    offset: 0,
-  }).catch(() => ({ results: [] as BSDEvent[] }));
-  const events = Array.isArray(payload.results) ? payload.results : [];
-  const matches = await Promise.all(events.slice(0, 20).map((event) => enrichEvent(event)));
+  let payload: Awaited<ReturnType<typeof getBsdEvents>>;
+  try {
+    payload = await getBsdEvents({
+      dateFrom: todayIsoDate(0),
+      dateTo: todayIsoDate(30),
+      limit: 200,
+      offset: 0,
+    });
+    console.log("[BSD UPCOMING]", {
+      count: payload.count ?? 0,
+      results: payload.results?.length ?? 0,
+    });
+  } catch (error) {
+    console.error("[BSD UPCOMING] failed", error);
+    throw error;
+  }
+  const events = (Array.isArray(payload.results) ? payload.results : []).filter((event) => {
+    const status = String(event.status ?? "").trim().toLowerCase();
+    return status === "notstarted" || status === "upcoming";
+  });
+  const matches = await enrichEventsInBatches(events, { maxItems: 100, batchSize: 10 });
   upcomingSnapshot = matches.map((match) => ({
     ...match,
     isLive: undefined,
