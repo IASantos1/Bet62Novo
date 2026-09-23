@@ -396,7 +396,11 @@ async function bsdFetch<T>(
     return cached.value;
   }
 
-  const url = new URL(path, CONFIG.BZZOIRO_BASE_URL);
+  const baseUrl = CONFIG.BZZOIRO_BASE_URL.endsWith("/")
+    ? CONFIG.BZZOIRO_BASE_URL
+    : `${CONFIG.BZZOIRO_BASE_URL}/`;
+  const relativePath = path.replace(/^\/+/, "");
+  const url = new URL(relativePath, baseUrl);
   for (const [name, value] of Object.entries(args?.query ?? {})) {
     if (value === undefined || value === null || `${value}` === "") continue;
     url.searchParams.set(name, String(value));
