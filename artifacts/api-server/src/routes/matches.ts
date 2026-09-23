@@ -5,6 +5,7 @@ import {
   getBsdEventH2H,
   getBsdEventIncidents,
   getBsdEventLineups,
+  getBsdEventOddsSummary,
   getBsdEventPolymarket,
   getBsdEventPrediction,
   getBsdEventStats,
@@ -58,6 +59,7 @@ import {
   type BSDLineupsResponse,
   type BSDManager,
   type BSDManagerCareerRow,
+  type BSDEventOddsSummary,
   type BSDOddsRow,
   type BSDPlayer,
   type BSDPolymarketResponse,
@@ -462,6 +464,87 @@ function applyOddsRows(rows: BSDOddsRow[]): {
   };
 }
 
+function mergeOddsSummary(
+  current: {
+    odds: Odds1X2;
+    markets: GenericMarkets;
+    hasRealOdds: boolean;
+    allOdds: AllOddsMarket[];
+  },
+  summary: BSDEventOddsSummary | null | undefined,
+): {
+  odds: Odds1X2;
+  markets: GenericMarkets;
+  hasRealOdds: boolean;
+  allOdds: AllOddsMarket[];
+} {
+  const payload = summary?.odds;
+  if (!payload) return current;
+
+  const odds: Odds1X2 = {
+    home: current.odds.home > 1 ? current.odds.home : parseNumber(payload.home_win),
+    draw: current.odds.draw > 1 ? current.odds.draw : parseNumber(payload.draw),
+    away: current.odds.away > 1 ? current.odds.away : parseNumber(payload.away_win),
+  };
+
+  const markets: GenericMarkets = {
+    ...current.markets,
+    bothTeamsScore: {
+      yes:
+        current.markets.bothTeamsScore.yes > 1
+          ? current.markets.bothTeamsScore.yes
+          : parseNumber(payload.btts_yes),
+      no:
+        current.markets.bothTeamsScore.no > 1
+          ? current.markets.bothTeamsScore.no
+          : parseNumber(payload.btts_no),
+    },
+    totalGoals: {
+      ...current.markets.totalGoals,
+      over15:
+        current.markets.totalGoals.over15 > 1
+          ? current.markets.totalGoals.over15
+          : parseNumber(payload.over_15_goals),
+      under15:
+        current.markets.totalGoals.under15 > 1
+          ? current.markets.totalGoals.under15
+          : parseNumber(payload.under_15_goals),
+      over25:
+        current.markets.totalGoals.over25 > 1
+          ? current.markets.totalGoals.over25
+          : parseNumber(payload.over_25_goals),
+      under25:
+        current.markets.totalGoals.under25 > 1
+          ? current.markets.totalGoals.under25
+          : parseNumber(payload.under_25_goals),
+      over35:
+        current.markets.totalGoals.over35 > 1
+          ? current.markets.totalGoals.over35
+          : parseNumber(payload.over_35_goals),
+      under35:
+        current.markets.totalGoals.under35 > 1
+          ? current.markets.totalGoals.under35
+          : parseNumber(payload.under_35_goals),
+    },
+  };
+
+  return {
+    odds,
+    markets,
+    hasRealOdds:
+      current.hasRealOdds ||
+      odds.home > 1 ||
+      odds.draw > 1 ||
+      odds.away > 1 ||
+      markets.bothTeamsScore.yes > 1 ||
+      markets.bothTeamsScore.no > 1 ||
+      markets.totalGoals.over15 > 1 ||
+      markets.totalGoals.over25 > 1 ||
+      markets.totalGoals.over35 > 1,
+    allOdds: current.allOdds,
+  };
+}
+
 function mapIncidentTeam(incident: Record<string, unknown>, home: string, away: string): string {
   const raw = String(
     incident["team"] ??
@@ -536,6 +619,9 @@ function mapMatchFromEvent(
   event: BSDEvent,
   args?: {
     oddsRows?: BSDOddsRow[];
+    odds?: Odds1X2;
+    markets?: GenericMarkets;
+    hasRealOdds?: boolean;
     incidents?: Array<Record<string, unknown>>;
     stats?: BSDStatsResponse | null;
   },
@@ -545,7 +631,10 @@ function mapMatchFromEvent(
   const away = text(event.away_team_name ?? event.away_team, "Fora");
   const league = text(event.league_name ?? event.league, "Futebol");
   const country = text(event.country_name ?? event.country);
-  const { odds, markets, hasRealOdds } = applyOddsRows(args?.oddsRows ?? []);
+  const fallbackOdds = applyOddsRows(args?.oddsRows ?? []);
+  const odds = args?.odds ?? fallbackOdds.odds;
+  const markets = args?.markets ?? fallbackOdds.markets;
+  const hasRealOdds = args?.hasRealOdds ?? fallbackOdds.hasRealOdds;
   const incidents = args?.incidents ?? [];
   const status = mapStatus(text(event.status, "upcoming"));
   const { date, time } = toDateParts(event.event_date ?? null);
@@ -585,12 +674,21 @@ function mapMatchFromEvent(
 }
 
 async function enrichEvent(event: BSDEvent): Promise<LiveMatchState> {
-  const [oddsRows, incidents, stats] = await Promise.all([
+  const [oddsRows, oddsSummary, incidents, stats] = await Promise.all([
     getBsdOddsForEvent(event.id).catch(() => []),
+    getBsdEventOddsSummary(event.id).catch(() => null),
     getBsdEventIncidents(event.id).catch(() => []),
     getBsdEventStats(event.id).catch(() => null),
   ]);
-  return mapMatchFromEvent(event, { oddsRows, incidents, stats });
+  const mergedOdds = mergeOddsSummary(applyOddsRows(oddsRows), oddsSummary);
+  return mapMatchFromEvent(event, {
+    oddsRows,
+    odds: mergedOdds.odds,
+    markets: mergedOdds.markets,
+    hasRealOdds: mergedOdds.hasRealOdds,
+    incidents,
+    stats,
+  });
 }
 
 async function enrichEventsInBatches(

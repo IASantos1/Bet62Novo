@@ -70,6 +70,27 @@ export type BSDOddsRow = {
   updated_at?: string | null;
 };
 
+export type BSDEventOddsSummary = {
+  event_id?: number | string | null;
+  odds?: {
+    home_win?: number | string | null;
+    draw?: number | string | null;
+    away_win?: number | string | null;
+    over_15_goals?: number | string | null;
+    over_25_goals?: number | string | null;
+    over_35_goals?: number | string | null;
+    under_15_goals?: number | string | null;
+    under_25_goals?: number | string | null;
+    under_35_goals?: number | string | null;
+    btts_yes?: number | string | null;
+    btts_no?: number | string | null;
+  } | null;
+  last_update_at?: string | null;
+  next_update_at?: string | null;
+  update_interval_seconds?: number | string | null;
+  update_reason?: string | null;
+};
+
 export type BSDStandingRow = {
   position?: number | string | null;
   team_id?: number | string | null;
@@ -521,6 +542,17 @@ export async function getBsdOddsForEvent(eventId: string | number): Promise<BSDO
     ttlMs: 20_000,
     maxPages: 3,
   });
+}
+
+export async function getBsdEventOddsSummary(
+  eventId: string | number,
+): Promise<BSDEventOddsSummary | null> {
+  return bsdFetch<BSDEventOddsSummary>(
+    `/events/${encodeURIComponent(String(eventId))}/odds/`,
+    {
+      ttlMs: 20_000,
+    },
+  ).catch(() => null);
 }
 
 export async function getBsdOddsFeed(args?: {
