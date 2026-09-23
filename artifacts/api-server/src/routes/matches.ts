@@ -9024,8 +9024,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         !!m.hasRealOdds ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0;
-      // Tennis always has computed odds even without a real bookmaker price — allow all.
+        (m.odds?.away ?? 0) > 0 ||
+        ((m.sport ?? "football") === "football" && !!m._sportMonksFixtureId);
+      // Tennis always has computed odds even without a real bookmaker price.
+      // Football SportMonks fixtures must also remain visible even when the
+      // odds snapshot is temporarily empty/interrupted.
       if (m.sport !== "tennis" && !hasVisibleOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
       const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
@@ -9190,7 +9193,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // not by hiding the match itself.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     m.sport !== "football" ||
-    footballWithOddsFallback.some((visible) => String(visible.id) === String(m.id));
+    livePart.some((visible) => String(visible.id) === String(m.id));
 
   const filteredLive = sortByCatalogPriority(
     [...livePart, ...promotedTennis].filter(
@@ -9245,7 +9248,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       applyOperationalDecision(match, liveDecisions.get(String(match.id))),
     ),
   )
-    .filter((match) => match.hasRealOdds)
+    .filter(
+      (match) =>
+        match.hasRealOdds ||
+        (match.sport === "football" && !!match._sportMonksFixtureId),
+    )
     .sort(
       (a, b) =>
         (sportOrder.get(a.sport ?? "") ?? 99) -
