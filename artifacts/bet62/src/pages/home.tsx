@@ -7350,7 +7350,8 @@ export default function Home({
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          const m = d?.match as Match | null | undefined;
+          const m =
+            ((d?.match ?? (d && typeof d === "object" && "id" in d ? d : null)) as Match | null | undefined);
           if (!m) return false;
           writeSnapshot(matchSnapshotKey(id, "live"), m as any);
           setExpandedMatch((prev) => {
@@ -7431,7 +7432,8 @@ export default function Home({
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          const m = d?.match as Match | null | undefined;
+          const m =
+            ((d?.match ?? (d && typeof d === "object" && "id" in d ? d : null)) as Match | null | undefined);
           if (!m) return false;
           writeSnapshot(matchSnapshotKey(id, "upcoming"), m as any);
           setUpcomingMatches((prev) =>

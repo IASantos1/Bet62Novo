@@ -1533,7 +1533,7 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     const eventId = toEventId(req.params["id"] ?? "");
     const event = await getBsdEventById(eventId);
     const match = await enrichEvent(event);
-    sendJson(res, match);
+    sendJson(res, { match });
   } catch (error) {
     res.status(formatErrorStatus(error, 404)).json({ error: "match unavailable" });
   }
@@ -1544,7 +1544,7 @@ router.get("/upcoming-match/:id", async (req: Request, res: Response) => {
     const eventId = toEventId(req.params["id"] ?? "");
     const event = await getBsdEventById(eventId);
     const match = await enrichEvent(event);
-    sendJson(res, { ...match, isLive: false, status: "upcoming" });
+    sendJson(res, { match: { ...match, isLive: false, status: "upcoming" } });
   } catch (error) {
     res.status(formatErrorStatus(error, 404)).json({ error: "match unavailable" });
   }
