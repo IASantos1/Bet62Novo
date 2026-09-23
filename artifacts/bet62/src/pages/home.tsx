@@ -8882,58 +8882,9 @@ export default function Home({
       };
     };
 
-    const openWebSocket = () => {
-      if (liveWsRef.current) return;
-      if (typeof window === "undefined" || typeof WebSocket === "undefined") {
-        openSSE();
-        return;
-      }
-
-      let ws: WebSocket;
-      try {
-        const proto = window.location.protocol === "https:" ? "wss" : "ws";
-        ws = new WebSocket(`${proto}://${window.location.host}/api/matches/ws`);
-      } catch {
-        openSSE();
-        return;
-      }
-
-      liveWsRef.current = ws;
-      ws.onopen = () => {
-        liveWsHealthyRef.current = true;
-        if (sseRef.current) {
-          sseRef.current.close();
-          sseRef.current = null;
-        }
-        sseActiveRef.current = false;
-        resetFallbackBackoff();
-        setLiveTransport("ws");
-      };
-      ws.onmessage = (evt) => {
-        try {
-          const raw =
-            typeof evt.data === "string" ? evt.data : String(evt.data ?? "");
-          if (!raw) return;
-          liveWsHealthyRef.current = true;
-          handleRealtimePayload(JSON.parse(raw), "ws");
-        } catch {
-          /* ignore malformed frames */
-        }
-      };
-      ws.onclose = () => {
-        if (liveWsRef.current === ws) liveWsRef.current = null;
-        liveWsHealthyRef.current = false;
-        if (cancelled || activeTabRef.current !== "live") return;
-        if (sseRef.current === null) openSSE();
-      };
-      ws.onerror = () => {
-        try {
-          ws.close();
-        } catch {}
-      };
-    };
-
-    openWebSocket();
+    // BSD live WebSocket requires a paid addon. On the base plan we stay on
+    // SSE + HTTP fallback so the app does not attempt an unavailable upgrade.
+    openSSE();
 
     // ── 3. HTTP fallback poll while push transport is degraded ────────────────
     // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.

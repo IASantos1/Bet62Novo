@@ -220,6 +220,16 @@ function toTeamLogo(teamId: string | number | null | undefined): string | undefi
   return `https://sports.bzzoiro.com/img/team/${encodeURIComponent(String(teamId))}/?bg=transparent`;
 }
 
+function toLeagueLogo(leagueId: string | number | null | undefined): string | null {
+  if (leagueId == null || `${leagueId}`.trim() === "") return null;
+  return `https://sports.bzzoiro.com/img/league/${encodeURIComponent(String(leagueId))}/?bg=transparent`;
+}
+
+function toPlayerImage(playerId: string | number | null | undefined): string | null {
+  if (playerId == null || `${playerId}`.trim() === "") return null;
+  return `https://sports.bzzoiro.com/img/player/${encodeURIComponent(String(playerId))}/?sor=true&bg=transparent`;
+}
+
 function mapStatus(status: string): string {
   const normalized = status.trim().toLowerCase();
   if (!normalized) return "unknown";
@@ -721,9 +731,7 @@ function mapBestXi(payload: Record<string, unknown> | null | undefined) {
       shirtNumber:
         row["shirt_number"] != null ? String(row["shirt_number"]) : null,
       imageUrl:
-        row["player_id"] != null
-          ? `https://sports.bzzoiro.com/img/player/${encodeURIComponent(String(row["player_id"]))}/`
-          : null,
+        toPlayerImage(row["player_id"]),
     })),
   };
 }
@@ -1304,7 +1312,7 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
         name: text(league?.name, `Liga ${leagueId}`),
         country: text(league?.country),
         isWomen: Boolean(league?.is_women),
-        logoUrl: `https://sports.bzzoiro.com/img/league/${encodeURIComponent(leagueId)}/`,
+        logoUrl: toLeagueLogo(leagueId),
       },
       season: season
         ? {
@@ -1349,9 +1357,7 @@ router.get("/leagues/:id/page", async (req: Request, res: Response) => {
         matches: parseNumber(row.matches),
         position: text(row.position),
         imageUrl:
-          row.player_id != null
-            ? `https://sports.bzzoiro.com/img/player/${encodeURIComponent(String(row.player_id))}/`
-            : null,
+          toPlayerImage(row.player_id),
       })),
       bestXi: mapBestXi(bestXi as Record<string, unknown> | null),
     });
@@ -1619,7 +1625,7 @@ router.get("/player-profile/:id", async (_req: Request, res: Response) => {
       id: String(profile.id ?? playerId),
       sport: "football",
       name: text(profile.name, `Jogador ${playerId}`),
-      imageUrl: `https://sports.bzzoiro.com/img/player/${encodeURIComponent(playerId)}/`,
+      imageUrl: toPlayerImage(playerId),
       nationality: text(profile.nationality ?? profile.country_name) || null,
       nationalityFlagUrl: getNationalityFlagUrl(profile.nationality_code),
       position: text(profile.position) || null,
