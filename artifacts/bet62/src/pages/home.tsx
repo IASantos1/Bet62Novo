@@ -14225,48 +14225,65 @@ export default function Home({
       bucket: "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais",
     ) => {
       const marketText = normalizeAllOddsText(`${market.group} ${market.name}`);
+      const periodPrefix = (() => {
+        if (
+          /(1st half|first half|1º tempo|primeiro tempo|half time)/.test(
+            marketText,
+          )
+        ) {
+          return "1º Tempo — ";
+        }
+        if (/(2nd half|second half|2º tempo|segundo tempo)/.test(marketText)) {
+          return "2º Tempo — ";
+        }
+        return "";
+      })();
       if (bucket === "gols") {
         if (/away team goals/.test(marketText)) {
-          return "Gols da Equipa Visitante — Acima / Abaixo";
+          return `${periodPrefix}Golos da Equipa Visitante — Acima / Abaixo`;
         }
         if (/home team goals/.test(marketText)) {
-          return "Gols da Equipa da Casa — Acima / Abaixo";
+          return `${periodPrefix}Golos da Equipa da Casa — Acima / Abaixo`;
         }
         if (/(odd\/even|odd even|impar|par)/.test(marketText)) {
-          return "Total de Gols — Ímpar / Par";
+          return `${periodPrefix}Total de Golos — Ímpar / Par`;
         }
         if (/both teams to score/.test(marketText)) {
-          return "Ambas as Equipas Marcam";
+          return `${periodPrefix}Ambas as Equipas Marcam`;
         }
         if (/goals over\/under|goals over under/.test(marketText)) {
-          return "Gols Acima / Abaixo";
+          return `${periodPrefix}Golos Acima / Abaixo`;
         }
       }
       if (bucket === "escanteios") {
-        if (/handicap/.test(marketText)) return "Handicap de Cantos";
-        if (/home/.test(marketText)) return "Cantos da Casa — Acima / Abaixo";
-        if (/away/.test(marketText)) return "Cantos do Visitante — Acima / Abaixo";
-        return "Cantos — Acima / Abaixo";
+        if (/handicap/.test(marketText)) return `${periodPrefix}Handicap de Cantos`;
+        if (/home/.test(marketText))
+          return `${periodPrefix}Cantos da Casa — Acima / Abaixo`;
+        if (/away/.test(marketText))
+          return `${periodPrefix}Cantos do Visitante — Acima / Abaixo`;
+        return `${periodPrefix}Cantos — Acima / Abaixo`;
       }
       if (bucket === "cartoes") {
-        if (/home/.test(marketText)) return "Cartões da Casa — Acima / Abaixo";
-        if (/away/.test(marketText)) return "Cartões do Visitante — Acima / Abaixo";
-        return "Cartões — Acima / Abaixo";
+        if (/home/.test(marketText))
+          return `${periodPrefix}Cartões da Casa — Acima / Abaixo`;
+        if (/away/.test(marketText))
+          return `${periodPrefix}Cartões do Visitante — Acima / Abaixo`;
+        return `${periodPrefix}Cartões — Acima / Abaixo`;
       }
       if (bucket === "handicap") {
-        return "Handicap";
+        return `${periodPrefix}Handicap`;
       }
       if (bucket === "asiatico") {
         if (/draw no bet|empate anulado/.test(marketText)) {
-          return "Empate Anulado";
+          return `${periodPrefix}Empate Anulado`;
         }
         if (/handicap/.test(marketText)) {
-          return "Handicap Asiático";
+          return `${periodPrefix}Handicap Asiático`;
         }
         if (/total/.test(marketText)) {
-          return "Total Asiático";
+          return `${periodPrefix}Total Asiático`;
         }
-        return "Asiático";
+        return `${periodPrefix}Asiático`;
       }
       if (bucket === "especiais") {
         return market.name || market.group || "Especiais";
@@ -14330,6 +14347,7 @@ export default function Home({
         </div>
       );
     };
+    const lineTitle = (line: string) => `Linha ${line}`;
 
     marketGroupSeqRef.current = 0;
     return (
@@ -15064,7 +15082,7 @@ export default function Home({
                           tgMap[Math.min(lateGameGoals, tgMap.length - 1)]!;
                         if (!line.o) return null;
                         return (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle(line.label)}>
                             <MarketOddsBtn
                               match={match}
                               sel={line.selO}
@@ -15085,7 +15103,7 @@ export default function Home({
                     ) : (
                       <>
                         {m.totalGoals.over05 > 0 && (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle("0.5")}>
                             <MarketOddsBtn
                               match={match}
                               sel="o05"
@@ -15103,7 +15121,7 @@ export default function Home({
                           </MarketGroup>
                         )}
                         {m.totalGoals.over15 > 0 && (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle("1.5")}>
                             <MarketOddsBtn
                               match={match}
                               sel="o15"
@@ -15120,7 +15138,7 @@ export default function Home({
                             />
                           </MarketGroup>
                         )}
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("2.5")}>
                           <MarketOddsBtn
                             match={match}
                             sel="o25"
@@ -15137,7 +15155,7 @@ export default function Home({
                           />
                         </MarketGroup>
                         {m.totalGoals.over35 > 0 && (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle("3.5")}>
                             <MarketOddsBtn
                               match={match}
                               sel="o35"
@@ -15155,7 +15173,7 @@ export default function Home({
                           </MarketGroup>
                         )}
                         {m.totalGoals.over45 > 0 && (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle("4.5")}>
                             <MarketOddsBtn
                               match={match}
                               sel="o45"
@@ -15173,7 +15191,7 @@ export default function Home({
                           </MarketGroup>
                         )}
                         {m.totalGoals.over55 > 0 && (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle("5.5")}>
                             <MarketOddsBtn
                               match={match}
                               sel="o55"
@@ -15191,7 +15209,7 @@ export default function Home({
                           </MarketGroup>
                         )}
                         {m.totalGoals.over65 > 0 && (
-                          <MarketGroup title="">
+                          <MarketGroup title={lineTitle("6.5")}>
                             <MarketOddsBtn
                               match={match}
                               sel="o65"
@@ -15362,7 +15380,7 @@ export default function Home({
                       </div>
                       {((m as any).teamGoals.homeOver05 > 0 ||
                         (m as any).teamGoals.homeUnder05 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("0.5")}>
                           {(m as any).teamGoals.homeOver05 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -15385,7 +15403,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.homeOver15 > 0 ||
                         (m as any).teamGoals.homeUnder15 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("1.5")}>
                           {(m as any).teamGoals.homeOver15 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -15408,7 +15426,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.homeOver25 > 0 ||
                         (m as any).teamGoals.homeUnder25 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("2.5")}>
                           {(m as any).teamGoals.homeOver25 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -15436,7 +15454,7 @@ export default function Home({
                       </div>
                       {((m as any).teamGoals.awayOver05 > 0 ||
                         (m as any).teamGoals.awayUnder05 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("0.5")}>
                           {(m as any).teamGoals.awayOver05 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -15459,7 +15477,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.awayOver15 > 0 ||
                         (m as any).teamGoals.awayUnder15 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("1.5")}>
                           {(m as any).teamGoals.awayOver15 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -15482,7 +15500,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.awayOver25 > 0 ||
                         (m as any).teamGoals.awayUnder25 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("2.5")}>
                           {(m as any).teamGoals.awayOver25 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -16594,7 +16612,7 @@ export default function Home({
                       </div>
                       {((m as any).teamGoals.homeOver05 > 0 ||
                         (m as any).teamGoals.homeUnder05 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("0.5")}>
                           {(m as any).teamGoals.homeOver05 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -16617,7 +16635,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.homeOver15 > 0 ||
                         (m as any).teamGoals.homeUnder15 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("1.5")}>
                           {(m as any).teamGoals.homeOver15 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -16640,7 +16658,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.homeOver25 > 0 ||
                         (m as any).teamGoals.homeUnder25 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("2.5")}>
                           {(m as any).teamGoals.homeOver25 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -16668,7 +16686,7 @@ export default function Home({
                       </div>
                       {((m as any).teamGoals.awayOver05 > 0 ||
                         (m as any).teamGoals.awayUnder05 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("0.5")}>
                           {(m as any).teamGoals.awayOver05 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -16691,7 +16709,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.awayOver15 > 0 ||
                         (m as any).teamGoals.awayUnder15 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("1.5")}>
                           {(m as any).teamGoals.awayOver15 > 0 && (
                             <MarketOddsBtn
                               match={match}
@@ -16714,7 +16732,7 @@ export default function Home({
                       )}
                       {((m as any).teamGoals.awayOver25 > 0 ||
                         (m as any).teamGoals.awayUnder25 > 0) && (
-                        <MarketGroup title="">
+                        <MarketGroup title={lineTitle("2.5")}>
                           {(m as any).teamGoals.awayOver25 > 0 && (
                             <MarketOddsBtn
                               match={match}
