@@ -5,8 +5,11 @@ import {
   getBsdEventH2H,
   getBsdEventIncidents,
   getBsdEventLineups,
+  getBsdEventPolymarket,
   getBsdEventPrediction,
   getBsdEventStats,
+  getBsdBestOdds,
+  getBsdBookmakers,
   getBsdEvents,
   getBsdLeagueBestXi,
   getBsdLeagueById,
@@ -18,6 +21,7 @@ import {
   getBsdLeagueVenues,
   getBsdLeagues,
   getBsdLiveEvents,
+  getBsdOddsFeed,
   getBsdOddsForEvent,
   getBsdEntitySocial,
   getBsdPlayerById,
@@ -26,6 +30,8 @@ import {
   getBsdPlayers,
   getBsdPlayerStats,
   getBsdPlayerTransfers,
+  getBsdPredictionById,
+  getBsdPredictions,
   getBsdManagerById,
   getBsdManagerCareer,
   getBsdManagerMatches,
@@ -46,6 +52,7 @@ import {
   getBsdWorldCupSquadByTeam,
   getBsdWorldCupSquads,
   type BSDEvent,
+  type BSDBookmaker,
   type BSDH2HResponse,
   type BSDLeague,
   type BSDLineupsResponse,
@@ -53,6 +60,7 @@ import {
   type BSDManagerCareerRow,
   type BSDOddsRow,
   type BSDPlayer,
+  type BSDPolymarketResponse,
   type BSDPredictionResponse,
   type BSDReferee,
   type BSDStandingRow,
@@ -1088,6 +1096,71 @@ function mapVenueCompetition(row: BSDVenueCompetitionRow) {
   };
 }
 
+function mapOddsRow(row: BSDOddsRow) {
+  return {
+    id: row.id != null ? String(row.id) : null,
+    eventId: row.event_id != null ? String(row.event_id) : null,
+    matchId: row.event_id != null ? toMatchId(row.event_id) : null,
+    market: text(row.market) || null,
+    outcome: text(row.outcome) || null,
+    outcomeName: text(row.outcome_name) || null,
+    line: row.line != null ? parseNumber(row.line) : null,
+    push: text(row.push) || null,
+    bookmakerSlug: text(row.bookmaker_slug) || null,
+    bookmakerName: text(row.bookmaker_name) || null,
+    bookmakerCount: row.bookmaker_count != null ? parseNumber(row.bookmaker_count) : null,
+    decimalOdds: row.decimal_odds != null ? parseNumber(row.decimal_odds) : null,
+    previousDecimalOdds:
+      row.previous_decimal_odds != null ? parseNumber(row.previous_decimal_odds) : null,
+    openingDecimalOdds:
+      row.opening_decimal_odds != null ? parseNumber(row.opening_decimal_odds) : null,
+    openingAt: text(row.opening_at) || null,
+    impliedProbability:
+      row.implied_probability != null ? parseNumber(row.implied_probability) : null,
+    movement: text(row.movement) || null,
+    isMaxQuote: row.is_max_quote != null ? Boolean(row.is_max_quote) : null,
+    updatedAt: text(row.updated_at) || null,
+  };
+}
+
+function mapBookmaker(row: BSDBookmaker) {
+  return {
+    slug: text(row.slug) || null,
+    name: text(row.name) || null,
+  };
+}
+
+function mapPolymarket(payload: BSDPolymarketResponse | null) {
+  if (!payload || typeof payload !== "object") return null;
+  return {
+    eventId: pickText(payload, ["event_id"]) || null,
+    markets: getNestedRecord(payload, "markets"),
+    liquidity: getNestedRecord(payload, "liquidity"),
+    pricing: getNestedRecord(payload, "pricing"),
+    goalscorers: getNestedRecord(payload, "goalscorers"),
+    exactScores: getNestedRecord(payload, "exact_scores"),
+    updatedAt: pickText(payload, ["updated_at"]) || null,
+  };
+}
+
+function mapPredictionFeedItem(payload: BSDPredictionResponse | null) {
+  if (!payload) return null;
+  const eventId =
+    payload.event?.id != null ? String(payload.event.id) : null;
+  return {
+    id: payload.id != null ? String(payload.id) : null,
+    event: {
+      id: eventId,
+      matchId: eventId ? toMatchId(eventId) : null,
+      home: text(payload.event?.home_team) || null,
+      away: text(payload.event?.away_team) || null,
+    },
+    prediction: mapPrediction(payload),
+    recommendations: payload.recommendations ?? null,
+    model: payload.model ?? null,
+  };
+}
+
 function mapLeagueEventCard(event: BSDEvent) {
   const { date, time } = toDateParts(event.event_date ?? null);
   return {
@@ -1437,6 +1510,65 @@ router.get("/all-odds/:id", async (req: Request, res: Response) => {
     sendJson(res, { markets: allOdds });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ markets: [] });
+  }
+});
+
+router.get("/odds", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdOddsFeed({
+      eventId: String(req.query["eventId"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      market: String(req.query["market"] ?? "").trim() || undefined,
+      outcome: String(req.query["outcome"] ?? "").trim() || undefined,
+      bookmakerSlug: String(req.query["bookmakerSlug"] ?? "").trim() || undefined,
+      isMaxQuote: parseBooleanQuery(req.query["isMaxQuote"]),
+      movement: String(req.query["movement"] ?? "").trim() || undefined,
+      minDecimalOdds:
+        req.query["minDecimalOdds"] != null ? parseNumber(req.query["minDecimalOdds"]) : undefined,
+      maxDecimalOdds:
+        req.query["maxDecimalOdds"] != null ? parseNumber(req.query["maxDecimalOdds"]) : undefined,
+      updatedAfter: String(req.query["updatedAfter"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      rows: Array.isArray(payload.results) ? payload.results.map(mapOddsRow) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, rows: [] });
+  }
+});
+
+router.get("/odds/best", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdBestOdds({
+      market: String(req.query["market"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      rows: Array.isArray(payload.results) ? payload.results.map(mapOddsRow) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, rows: [] });
+  }
+});
+
+router.get("/bookmakers", async (_req: Request, res: Response) => {
+  try {
+    const rows = await getBsdBookmakers();
+    sendJson(res, { bookmakers: rows.map(mapBookmaker) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ bookmakers: [] });
   }
 });
 
@@ -2721,6 +2853,58 @@ router.get("/prediction/:matchId", async (req: Request, res: Response) => {
   try {
     const payload = await getBsdEventPrediction(toEventId(req.params["matchId"] ?? ""));
     sendJson(res, { prediction: mapPrediction(payload) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ prediction: null });
+  }
+});
+
+router.get("/polymarket/:matchId", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdEventPolymarket(toEventId(req.params["matchId"] ?? ""));
+    if (!payload) {
+      return res.status(404).json({ polymarket: null });
+    }
+    sendJson(res, { polymarket: mapPolymarket(payload) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ polymarket: null });
+  }
+});
+
+router.get("/predictions", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdPredictions({
+      status: String(req.query["status"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      minConfidence:
+        req.query["minConfidence"] != null ? parseNumber(req.query["minConfidence"]) : undefined,
+      recommended: parseBooleanQuery(req.query["recommended"]),
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      predictions: Array.isArray(payload.results)
+        ? payload.results
+            .map((row) => mapPredictionFeedItem(row))
+            .filter((row): row is NonNullable<typeof row> => Boolean(row))
+        : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, predictions: [] });
+  }
+});
+
+router.get("/predictions/:id", async (req: Request, res: Response) => {
+  try {
+    const predictionId = String(req.params["id"] ?? "").trim();
+    if (!predictionId) return res.status(400).json({ error: "prediction id required" });
+    const payload = await getBsdPredictionById(predictionId);
+    if (!payload) return res.status(404).json({ prediction: null });
+    sendJson(res, { prediction: mapPredictionFeedItem(payload) });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ prediction: null });
   }

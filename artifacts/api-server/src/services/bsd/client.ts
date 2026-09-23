@@ -56,10 +56,14 @@ export type BSDOddsRow = {
   outcome?: string | null;
   outcome_name?: string | null;
   line?: number | string | null;
+  push?: string | null;
   bookmaker_slug?: string | null;
   bookmaker_name?: string | null;
+  bookmaker_count?: number | string | null;
   decimal_odds?: number | string | null;
   previous_decimal_odds?: number | string | null;
+  opening_decimal_odds?: number | string | null;
+  opening_at?: string | null;
   implied_probability?: number | string | null;
   movement?: string | null;
   is_max_quote?: boolean | null;
@@ -219,6 +223,11 @@ export type BSDWorldCupSquadRow = Record<string, unknown>;
 export type BSDManagerCareerRow = Record<string, unknown>;
 export type BSDManagerMatchRow = Record<string, unknown>;
 export type BSDVenueCompetitionRow = Record<string, unknown>;
+export type BSDBookmaker = {
+  slug?: string | null;
+  name?: string | null;
+};
+export type BSDPolymarketResponse = Record<string, unknown>;
 
 export type BSDPredictionResponse = {
   id?: number | string | null;
@@ -504,6 +513,76 @@ export async function getBsdOddsForEvent(eventId: string | number): Promise<BSDO
     ttlMs: 20_000,
     maxPages: 3,
   });
+}
+
+export async function getBsdOddsFeed(args?: {
+  eventId?: string | number;
+  leagueId?: string | number;
+  seasonId?: string | number;
+  teamId?: string | number;
+  market?: string;
+  outcome?: string;
+  bookmakerSlug?: string;
+  isMaxQuote?: boolean;
+  movement?: string;
+  minDecimalOdds?: number;
+  maxDecimalOdds?: number;
+  updatedAfter?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDOddsRow>> {
+  return bsdFetch<PaginatedResponse<BSDOddsRow>>("/odds/", {
+    query: {
+      ...(args?.eventId != null ? { event_id: args.eventId } : {}),
+      ...(args?.leagueId != null ? { league_id: args.leagueId } : {}),
+      ...(args?.seasonId != null ? { season_id: args.seasonId } : {}),
+      ...(args?.teamId != null ? { team_id: args.teamId } : {}),
+      ...(args?.market ? { market: args.market } : {}),
+      ...(args?.outcome ? { outcome: args.outcome } : {}),
+      ...(args?.bookmakerSlug ? { bookmaker_slug: args.bookmakerSlug } : {}),
+      ...(args?.isMaxQuote != null ? { is_max_quote: args.isMaxQuote } : {}),
+      ...(args?.movement ? { movement: args.movement } : {}),
+      ...(args?.minDecimalOdds != null ? { min_decimal_odds: args.minDecimalOdds } : {}),
+      ...(args?.maxDecimalOdds != null ? { max_decimal_odds: args.maxDecimalOdds } : {}),
+      ...(args?.updatedAfter ? { updated_after: args.updatedAfter } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 3 * 60_000,
+  });
+}
+
+export async function getBsdBestOdds(args?: {
+  market?: string;
+  leagueId?: string | number;
+  seasonId?: string | number;
+  teamId?: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDOddsRow>> {
+  return bsdFetch<PaginatedResponse<BSDOddsRow>>("/odds/best/", {
+    query: {
+      ...(args?.market ? { market: args.market } : {}),
+      ...(args?.leagueId != null ? { league_id: args.leagueId } : {}),
+      ...(args?.seasonId != null ? { season_id: args.seasonId } : {}),
+      ...(args?.teamId != null ? { team_id: args.teamId } : {}),
+      ...(args?.dateFrom ? { date_from: args.dateFrom } : {}),
+      ...(args?.dateTo ? { date_to: args.dateTo } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 5 * 60_000,
+  });
+}
+
+export async function getBsdBookmakers(): Promise<BSDBookmaker[]> {
+  const payload = await bsdFetch<PaginatedResponse<BSDBookmaker> | BSDBookmaker[]>("/bookmakers/", {
+    ttlMs: 60 * 60_000,
+  }).catch(() => ({ results: [] as BSDBookmaker[] }));
+  if (Array.isArray(payload)) return payload;
+  return Array.isArray(payload.results) ? payload.results : [];
 }
 
 export async function getBsdLeagueSeason(
@@ -1145,6 +1224,57 @@ export async function getBsdEventPrediction(
 ): Promise<BSDPredictionResponse | null> {
   return bsdFetch<BSDPredictionResponse>(
     `/events/${encodeURIComponent(String(eventId))}/prediction/`,
+    {
+      ttlMs: 2 * 60_000,
+    },
+  ).catch(() => null);
+}
+
+export async function getBsdEventPolymarket(
+  eventId: string | number,
+): Promise<BSDPolymarketResponse | null> {
+  return bsdFetch<BSDPolymarketResponse>(
+    `/events/${encodeURIComponent(String(eventId))}/polymarket/`,
+    {
+      ttlMs: 60_000,
+    },
+  ).catch(() => null);
+}
+
+export async function getBsdPredictions(args?: {
+  status?: string;
+  leagueId?: string | number;
+  seasonId?: string | number;
+  teamId?: string | number;
+  dateFrom?: string;
+  dateTo?: string;
+  minConfidence?: number;
+  recommended?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<BSDPredictionResponse>> {
+  return bsdFetch<PaginatedResponse<BSDPredictionResponse>>("/predictions/", {
+    query: {
+      ...(args?.status ? { status: args.status } : {}),
+      ...(args?.leagueId != null ? { league_id: args.leagueId } : {}),
+      ...(args?.seasonId != null ? { season_id: args.seasonId } : {}),
+      ...(args?.teamId != null ? { team_id: args.teamId } : {}),
+      ...(args?.dateFrom ? { date_from: args.dateFrom } : {}),
+      ...(args?.dateTo ? { date_to: args.dateTo } : {}),
+      ...(args?.minConfidence != null ? { min_confidence: args.minConfidence } : {}),
+      ...(args?.recommended != null ? { recommended: args.recommended } : {}),
+      limit: args?.limit ?? 50,
+      offset: args?.offset ?? 0,
+    },
+    ttlMs: 2 * 60_000,
+  }).catch(() => ({ results: [] as BSDPredictionResponse[] }));
+}
+
+export async function getBsdPredictionById(
+  predictionId: string | number,
+): Promise<BSDPredictionResponse | null> {
+  return bsdFetch<BSDPredictionResponse>(
+    `/predictions/${encodeURIComponent(String(predictionId))}/`,
     {
       ttlMs: 2 * 60_000,
     },
