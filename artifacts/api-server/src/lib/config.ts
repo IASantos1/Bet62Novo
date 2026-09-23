@@ -33,6 +33,8 @@ const AI_AGENTS_MODEL =
 const SPORTMONKS_API_TOKEN = process.env["SPORTMONKS_API_TOKEN"] ?? "";
 const SPORTMONKS_BASE_URL =
   process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3";
+const SPORTMONKS_ODDS_BOOKMAKER =
+  process.env["SPORTMONKS_ODDS_BOOKMAKER"]?.trim() || "bet365";
 
 // Mr. Doge remains available only as a legacy compatibility module while
 // deployments migrate; it is deliberately not selected by the match routes.
@@ -77,6 +79,7 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
 export const CONFIG = {
   SPORTMONKS_API_TOKEN,
   SPORTMONKS_BASE_URL,
+  SPORTMONKS_ODDS_BOOKMAKER,
   MRDOGE_API_KEY,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,

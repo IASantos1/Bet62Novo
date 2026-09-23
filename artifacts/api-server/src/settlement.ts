@@ -4124,7 +4124,7 @@ function providerMatchIdPrefixesForSport(
 ): string[] {
   switch (sport) {
     case "football":
-      return ["mrdoge-football", "gs-soccer", "gs-football"];
+      return ["sportmonks-football", "mrdoge-football", "gs-soccer", "gs-football"];
     case "tennis":
       return ["mrdoge-tennis", "gs-tennis"];
     case "basketball":
@@ -4243,7 +4243,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  return /^mrdoge-(football|tennis|basketball|hockey|baseball|volleyball)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
+  return /^sportmonks-football-.+$|^mrdoge-(football|tennis|basketball|hockey|baseball|volleyball)-.+$|^gs-(soccer|football|tennis|basketball|volleyball|hockey|baseball|mma|handball|cricket|rugby|rugbyleague|esports|amfootball|boxing|futsal|darts)-.+$/.test(
     String(matchId ?? "").trim(),
   );
 }

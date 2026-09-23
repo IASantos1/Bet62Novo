@@ -51,8 +51,10 @@ import {
   getSportMonksFixturesBetween,
   getSportMonksFixturesByTeamRange,
   getSportMonksInplayLivescores,
+  getSportMonksInplayOddsByFixtureId,
   getSportMonksLeagueById,
   getSportMonksLiveStandingsByLeague,
+  getSportMonksPrematchOddsByFixtureId,
   getSportMonksPlayerById,
   getSportMonksPredictionsByFixtureId,
   getSportMonksStandingsBySeason,
@@ -62,6 +64,7 @@ import {
   type SportMonksEvent,
   type SportMonksFixture,
   type SportMonksLineupEntry,
+  type SportMonksOdd,
   type SportMonksParticipant,
   type SportMonksScore,
   type SportMonksStanding,
@@ -168,6 +171,557 @@ function sportMonksVsMrDogeMatch(
   const mrTime = Date.parse(String(match.startTime ?? ""));
   if (!Number.isFinite(smTime) || !Number.isFinite(mrTime)) return true;
   return Math.abs(smTime - mrTime) <= 90 * 60_000;
+}
+
+function sportMonksOddsDecimal(row: SportMonksOdd): number {
+  const value = Number(row.value ?? row.dp3 ?? NaN);
+  return Number.isFinite(value) && value > 1 ? value : 0;
+}
+
+function sportMonksOddsLine(
+  row: SportMonksOdd,
+): number | null {
+  const raw =
+    row.total ??
+    row.handicap ??
+    row.original_label ??
+    null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sportMonksOddsBookmakerName(row: SportMonksOdd): string {
+  return normalizeSportEntityName(String(row.bookmaker?.name ?? ""));
+}
+
+function sportMonksOddsMarketKey(row: SportMonksOdd): string {
+  return normalizeSportEntityName(
+    String(
+      row.market?.developer_name ??
+        row.market?.name ??
+        row.market_description ??
+        row.name ??
+        "",
+    ),
+  );
+}
+
+function sportMonksOddsLabelKey(row: SportMonksOdd): string {
+  return normalizeSportEntityName(
+    String(row.label ?? row.name ?? row.original_label ?? ""),
+  );
+}
+
+function sportMonksIsOpenOdd(row: SportMonksOdd): boolean {
+  return !(row.stopped || row.suspended);
+}
+
+function sportMonksChooseBookmakerOdds(rows: SportMonksOdd[]): SportMonksOdd[] {
+  if (rows.length === 0) return [];
+  const preferred = normalizeSportEntityName(CONFIG.SPORTMONKS_ODDS_BOOKMAKER);
+  const byBookmaker = new Map<string, SportMonksOdd[]>();
+  for (const row of rows) {
+    const bookmaker =
+      sportMonksOddsBookmakerName(row) ||
+      String(row.bookmaker_id ?? "unknown");
+    const bucket = byBookmaker.get(bookmaker) ?? [];
+    bucket.push(row);
+    byBookmaker.set(bookmaker, bucket);
+  }
+  if (preferred && byBookmaker.has(preferred)) {
+    return byBookmaker.get(preferred) ?? [];
+  }
+  return [...byBookmaker.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+}
+
+async function fetchSportMonksOddsBatch(
+  fixtureIds: Array<string>,
+  mode: "prematch" | "inplay",
+): Promise<Map<string, SportMonksOdd[]>> {
+  const ids = [...new Set(fixtureIds.filter(Boolean))];
+  const out = new Map<string, SportMonksOdd[]>();
+  const batchSize = mode === "inplay" ? 6 : 8;
+  for (let offset = 0; offset < ids.length; offset += batchSize) {
+    const batch = ids.slice(offset, offset + batchSize);
+    const rows = await Promise.all(
+      batch.map(async (fixtureId) => {
+        const odds =
+          mode === "inplay"
+            ? await getSportMonksInplayOddsByFixtureId({
+                fixtureId,
+                include: "market;bookmaker",
+              }).catch(() => [] as SportMonksOdd[])
+            : await getSportMonksPrematchOddsByFixtureId({
+                fixtureId,
+                include: "market;bookmaker",
+              }).catch(() => [] as SportMonksOdd[]);
+        return [fixtureId, odds] as const;
+      }),
+    );
+    for (const [fixtureId, odds] of rows) {
+      out.set(fixtureId, sportMonksChooseBookmakerOdds(odds));
+    }
+  }
+  return out;
+}
+
+function sportMonksOutcomeSide(
+  label: string,
+  teams: { home: string; away: string },
+): "home" | "draw" | "away" | null {
+  const raw = String(label ?? "").trim().toLowerCase();
+  const normalized = normalizeSportEntityName(label);
+  if (!raw && !normalized) return null;
+  if (
+    raw === "1" ||
+    raw === "home" ||
+    normalized === normalizeSportEntityName(teams.home)
+  ) {
+    return "home";
+  }
+  if (raw === "x" || raw === "draw" || normalized === "draw" || normalized === "empate") {
+    return "draw";
+  }
+  if (
+    raw === "2" ||
+    raw === "away" ||
+    normalized === normalizeSportEntityName(teams.away)
+  ) {
+    return "away";
+  }
+  return null;
+}
+
+function sportMonksCanonicalScoreLabel(label: string): string {
+  return String(label ?? "")
+    .replace(/\s+/g, "")
+    .replace(/[–—]/g, "-")
+    .replace(/:/g, "-")
+    .trim();
+}
+
+function sportMonksApplyFootballOdds(
+  rows: SportMonksOdd[],
+  teams: { home: string; away: string },
+): {
+  hasRealOdds: boolean;
+  odds: { home: number; draw: number; away: number };
+  markets: AdvancedMarkets;
+} {
+  const markets = zerofillAdvancedMarkets();
+  const resultOdds = { home: 0, draw: 0, away: 0 };
+  const firstHalfTotalCandidates = new Map<
+    string,
+    { line: number; over: number; under: number }
+  >();
+  const asianHandicapCandidates = new Map<
+    string,
+    { line: number; home: number; away: number }
+  >();
+  const europeanHandicapCandidates = new Map<
+    string,
+    { line: number; home: number; draw: number; away: number }
+  >();
+  const homeCornersCandidates = new Map<
+    string,
+    { line: number; over: number; under: number }
+  >();
+  const awayCornersCandidates = new Map<
+    string,
+    { line: number; over: number; under: number }
+  >();
+  let hasRealOdds = false;
+
+  const setLinePair = <
+    T extends {
+      over: number;
+      under: number;
+    },
+  >(
+    map: Map<string, T & { line: number }>,
+    line: number,
+    side: "over" | "under",
+    price: number,
+  ) => {
+    const key = line.toFixed(2);
+    const current =
+      map.get(key) ?? ({ line, over: 0, under: 0 } as T & { line: number });
+    current[side] = price;
+    map.set(key, current);
+  };
+
+  for (const row of rows) {
+    if (!sportMonksIsOpenOdd(row)) continue;
+    const price = sportMonksOddsDecimal(row);
+    if (!(price > 1.001)) continue;
+    const marketKey = sportMonksOddsMarketKey(row);
+    const label = String(row.label ?? row.name ?? "").trim();
+    const labelKey = sportMonksOddsLabelKey(row);
+    const line = sportMonksOddsLine(row);
+
+    if (
+      /match winner|match result|fulltime result/.test(marketKey) &&
+      !/handicap|1st half|first half|2nd half|second half/.test(marketKey)
+    ) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") resultOdds.home = price;
+      else if (side === "draw") resultOdds.draw = price;
+      else if (side === "away") resultOdds.away = price;
+      continue;
+    }
+
+    if (/double chance/.test(marketKey)) {
+      if (/^1x$/.test(label.toLowerCase()) || /home or draw|1 x/.test(labelKey)) {
+        markets.doubleChance.homeOrDraw = price;
+      } else if (/^x2$/.test(label.toLowerCase()) || /draw or away|x 2/.test(labelKey)) {
+        markets.doubleChance.awayOrDraw = price;
+      } else if (/^12$/.test(label.toLowerCase()) || /home or away|1 2/.test(labelKey)) {
+        markets.doubleChance.homeOrAway = price;
+      }
+      continue;
+    }
+
+    if (/both teams to score|btts/.test(marketKey)) {
+      if (/^yes$|^sim$/.test(label.toLowerCase()) || labelKey === "yes" || labelKey === "sim") {
+        markets.bothTeamsScore.yes = price;
+      } else if (/^no$|^nao$|^não$/.test(label.toLowerCase()) || labelKey === "no" || labelKey === "nao") {
+        markets.bothTeamsScore.no = price;
+      }
+      continue;
+    }
+
+    if (
+      /home team goals over under|home over under/.test(marketKey) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.homeOver05 = price;
+        if (line === 1.5) markets.teamGoals!.homeOver15 = price;
+        if (line === 2.5) markets.teamGoals!.homeOver25 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.homeUnder05 = price;
+        if (line === 1.5) markets.teamGoals!.homeUnder15 = price;
+        if (line === 2.5) markets.teamGoals!.homeUnder25 = price;
+      }
+      continue;
+    }
+
+    if (
+      /away team goals over under|away over under/.test(marketKey) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.awayOver05 = price;
+        if (line === 1.5) markets.teamGoals!.awayOver15 = price;
+        if (line === 2.5) markets.teamGoals!.awayOver25 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.awayUnder05 = price;
+        if (line === 1.5) markets.teamGoals!.awayUnder15 = price;
+        if (line === 2.5) markets.teamGoals!.awayUnder25 = price;
+      }
+      continue;
+    }
+
+    if (
+      /1st half goals over under|first half goals over under|over under 1st half/.test(
+        marketKey,
+      ) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        setLinePair(firstHalfTotalCandidates, line, "over", price);
+      } else if (/under|menos/.test(labelKey)) {
+        setLinePair(firstHalfTotalCandidates, line, "under", price);
+      }
+      continue;
+    }
+
+    if (
+      /goals odd even|odd even/.test(marketKey) &&
+      !/team|home|away/.test(marketKey)
+    ) {
+      if (labelKey === "odd" || labelKey === "impar") markets.goalOddEven = { ...(markets.goalOddEven ?? { odd: 0, even: 0 }), odd: price };
+      if (labelKey === "even" || labelKey === "par") markets.goalOddEven = { ...(markets.goalOddEven ?? { odd: 0, even: 0 }), even: price };
+      continue;
+    }
+
+    if (/number of goals|exact goals/.test(marketKey)) {
+      const exactGoals = {
+        ...(markets.exactGoals ?? {
+          g0: 0,
+          g1: 0,
+          g2: 0,
+          g3: 0,
+          g4: 0,
+          g5plus: 0,
+        }),
+      };
+      if (/sem goals|no goals|^0$|0 goals|0 gol/.test(labelKey)) exactGoals.g0 = price;
+      else if (/^1$|1 goal|1 gol/.test(labelKey)) exactGoals.g1 = price;
+      else if (/^2$|2 goals|2 gol/.test(labelKey)) exactGoals.g2 = price;
+      else if (/^3$|3 goals|3 gol/.test(labelKey)) exactGoals.g3 = price;
+      else if (/^4$|4 goals|4 gol/.test(labelKey)) exactGoals.g4 = price;
+      else if (/5|mais|more|plus/.test(labelKey)) exactGoals.g5plus = price;
+      markets.exactGoals = exactGoals;
+      continue;
+    }
+
+    if (
+      /goals over under|over under/.test(marketKey) &&
+      !/1st half|first half|home team|away team|corners|cards|asian/.test(marketKey) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) markets.totalGoals.over05 = price;
+        if (line === 1.5) markets.totalGoals.over15 = price;
+        if (line === 2.5) markets.totalGoals.over25 = price;
+        if (line === 3.5) markets.totalGoals.over35 = price;
+        if (line === 4.5) markets.totalGoals.over45 = price;
+        if (line === 5.5) markets.totalGoals.over55 = price;
+        if (line === 6.5) markets.totalGoals.over65 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) markets.totalGoals.under05 = price;
+        if (line === 1.5) markets.totalGoals.under15 = price;
+        if (line === 2.5) markets.totalGoals.under25 = price;
+        if (line === 3.5) markets.totalGoals.under35 = price;
+        if (line === 4.5) markets.totalGoals.under45 = price;
+        if (line === 5.5) markets.totalGoals.under55 = price;
+        if (line === 6.5) markets.totalGoals.under65 = price;
+      }
+      continue;
+    }
+
+    if (/asian goals over under|asian total|asian over under/.test(marketKey) && line != null) {
+      const asianTotals = {
+        ...(markets.asianTotals ?? {
+          o05: 0,
+          u05: 0,
+          o45: 0,
+          u45: 0,
+          o55: 0,
+          u55: 0,
+          o225: 0,
+          u225: 0,
+          o275: 0,
+          u275: 0,
+        }),
+      };
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) asianTotals.o05 = price;
+        if (line === 4.5) asianTotals.o45 = price;
+        if (line === 5.5) asianTotals.o55 = price;
+        if (line === 2.25) asianTotals.o225 = price;
+        if (line === 2.75) asianTotals.o275 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) asianTotals.u05 = price;
+        if (line === 4.5) asianTotals.u45 = price;
+        if (line === 5.5) asianTotals.u55 = price;
+        if (line === 2.25) asianTotals.u225 = price;
+        if (line === 2.75) asianTotals.u275 = price;
+      }
+      markets.asianTotals = asianTotals;
+      continue;
+    }
+
+    if (/draw no bet/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") {
+        markets.drawNoBet = { ...(markets.drawNoBet ?? { home: 0, away: 0 }), home: price };
+      } else if (side === "away") {
+        markets.drawNoBet = { ...(markets.drawNoBet ?? { home: 0, away: 0 }), away: price };
+      }
+      continue;
+    }
+
+    if (/asian handicap/.test(marketKey) && line != null) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") {
+        const item = asianHandicapCandidates.get(line.toFixed(2)) ?? {
+          line,
+          home: 0,
+          away: 0,
+        };
+        item.home = price;
+        asianHandicapCandidates.set(line.toFixed(2), item);
+      } else if (side === "away") {
+        const item = asianHandicapCandidates.get(line.toFixed(2)) ?? {
+          line,
+          home: 0,
+          away: 0,
+        };
+        item.away = price;
+        asianHandicapCandidates.set(line.toFixed(2), item);
+      }
+      continue;
+    }
+
+    if (
+      /match result handicap|european handicap/.test(marketKey) &&
+      line != null
+    ) {
+      const item = europeanHandicapCandidates.get(line.toFixed(2)) ?? {
+        line,
+        home: 0,
+        draw: 0,
+        away: 0,
+      };
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") item.home = price;
+      else if (side === "draw") item.draw = price;
+      else if (side === "away") item.away = price;
+      europeanHandicapCandidates.set(line.toFixed(2), item);
+      continue;
+    }
+
+    if (/1st half result|first half result|fulltime result 1st half/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") markets.halfTime.home = price;
+      else if (side === "draw") markets.halfTime.draw = price;
+      else if (side === "away") markets.halfTime.away = price;
+      continue;
+    }
+
+    if (/2nd half result|second half result/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") markets.secondHalf.home = price;
+      else if (side === "draw") markets.secondHalf.draw = price;
+      else if (side === "away") markets.secondHalf.away = price;
+      continue;
+    }
+
+    if (/halftime fulltime|half time full time|ht ft/.test(marketKey)) {
+      const key = label
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace("1/1", "hh")
+        .replace("1/x", "hd")
+        .replace("1/2", "ha")
+        .replace("x/1", "dh")
+        .replace("x/x", "dd")
+        .replace("x/2", "da")
+        .replace("2/1", "ah")
+        .replace("2/x", "ad")
+        .replace("2/2", "aa");
+      const validKeys = new Set(["hh", "hd", "ha", "dh", "dd", "da", "ah", "ad", "aa"]);
+      if (validKeys.has(key)) {
+        markets.htft = {
+          ...(markets.htft ?? { hh: 0, hd: 0, ha: 0, dh: 0, dd: 0, da: 0, ah: 0, ad: 0, aa: 0 }),
+          [key]: price,
+        };
+      }
+      continue;
+    }
+
+    if (/correct score/.test(marketKey)) {
+      const scoreLabel = sportMonksCanonicalScoreLabel(label);
+      if (/^\d+-\d+$/.test(scoreLabel)) {
+        markets.correctScore = {
+          ...(markets.correctScore ?? {}),
+          [scoreLabel]: price,
+        };
+      }
+      continue;
+    }
+
+    if (/team to score first|first goal/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") markets.firstGoal.home = price;
+      else if (side === "away") markets.firstGoal.away = price;
+      else if (labelKey === "no goal" || labelKey === "sem golo" || labelKey === "sem gol") {
+        markets.firstGoal.noGoal = price;
+      }
+      continue;
+    }
+
+    if (/corners over under/.test(marketKey) && line != null) {
+      if (/home/.test(marketKey)) {
+        if (/over|mais/.test(labelKey)) setLinePair(homeCornersCandidates, line, "over", price);
+        if (/under|menos/.test(labelKey)) setLinePair(homeCornersCandidates, line, "under", price);
+      } else if (/away/.test(marketKey)) {
+        if (/over|mais/.test(labelKey)) setLinePair(awayCornersCandidates, line, "over", price);
+        if (/under|menos/.test(labelKey)) setLinePair(awayCornersCandidates, line, "under", price);
+      } else {
+        if (/over|mais/.test(labelKey)) {
+          if (line === 8.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o85: price };
+          if (line === 9.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o95: price };
+          if (line === 10.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o105: price };
+        } else if (/under|menos/.test(labelKey)) {
+          if (line === 8.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), u85: price };
+          if (line === 9.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), u95: price };
+          if (line === 10.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), u105: price };
+        }
+      }
+      continue;
+    }
+
+    if (/cards over under/.test(marketKey) && line != null) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 3.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o35: price };
+        if (line === 4.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o45: price };
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 3.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), u35: price };
+        if (line === 4.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), u45: price };
+      }
+      continue;
+    }
+  }
+
+  const firstHalfTotals = [...firstHalfTotalCandidates.values()]
+    .filter((item) => item.over > 0 && item.under > 0)
+    .sort((a, b) => a.line - b.line);
+  if (firstHalfTotals.length > 0) {
+    markets.firstHalfTotal = firstHalfTotals[0];
+    markets._total1H = firstHalfTotals[0]!.line;
+  }
+
+  const asianHandicaps = [...asianHandicapCandidates.values()]
+    .filter((item) => item.home > 0 && item.away > 0)
+    .sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+  if (asianHandicaps.length > 0) {
+    markets.asianHandicap = asianHandicaps[0];
+  }
+  for (const item of asianHandicaps) {
+    if (Math.abs(item.line) === 1) {
+      markets.handicap.homeMinusOne = item.home;
+      markets.handicap.awayPlusOne = item.away;
+    }
+    if (Math.abs(item.line) === 1.5) {
+      markets.handicap.homeMinusOneHalf = item.home;
+      markets.handicap.awayPlusOneHalf = item.away;
+    }
+  }
+
+  const europeanHandicaps = [...europeanHandicapCandidates.values()]
+    .filter((item) => item.home > 0 && item.draw > 0 && item.away > 0)
+    .sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+  if (europeanHandicaps.length > 0) {
+    markets.europeanHandicap = europeanHandicaps[0];
+  }
+
+  const homeCorners = [...homeCornersCandidates.values()]
+    .filter((item) => item.over > 0 && item.under > 0)
+    .sort((a, b) => a.line - b.line);
+  if (homeCorners.length > 0) {
+    markets.homeCorners = homeCorners[0];
+  }
+  const awayCorners = [...awayCornersCandidates.values()]
+    .filter((item) => item.over > 0 && item.under > 0)
+    .sort((a, b) => a.line - b.line);
+  if (awayCorners.length > 0) {
+    markets.awayCorners = awayCorners[0];
+  }
+
+  hasRealOdds =
+    resultOdds.home > 1 &&
+    resultOdds.draw > 1 &&
+    resultOdds.away > 1;
+
+  return {
+    hasRealOdds,
+    odds: resultOdds,
+    markets,
+  };
 }
 
 function sportMonksLatestBallPosition(
@@ -8671,7 +9225,7 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       endDate,
       include: "participants;league.country;state;venue",
     }).catch(() => [] as SportMonksFixture[]);
-    const visible = fixtures
+    const visibleFixtures = fixtures
       .filter((fixture) => !sportMonksIsFinished(fixture))
       .filter((fixture) => {
         const kickoffMs = sportMonksTimestampMs(fixture);
@@ -8683,7 +9237,16 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
             sportMonksCountryName(fixture),
             sportMonksLeagueName(fixture),
           ) === "preferred",
-      )
+      });
+    const oddsByFixtureId = await fetchSportMonksOddsBatch(
+      visibleFixtures
+        .map((fixture) =>
+          fixture.id == null ? "" : String(fixture.id),
+        )
+        .filter(Boolean),
+      "prematch",
+    );
+    const visible = visibleFixtures
       .map((fixture): UpcomingMatch | null => {
         const teams = sportMonksTeams(fixture);
         if (!teams.home?.name || !teams.away?.name) return null;
@@ -8691,6 +9254,13 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
         const kickoff = kickoffMs
           ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString())
           : { date: "", time: "" };
+        const parsedOdds = sportMonksApplyFootballOdds(
+          oddsByFixtureId.get(String(fixture.id)) ?? [],
+          {
+            home: String(teams.home.name),
+            away: String(teams.away.name),
+          },
+        );
         return {
           id: `sportmonks-football-${String(fixture.id)}`,
           home: String(teams.home.name),
@@ -8704,9 +9274,9 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
           date: kickoff.date,
           time: kickoff.time,
           sport: "football",
-          hasRealOdds: false,
-          odds: { home: 0, draw: 0, away: 0 },
-          markets: zerofillAdvancedMarkets(),
+          hasRealOdds: parsedOdds.hasRealOdds,
+          odds: parsedOdds.odds,
+          markets: parsedOdds.markets,
           leagueId:
             fixture.league_id == null ? undefined : String(fixture.league_id),
           seasonId:
@@ -8725,7 +9295,12 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       })
       .filter((fixture): fixture is UpcomingMatch => fixture != null);
     logger.info(
-      { fixtures: fixtures.length, visible: visible.length },
+      {
+        fixtures: fixtures.length,
+        visibleFixtures: visibleFixtures.length,
+        visible: visible.length,
+        withRealOdds: visible.filter((fixture) => fixture.hasRealOdds).length,
+      },
       "[sportmonks] football upcoming built",
     );
     return visible;
@@ -8736,7 +9311,6 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
 }
 
 async function buildFootballUpcoming(): Promise<UpcomingMatch[]> {
-  if (CONFIG.MRDOGE_API_KEY) return buildFootballUpcomingFromMrDoge();
   return buildFootballUpcomingFromSportMonks();
 }
 
@@ -8894,11 +9468,26 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
     const fixtures = await getSportMonksInplayLivescores(
       "participants;league.country;state;venue;events;statistics.type;scores;ballCoordinates",
     ).catch(() => [] as SportMonksFixture[]);
+    const oddsByFixtureId = await fetchSportMonksOddsBatch(
+      fixtures
+        .map((fixture) =>
+          fixture.id == null ? "" : String(fixture.id),
+        )
+        .filter(Boolean),
+      "inplay",
+    );
     return fixtures
       .map((fixture): LiveMatchState | null => {
         const teams = sportMonksTeams(fixture);
         if (!teams.home?.name || !teams.away?.name) return null;
         const { homeScore, awayScore } = sportMonksScoreline(fixture);
+        const parsedOdds = sportMonksApplyFootballOdds(
+          oddsByFixtureId.get(String(fixture.id)) ?? [],
+          {
+            home: String(teams.home.name),
+            away: String(teams.away.name),
+          },
+        );
         return {
           id: `sportmonks-football-${String(fixture.id)}`,
           home: String(teams.home.name),
@@ -8914,9 +9503,9 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
           awayScore,
           minute: sportMonksMinute(fixture),
           status: sportMonksMatchStatus(fixture),
-          hasRealOdds: false,
-          odds: { home: 0, draw: 0, away: 0 },
-          markets: zerofillAdvancedMarkets(),
+          hasRealOdds: parsedOdds.hasRealOdds,
+          odds: parsedOdds.odds,
+          markets: parsedOdds.markets,
           events: sportMonksEvents(fixture),
           redCardsHome: 0,
           redCardsAway: 0,
@@ -8958,7 +9547,6 @@ async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
 }
 
 async function buildFootballLive(): Promise<LiveMatchState[]> {
-  if (CONFIG.MRDOGE_API_KEY) return buildFootballLiveFromMrDoge();
   return buildFootballLiveFromSportMonks();
 }
 
@@ -9335,10 +9923,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   }
   const allUpcoming = _allUpcomingCache;
 
-  // ── Legacy provider path ────────────────────────────────────────────────
-  // MrDoge is the only active sportsbook provider on this route. The
-  // existing anti-flicker layer remains active below so a short provider
-  // outage does not erase the live board.
+  // ── Live provider path ──────────────────────────────────────────────────
+  // Football now builds from SportMonks; the other sports still use the
+  // legacy MrDoge path below. The anti-flicker layer remains active so a
+  // short provider outage does not erase the live board.
   await startMrDogeLiveSync().catch((err) => {
     logger.warn({ err }, "[mrdoge] live sync ensure failed");
   });

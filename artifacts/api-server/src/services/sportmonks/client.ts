@@ -190,6 +190,47 @@ export type SportMonksLeague = {
   } | null;
 };
 
+export type SportMonksOddsMarket = {
+  id?: number | string;
+  legacy_id?: number | string;
+  name?: string | null;
+  developer_name?: string | null;
+  has_winning_calculations?: boolean | null;
+};
+
+export type SportMonksBookmaker = {
+  id?: number | string;
+  legacy_id?: number | string;
+  name?: string | null;
+};
+
+export type SportMonksOdd = {
+  id?: number | string;
+  external_id?: number | string;
+  fixture_id?: number | string;
+  market_id?: number | string;
+  bookmaker_id?: number | string;
+  label?: string | null;
+  value?: string | number | null;
+  name?: string | null;
+  market_description?: string | null;
+  probability?: string | number | null;
+  dp3?: string | number | null;
+  fractional?: string | null;
+  american?: string | number | null;
+  winning?: boolean | null;
+  suspended?: boolean | null;
+  stopped?: boolean | null;
+  total?: string | number | null;
+  handicap?: string | number | null;
+  original_label?: string | null;
+  participants?: string | null;
+  latest_bookmaker_update?: string | null;
+  market?: SportMonksOddsMarket | null;
+  bookmaker?: SportMonksBookmaker | null;
+  fixture?: SportMonksFixture | null;
+};
+
 type CacheEntry<T> = { expiresAt: number; value: T };
 
 const responseCache = new Map<string, CacheEntry<unknown>>();
@@ -379,6 +420,34 @@ export async function getSportMonksTopScorersBySeason(
     {
       query: include ? { include } : undefined,
       ttlMs: 300_000,
+    },
+  );
+  return Array.isArray(data) ? data : data ? [data] : [];
+}
+
+export async function getSportMonksPrematchOddsByFixtureId(args: {
+  fixtureId: string | number;
+  include?: string;
+}): Promise<SportMonksOdd[]> {
+  const data = await sportMonksFetch<SportMonksOdd[] | SportMonksOdd>(
+    `/football/odds/pre-match/fixtures/${encodeURIComponent(String(args.fixtureId))}`,
+    {
+      query: args.include ? { include: args.include } : undefined,
+      ttlMs: 20_000,
+    },
+  );
+  return Array.isArray(data) ? data : data ? [data] : [];
+}
+
+export async function getSportMonksInplayOddsByFixtureId(args: {
+  fixtureId: string | number;
+  include?: string;
+}): Promise<SportMonksOdd[]> {
+  const data = await sportMonksFetch<SportMonksOdd[] | SportMonksOdd>(
+    `/football/odds/inplay/fixtures/${encodeURIComponent(String(args.fixtureId))}`,
+    {
+      query: args.include ? { include: args.include } : undefined,
+      ttlMs: 5_000,
     },
   );
   return Array.isArray(data) ? data : data ? [data] : [];
