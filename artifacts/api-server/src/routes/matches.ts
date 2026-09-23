@@ -17,7 +17,10 @@ import {
 } from "../lib/settlementQueue.js";
 import type { Match, Market } from "@mrdoge/node";
 import { getMrDogeClient } from "../services/mrdoge/client.js";
-import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
+import {
+  getMrDogeLiveMatches,
+  startMrDogeLiveSync,
+} from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
 import {
   MRDOGE_SOCCER_BET_TYPES,
@@ -292,6 +295,87 @@ function sportMonksCountryName(fixture: SportMonksFixture): string {
 
 function sportMonksLeagueName(fixture: SportMonksFixture): string {
   return String(fixture.league?.name ?? "").trim();
+}
+
+function sportMonksStateText(fixture: SportMonksFixture): string {
+  return String(
+    fixture.state?.short_name ??
+      fixture.state?.developer_name ??
+      fixture.state?.state ??
+      fixture.state?.name ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function sportMonksIsFinished(fixture: SportMonksFixture): boolean {
+  const state = sportMonksStateText(fixture);
+  return /finished|full.?time|after_extra_time|after_penalties|ended|closed|ft/.test(
+    state,
+  );
+}
+
+function sportMonksIsUpcoming(fixture: SportMonksFixture): boolean {
+  const state = sportMonksStateText(fixture);
+  if (!state) return true;
+  return /not_started|ns|upcoming|scheduled/.test(state);
+}
+
+function sportMonksMatchStatus(fixture: SportMonksFixture): string {
+  const state = sportMonksStateText(fixture);
+  if (/halftime|half_time|\bht\b/.test(state)) return "HT";
+  if (/2nd|second/.test(state)) return "2nd half";
+  if (/1st|first/.test(state)) return "1st half";
+  if (/extra/.test(state)) return "ET";
+  if (/pen/.test(state)) return "PEN";
+  if (sportMonksIsFinished(fixture)) return "FT";
+  if (sportMonksIsUpcoming(fixture)) return "NS";
+  return String(fixture.state?.short_name ?? fixture.state?.name ?? "LIVE").trim();
+}
+
+function sportMonksMinute(fixture: SportMonksFixture): number {
+  let minute = 0;
+  const events = Array.isArray(fixture.events) ? fixture.events : [];
+  for (const event of events) {
+    const base = Number(event.minute ?? 0);
+    const extra = Number(event.extra_minute ?? 0);
+    if (Number.isFinite(base)) minute = Math.max(minute, base + (Number.isFinite(extra) ? extra : 0));
+  }
+  const rows = Array.isArray(fixture.ballCoordinates)
+    ? fixture.ballCoordinates
+    : Array.isArray(fixture.ballcoordinates)
+      ? fixture.ballcoordinates
+      : [];
+  for (const row of rows) {
+    const timerSec = sportMonksTimerSeconds(row.timer);
+    if (timerSec >= 0) minute = Math.max(minute, Math.floor(timerSec / 60));
+  }
+  const periods = Array.isArray(fixture.periods) ? fixture.periods : [];
+  for (const period of periods) {
+    const minutes = Number(period.minutes ?? NaN);
+    if (Number.isFinite(minutes)) minute = Math.max(minute, minutes);
+  }
+  return minute;
+}
+
+function sportMonksScoreline(
+  fixture: SportMonksFixture,
+): { homeScore: number; awayScore: number } {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  let homeScore = 0;
+  let awayScore = 0;
+  const scores = Array.isArray(fixture.scores) ? fixture.scores : [];
+  for (const row of scores) {
+    const participantId = String(row.participant_id ?? "");
+    const value = Number(row.score?.goals ?? row.score?.goal ?? row.goals ?? NaN);
+    if (!Number.isFinite(value)) continue;
+    if (participantId && participantId === homeId) homeScore = Math.max(homeScore, value);
+    if (participantId && participantId === awayId) awayScore = Math.max(awayScore, value);
+  }
+  return { homeScore, awayScore };
 }
 
 function sportMonksVsBet62Match(
@@ -8346,7 +8430,7 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
 // ─── Match builders ────────────────────────────────────────────────────────────
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return buildFootballUpcomingFromMrDoge();
+  return buildFootballUpcoming();
 }
 
 // Prematch odds.list is a one-shot HTTP/WS call per match, NOT a
@@ -8577,6 +8661,85 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
   }
 }
 
+async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
+  if (!sportMonksEnabled()) return [];
+  try {
+    const startDate = new Date().toISOString().slice(0, 10);
+    const endDate = getUpcomingFetchEndDate();
+    const fixtures = await getSportMonksFixturesBetween({
+      startDate,
+      endDate,
+      include: "participants;league.country;state;venue",
+    }).catch(() => [] as SportMonksFixture[]);
+    const visible = fixtures
+      .filter((fixture) => !sportMonksIsFinished(fixture))
+      .filter((fixture) => {
+        const kickoffMs = sportMonksTimestampMs(fixture);
+        return kickoffMs == null || kickoffMs >= Date.now() - 30 * 60 * 1000;
+      })
+      .filter(
+        (fixture) =>
+          footballCompetitionVisibilityBand(
+            sportMonksCountryName(fixture),
+            sportMonksLeagueName(fixture),
+          ) === "preferred",
+      )
+      .map((fixture): UpcomingMatch | null => {
+        const teams = sportMonksTeams(fixture);
+        if (!teams.home?.name || !teams.away?.name) return null;
+        const kickoffMs = sportMonksTimestampMs(fixture);
+        const kickoff = kickoffMs
+          ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString())
+          : { date: "", time: "" };
+        return {
+          id: `sportmonks-football-${String(fixture.id)}`,
+          home: String(teams.home.name),
+          away: String(teams.away.name),
+          homeTeamId: teams.home.id == null ? undefined : String(teams.home.id),
+          awayTeamId: teams.away.id == null ? undefined : String(teams.away.id),
+          homeLogoUrl: String(teams.home.image_path ?? "").trim() || undefined,
+          awayLogoUrl: String(teams.away.image_path ?? "").trim() || undefined,
+          league: sportMonksLeagueName(fixture),
+          country: sportMonksCountryName(fixture),
+          date: kickoff.date,
+          time: kickoff.time,
+          sport: "football",
+          hasRealOdds: false,
+          odds: { home: 0, draw: 0, away: 0 },
+          markets: zerofillAdvancedMarkets(),
+          leagueId:
+            fixture.league_id == null ? undefined : String(fixture.league_id),
+          seasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          stadium: String(fixture.venue?.name ?? "").trim() || undefined,
+          referee: String(fixture.referee?.name ?? fixture.referee?.display_name ?? "").trim() || undefined,
+          _sportMonksFixtureId:
+            fixture.id == null ? undefined : String(fixture.id),
+          _sportMonksSeasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          _sportMonksHomeTeamId:
+            teams.home.id == null ? undefined : String(teams.home.id),
+          _sportMonksAwayTeamId:
+            teams.away.id == null ? undefined : String(teams.away.id),
+        };
+      })
+      .filter((fixture): fixture is UpcomingMatch => fixture != null);
+    logger.info(
+      { fixtures: fixtures.length, visible: visible.length },
+      "[sportmonks] football upcoming built",
+    );
+    return visible;
+  } catch (err) {
+    logger.error({ err }, "[sportmonks] football upcoming fetch failed");
+    return [];
+  }
+}
+
+async function buildFootballUpcoming(): Promise<UpcomingMatch[]> {
+  if (CONFIG.MRDOGE_API_KEY) return buildFootballUpcomingFromMrDoge();
+  return buildFootballUpcomingFromSportMonks();
+}
+
 // Mr. Doge live football — reads the shared in-memory map liveSync.ts's
 // single matches.subscribeLive connection maintains (no per-tick REST call
 // here), and drives the per-match odds.subscribe lifecycle every tick via
@@ -8723,6 +8886,80 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       _liveExtra: { phase, ...liveExtra },
     };
   });
+}
+
+async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
+  if (!sportMonksEnabled()) return [];
+  try {
+    const fixtures = await getSportMonksInplayLivescores(
+      "participants;league.country;state;venue;events;statistics.type;scores;ballCoordinates",
+    ).catch(() => [] as SportMonksFixture[]);
+    return fixtures
+      .map((fixture): LiveMatchState | null => {
+        const teams = sportMonksTeams(fixture);
+        if (!teams.home?.name || !teams.away?.name) return null;
+        const { homeScore, awayScore } = sportMonksScoreline(fixture);
+        return {
+          id: `sportmonks-football-${String(fixture.id)}`,
+          home: String(teams.home.name),
+          away: String(teams.away.name),
+          homeTeamId: teams.home.id == null ? undefined : String(teams.home.id),
+          awayTeamId: teams.away.id == null ? undefined : String(teams.away.id),
+          homeLogoUrl: String(teams.home.image_path ?? "").trim() || undefined,
+          awayLogoUrl: String(teams.away.image_path ?? "").trim() || undefined,
+          league: sportMonksLeagueName(fixture),
+          country: sportMonksCountryName(fixture),
+          sport: "football",
+          homeScore,
+          awayScore,
+          minute: sportMonksMinute(fixture),
+          status: sportMonksMatchStatus(fixture),
+          hasRealOdds: false,
+          odds: { home: 0, draw: 0, away: 0 },
+          markets: zerofillAdvancedMarkets(),
+          events: sportMonksEvents(fixture),
+          redCardsHome: 0,
+          redCardsAway: 0,
+          matchStats: sportMonksMatchStats(fixture),
+          stadium: String(fixture.venue?.name ?? "").trim() || undefined,
+          referee: String(fixture.referee?.name ?? fixture.referee?.display_name ?? "").trim() || undefined,
+          leagueId:
+            fixture.league_id == null ? undefined : String(fixture.league_id),
+          seasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          _ballPosition: sportMonksLatestBallPosition(fixture),
+          _sportMonksFixtureId:
+            fixture.id == null ? undefined : String(fixture.id),
+          _sportMonksSeasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          _sportMonksHomeTeamId:
+            teams.home.id == null ? undefined : String(teams.home.id),
+          _sportMonksAwayTeamId:
+            teams.away.id == null ? undefined : String(teams.away.id),
+          _liveExtra: {
+            phase:
+              sportMonksMatchStatus(fixture) === "HT"
+                ? "HT"
+                : sportMonksMatchStatus(fixture) === "ET"
+                  ? "ET"
+                  : sportMonksMatchStatus(fixture) === "PEN"
+                    ? "PEN"
+                    : /2nd half/i.test(sportMonksMatchStatus(fixture))
+                      ? "2H"
+                      : "1H",
+          },
+        };
+      })
+      .filter((fixture): fixture is LiveMatchState => fixture != null);
+  } catch (err) {
+    logger.error({ err }, "[sportmonks] football live fetch failed");
+    return [];
+  }
+}
+
+async function buildFootballLive(): Promise<LiveMatchState[]> {
+  if (CONFIG.MRDOGE_API_KEY) return buildFootballLiveFromMrDoge();
+  return buildFootballLiveFromSportMonks();
 }
 
 // Tennis/basketball/hockey/baseball/volleyball — MRDoge provides the live
@@ -9023,7 +9260,7 @@ async function rebuildUpcomingCache(): Promise<void> {
   try {
     let football: UpcomingMatch[] = [];
     try {
-      football = await buildFootballUpcomingFromMrDoge();
+      football = await buildFootballUpcoming();
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
@@ -9102,9 +9339,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // MrDoge is the only active sportsbook provider on this route. The
   // existing anti-flicker layer remains active below so a short provider
   // outage does not erase the live board.
+  await startMrDogeLiveSync().catch((err) => {
+    logger.warn({ err }, "[mrdoge] live sync ensure failed");
+  });
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    footballLiveRaw = await buildFootballLiveFromMrDoge();
+    footballLiveRaw = await buildFootballLive();
   } catch (err) {
     logger.error(
       { err },
@@ -10237,7 +10477,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // caches.
   let football: UpcomingMatch[] = [];
   try {
-    football = await buildFootballUpcomingFromMrDoge();
+    football = await buildFootballUpcoming();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
@@ -10543,7 +10783,9 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ((m.hasRealOdds ?? false) ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0) &&
+        (m.odds?.away ?? 0) > 0 ||
+        ((m.sport ?? "football") === "football" &&
+          !!m._sportMonksFixtureId)) &&
       !isPlaceholderTeamName(m.home) &&
       !isPlaceholderTeamName(m.away) &&
       !finishedMatchResults.has(String(m.id)) &&
