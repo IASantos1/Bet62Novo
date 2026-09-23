@@ -8173,7 +8173,7 @@ function applyProviderProjection(
   const projection = projectBet62Odds(
     match.odds,
     { home: match.home, away: match.away },
-    match.isLive ? 6 * 60 * 60_000 : 15 * 60_000,
+    match.isLive ? CONFIG.PUSH_ODDS_MAX_AGE_MS : CONFIG.PREMATCH_ODDS_MAX_AGE_MS,
   );
   if (projection.markets["totalGoals"]) {
     markets.totalGoals = { ...markets.totalGoals, ...(projection.markets["totalGoals"] as Partial<AdvancedMarkets["totalGoals"]>) };
@@ -9133,20 +9133,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     )
     .slice(0, 50);
 
-  // Both bridges below used to promote an "Em Breve" (prematch/SportsAPI-
-  // sourced) candidate straight into the live section with a fabricated
-  // 0-0 / "Em Jogo" / "1st set" placeholder whenever the real live feed
-  // hadn't picked the match up yet — for tennis specifically, that was a
-  // stand-in for PulseScore lag that no longer exists now that tennis has
-  // its own real PulseScore live builder; for every other sport it was
-  // fabricating a "live" match out of prematch data from a provider
-  // (Statpal/SportsAPI) that's since been removed from the live pipeline
-  // entirely. Removed outright (explicit user decision, 2026-08-06: only
-  // PulseScore-sourced data belongs on the live page) — a match now only
-  // ever appears live once PulseScore's own feed actually reports it live,
-  // no fabricated bridge. promotedTennis stays declared (always empty) since
-  // syncLiveCompetitionCatalog/getCompetitionCatalogDecisions below still
-  // reference it structurally.
+  // Starting-soon matches must never be promoted into the live section with a
+  // fabricated 0-0 / "Em Jogo" placeholder. In the hybrid runtime a match
+  // only appears live when Goal API or PropLine actually report it as live.
+  // promotedTennis stays declared (always empty) because the competition
+  // catalog sync below still references it structurally.
   const promotedTennis: LiveMatchState[] = [];
   const startingSoonFinal: LiveMatchState[] = [];
   for (const m of startingSoonCandidates) {
@@ -9185,7 +9176,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       sport: m.sport,
       name: m.league,
       country: m.country,
-      provider: "sportsapi_live",
+      provider: "bet62_live",
       status: m.status,
       suspensionReason: m._suspensionReason ?? null,
     })),
@@ -9195,7 +9186,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       sport: m.sport,
       name: m.league,
       country: m.country,
-      provider: "sportsapi_live",
+      provider: "bet62_live",
       status: m.status,
       suspensionReason: m._suspensionReason ?? null,
     })),
@@ -9205,7 +9196,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       sport: m.sport,
       name: m.league,
       country: m.country,
-      provider: "sportsapi_upcoming",
+      provider: "bet62_upcoming",
       status: m.status,
       suspensionReason: null,
     })),
@@ -9254,12 +9245,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       .map((entry) => entry.match);
   };
 
-  // Football live is sourced from Mr. Doge again (2026-09-20+). The old
-  // "hide every football live fixture" guard was left behind from the brief
-  // gap after GOAL API/PulseScore removal and caused matches to appear only
-  // in "Em Breve" and then vanish at kickoff instead of entering "Ao Vivo".
-  // Keep all live football fixtures visible now; suspended/interrupted odds
-  // are handled at market/button level, not by hiding the match itself.
+  // Football live now comes from Goal API with PropLine odds fallback. Keep
+  // visible fixtures in the live board even when odds are temporarily
+  // suspended/interrupted; that state is handled at market/button level,
+  // not by hiding the match itself.
   const isVisibleFootballFixture = (m: LiveMatchState): boolean =>
     m.sport !== "football" ||
     footballWithOddsFallback.some((visible) => String(visible.id) === String(m.id));

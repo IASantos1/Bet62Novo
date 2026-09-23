@@ -144,7 +144,7 @@ export async function getPropLineBoard(options: {
 } = {}): Promise<unknown> {
   const sports = keysForSport(options.sport ?? "", await getSports());
   const ttl = options.live
-    ? Math.max(CONFIG.SPORTS_API_ODDS_CACHE_MS, 15_000)
+    ? CONFIG.SPORTS_API_LIVE_CACHE_MS
     : 5 * 60_000;
   const boards = await Promise.all(
     sports.map(async (sport) => {
