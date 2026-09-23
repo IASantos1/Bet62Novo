@@ -662,10 +662,29 @@ function sportMonksApplyFootballOdds(
     markets.awayCorners = awayCorners[0];
   }
 
-  hasRealOdds =
+  const hasResultOdds =
     resultOdds.home > 1 &&
     resultOdds.draw > 1 &&
     resultOdds.away > 1;
+  const hasMeaningfulDerivedMarket =
+    markets.doubleChance.homeOrDraw > 1 ||
+    markets.doubleChance.awayOrDraw > 1 ||
+    markets.doubleChance.homeOrAway > 1 ||
+    markets.bothTeamsScore.yes > 1 ||
+    markets.bothTeamsScore.no > 1 ||
+    markets.totalGoals.over05 > 1 ||
+    markets.totalGoals.over15 > 1 ||
+    markets.totalGoals.over25 > 1 ||
+    markets.totalGoals.under05 > 1 ||
+    markets.totalGoals.under15 > 1 ||
+    markets.totalGoals.under25 > 1 ||
+    markets.drawNoBet.home > 1 ||
+    markets.drawNoBet.away > 1 ||
+    markets.asianHandicap.home > 1 ||
+    markets.asianHandicap.away > 1 ||
+    Object.values(markets.correctScore).some((price) => Number(price) > 1);
+
+  hasRealOdds = hasResultOdds || hasMeaningfulDerivedMarket;
 
   return {
     hasRealOdds,

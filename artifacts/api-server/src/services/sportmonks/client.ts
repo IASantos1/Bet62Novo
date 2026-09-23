@@ -562,26 +562,26 @@ export async function getSportMonksPrematchOddsByFixtureId(args: {
   fixtureId: string | number;
   include?: string;
 }): Promise<SportMonksOdd[]> {
-  const data = await sportMonksFetch<SportMonksOdd[] | SportMonksOdd>(
+  return sportMonksFetchAllPages<SportMonksOdd>(
     `/football/odds/pre-match/fixtures/${encodeURIComponent(String(args.fixtureId))}`,
     {
       query: args.include ? { include: args.include } : undefined,
       ttlMs: 20_000,
+      maxPages: 8,
     },
   );
-  return Array.isArray(data) ? data : data ? [data] : [];
 }
 
 export async function getSportMonksInplayOddsByFixtureId(args: {
   fixtureId: string | number;
   include?: string;
 }): Promise<SportMonksOdd[]> {
-  const data = await sportMonksFetch<SportMonksOdd[] | SportMonksOdd>(
+  return sportMonksFetchAllPages<SportMonksOdd>(
     `/football/odds/inplay/fixtures/${encodeURIComponent(String(args.fixtureId))}`,
     {
       query: args.include ? { include: args.include } : undefined,
       ttlMs: 5_000,
+      maxPages: 6,
     },
   );
-  return Array.isArray(data) ? data : data ? [data] : [];
 }
