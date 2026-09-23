@@ -30,26 +30,6 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
-// ── BET62 Live + Match Tracker + Streaming ──
-//
-// Goal API is the authoritative football state/event/statistics source.
-// PropLine is the authoritative odds and multi-sport source. Both clients
-// live in the API server; the browser only sees the normalized Bet62 routes.
-const GOAL_API_KEY = process.env["GOAL_API_KEY"] ?? "";
-const GOAL_API_BASE_URL =
-  process.env["GOAL_API_BASE_URL"]?.trim() || "https://api.goal-api.com/v1";
-const GOAL_API_WS_URL =
-  process.env["GOAL_API_WS_URL"]?.trim() || "wss://api.goal-api.com/ws";
-const PROPLINE_API_KEY = process.env["PROPLINE_API_KEY"] ?? "";
-const PROPLINE_BASE_URL =
-  process.env["PROPLINE_BASE_URL"]?.trim() || "https://api.prop-line.com";
-const PROPLINE_WS_URL = process.env["PROPLINE_WS_URL"]?.trim() || "";
-const SPORTS_API_TIMEOUT_MS = Number(process.env["SPORTS_API_TIMEOUT_MS"] ?? "5000");
-const SPORTS_API_LIVE_CACHE_MS = Number(process.env["SPORTS_API_LIVE_CACHE_MS"] ?? "3000");
-const SPORTS_API_ODDS_CACHE_MS = Number(process.env["SPORTS_API_ODDS_CACHE_MS"] ?? "5000");
-const PUSH_ODDS_MAX_AGE_MS = Number(process.env["PUSH_ODDS_MAX_AGE_MS"] ?? "5000");
-const PREMATCH_ODDS_MAX_AGE_MS = Number(process.env["PREMATCH_ODDS_MAX_AGE_MS"] ?? "45000");
-
 // Mr. Doge remains available only as a legacy compatibility module while
 // deployments migrate; it is deliberately not selected by the match routes.
 // The old comments below document the SDK for the isolated compatibility code.
@@ -71,8 +51,8 @@ const PREMATCH_ODDS_MAX_AGE_MS = Number(process.env["PREMATCH_ODDS_MAX_AGE_MS"] 
 // SOCCER_BOTH_TEAMS_TO_SCORE); betType is an open string at the protocol
 // level (no enum to enumerate from), so any other market requires a real
 // API probe before being wired in — never guess a sysname the way an
-// earlier bzzoiro/PulseScore market mapping did and shipped a
-// misclassified BTTS/corners market.
+// earlier provider mapping did and shipped a misclassified BTTS/corners
+// market.
 const MRDOGE_API_KEY = process.env["MRDOGE_API_KEY"] ?? "";
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 
@@ -91,17 +71,6 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
-  GOAL_API_KEY,
-  GOAL_API_BASE_URL,
-  GOAL_API_WS_URL,
-  PROPLINE_API_KEY,
-  PROPLINE_BASE_URL,
-  PROPLINE_WS_URL,
-  SPORTS_API_TIMEOUT_MS: Number.isFinite(SPORTS_API_TIMEOUT_MS) && SPORTS_API_TIMEOUT_MS > 0 ? SPORTS_API_TIMEOUT_MS : 5_000,
-  SPORTS_API_LIVE_CACHE_MS: Number.isFinite(SPORTS_API_LIVE_CACHE_MS) && SPORTS_API_LIVE_CACHE_MS > 0 ? SPORTS_API_LIVE_CACHE_MS : 3_000,
-  SPORTS_API_ODDS_CACHE_MS: Number.isFinite(SPORTS_API_ODDS_CACHE_MS) && SPORTS_API_ODDS_CACHE_MS > 0 ? SPORTS_API_ODDS_CACHE_MS : 5_000,
-  PUSH_ODDS_MAX_AGE_MS: Number.isFinite(PUSH_ODDS_MAX_AGE_MS) && PUSH_ODDS_MAX_AGE_MS > 0 ? PUSH_ODDS_MAX_AGE_MS : 5_000,
-  PREMATCH_ODDS_MAX_AGE_MS: Number.isFinite(PREMATCH_ODDS_MAX_AGE_MS) && PREMATCH_ODDS_MAX_AGE_MS > 0 ? PREMATCH_ODDS_MAX_AGE_MS : 45_000,
   MRDOGE_API_KEY,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,

@@ -1795,8 +1795,8 @@ router.post(
     // other sports keep the plain global limit, unchanged from before.
     // Checked by `liveState.sport === "football"` rather than a hardcoded
     // matchId prefix — this used to only recognize the dead "football-v2-"
-    // (Statpal) id scheme, so PulseScore-sourced live football matches
-    // ("pulsescore-football-...") got the full global max stake with no
+    // (Statpal) id scheme, so the later provider-specific live football ids
+    // got the full global max stake with no
     // tier-based cap at all. Prefers the tier already computed by whichever
     // builder populated liveMatchState (matchTier), recomputing only as a
     // defensive fallback.

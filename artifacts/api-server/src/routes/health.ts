@@ -19,28 +19,18 @@ router.get("/version", (_req, res) => {
   res.json({ commit: process.env["RAILWAY_GIT_COMMIT_SHA"] ?? null });
 });
 
-// Unvalidated operational route: reports the provider setup currently wired
-// into the Goal API + PropLine migration without forcing callers to know the
-// internal config module shape.
+// Unvalidated operational route: reports the currently active sportsbook
+// provider setup without forcing callers to know the internal config shape.
 router.get("/health-data-providers", (_req, res) => {
   const g = globalThis as any;
   res.json({
     flags: {
-      goalApiEnabled: Boolean(CONFIG.GOAL_API_KEY),
-      propLineEnabled: Boolean(CONFIG.PROPLINE_API_KEY),
       mrDogeLegacyEnabled: Boolean(CONFIG.MRDOGE_API_KEY),
     },
     keys: {
-      goalApi: Boolean(CONFIG.GOAL_API_KEY),
-      propLine: Boolean(CONFIG.PROPLINE_API_KEY),
       mrDoge: Boolean(CONFIG.MRDOGE_API_KEY),
     },
-    urls: {
-      goalApiBaseUrl: CONFIG.GOAL_API_BASE_URL,
-      goalApiWsUrl: CONFIG.GOAL_API_WS_URL,
-      propLineBaseUrl: CONFIG.PROPLINE_BASE_URL,
-      propLineWsUrl: CONFIG.PROPLINE_WS_URL || null,
-    },
+    activeProvider: CONFIG.MRDOGE_API_KEY ? "mrdoge" : null,
     lastSuccessfulFetch: {},
     providerQualityDebug: g.__providerQualityDebug ?? null,
     livePayloadDebug: g.__livePayloadDebug ?? null,

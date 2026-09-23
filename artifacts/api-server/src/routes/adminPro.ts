@@ -415,9 +415,9 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
     // every provider, so a single lookup against each works regardless of
     // sport — pré-jogo fixtures (not yet live) only ever show up in the
     // upcoming snapshot.
-    // The real-time "PulseScore real price or synthetic estimate" indicator
-    // this used to compute here (GOAL API/PulseScore-football only) is gone
-    // now that both providers are removed (2026-09-20, user decision) —
+    // The old provider-specific "real price vs estimate" indicator is gone
+    // now that those removed providers are out of the runtime (2026-09-20,
+    // user decision) —
     // pulse_score_price_status is kept in the response shape, always null,
     // for frontend compatibility.
     const upcomingById = new Map(getUpcomingMatchesSnapshot().map((m) => [m.id, m]));
@@ -444,9 +444,9 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
     // at all — syncLiveCompetitionCatalog (which populates that table) is
     // only ever called with livePart/promotedTennis from buildLivePayload,
     // never from the upcoming-matches builder. This used to also surface
-    // pré-jogo football fixtures with a real PulseScore price as read-only
-    // synthetic rows; GOAL API and PulseScore are both removed (2026-09-20,
-    // user decision), so that set is always empty now.
+    // pré-jogo football fixtures from the removed provider stack as read-only
+    // synthetic rows; that source is gone (2026-09-20, user decision), so
+    // that set is always empty now.
     res.json({ events });
   } catch (err) {
     logger.error({ err }, "Admin event runtime list error");
