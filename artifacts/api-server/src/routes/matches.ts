@@ -82,6 +82,10 @@ export function getUpcomingMatchesSnapshot(): UpcomingMatch[] {
   return EMPTY_UPCOMING;
 }
 
+export async function ensureFinishedMatchResult(_matchId: string): Promise<boolean> {
+  return false;
+}
+
 export function footballMarketTier(
   _leagueDisplayName: string,
   _country?: string,
