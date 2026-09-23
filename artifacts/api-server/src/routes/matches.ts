@@ -1771,7 +1771,7 @@ router.get("/leagues/:id/top/:stat", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/leagues/:id/bestxi/:seasonId/:roundNumber?", async (req: Request, res: Response) => {
+async function handleLeagueBestXi(req: Request, res: Response) {
   try {
     const leagueId = String(req.params["id"] ?? "").trim();
     const seasonId = String(req.params["seasonId"] ?? "").trim();
@@ -1782,7 +1782,10 @@ router.get("/leagues/:id/bestxi/:seasonId/:roundNumber?", async (req: Request, r
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json(mapBestXi(null));
   }
-});
+}
+
+router.get("/leagues/:id/bestxi/:seasonId", handleLeagueBestXi);
+router.get("/leagues/:id/bestxi/:seasonId/:roundNumber", handleLeagueBestXi);
 
 router.get("/leagues/:id/venues", async (req: Request, res: Response) => {
   try {
