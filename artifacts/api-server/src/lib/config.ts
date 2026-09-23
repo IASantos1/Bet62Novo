@@ -47,6 +47,8 @@ const PROPLINE_WS_URL = process.env["PROPLINE_WS_URL"]?.trim() || "";
 const SPORTS_API_TIMEOUT_MS = Number(process.env["SPORTS_API_TIMEOUT_MS"] ?? "5000");
 const SPORTS_API_LIVE_CACHE_MS = Number(process.env["SPORTS_API_LIVE_CACHE_MS"] ?? "3000");
 const SPORTS_API_ODDS_CACHE_MS = Number(process.env["SPORTS_API_ODDS_CACHE_MS"] ?? "5000");
+const PUSH_ODDS_MAX_AGE_MS = Number(process.env["PUSH_ODDS_MAX_AGE_MS"] ?? "5000");
+const PREMATCH_ODDS_MAX_AGE_MS = Number(process.env["PREMATCH_ODDS_MAX_AGE_MS"] ?? "45000");
 
 // Mr. Doge remains available only as a legacy compatibility module while
 // deployments migrate; it is deliberately not selected by the match routes.
@@ -98,6 +100,8 @@ export const CONFIG = {
   SPORTS_API_TIMEOUT_MS: Number.isFinite(SPORTS_API_TIMEOUT_MS) && SPORTS_API_TIMEOUT_MS > 0 ? SPORTS_API_TIMEOUT_MS : 5_000,
   SPORTS_API_LIVE_CACHE_MS: Number.isFinite(SPORTS_API_LIVE_CACHE_MS) && SPORTS_API_LIVE_CACHE_MS > 0 ? SPORTS_API_LIVE_CACHE_MS : 3_000,
   SPORTS_API_ODDS_CACHE_MS: Number.isFinite(SPORTS_API_ODDS_CACHE_MS) && SPORTS_API_ODDS_CACHE_MS > 0 ? SPORTS_API_ODDS_CACHE_MS : 5_000,
+  PUSH_ODDS_MAX_AGE_MS: Number.isFinite(PUSH_ODDS_MAX_AGE_MS) && PUSH_ODDS_MAX_AGE_MS > 0 ? PUSH_ODDS_MAX_AGE_MS : 5_000,
+  PREMATCH_ODDS_MAX_AGE_MS: Number.isFinite(PREMATCH_ODDS_MAX_AGE_MS) && PREMATCH_ODDS_MAX_AGE_MS > 0 ? PREMATCH_ODDS_MAX_AGE_MS : 45_000,
   MRDOGE_API_KEY,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,

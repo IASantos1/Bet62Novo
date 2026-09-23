@@ -40,7 +40,8 @@ export type ProviderMatch = {
   isLive: boolean;
 };
 
-const LIVE_ODDS_MAX_AGE_MS = 6 * 60 * 60_000;
+const LIVE_ODDS_MAX_AGE_MS = CONFIG.PUSH_ODDS_MAX_AGE_MS;
+const PREMATCH_ODDS_MAX_AGE_MS = CONFIG.PREMATCH_ODDS_MAX_AGE_MS;
 
 const normalizeName = (value: string): string =>
   value
@@ -54,6 +55,19 @@ const normalizeName = (value: string): string =>
 
 function sameEvent(a: GoalFixture, b: PropLineEvent): boolean {
   if (a.id === b.id) return true;
+  const sameTeamIds =
+    a.homeTeamId &&
+    a.awayTeamId &&
+    b.homeTeamId &&
+    b.awayTeamId &&
+    a.homeTeamId === b.homeTeamId &&
+    a.awayTeamId === b.awayTeamId;
+  if (sameTeamIds) {
+    if (!a.kickoffUtc || !b.kickoffUtc) return true;
+    const aTime = Date.parse(a.kickoffUtc);
+    const bTime = Date.parse(b.kickoffUtc);
+    return !Number.isFinite(aTime) || !Number.isFinite(bTime) || Math.abs(aTime - bTime) <= 20 * 60_000;
+  }
   const similarity = (left: string, right: string): number => {
     const aTokens = new Set(normalizeName(left).split(" ").filter(Boolean));
     const bTokens = new Set(normalizeName(right).split(" ").filter(Boolean));
@@ -63,6 +77,18 @@ function sameEvent(a: GoalFixture, b: PropLineEvent): boolean {
   };
   const teams = similarity(a.home, b.home) >= 0.6 && similarity(a.away, b.away) >= 0.6;
   if (!teams) return false;
+  const leagueScore = (() => {
+    const left = normalizeName(a.league);
+    const right = normalizeName(b.league);
+    if (!left || !right) return 1;
+    if (left === right) return 1;
+    const leftTokens = new Set(left.split(" ").filter(Boolean));
+    const rightTokens = new Set(right.split(" ").filter(Boolean));
+    if (!leftTokens.size || !rightTokens.size) return 0;
+    const common = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+    return common / Math.max(leftTokens.size, rightTokens.size);
+  })();
+  if (leagueScore < 0.34) return false;
   if (!a.kickoffUtc || !b.kickoffUtc) return true;
   const aTime = Date.parse(a.kickoffUtc);
   const bTime = Date.parse(b.kickoffUtc);
@@ -172,7 +198,10 @@ export async function getGoalFootballMatches(options: {
   for (const fixture of enriched) {
     const matchingEvent = propEvents.find((event) => sameEvent(fixture, event));
     let odds = matchingEvent
-      ? freshestOpenMarkets(normalizePropLineOdds(matchingEvent.raw), options.live ? LIVE_ODDS_MAX_AGE_MS : 15 * 60_000)
+      ? freshestOpenMarkets(
+          normalizePropLineOdds(matchingEvent.raw),
+          options.live ? LIVE_ODDS_MAX_AGE_MS : PREMATCH_ODDS_MAX_AGE_MS,
+        )
       : [];
     if (odds.length === 0) {
       odds = normalizeGoalFallbackOdds(
@@ -217,13 +246,19 @@ export async function getPropLineMatches(options: {
   return events.map((event) =>
     toPropLineMatch(
       event,
-      freshestOpenMarkets(normalizePropLineOdds(event.raw), options.live ? LIVE_ODDS_MAX_AGE_MS : 15 * 60_000),
+      freshestOpenMarkets(
+        normalizePropLineOdds(event.raw),
+        options.live ? LIVE_ODDS_MAX_AGE_MS : PREMATCH_ODDS_MAX_AGE_MS,
+      ),
     ),
   );
 }
 
 export function providerMatchHasFreshOdds(match: ProviderMatch): boolean {
-  return freshestOpenMarkets(match.odds, match.isLive ? LIVE_ODDS_MAX_AGE_MS : 15 * 60_000).length > 0;
+  return freshestOpenMarkets(
+    match.odds,
+    match.isLive ? LIVE_ODDS_MAX_AGE_MS : PREMATCH_ODDS_MAX_AGE_MS,
+  ).length > 0;
 }
 
 function normalizeGoalFallbackOdds(value: unknown, live: boolean): NormalizedMarket[] {
@@ -254,7 +289,7 @@ function normalizeGoalFallbackOdds(value: unknown, live: boolean): NormalizedMar
         receivedTimestamp,
       }];
     }),
-    live ? LIVE_ODDS_MAX_AGE_MS : 15 * 60_000,
+    live ? LIVE_ODDS_MAX_AGE_MS : PREMATCH_ODDS_MAX_AGE_MS,
   );
 }
 
@@ -335,7 +370,7 @@ export type Bet62OddsProjection = {
 export function projectBet62Odds(
   markets: NormalizedMarket[],
   teams?: { home: string; away: string },
-  maxAgeMs = 45_000,
+  maxAgeMs = PREMATCH_ODDS_MAX_AGE_MS,
 ): Bet62OddsProjection {
   const fresh = freshestOpenMarkets(markets, maxAgeMs);
   const projection: Bet62OddsProjection = { markets: {} };

@@ -1,25 +1,40 @@
+import "dotenv/config";
+import { createServer } from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
+import { startSettlementWorker } from "./settlement.js";
+import { startAiAgentsCron } from "./lib/aiAgentsCron.js";
+import { ensureBigBangCatalogFresh } from "./services/bigbang/sync.js";
 
-const rawPort = process.env["PORT"];
+// Keep the API process alive through unexpected async failures. The app has
+// deliberate fire-and-forget work for settlement, live refresh and catalog
+// warming; logging and continuing is safer than letting a single rejection
+// restart the whole server and drop live clients.
+process.on("unhandledRejection", (reason) => {
+  logger.error({ err: reason }, "[process] unhandledRejection - not crashing");
+});
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "[process] uncaughtException - not crashing");
+});
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
+const rawPort = process.env["API_PORT"] ?? process.env["PORT"] ?? "8080";
 const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
+  throw new Error(`Invalid port value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
+const server = createServer(app);
 
-  logger.info({ port }, "Server listening");
+server.listen(port, () => {
+  logger.info({ port }, "API server started");
+
+  startSettlementWorker();
+  logger.info("Auto-settlement worker started");
+
+  void ensureBigBangCatalogFresh().catch((err) => {
+    logger.warn({ err }, "[bigbang] initial catalog sync failed");
+  });
+
+  startAiAgentsCron();
 });
