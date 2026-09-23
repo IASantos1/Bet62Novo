@@ -17,7 +17,10 @@ import {
 } from "../lib/settlementQueue.js";
 import type { Match, Market } from "@mrdoge/node";
 import { getMrDogeClient } from "../services/mrdoge/client.js";
-import { getMrDogeLiveMatches } from "../services/mrdoge/liveSync.js";
+import {
+  getMrDogeLiveMatches,
+  startMrDogeLiveSync,
+} from "../services/mrdoge/liveSync.js";
 import { getMrDogeOdds, syncMrDogeOddsSubscriptions } from "../services/mrdoge/oddsSync.js";
 import {
   MRDOGE_SOCCER_BET_TYPES,
@@ -43,6 +46,31 @@ import {
   extractMrDogeBaseballLiveExtra,
   extractMrDogeVolleyballLiveExtra,
 } from "../services/mrdoge/common.js";
+import {
+  getSportMonksFixtureById,
+  getSportMonksFixturesBetween,
+  getSportMonksFixturesByTeamRange,
+  getSportMonksInplayLivescores,
+  getSportMonksInplayOddsByFixtureId,
+  getSportMonksLeagueById,
+  getSportMonksLiveStandingsByLeague,
+  getSportMonksPrematchOddsByFixtureId,
+  getSportMonksPlayerById,
+  getSportMonksPredictionsByFixtureId,
+  getSportMonksStandingsBySeason,
+  getSportMonksTopScorersBySeason,
+  sportMonksEnabled,
+  type SportMonksBallCoordinate,
+  type SportMonksEvent,
+  type SportMonksFixture,
+  type SportMonksLineupEntry,
+  type SportMonksOdd,
+  type SportMonksParticipant,
+  type SportMonksScore,
+  type SportMonksStanding,
+  type SportMonksStatistic,
+  type SportMonksTopScorer,
+} from "../services/sportmonks/client.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
@@ -56,6 +84,872 @@ function extractProviderMatchId(rawId: string): string {
     .replace(/^[a-z]+-v\d+-/i, "")
     .replace(/^mrdoge-[a-z_]+-/i, "")
     .replace(/^sportmonks-[a-z_]+-/i, "");
+}
+
+function normalizeSportEntityName(value: string): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(fc|cf|sc|ac|cd|club|fk|afc|women|wfc)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sportMonksParticipantLocation(
+  participant: SportMonksParticipant | undefined,
+): "home" | "away" | null {
+  const raw = String(
+    participant?.meta?.location ?? participant?.location ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  if (raw === "home") return "home";
+  if (raw === "away") return "away";
+  return null;
+}
+
+function sportMonksTeams(fixture: SportMonksFixture): {
+  home: SportMonksParticipant | null;
+  away: SportMonksParticipant | null;
+} {
+  const participants = Array.isArray(fixture.participants)
+    ? fixture.participants
+    : [];
+  const home =
+    participants.find((item) => sportMonksParticipantLocation(item) === "home") ??
+    null;
+  const away =
+    participants.find((item) => sportMonksParticipantLocation(item) === "away") ??
+    null;
+  if (home && away) return { home, away };
+  const [first, second] = participants;
+  return {
+    home: home ?? first ?? null,
+    away: away ?? second ?? null,
+  };
+}
+
+function sportMonksTimestampMs(fixture: SportMonksFixture): number | null {
+  const ts = Number(fixture.starting_at_timestamp ?? 0);
+  if (Number.isFinite(ts) && ts > 0) return ts * 1000;
+  const parsed = Date.parse(String(fixture.starting_at ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sportMonksTimerSeconds(timer: string | null | undefined): number {
+  const parts = String(timer ?? "")
+    .trim()
+    .split(":")
+    .map((part) => Number(part));
+  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return -1;
+  }
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    return minutes * 60 + seconds;
+  }
+  const [hours, minutes, seconds] = parts;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function sportMonksVsMrDogeMatch(
+  fixture: SportMonksFixture,
+  match: Match,
+): boolean {
+  const teams = sportMonksTeams(fixture);
+  if (!teams.home || !teams.away) return false;
+  const sameHome =
+    normalizeSportEntityName(String(teams.home.name ?? "")) ===
+    normalizeSportEntityName(String(match.homeTeam?.name ?? ""));
+  const sameAway =
+    normalizeSportEntityName(String(teams.away.name ?? "")) ===
+    normalizeSportEntityName(String(match.awayTeam?.name ?? ""));
+  if (!sameHome || !sameAway) return false;
+  const smTime = sportMonksTimestampMs(fixture);
+  const mrTime = Date.parse(String(match.startTime ?? ""));
+  if (!Number.isFinite(smTime) || !Number.isFinite(mrTime)) return true;
+  return Math.abs(smTime - mrTime) <= 90 * 60_000;
+}
+
+function sportMonksOddsDecimal(row: SportMonksOdd): number {
+  const value = Number(row.value ?? row.dp3 ?? NaN);
+  return Number.isFinite(value) && value > 1 ? value : 0;
+}
+
+function sportMonksOddsLine(
+  row: SportMonksOdd,
+): number | null {
+  const raw =
+    row.total ??
+    row.handicap ??
+    row.original_label ??
+    null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sportMonksOddsBookmakerName(row: SportMonksOdd): string {
+  return normalizeSportEntityName(String(row.bookmaker?.name ?? ""));
+}
+
+function sportMonksOddsMarketKey(row: SportMonksOdd): string {
+  return normalizeSportEntityName(
+    String(
+      row.market?.developer_name ??
+        row.market?.name ??
+        row.market_description ??
+        row.name ??
+        "",
+    ),
+  );
+}
+
+function sportMonksOddsLabelKey(row: SportMonksOdd): string {
+  return normalizeSportEntityName(
+    String(row.label ?? row.name ?? row.original_label ?? ""),
+  );
+}
+
+function sportMonksIsOpenOdd(row: SportMonksOdd): boolean {
+  return !(row.stopped || row.suspended);
+}
+
+function sportMonksChooseBookmakerOdds(rows: SportMonksOdd[]): SportMonksOdd[] {
+  if (rows.length === 0) return [];
+  const preferred = normalizeSportEntityName(CONFIG.SPORTMONKS_ODDS_BOOKMAKER);
+  const byBookmaker = new Map<string, SportMonksOdd[]>();
+  for (const row of rows) {
+    const bookmaker =
+      sportMonksOddsBookmakerName(row) ||
+      String(row.bookmaker_id ?? "unknown");
+    const bucket = byBookmaker.get(bookmaker) ?? [];
+    bucket.push(row);
+    byBookmaker.set(bookmaker, bucket);
+  }
+  if (preferred && byBookmaker.has(preferred)) {
+    return byBookmaker.get(preferred) ?? [];
+  }
+  return [...byBookmaker.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+}
+
+async function fetchSportMonksOddsBatch(
+  fixtureIds: Array<string>,
+  mode: "prematch" | "inplay",
+): Promise<Map<string, SportMonksOdd[]>> {
+  const ids = [...new Set(fixtureIds.filter(Boolean))];
+  const out = new Map<string, SportMonksOdd[]>();
+  const batchSize = mode === "inplay" ? 6 : 8;
+  for (let offset = 0; offset < ids.length; offset += batchSize) {
+    const batch = ids.slice(offset, offset + batchSize);
+    const rows = await Promise.all(
+      batch.map(async (fixtureId) => {
+        const odds =
+          mode === "inplay"
+            ? await getSportMonksInplayOddsByFixtureId({
+                fixtureId,
+                include: "market;bookmaker",
+              }).catch(() => [] as SportMonksOdd[])
+            : await getSportMonksPrematchOddsByFixtureId({
+                fixtureId,
+                include: "market;bookmaker",
+              }).catch(() => [] as SportMonksOdd[]);
+        return [fixtureId, odds] as const;
+      }),
+    );
+    for (const [fixtureId, odds] of rows) {
+      out.set(fixtureId, sportMonksChooseBookmakerOdds(odds));
+    }
+  }
+  return out;
+}
+
+function sportMonksOutcomeSide(
+  label: string,
+  teams: { home: string; away: string },
+): "home" | "draw" | "away" | null {
+  const raw = String(label ?? "").trim().toLowerCase();
+  const normalized = normalizeSportEntityName(label);
+  if (!raw && !normalized) return null;
+  if (
+    raw === "1" ||
+    raw === "home" ||
+    normalized === normalizeSportEntityName(teams.home)
+  ) {
+    return "home";
+  }
+  if (raw === "x" || raw === "draw" || normalized === "draw" || normalized === "empate") {
+    return "draw";
+  }
+  if (
+    raw === "2" ||
+    raw === "away" ||
+    normalized === normalizeSportEntityName(teams.away)
+  ) {
+    return "away";
+  }
+  return null;
+}
+
+function sportMonksCanonicalScoreLabel(label: string): string {
+  return String(label ?? "")
+    .replace(/\s+/g, "")
+    .replace(/[–—]/g, "-")
+    .replace(/:/g, "-")
+    .trim();
+}
+
+function sportMonksApplyFootballOdds(
+  rows: SportMonksOdd[],
+  teams: { home: string; away: string },
+): {
+  hasRealOdds: boolean;
+  odds: { home: number; draw: number; away: number };
+  markets: AdvancedMarkets;
+} {
+  const markets = zerofillAdvancedMarkets();
+  const resultOdds = { home: 0, draw: 0, away: 0 };
+  const firstHalfTotalCandidates = new Map<
+    string,
+    { line: number; over: number; under: number }
+  >();
+  const asianHandicapCandidates = new Map<
+    string,
+    { line: number; home: number; away: number }
+  >();
+  const europeanHandicapCandidates = new Map<
+    string,
+    { line: number; home: number; draw: number; away: number }
+  >();
+  const homeCornersCandidates = new Map<
+    string,
+    { line: number; over: number; under: number }
+  >();
+  const awayCornersCandidates = new Map<
+    string,
+    { line: number; over: number; under: number }
+  >();
+  let hasRealOdds = false;
+
+  const setLinePair = <
+    T extends {
+      over: number;
+      under: number;
+    },
+  >(
+    map: Map<string, T & { line: number }>,
+    line: number,
+    side: "over" | "under",
+    price: number,
+  ) => {
+    const key = line.toFixed(2);
+    const current =
+      map.get(key) ?? ({ line, over: 0, under: 0 } as T & { line: number });
+    current[side] = price;
+    map.set(key, current);
+  };
+
+  for (const row of rows) {
+    if (!sportMonksIsOpenOdd(row)) continue;
+    const price = sportMonksOddsDecimal(row);
+    if (!(price > 1.001)) continue;
+    const marketKey = sportMonksOddsMarketKey(row);
+    const label = String(row.label ?? row.name ?? "").trim();
+    const labelKey = sportMonksOddsLabelKey(row);
+    const line = sportMonksOddsLine(row);
+
+    if (
+      /match winner|match result|fulltime result/.test(marketKey) &&
+      !/handicap|1st half|first half|2nd half|second half/.test(marketKey)
+    ) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") resultOdds.home = price;
+      else if (side === "draw") resultOdds.draw = price;
+      else if (side === "away") resultOdds.away = price;
+      continue;
+    }
+
+    if (/double chance/.test(marketKey)) {
+      if (/^1x$/.test(label.toLowerCase()) || /home or draw|1 x/.test(labelKey)) {
+        markets.doubleChance.homeOrDraw = price;
+      } else if (/^x2$/.test(label.toLowerCase()) || /draw or away|x 2/.test(labelKey)) {
+        markets.doubleChance.awayOrDraw = price;
+      } else if (/^12$/.test(label.toLowerCase()) || /home or away|1 2/.test(labelKey)) {
+        markets.doubleChance.homeOrAway = price;
+      }
+      continue;
+    }
+
+    if (/both teams to score|btts/.test(marketKey)) {
+      if (/^yes$|^sim$/.test(label.toLowerCase()) || labelKey === "yes" || labelKey === "sim") {
+        markets.bothTeamsScore.yes = price;
+      } else if (/^no$|^nao$|^não$/.test(label.toLowerCase()) || labelKey === "no" || labelKey === "nao") {
+        markets.bothTeamsScore.no = price;
+      }
+      continue;
+    }
+
+    if (
+      /home team goals over under|home over under/.test(marketKey) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.homeOver05 = price;
+        if (line === 1.5) markets.teamGoals!.homeOver15 = price;
+        if (line === 2.5) markets.teamGoals!.homeOver25 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.homeUnder05 = price;
+        if (line === 1.5) markets.teamGoals!.homeUnder15 = price;
+        if (line === 2.5) markets.teamGoals!.homeUnder25 = price;
+      }
+      continue;
+    }
+
+    if (
+      /away team goals over under|away over under/.test(marketKey) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.awayOver05 = price;
+        if (line === 1.5) markets.teamGoals!.awayOver15 = price;
+        if (line === 2.5) markets.teamGoals!.awayOver25 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) markets.teamGoals!.awayUnder05 = price;
+        if (line === 1.5) markets.teamGoals!.awayUnder15 = price;
+        if (line === 2.5) markets.teamGoals!.awayUnder25 = price;
+      }
+      continue;
+    }
+
+    if (
+      /1st half goals over under|first half goals over under|over under 1st half/.test(
+        marketKey,
+      ) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        setLinePair(firstHalfTotalCandidates, line, "over", price);
+      } else if (/under|menos/.test(labelKey)) {
+        setLinePair(firstHalfTotalCandidates, line, "under", price);
+      }
+      continue;
+    }
+
+    if (
+      /goals odd even|odd even/.test(marketKey) &&
+      !/team|home|away/.test(marketKey)
+    ) {
+      if (labelKey === "odd" || labelKey === "impar") markets.goalOddEven = { ...(markets.goalOddEven ?? { odd: 0, even: 0 }), odd: price };
+      if (labelKey === "even" || labelKey === "par") markets.goalOddEven = { ...(markets.goalOddEven ?? { odd: 0, even: 0 }), even: price };
+      continue;
+    }
+
+    if (/number of goals|exact goals/.test(marketKey)) {
+      const exactGoals = {
+        ...(markets.exactGoals ?? {
+          g0: 0,
+          g1: 0,
+          g2: 0,
+          g3: 0,
+          g4: 0,
+          g5plus: 0,
+        }),
+      };
+      if (/sem goals|no goals|^0$|0 goals|0 gol/.test(labelKey)) exactGoals.g0 = price;
+      else if (/^1$|1 goal|1 gol/.test(labelKey)) exactGoals.g1 = price;
+      else if (/^2$|2 goals|2 gol/.test(labelKey)) exactGoals.g2 = price;
+      else if (/^3$|3 goals|3 gol/.test(labelKey)) exactGoals.g3 = price;
+      else if (/^4$|4 goals|4 gol/.test(labelKey)) exactGoals.g4 = price;
+      else if (/5|mais|more|plus/.test(labelKey)) exactGoals.g5plus = price;
+      markets.exactGoals = exactGoals;
+      continue;
+    }
+
+    if (
+      /goals over under|over under/.test(marketKey) &&
+      !/1st half|first half|home team|away team|corners|cards|asian/.test(marketKey) &&
+      line != null
+    ) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) markets.totalGoals.over05 = price;
+        if (line === 1.5) markets.totalGoals.over15 = price;
+        if (line === 2.5) markets.totalGoals.over25 = price;
+        if (line === 3.5) markets.totalGoals.over35 = price;
+        if (line === 4.5) markets.totalGoals.over45 = price;
+        if (line === 5.5) markets.totalGoals.over55 = price;
+        if (line === 6.5) markets.totalGoals.over65 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) markets.totalGoals.under05 = price;
+        if (line === 1.5) markets.totalGoals.under15 = price;
+        if (line === 2.5) markets.totalGoals.under25 = price;
+        if (line === 3.5) markets.totalGoals.under35 = price;
+        if (line === 4.5) markets.totalGoals.under45 = price;
+        if (line === 5.5) markets.totalGoals.under55 = price;
+        if (line === 6.5) markets.totalGoals.under65 = price;
+      }
+      continue;
+    }
+
+    if (/asian goals over under|asian total|asian over under/.test(marketKey) && line != null) {
+      const asianTotals = {
+        ...(markets.asianTotals ?? {
+          o05: 0,
+          u05: 0,
+          o45: 0,
+          u45: 0,
+          o55: 0,
+          u55: 0,
+          o225: 0,
+          u225: 0,
+          o275: 0,
+          u275: 0,
+        }),
+      };
+      if (/over|mais/.test(labelKey)) {
+        if (line === 0.5) asianTotals.o05 = price;
+        if (line === 4.5) asianTotals.o45 = price;
+        if (line === 5.5) asianTotals.o55 = price;
+        if (line === 2.25) asianTotals.o225 = price;
+        if (line === 2.75) asianTotals.o275 = price;
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 0.5) asianTotals.u05 = price;
+        if (line === 4.5) asianTotals.u45 = price;
+        if (line === 5.5) asianTotals.u55 = price;
+        if (line === 2.25) asianTotals.u225 = price;
+        if (line === 2.75) asianTotals.u275 = price;
+      }
+      markets.asianTotals = asianTotals;
+      continue;
+    }
+
+    if (/draw no bet/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") {
+        markets.drawNoBet = { ...(markets.drawNoBet ?? { home: 0, away: 0 }), home: price };
+      } else if (side === "away") {
+        markets.drawNoBet = { ...(markets.drawNoBet ?? { home: 0, away: 0 }), away: price };
+      }
+      continue;
+    }
+
+    if (/asian handicap/.test(marketKey) && line != null) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") {
+        const item = asianHandicapCandidates.get(line.toFixed(2)) ?? {
+          line,
+          home: 0,
+          away: 0,
+        };
+        item.home = price;
+        asianHandicapCandidates.set(line.toFixed(2), item);
+      } else if (side === "away") {
+        const item = asianHandicapCandidates.get(line.toFixed(2)) ?? {
+          line,
+          home: 0,
+          away: 0,
+        };
+        item.away = price;
+        asianHandicapCandidates.set(line.toFixed(2), item);
+      }
+      continue;
+    }
+
+    if (
+      /match result handicap|european handicap/.test(marketKey) &&
+      line != null
+    ) {
+      const item = europeanHandicapCandidates.get(line.toFixed(2)) ?? {
+        line,
+        home: 0,
+        draw: 0,
+        away: 0,
+      };
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") item.home = price;
+      else if (side === "draw") item.draw = price;
+      else if (side === "away") item.away = price;
+      europeanHandicapCandidates.set(line.toFixed(2), item);
+      continue;
+    }
+
+    if (/1st half result|first half result|fulltime result 1st half/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") markets.halfTime.home = price;
+      else if (side === "draw") markets.halfTime.draw = price;
+      else if (side === "away") markets.halfTime.away = price;
+      continue;
+    }
+
+    if (/2nd half result|second half result/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") markets.secondHalf.home = price;
+      else if (side === "draw") markets.secondHalf.draw = price;
+      else if (side === "away") markets.secondHalf.away = price;
+      continue;
+    }
+
+    if (/halftime fulltime|half time full time|ht ft/.test(marketKey)) {
+      const key = label
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace("1/1", "hh")
+        .replace("1/x", "hd")
+        .replace("1/2", "ha")
+        .replace("x/1", "dh")
+        .replace("x/x", "dd")
+        .replace("x/2", "da")
+        .replace("2/1", "ah")
+        .replace("2/x", "ad")
+        .replace("2/2", "aa");
+      const validKeys = new Set(["hh", "hd", "ha", "dh", "dd", "da", "ah", "ad", "aa"]);
+      if (validKeys.has(key)) {
+        markets.htft = {
+          ...(markets.htft ?? { hh: 0, hd: 0, ha: 0, dh: 0, dd: 0, da: 0, ah: 0, ad: 0, aa: 0 }),
+          [key]: price,
+        };
+      }
+      continue;
+    }
+
+    if (/correct score/.test(marketKey)) {
+      const scoreLabel = sportMonksCanonicalScoreLabel(label);
+      if (/^\d+-\d+$/.test(scoreLabel)) {
+        markets.correctScore = {
+          ...(markets.correctScore ?? {}),
+          [scoreLabel]: price,
+        };
+      }
+      continue;
+    }
+
+    if (/team to score first|first goal/.test(marketKey)) {
+      const side = sportMonksOutcomeSide(label, teams);
+      if (side === "home") markets.firstGoal.home = price;
+      else if (side === "away") markets.firstGoal.away = price;
+      else if (labelKey === "no goal" || labelKey === "sem golo" || labelKey === "sem gol") {
+        markets.firstGoal.noGoal = price;
+      }
+      continue;
+    }
+
+    if (/corners over under/.test(marketKey) && line != null) {
+      if (/home/.test(marketKey)) {
+        if (/over|mais/.test(labelKey)) setLinePair(homeCornersCandidates, line, "over", price);
+        if (/under|menos/.test(labelKey)) setLinePair(homeCornersCandidates, line, "under", price);
+      } else if (/away/.test(marketKey)) {
+        if (/over|mais/.test(labelKey)) setLinePair(awayCornersCandidates, line, "over", price);
+        if (/under|menos/.test(labelKey)) setLinePair(awayCornersCandidates, line, "under", price);
+      } else {
+        if (/over|mais/.test(labelKey)) {
+          if (line === 8.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o85: price };
+          if (line === 9.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o95: price };
+          if (line === 10.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), o105: price };
+        } else if (/under|menos/.test(labelKey)) {
+          if (line === 8.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), u85: price };
+          if (line === 9.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), u95: price };
+          if (line === 10.5) markets.corners = { ...(markets.corners ?? { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 }), u105: price };
+        }
+      }
+      continue;
+    }
+
+    if (/cards over under/.test(marketKey) && line != null) {
+      if (/over|mais/.test(labelKey)) {
+        if (line === 3.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o35: price };
+        if (line === 4.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), o45: price };
+      } else if (/under|menos/.test(labelKey)) {
+        if (line === 3.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), u35: price };
+        if (line === 4.5) markets.cards = { ...(markets.cards ?? { o35: 0, u35: 0, o45: 0, u45: 0 }), u45: price };
+      }
+      continue;
+    }
+  }
+
+  const firstHalfTotals = [...firstHalfTotalCandidates.values()]
+    .filter((item) => item.over > 0 && item.under > 0)
+    .sort((a, b) => a.line - b.line);
+  if (firstHalfTotals.length > 0) {
+    markets.firstHalfTotal = firstHalfTotals[0];
+    markets._total1H = firstHalfTotals[0]!.line;
+  }
+
+  const asianHandicaps = [...asianHandicapCandidates.values()]
+    .filter((item) => item.home > 0 && item.away > 0)
+    .sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+  if (asianHandicaps.length > 0) {
+    markets.asianHandicap = asianHandicaps[0];
+  }
+  for (const item of asianHandicaps) {
+    if (Math.abs(item.line) === 1) {
+      markets.handicap.homeMinusOne = item.home;
+      markets.handicap.awayPlusOne = item.away;
+    }
+    if (Math.abs(item.line) === 1.5) {
+      markets.handicap.homeMinusOneHalf = item.home;
+      markets.handicap.awayPlusOneHalf = item.away;
+    }
+  }
+
+  const europeanHandicaps = [...europeanHandicapCandidates.values()]
+    .filter((item) => item.home > 0 && item.draw > 0 && item.away > 0)
+    .sort((a, b) => Math.abs(a.line) - Math.abs(b.line));
+  if (europeanHandicaps.length > 0) {
+    markets.europeanHandicap = europeanHandicaps[0];
+  }
+
+  const homeCorners = [...homeCornersCandidates.values()]
+    .filter((item) => item.over > 0 && item.under > 0)
+    .sort((a, b) => a.line - b.line);
+  if (homeCorners.length > 0) {
+    markets.homeCorners = homeCorners[0];
+  }
+  const awayCorners = [...awayCornersCandidates.values()]
+    .filter((item) => item.over > 0 && item.under > 0)
+    .sort((a, b) => a.line - b.line);
+  if (awayCorners.length > 0) {
+    markets.awayCorners = awayCorners[0];
+  }
+
+  hasRealOdds =
+    resultOdds.home > 1 &&
+    resultOdds.draw > 1 &&
+    resultOdds.away > 1;
+
+  return {
+    hasRealOdds,
+    odds: resultOdds,
+    markets,
+  };
+}
+
+function sportMonksLatestBallPosition(
+  fixture: SportMonksFixture,
+): LiveMatchState["_ballPosition"] {
+  const rows = Array.isArray(fixture.ballCoordinates)
+    ? fixture.ballCoordinates
+    : Array.isArray(fixture.ballcoordinates)
+      ? fixture.ballcoordinates
+      : [];
+  const last = rows
+    .map((row) => ({
+      row,
+      id: Number(row.id ?? NaN),
+      x: Number(row.x ?? NaN),
+      y: Number(row.y ?? NaN),
+      timerSec: sportMonksTimerSeconds(row.timer),
+    }))
+    .filter((row) => Number.isFinite(row.x) && Number.isFinite(row.y))
+    .sort((a, b) => {
+      if (a.timerSec !== b.timerSec) return a.timerSec - b.timerSec;
+      if (Number.isFinite(a.id) && Number.isFinite(b.id)) return a.id - b.id;
+      return 0;
+    })
+    .at(-1);
+  if (!last) return null;
+  const side =
+    last.x < 0.4 ? "home" : last.x > 0.62 ? "away" : null;
+  const situation =
+    last.x < 0.2
+      ? "defensive-third"
+      : last.x > 0.8
+        ? "attacking-third"
+        : "middle-third";
+  return {
+    x: last.x,
+    y: last.y,
+    side,
+    situation,
+    updatedAt: Date.now(),
+  };
+}
+
+function sportMonksEventType(event: SportMonksEvent): string {
+  const raw = normalizeSportEntityName(
+    String(event.name ?? event.addition ?? event.result ?? event.type_id ?? ""),
+  );
+  if (raw.includes("goal")) return "goal";
+  if (raw.includes("red")) return "red_card";
+  if (raw.includes("yellow")) return "yellow_card";
+  if (raw.includes("var")) return "var";
+  if (raw.includes("penalty")) return "penalty";
+  if (raw.includes("substitution")) return "substitution";
+  return raw || "event";
+}
+
+function sportMonksEvents(
+  fixture: SportMonksFixture,
+): LiveMatchState["events"] {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  const rows = Array.isArray(fixture.events) ? fixture.events : [];
+  return rows
+    .map((event) => {
+      const participantId = String(event.participant_id ?? "");
+      return {
+        type: sportMonksEventType(event),
+        team:
+          participantId && participantId === homeId
+            ? "home"
+            : participantId && participantId === awayId
+              ? "away"
+              : "",
+        minute:
+          Number(event.minute ?? 0) +
+          Number(event.extra_minute ?? 0 || 0),
+        player: String(event.player_name ?? ""),
+        playerId:
+          event.player_id == null ? undefined : String(event.player_id),
+        detail: String(event.addition ?? event.result ?? ""),
+      };
+    })
+    .filter((event) => event.type && event.minute >= 0);
+}
+
+function sportMonksMatchStats(
+  fixture: SportMonksFixture,
+): LiveMatchState["matchStats"] {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  const stats = Array.isArray(fixture.statistics) ? fixture.statistics : [];
+  const rows = new Map<string, { name: string; home: string; away: string }>();
+  for (const stat of stats) {
+    const name = String(
+      stat.type?.name ??
+        stat.type?.developer_name ??
+        stat.type_id ??
+        "",
+    ).trim();
+    if (!name) continue;
+    const value =
+      stat.data?.value ??
+      stat.data?.total ??
+      stat.data?.percentage ??
+      stat.value ??
+      "-";
+    const key = normalizeSportEntityName(name);
+    const row = rows.get(key) ?? { name, home: "-", away: "-" };
+    const participantId = String(stat.participant_id ?? "");
+    if (participantId && participantId === homeId) row.home = String(value);
+    else if (participantId && participantId === awayId) row.away = String(value);
+    rows.set(key, row);
+  }
+  const values = [...rows.values()].filter(
+    (row) => row.home !== "-" || row.away !== "-",
+  );
+  return values.length ? [{ title: "Estatísticas", rows: values }] : undefined;
+}
+
+function sportMonksCountryName(fixture: SportMonksFixture): string {
+  return String(fixture.league?.country?.name ?? "").trim();
+}
+
+function sportMonksLeagueName(fixture: SportMonksFixture): string {
+  return String(fixture.league?.name ?? "").trim();
+}
+
+function sportMonksStateText(fixture: SportMonksFixture): string {
+  return String(
+    fixture.state?.short_name ??
+      fixture.state?.developer_name ??
+      fixture.state?.state ??
+      fixture.state?.name ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function sportMonksIsFinished(fixture: SportMonksFixture): boolean {
+  const state = sportMonksStateText(fixture);
+  return /finished|full.?time|after_extra_time|after_penalties|ended|closed|ft/.test(
+    state,
+  );
+}
+
+function sportMonksIsUpcoming(fixture: SportMonksFixture): boolean {
+  const state = sportMonksStateText(fixture);
+  if (!state) return true;
+  return /not_started|ns|upcoming|scheduled/.test(state);
+}
+
+function sportMonksMatchStatus(fixture: SportMonksFixture): string {
+  const state = sportMonksStateText(fixture);
+  if (/halftime|half_time|\bht\b/.test(state)) return "HT";
+  if (/2nd|second/.test(state)) return "2nd half";
+  if (/1st|first/.test(state)) return "1st half";
+  if (/extra/.test(state)) return "ET";
+  if (/pen/.test(state)) return "PEN";
+  if (sportMonksIsFinished(fixture)) return "FT";
+  if (sportMonksIsUpcoming(fixture)) return "NS";
+  return String(fixture.state?.short_name ?? fixture.state?.name ?? "LIVE").trim();
+}
+
+function sportMonksMinute(fixture: SportMonksFixture): number {
+  let minute = 0;
+  const events = Array.isArray(fixture.events) ? fixture.events : [];
+  for (const event of events) {
+    const base = Number(event.minute ?? 0);
+    const extra = Number(event.extra_minute ?? 0);
+    if (Number.isFinite(base)) minute = Math.max(minute, base + (Number.isFinite(extra) ? extra : 0));
+  }
+  const rows = Array.isArray(fixture.ballCoordinates)
+    ? fixture.ballCoordinates
+    : Array.isArray(fixture.ballcoordinates)
+      ? fixture.ballcoordinates
+      : [];
+  for (const row of rows) {
+    const timerSec = sportMonksTimerSeconds(row.timer);
+    if (timerSec >= 0) minute = Math.max(minute, Math.floor(timerSec / 60));
+  }
+  const periods = Array.isArray(fixture.periods) ? fixture.periods : [];
+  for (const period of periods) {
+    const minutes = Number(period.minutes ?? NaN);
+    if (Number.isFinite(minutes)) minute = Math.max(minute, minutes);
+  }
+  return minute;
+}
+
+function sportMonksScoreline(
+  fixture: SportMonksFixture,
+): { homeScore: number; awayScore: number } {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  let homeScore = 0;
+  let awayScore = 0;
+  const scores = Array.isArray(fixture.scores) ? fixture.scores : [];
+  for (const row of scores) {
+    const participantId = String(row.participant_id ?? "");
+    const value = Number(row.score?.goals ?? row.score?.goal ?? row.goals ?? NaN);
+    if (!Number.isFinite(value)) continue;
+    if (participantId && participantId === homeId) homeScore = Math.max(homeScore, value);
+    if (participantId && participantId === awayId) awayScore = Math.max(awayScore, value);
+  }
+  return { homeScore, awayScore };
+}
+
+function sportMonksVsBet62Match(
+  fixture: SportMonksFixture,
+  match: Pick<LiveMatchState | UpcomingMatch, "home" | "away" | "date">,
+): boolean {
+  const teams = sportMonksTeams(fixture);
+  if (!teams.home || !teams.away) return false;
+  const sameHome =
+    normalizeSportEntityName(String(teams.home.name ?? "")) ===
+    normalizeSportEntityName(String(match.home ?? ""));
+  const sameAway =
+    normalizeSportEntityName(String(teams.away.name ?? "")) ===
+    normalizeSportEntityName(String(match.away ?? ""));
+  if (!sameHome || !sameAway) return false;
+  const matchDate = String(match.date ?? "").trim();
+  if (!matchDate) return true;
+  const smTime = sportMonksTimestampMs(fixture);
+  if (!Number.isFinite(smTime)) return true;
+  return mrDogeStartTimeToLisbon(new Date(smTime).toISOString()).date === matchDate;
 }
 
 function mrDogeAllOddsGroup(market: Market): string {
@@ -584,9 +1478,8 @@ export type LiveMatchState = {
   homeLogoUrl?: string;
   awayLogoUrl?: string;
   regionFlagUrl?: string;
-  // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
-  // populated on the same fixture object every other football field here
-  // comes from).
+  // Football only — venue/referee-style metadata from the enriched football
+  // fixture source (currently SportMonks on the football overlay path).
   stadium?: string;
   referee?: string;
   league: string;
@@ -611,16 +1504,15 @@ export type LiveMatchState = {
   _suspensionReason?: string;
   // Feed health warning (must not be treated as a market suspension)
   _feedWarning?: string;
-  // League ID (football only) — currently unpopulated; no provider feeds it
-  // since the StatPal integration that used to set it was removed.
+  // League ID (football only)
   leagueId?: string;
+  seasonId?: string;
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
-  // Match statistics panel (football/GOAL API only) — possession/shots/
-  // corners/fouls, shaped for the frontend's existing generic stats-row
-  // renderer (home.tsx's V2StatsGroup type, previously fed by the deleted
-  // SportsAPI Pro V2 integration and always empty since).
+  // Match statistics panel (football only) — possession/shots/corners/fouls,
+  // shaped for the frontend's existing generic stats-row renderer and now
+  // primarily hydrated from SportMonks when available.
   matchStats?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }>;
   // Live text commentary feed (football/GOAL API only) — free-text
   // play-by-play narration ("Long An in possession", "PVF-CAND dangerous
@@ -639,6 +1531,10 @@ export type LiveMatchState = {
   // commentary-derived zone guess whenever it's missing — removing the
   // field would be a no-op for behavior, just churn.
   _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
+  _sportMonksFixtureId?: string;
+  _sportMonksSeasonId?: string;
+  _sportMonksHomeTeamId?: string;
+  _sportMonksAwayTeamId?: string;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -836,6 +1732,7 @@ export type UpcomingMatch = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   leagueId?: string;
+  seasonId?: string;
   isWomens?: boolean;
   /** Football only — true when the league is in the curated priority allowlist
    * (footballLeagueAllowedStrict). Drives the default "today + big leagues up
@@ -858,6 +1755,12 @@ export type UpcomingMatch = {
   // homeImageVersion in getTeamBadgeAsset.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  stadium?: string;
+  referee?: string;
+  _sportMonksFixtureId?: string;
+  _sportMonksSeasonId?: string;
+  _sportMonksHomeTeamId?: string;
+  _sportMonksAwayTeamId?: string;
   regionFlagUrl?: string;
   // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
   // same fixture object every other football field here comes from).
@@ -8081,7 +8984,7 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
 // ─── Match builders ────────────────────────────────────────────────────────────
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  return buildFootballUpcomingFromMrDoge();
+  return buildFootballUpcoming();
 }
 
 // Prematch odds.list is a one-shot HTTP/WS call per match, NOT a
@@ -8149,12 +9052,21 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
     const mrdoge = getMrDogeClient();
     const startDate = new Date().toISOString().slice(0, 10);
     const endDate = getUpcomingFetchEndDate();
-    const matches = await mrdoge.matches.listAll({
-      sports: ["soccer"],
-      status: ["upcoming"],
-      startDate,
-      endDate,
-    });
+    const [matches, sportMonksFixtures] = await Promise.all([
+      mrdoge.matches.listAll({
+        sports: ["soccer"],
+        status: ["upcoming"],
+        startDate,
+        endDate,
+      }),
+      sportMonksEnabled()
+        ? getSportMonksFixturesBetween({
+            startDate,
+            endDate,
+            include: "participants;league.country;state;venue",
+          }).catch(() => [] as SportMonksFixture[])
+        : Promise.resolve([] as SportMonksFixture[]),
+    ]);
     const eligibleMatches = matches.filter(
       (match) =>
         footballCompetitionVisibilityBand(
@@ -8167,6 +9079,13 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       eligibleMatches,
       [...MRDOGE_SOCCER_BET_TYPES],
     );
+    const sportMonksByMrDogeId = new Map<string, SportMonksFixture>();
+    for (const match of eligibleMatches) {
+      const found = sportMonksFixtures.find((fixture) =>
+        sportMonksVsMrDogeMatch(fixture, match),
+      );
+      if (found) sportMonksByMrDogeId.set(match.id, found);
+    }
     let withRealOdds = 0;
     const built = eligibleMatches.map((m): UpcomingMatch => {
       const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
@@ -8174,6 +9093,10 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       const moneyline = extractMrDogeSoccerMoneyline(odds);
       const btts = extractMrDogeSoccerBtts(odds);
       const extended = extractMrDogeSoccerExtendedMarkets(odds);
+      const sportMonksFixture = sportMonksByMrDogeId.get(m.id);
+      const sportMonksTeamsData = sportMonksFixture
+        ? sportMonksTeams(sportMonksFixture)
+        : { home: null, away: null };
       const markets = zerofillAdvancedMarkets();
       Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
       if (btts) markets.bothTeamsScore = btts;
@@ -8222,21 +9145,48 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       if (moneyline != null) withRealOdds++;
       return {
         id: mrDogeMatchId("football", m),
-        home: m.homeTeam.name,
-        away: m.awayTeam.name,
+        home: String(sportMonksTeamsData.home?.name ?? m.homeTeam.name),
+        away: String(sportMonksTeamsData.away?.name ?? m.awayTeam.name),
         homeTeamId: String(m.homeTeam.id),
         awayTeamId: String(m.awayTeam.id),
-        homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
-        awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+        homeLogoUrl:
+          String(sportMonksTeamsData.home?.image_path ?? "").trim() ||
+          mrDogeTeamLogo(m.homeTeam.id),
+        awayLogoUrl:
+          String(sportMonksTeamsData.away?.image_path ?? "").trim() ||
+          mrDogeTeamLogo(m.awayTeam.id),
         regionFlagUrl: mrDogeRegionFlag(m.region.id),
-        league: m.competition.name,
-        country: m.region.name,
+        league: sportMonksFixture ? sportMonksLeagueName(sportMonksFixture) || m.competition.name : m.competition.name,
+        country: sportMonksFixture ? sportMonksCountryName(sportMonksFixture) || m.region.name : m.region.name,
         date,
         time,
         sport: "football",
         hasRealOdds: moneyline != null,
         odds: moneyline ?? { home: 0, draw: 0, away: 0 },
         markets,
+        leagueId:
+          sportMonksFixture?.league_id == null
+            ? undefined
+            : String(sportMonksFixture.league_id),
+        seasonId:
+          sportMonksFixture?.season_id == null
+            ? undefined
+            : String(sportMonksFixture.season_id),
+        stadium: String(sportMonksFixture?.venue?.name ?? "").trim() || undefined,
+        _sportMonksFixtureId:
+          sportMonksFixture?.id == null ? undefined : String(sportMonksFixture.id),
+        _sportMonksSeasonId:
+          sportMonksFixture?.season_id == null
+            ? undefined
+            : String(sportMonksFixture.season_id),
+        _sportMonksHomeTeamId:
+          sportMonksTeamsData.home?.id == null
+            ? undefined
+            : String(sportMonksTeamsData.home.id),
+        _sportMonksAwayTeamId:
+          sportMonksTeamsData.away?.id == null
+            ? undefined
+            : String(sportMonksTeamsData.away.id),
       };
     });
     // GET /upcoming's own filter (routes/matches.ts) hides any match
@@ -8265,6 +9215,105 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
   }
 }
 
+async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
+  if (!sportMonksEnabled()) return [];
+  try {
+    const startDate = new Date().toISOString().slice(0, 10);
+    const endDate = getUpcomingFetchEndDate();
+    const fixtures = await getSportMonksFixturesBetween({
+      startDate,
+      endDate,
+      include: "participants;league.country;state;venue",
+    }).catch(() => [] as SportMonksFixture[]);
+    const visibleFixtures = fixtures
+      .filter((fixture) => !sportMonksIsFinished(fixture))
+      .filter((fixture) => {
+        const kickoffMs = sportMonksTimestampMs(fixture);
+        return kickoffMs == null || kickoffMs >= Date.now() - 30 * 60 * 1000;
+      })
+      .filter(
+        (fixture) =>
+          footballCompetitionVisibilityBand(
+            sportMonksCountryName(fixture),
+            sportMonksLeagueName(fixture),
+          ) === "preferred",
+      });
+    const oddsByFixtureId = await fetchSportMonksOddsBatch(
+      visibleFixtures
+        .map((fixture) =>
+          fixture.id == null ? "" : String(fixture.id),
+        )
+        .filter(Boolean),
+      "prematch",
+    );
+    const visible = visibleFixtures
+      .map((fixture): UpcomingMatch | null => {
+        const teams = sportMonksTeams(fixture);
+        if (!teams.home?.name || !teams.away?.name) return null;
+        const kickoffMs = sportMonksTimestampMs(fixture);
+        const kickoff = kickoffMs
+          ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString())
+          : { date: "", time: "" };
+        const parsedOdds = sportMonksApplyFootballOdds(
+          oddsByFixtureId.get(String(fixture.id)) ?? [],
+          {
+            home: String(teams.home.name),
+            away: String(teams.away.name),
+          },
+        );
+        return {
+          id: `sportmonks-football-${String(fixture.id)}`,
+          home: String(teams.home.name),
+          away: String(teams.away.name),
+          homeTeamId: teams.home.id == null ? undefined : String(teams.home.id),
+          awayTeamId: teams.away.id == null ? undefined : String(teams.away.id),
+          homeLogoUrl: String(teams.home.image_path ?? "").trim() || undefined,
+          awayLogoUrl: String(teams.away.image_path ?? "").trim() || undefined,
+          league: sportMonksLeagueName(fixture),
+          country: sportMonksCountryName(fixture),
+          date: kickoff.date,
+          time: kickoff.time,
+          sport: "football",
+          hasRealOdds: parsedOdds.hasRealOdds,
+          odds: parsedOdds.odds,
+          markets: parsedOdds.markets,
+          leagueId:
+            fixture.league_id == null ? undefined : String(fixture.league_id),
+          seasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          stadium: String(fixture.venue?.name ?? "").trim() || undefined,
+          referee: String(fixture.referee?.name ?? fixture.referee?.display_name ?? "").trim() || undefined,
+          _sportMonksFixtureId:
+            fixture.id == null ? undefined : String(fixture.id),
+          _sportMonksSeasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          _sportMonksHomeTeamId:
+            teams.home.id == null ? undefined : String(teams.home.id),
+          _sportMonksAwayTeamId:
+            teams.away.id == null ? undefined : String(teams.away.id),
+        };
+      })
+      .filter((fixture): fixture is UpcomingMatch => fixture != null);
+    logger.info(
+      {
+        fixtures: fixtures.length,
+        visibleFixtures: visibleFixtures.length,
+        visible: visible.length,
+        withRealOdds: visible.filter((fixture) => fixture.hasRealOdds).length,
+      },
+      "[sportmonks] football upcoming built",
+    );
+    return visible;
+  } catch (err) {
+    logger.error({ err }, "[sportmonks] football upcoming fetch failed");
+    return [];
+  }
+}
+
+async function buildFootballUpcoming(): Promise<UpcomingMatch[]> {
+  return buildFootballUpcomingFromSportMonks();
+}
+
 // Mr. Doge live football — reads the shared in-memory map liveSync.ts's
 // single matches.subscribeLive connection maintains (no per-tick REST call
 // here), and drives the per-match odds.subscribe lifecycle every tick via
@@ -8280,6 +9329,18 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
   // doc comment gives "England"/"Inglaterra" as an example) that silently
   // dropped every match the first time this filtered on it instead.
   const matches = getMrDogeLiveMatches().filter((m) => m.stats?.sport === "soccer");
+  const sportMonksFixtures = sportMonksEnabled()
+    ? await getSportMonksInplayLivescores(
+        "participants;league.country;state;venue;events;statistics.type;ballCoordinates",
+      ).catch(() => [] as SportMonksFixture[])
+    : [];
+  const sportMonksByMrDogeId = new Map<string, SportMonksFixture>();
+  for (const match of matches) {
+    const found = sportMonksFixtures.find((fixture) =>
+      sportMonksVsMrDogeMatch(fixture, match),
+    );
+    if (found) sportMonksByMrDogeId.set(match.id, found);
+  }
   return matches.map((m): LiveMatchState => {
     const stats = m.stats?.sport === "soccer" ? m.stats : null;
     const { status, phase } = mrDogeSoccerStatus(stats?.clock);
@@ -8287,6 +9348,10 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     const moneyline = extractMrDogeSoccerMoneyline(odds);
     const btts = extractMrDogeSoccerBtts(odds);
     const extended = extractMrDogeSoccerExtendedMarkets(odds);
+    const sportMonksFixture = sportMonksByMrDogeId.get(m.id);
+    const sportMonksTeamsData = sportMonksFixture
+      ? sportMonksTeams(sportMonksFixture)
+      : { home: null, away: null };
     const markets = zerofillAdvancedMarkets();
     const liveExtra = extractMrDogeSoccerLiveExtra(stats);
     Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
@@ -8335,15 +9400,19 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     }
     return {
       id: mrDogeMatchId("football", m),
-      home: m.homeTeam.name,
-      away: m.awayTeam.name,
+      home: String(sportMonksTeamsData.home?.name ?? m.homeTeam.name),
+      away: String(sportMonksTeamsData.away?.name ?? m.awayTeam.name),
       homeTeamId: String(m.homeTeam.id),
       awayTeamId: String(m.awayTeam.id),
-      homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
-      awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+      homeLogoUrl:
+        String(sportMonksTeamsData.home?.image_path ?? "").trim() ||
+        mrDogeTeamLogo(m.homeTeam.id),
+      awayLogoUrl:
+        String(sportMonksTeamsData.away?.image_path ?? "").trim() ||
+        mrDogeTeamLogo(m.awayTeam.id),
       regionFlagUrl: mrDogeRegionFlag(m.region.id),
-      league: m.competition.name,
-      country: m.region.name,
+      league: sportMonksFixture ? sportMonksLeagueName(sportMonksFixture) || m.competition.name : m.competition.name,
+      country: sportMonksFixture ? sportMonksCountryName(sportMonksFixture) || m.region.name : m.region.name,
       sport: "football",
       homeScore: stats?.homeScore ?? 0,
       awayScore: stats?.awayScore ?? 0,
@@ -8352,13 +9421,133 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       hasRealOdds: moneyline != null,
       odds: moneyline ?? { home: 0, draw: 0, away: 0 },
       markets,
-      events: buildMrDogeTimelineEvents(m),
+      events:
+        sportMonksFixture && sportMonksEvents(sportMonksFixture).length > 0
+          ? sportMonksEvents(sportMonksFixture)
+          : buildMrDogeTimelineEvents(m),
       redCardsHome: stats?.homeRedCards ?? 0,
       redCardsAway: stats?.awayRedCards ?? 0,
-      matchStats: buildMrDogeSoccerMatchStats(stats),
+      matchStats:
+        sportMonksFixture && sportMonksMatchStats(sportMonksFixture)
+          ? sportMonksMatchStats(sportMonksFixture)
+          : buildMrDogeSoccerMatchStats(stats),
+      stadium: String(sportMonksFixture?.venue?.name ?? "").trim() || undefined,
+      leagueId:
+        sportMonksFixture?.league_id == null
+          ? undefined
+          : String(sportMonksFixture.league_id),
+      seasonId:
+        sportMonksFixture?.season_id == null
+          ? undefined
+          : String(sportMonksFixture.season_id),
+      _ballPosition: sportMonksFixture
+        ? sportMonksLatestBallPosition(sportMonksFixture)
+        : null,
+      _sportMonksFixtureId:
+        sportMonksFixture?.id == null ? undefined : String(sportMonksFixture.id),
+      _sportMonksSeasonId:
+        sportMonksFixture?.season_id == null
+          ? undefined
+          : String(sportMonksFixture.season_id),
+      _sportMonksHomeTeamId:
+        sportMonksTeamsData.home?.id == null
+          ? undefined
+          : String(sportMonksTeamsData.home.id),
+      _sportMonksAwayTeamId:
+        sportMonksTeamsData.away?.id == null
+          ? undefined
+          : String(sportMonksTeamsData.away.id),
       _liveExtra: { phase, ...liveExtra },
     };
   });
+}
+
+async function buildFootballLiveFromSportMonks(): Promise<LiveMatchState[]> {
+  if (!sportMonksEnabled()) return [];
+  try {
+    const fixtures = await getSportMonksInplayLivescores(
+      "participants;league.country;state;venue;events;statistics.type;scores;ballCoordinates",
+    ).catch(() => [] as SportMonksFixture[]);
+    const oddsByFixtureId = await fetchSportMonksOddsBatch(
+      fixtures
+        .map((fixture) =>
+          fixture.id == null ? "" : String(fixture.id),
+        )
+        .filter(Boolean),
+      "inplay",
+    );
+    return fixtures
+      .map((fixture): LiveMatchState | null => {
+        const teams = sportMonksTeams(fixture);
+        if (!teams.home?.name || !teams.away?.name) return null;
+        const { homeScore, awayScore } = sportMonksScoreline(fixture);
+        const parsedOdds = sportMonksApplyFootballOdds(
+          oddsByFixtureId.get(String(fixture.id)) ?? [],
+          {
+            home: String(teams.home.name),
+            away: String(teams.away.name),
+          },
+        );
+        return {
+          id: `sportmonks-football-${String(fixture.id)}`,
+          home: String(teams.home.name),
+          away: String(teams.away.name),
+          homeTeamId: teams.home.id == null ? undefined : String(teams.home.id),
+          awayTeamId: teams.away.id == null ? undefined : String(teams.away.id),
+          homeLogoUrl: String(teams.home.image_path ?? "").trim() || undefined,
+          awayLogoUrl: String(teams.away.image_path ?? "").trim() || undefined,
+          league: sportMonksLeagueName(fixture),
+          country: sportMonksCountryName(fixture),
+          sport: "football",
+          homeScore,
+          awayScore,
+          minute: sportMonksMinute(fixture),
+          status: sportMonksMatchStatus(fixture),
+          hasRealOdds: parsedOdds.hasRealOdds,
+          odds: parsedOdds.odds,
+          markets: parsedOdds.markets,
+          events: sportMonksEvents(fixture),
+          redCardsHome: 0,
+          redCardsAway: 0,
+          matchStats: sportMonksMatchStats(fixture),
+          stadium: String(fixture.venue?.name ?? "").trim() || undefined,
+          referee: String(fixture.referee?.name ?? fixture.referee?.display_name ?? "").trim() || undefined,
+          leagueId:
+            fixture.league_id == null ? undefined : String(fixture.league_id),
+          seasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          _ballPosition: sportMonksLatestBallPosition(fixture),
+          _sportMonksFixtureId:
+            fixture.id == null ? undefined : String(fixture.id),
+          _sportMonksSeasonId:
+            fixture.season_id == null ? undefined : String(fixture.season_id),
+          _sportMonksHomeTeamId:
+            teams.home.id == null ? undefined : String(teams.home.id),
+          _sportMonksAwayTeamId:
+            teams.away.id == null ? undefined : String(teams.away.id),
+          _liveExtra: {
+            phase:
+              sportMonksMatchStatus(fixture) === "HT"
+                ? "HT"
+                : sportMonksMatchStatus(fixture) === "ET"
+                  ? "ET"
+                  : sportMonksMatchStatus(fixture) === "PEN"
+                    ? "PEN"
+                    : /2nd half/i.test(sportMonksMatchStatus(fixture))
+                      ? "2H"
+                      : "1H",
+          },
+        };
+      })
+      .filter((fixture): fixture is LiveMatchState => fixture != null);
+  } catch (err) {
+    logger.error({ err }, "[sportmonks] football live fetch failed");
+    return [];
+  }
+}
+
+async function buildFootballLive(): Promise<LiveMatchState[]> {
+  return buildFootballLiveFromSportMonks();
 }
 
 // Tennis/basketball/hockey/baseball/volleyball — MRDoge provides the live
@@ -8659,7 +9848,7 @@ async function rebuildUpcomingCache(): Promise<void> {
   try {
     let football: UpcomingMatch[] = [];
     try {
-      football = await buildFootballUpcomingFromMrDoge();
+      football = await buildFootballUpcoming();
       _lastGoodFootballUpcoming = football;
     } catch (err) {
       logger.error(
@@ -8734,13 +9923,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   }
   const allUpcoming = _allUpcomingCache;
 
-  // ── Legacy provider path ────────────────────────────────────────────────
-  // MrDoge is the only active sportsbook provider on this route. The
-  // existing anti-flicker layer remains active below so a short provider
-  // outage does not erase the live board.
+  // ── Live provider path ──────────────────────────────────────────────────
+  // Football now builds from SportMonks; the other sports still use the
+  // legacy MrDoge path below. The anti-flicker layer remains active so a
+  // short provider outage does not erase the live board.
+  await startMrDogeLiveSync().catch((err) => {
+    logger.warn({ err }, "[mrdoge] live sync ensure failed");
+  });
   let footballLiveRaw: LiveMatchState[] = [];
   try {
-    footballLiveRaw = await buildFootballLiveFromMrDoge();
+    footballLiveRaw = await buildFootballLive();
   } catch (err) {
     logger.error(
       { err },
@@ -9873,7 +11065,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   // caches.
   let football: UpcomingMatch[] = [];
   try {
-    football = await buildFootballUpcomingFromMrDoge();
+    football = await buildFootballUpcoming();
   } catch (err) {
     logger.error({ err }, "[refreshUpcomingTop] football fetch failed");
   }
@@ -10179,7 +11371,9 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ((m.hasRealOdds ?? false) ||
         (m.odds?.home ?? 0) > 0 ||
         (m.odds?.draw ?? 0) > 0 ||
-        (m.odds?.away ?? 0) > 0) &&
+        (m.odds?.away ?? 0) > 0 ||
+        ((m.sport ?? "football") === "football" &&
+          !!m._sportMonksFixtureId)) &&
       !isPlaceholderTeamName(m.home) &&
       !isPlaceholderTeamName(m.away) &&
       !finishedMatchResults.has(String(m.id)) &&
@@ -12064,18 +13258,48 @@ router.get("/football-results-stats", async (_req: Request, res: Response) => {
 // from the active provider path — makeTennisBaseOdds' _tennisPreMatchOdds cache
 // simply never gets a hit any more and falls through to its neutral default.
 
-// GOAL API's leagueId (fx.leagueId, populated on the football
-// upcoming/live builders) lets this route return a real table instead of
-// buildLeagueStandings' fully synthetic ELO-seeded generator — same
-// "real data patches synthetic" convention every other GOAL API-backed
-// route in this file follows. Falls back to the synthetic table on any
-// failure or when no leagueId is given (non-football, or GOAL API not
-// configured).
-// GOAL API removed 2026-09-20 (user decision) — always falls through to the
-// synthetic ELO-seeded table below now.
+// SportMonks league/season context (fed by the football upcoming/live
+// builders, with an extra on-demand resolver fallback below) lets this route
+// return a real table instead of buildLeagueStandings' synthetic ELO-seeded
+// generator. Falls back to the synthetic table on any failure or when no
+// SportMonks league/season context is available.
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
+  const leagueId = String(req.query["leagueId"] ?? "").trim();
+  const matchId = String(req.query["matchId"] ?? "").trim();
+  const explicitSeasonId = String(req.query["seasonId"] ?? "").trim();
   try {
+    if (sportMonksEnabled()) {
+      let rows: SportMonksStanding[] = [];
+      if (leagueId) {
+        rows = await getSportMonksLiveStandingsByLeague(
+          leagueId,
+          "participant",
+        ).catch(() => [] as SportMonksStanding[]);
+      }
+      let teams = mapSportMonksStandings(rows);
+      if (teams.length === 0) {
+        const seasonId = await resolveSportMonksSeasonId({
+          seasonId: explicitSeasonId,
+          matchId,
+          leagueId,
+        });
+        if (seasonId) {
+          rows = await getSportMonksStandingsBySeason(
+            seasonId,
+            "participant;details.type",
+          ).catch(() => [] as SportMonksStanding[]);
+          teams = mapSportMonksStandings(rows);
+        }
+      }
+      if (teams.length > 0) {
+        res.json({
+          league: league || "Classificação",
+          teams,
+        });
+        return;
+      }
+    }
     const standing = buildLeagueStandings(league, "", "");
     res.json(standing);
   } catch {
@@ -13042,23 +14266,332 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   res.json(result);
 });
 
+async function findFootballMatchByBet62Id(
+  matchId: string,
+): Promise<(LiveMatchState | UpcomingMatch) | null> {
+  if (!matchId) return null;
+  const targetId = String(matchId).trim();
+  const targetProviderId = extractProviderMatchId(targetId);
+  const live = await getLivePayloadCached(false).catch(() => null);
+  const liveMatch =
+    live?.matches.find(
+      (match) =>
+        match.sport === "football" &&
+        (String(match.id) === targetId ||
+          extractProviderMatchId(String(match.id)) === targetProviderId),
+    ) ?? null;
+  if (liveMatch) return liveMatch;
+  const upcoming = await getUpcomingAll().catch(() => null);
+  if (!upcoming) return null;
+  return (
+    upcoming.football.find(
+      (match) =>
+        String(match.id) === targetId ||
+        extractProviderMatchId(String(match.id)) === targetProviderId,
+    ) ?? null
+  );
+}
+
+async function resolveSportMonksFixtureContext(matchId: string): Promise<{
+  fixtureId?: string;
+  seasonId?: string;
+  leagueId?: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+}> {
+  const match = await findFootballMatchByBet62Id(matchId);
+  if (!match) return {};
+  const base = {
+    fixtureId:
+      "_sportMonksFixtureId" in match
+        ? (match._sportMonksFixtureId ?? undefined)
+        : undefined,
+    seasonId:
+      "_sportMonksSeasonId" in match
+        ? (match._sportMonksSeasonId ?? match.seasonId ?? undefined)
+        : match.seasonId,
+    leagueId: match.leagueId,
+    homeTeamId:
+      "_sportMonksHomeTeamId" in match
+        ? (match._sportMonksHomeTeamId ?? undefined)
+        : undefined,
+    awayTeamId:
+      "_sportMonksAwayTeamId" in match
+        ? (match._sportMonksAwayTeamId ?? undefined)
+        : undefined,
+  };
+  if (
+    base.fixtureId ||
+    !sportMonksEnabled()
+  ) {
+    return base;
+  }
+
+  const include = "participants;league.country;state;venue";
+  const inplayFixtures = await getSportMonksInplayLivescores(include).catch(
+    () => [] as SportMonksFixture[],
+  );
+  let fixture =
+    inplayFixtures.find((row) => sportMonksVsBet62Match(row, match)) ?? null;
+  if (!fixture) {
+    const startDate = String(match.date ?? "").trim() || new Date().toISOString().slice(0, 10);
+    const scheduledFixtures = await getSportMonksFixturesBetween({
+      startDate,
+      endDate: startDate,
+      include,
+    }).catch(() => [] as SportMonksFixture[]);
+    fixture =
+      scheduledFixtures.find((row) => sportMonksVsBet62Match(row, match)) ??
+      null;
+  }
+  if (!fixture) return base;
+  const teams = sportMonksTeams(fixture);
+  return {
+    fixtureId: base.fixtureId ?? String(fixture.id ?? ""),
+    seasonId:
+      base.seasonId ??
+      (fixture.season_id == null ? undefined : String(fixture.season_id)),
+    leagueId:
+      base.leagueId ??
+      (fixture.league_id == null ? undefined : String(fixture.league_id)),
+    homeTeamId:
+      base.homeTeamId ??
+      (teams.home?.id == null ? undefined : String(teams.home.id)),
+    awayTeamId:
+      base.awayTeamId ??
+      (teams.away?.id == null ? undefined : String(teams.away.id)),
+  };
+}
+
+function mapSportMonksStandings(rows: SportMonksStanding[]): Array<{
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+}> {
+  return rows
+    .map((row) => {
+      const record = row as Record<string, unknown>;
+      const participant =
+        record["participant"] && typeof record["participant"] === "object"
+          ? (record["participant"] as Record<string, unknown>)
+          : {};
+      const detailEntries = Array.isArray(record["details"])
+        ? (record["details"] as Array<Record<string, unknown>>)
+        : [];
+      const details: Record<string, unknown> =
+        record["details"] &&
+        typeof record["details"] === "object" &&
+        !Array.isArray(record["details"])
+          ? { ...(record["details"] as Record<string, unknown>) }
+          : {};
+      for (const detail of detailEntries) {
+        const type =
+          detail["type"] && typeof detail["type"] === "object"
+            ? (detail["type"] as Record<string, unknown>)
+            : {};
+        const key = normalizeSportEntityName(
+          String(
+            type["developer_name"] ??
+              type["name"] ??
+              detail["name"] ??
+              "",
+          ),
+        );
+        if (!key) continue;
+        details[key] = detail["value"] ?? detail["score"] ?? detail["total"];
+      }
+      return {
+        pos: Number(record["position"] ?? 0),
+        name: String(
+          participant["name"] ?? participant["display_name"] ?? "",
+        ),
+        played: Number(details["played"] ?? record["played"] ?? 0),
+        won: Number(details["won"] ?? record["won"] ?? 0),
+        drawn: Number(
+          details["draw"] ??
+            details["drawn"] ??
+            record["drawn"] ??
+            record["draw"] ??
+            0,
+        ),
+        lost: Number(details["lost"] ?? record["lost"] ?? 0),
+        gf: Number(
+          details["goals_for"] ?? details["gf"] ?? record["goals_for"] ?? 0,
+        ),
+        ga: Number(
+          details["goals_against"] ??
+            details["ga"] ??
+            record["goals_against"] ??
+            0,
+        ),
+        pts: Number(details["points"] ?? record["points"] ?? 0),
+      };
+    })
+    .filter((row) => row.name && row.pos > 0)
+    .sort((a, b) => a.pos - b.pos);
+}
+
+async function resolveSportMonksSeasonId(args: {
+  seasonId?: string;
+  matchId?: string;
+  leagueId?: string;
+}): Promise<string | undefined> {
+  const explicitSeasonId = String(args.seasonId ?? "").trim();
+  if (explicitSeasonId) return explicitSeasonId;
+  const matchId = String(args.matchId ?? "").trim();
+  if (matchId) {
+    const ctx = await resolveSportMonksFixtureContext(matchId);
+    const seasonId = String(ctx.seasonId ?? "").trim();
+    if (seasonId) return seasonId;
+  }
+  const leagueId = String(args.leagueId ?? "").trim();
+  if (!leagueId || !sportMonksEnabled()) return undefined;
+  const league = await getSportMonksLeagueById({
+    leagueId,
+    include: "currentseason",
+  }).catch(() => null);
+  const currentSeason =
+    league?.currentseason ?? league?.currentSeason ?? null;
+  return currentSeason?.id == null ? undefined : String(currentSeason.id);
+}
+
+function mapSportMonksLineups(
+  fixture: SportMonksFixture,
+): {
+  confirmed: boolean;
+  home: { formation?: string; coach?: string; starters: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>; bench: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }> };
+  away: { formation?: string; coach?: string; starters: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>; bench: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }> };
+} {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  const rows = Array.isArray(fixture.lineups) ? fixture.lineups : [];
+  const emptySide = {
+    formation: undefined,
+    coach: undefined,
+    starters: [] as Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>,
+    bench: [] as Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>,
+  };
+  const result = {
+    confirmed: false,
+    home: { ...emptySide },
+    away: { ...emptySide },
+  };
+  for (const row of rows) {
+    const participantId = String(
+      row.participant_id ?? row.team_id ?? "",
+    );
+    const side =
+      participantId && participantId === homeId
+        ? result.home
+        : participantId && participantId === awayId
+          ? result.away
+          : null;
+    if (!side) continue;
+    const name = String(
+      row.player?.display_name ??
+        row.player?.common_name ??
+        row.player_name ??
+        [row.player?.firstname, row.player?.lastname]
+          .filter(Boolean)
+          .join(" "),
+    ).trim();
+    if (!name) continue;
+    const typeText = (Array.isArray(row.details) ? row.details : [])
+      .map((detail) =>
+        String(
+          detail.type?.developer_name ?? detail.type?.name ?? detail.value ?? "",
+        ).toLowerCase(),
+      )
+      .join(" ");
+    const item = {
+      name,
+      shortName: name,
+      position: String(row.position_id ?? row.formation_field ?? ""),
+      number: String(row.jersey_number ?? ""),
+    };
+    if (
+      typeText.includes("bench") ||
+      typeText.includes("substitute") ||
+      typeText.includes("sub")
+    ) {
+      side.bench.push(item);
+    } else {
+      side.starters.push(item);
+    }
+    result.confirmed = true;
+  }
+  return result;
+}
+
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
-// Used to be sourced from SportMonks team schedules; that provider was
-// removed. This endpoint currently returns empty data by design.
-router.get("/team-upcoming", async (_req: Request, res: Response) => {
-  res.json({ fixtures: [] });
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "").trim();
+  const side = String(req.query["side"] ?? "home").trim().toLowerCase();
+  const limit = Math.max(1, Math.min(10, Number(req.query["limit"] ?? 5) || 5));
+  if (!matchId || !sportMonksEnabled()) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const ctx = await resolveSportMonksFixtureContext(matchId);
+  const teamId =
+    side === "away" ? ctx.awayTeamId : ctx.homeTeamId;
+  if (!teamId) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const startDate = new Date().toISOString().slice(0, 10);
+  const endDate = new Date(Date.now() + 30 * 24 * 60 * 60_000)
+    .toISOString()
+    .slice(0, 10);
+  const fixtures = await getSportMonksFixturesByTeamRange({
+    teamId,
+    startDate,
+    endDate,
+    include: "participants;league.country;state",
+  }).catch(() => [] as SportMonksFixture[]);
+  const mapped = fixtures
+    .filter((fixture) => String(fixture.id) !== String(ctx.fixtureId ?? ""))
+    .slice(0, limit)
+    .map((fixture) => {
+      const teams = sportMonksTeams(fixture);
+      const kickoffMs = sportMonksTimestampMs(fixture);
+      const kickoff = kickoffMs ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString()) : { date: "", time: "" };
+      return {
+        id: String(fixture.id ?? ""),
+        home: String(teams.home?.name ?? ""),
+        away: String(teams.away?.name ?? ""),
+        league: sportMonksLeagueName(fixture),
+        country: sportMonksCountryName(fixture),
+        date: kickoff.date,
+        time: kickoff.time,
+      };
+    });
+  res.json({ fixtures: mapped });
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
-// Used to be sourced from SportMonks (numeric ids); that provider was
-// removed and left this hardcoded to 404 ever since. GOAL API's /players/:id
-// (confirmed real 2026-09-09) is the real replacement — ids are opaque cuid
-// strings, not numbers, hence the frontend's playerId type moving from
-// number to string alongside this fix.
-// GOAL API and api-tennis both removed 2026-09-20 (user decision) —
-// football and tennis player profiles always 404 now.
-router.get("/player-profile/:id", async (_req: Request, res: Response) => {
-  res.status(404).json({ error: "player profile unavailable" });
+// Football player profile is sourced directly from SportMonks. The frontend
+// already treats the player id as an opaque string, so the route just proxies
+// the provider payload when that id is known from lineup/event context.
+router.get("/player-profile/:id", async (req: Request, res: Response) => {
+  const id = String(req.params["id"] ?? "").trim();
+  if (!id || !sportMonksEnabled()) {
+    res.status(404).json({ error: "player profile unavailable" });
+    return;
+  }
+  const player = await getSportMonksPlayerById(id).catch(() => null);
+  if (!player) {
+    res.status(404).json({ error: "player profile unavailable" });
+    return;
+  }
+  res.json({ player });
 });
 
 // ─── Live Storylines ────────────────────────────────────────────────────────
@@ -13071,35 +14604,106 @@ router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
 });
 
 // ─── Lineups ────────────────────────────────────────────────────────────────
-// GOAL API removed 2026-09-20 (user decision) — always empty now, same
-// dead-but-valid shape the frontend already treats as "not available".
 // ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
-// GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
-// by GOAL API's own leagueId (fx.leagueId, now populated on the football
-// upcoming/live builders above), not by league name like the legacy
-// /league-standings route.
-// GOAL API removed 2026-09-20 (user decision) — always empty now.
-router.get("/top-scorers/:leagueId", async (_req: Request, res: Response) => {
-  res.json({ scorers: [] });
+router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
+  const leagueId = String(req.params["leagueId"] ?? "").trim();
+  const matchId = String(req.query["matchId"] ?? "").trim();
+  const seasonId = await resolveSportMonksSeasonId({
+    seasonId: String(req.query["seasonId"] ?? "").trim(),
+    matchId,
+    leagueId,
+  });
+  if (!seasonId || !sportMonksEnabled()) {
+    res.json({ scorers: [] });
+    return;
+  }
+  const scorers = await getSportMonksTopScorersBySeason(
+    seasonId,
+    "player;participant",
+  ).catch(() => [] as SportMonksTopScorer[]);
+  const mapped = scorers
+    .map((row, index) => {
+      const record = row as Record<string, unknown>;
+      const player =
+        record["player"] && typeof record["player"] === "object"
+          ? (record["player"] as Record<string, unknown>)
+          : {};
+      const participant =
+        record["participant"] && typeof record["participant"] === "object"
+          ? (record["participant"] as Record<string, unknown>)
+          : {};
+      return {
+        rank: Number(record["position"] ?? index + 1),
+        playerName: String(
+          player["display_name"] ??
+            player["common_name"] ??
+            player["name"] ??
+            "",
+        ),
+        teamName: String(participant["name"] ?? ""),
+        goals: Number(record["goals"] ?? record["total"] ?? 0),
+        assists: Number(record["assists"] ?? 0),
+        penaltyGoals: Number(record["penalty_goals"] ?? 0),
+      };
+    })
+    .filter((row) => row.playerName);
+  res.json({ scorers: mapped });
 });
 
 router.get("/lineups/:matchId", async (req: Request, res: Response) => {
-  void req;
-  res.json({
-    confirmed: false,
-    home: { starters: [], bench: [] },
-    away: { starters: [], bench: [] },
-  });
+  const matchId = String(req.params["matchId"] ?? "").trim();
+  if (!matchId || !sportMonksEnabled()) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  const ctx = await resolveSportMonksFixtureContext(matchId);
+  if (!ctx.fixtureId) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  const fixture = await getSportMonksFixtureById({
+    fixtureId: ctx.fixtureId,
+    include: "participants;lineups.player;lineups.details.type",
+  }).catch(() => null);
+  if (!fixture) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  res.json(mapSportMonksLineups(fixture));
 });
 
-// GOAL API's own model-computed match-outcome probabilities — a distinct
-// data source from this file's odds-derived "Biblioteca de Combinações"
+// SportMonks model-computed match-outcome probabilities — a distinct data
+// source from this file's odds-derived "Biblioteca de Combinações"
 // (predictions.ts's publishCombosForMatch, which works off match.odds/
 // markets, not this endpoint). Informational only — feeds the "Previsão"
 // card, not settlement.
-// GOAL API removed 2026-09-20 (user decision) — always empty now.
-router.get("/prediction/:matchId", async (_req: Request, res: Response) => {
-  res.json({ prediction: null });
+router.get("/prediction/:matchId", async (req: Request, res: Response) => {
+  const matchId = String(req.params["matchId"] ?? "").trim();
+  if (!matchId || !sportMonksEnabled()) {
+    res.json({ prediction: null });
+    return;
+  }
+  const ctx = await resolveSportMonksFixtureContext(matchId);
+  if (!ctx.fixtureId) {
+    res.json({ prediction: null });
+    return;
+  }
+  const predictions = await getSportMonksPredictionsByFixtureId(
+    ctx.fixtureId,
+  ).catch(() => [] as Record<string, unknown>[]);
+  res.json({ prediction: predictions[0] ?? null });
 });
 
 // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────

@@ -26,11 +26,17 @@ router.get("/health-data-providers", (_req, res) => {
   res.json({
     flags: {
       mrDogeLegacyEnabled: Boolean(CONFIG.MRDOGE_API_KEY),
+      sportMonksFootballEnabled: Boolean(CONFIG.SPORTMONKS_API_TOKEN),
     },
     keys: {
       mrDoge: Boolean(CONFIG.MRDOGE_API_KEY),
+      sportMonks: Boolean(CONFIG.SPORTMONKS_API_TOKEN),
     },
-    activeProvider: CONFIG.MRDOGE_API_KEY ? "mrdoge" : null,
+    activeProvider: CONFIG.SPORTMONKS_API_TOKEN
+      ? "sportmonks"
+      : CONFIG.MRDOGE_API_KEY
+        ? "mrdoge"
+        : null,
     lastSuccessfulFetch: {},
     providerQualityDebug: g.__providerQualityDebug ?? null,
     livePayloadDebug: g.__livePayloadDebug ?? null,

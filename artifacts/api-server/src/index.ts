@@ -5,6 +5,7 @@ import { logger } from "./lib/logger.js";
 import { startSettlementWorker } from "./settlement.js";
 import { startAiAgentsCron } from "./lib/aiAgentsCron.js";
 import { ensureBigBangCatalogFresh } from "./services/bigbang/sync.js";
+import { startMrDogeLiveSync } from "./services/mrdoge/liveSync.js";
 
 // Keep the API process alive through unexpected async failures. The app has
 // deliberate fire-and-forget work for settlement, live refresh and catalog
@@ -34,6 +35,10 @@ server.listen(port, () => {
 
   void ensureBigBangCatalogFresh().catch((err) => {
     logger.warn({ err }, "[bigbang] initial catalog sync failed");
+  });
+
+  void startMrDogeLiveSync().catch((err) => {
+    logger.warn({ err }, "[mrdoge] initial live sync start failed");
   });
 
   startAiAgentsCron();
