@@ -43,6 +43,28 @@ import {
   extractMrDogeBaseballLiveExtra,
   extractMrDogeVolleyballLiveExtra,
 } from "../services/mrdoge/common.js";
+import {
+  getSportMonksFixtureById,
+  getSportMonksFixturesBetween,
+  getSportMonksFixturesByTeamRange,
+  getSportMonksInplayLivescores,
+  getSportMonksLeagueById,
+  getSportMonksLiveStandingsByLeague,
+  getSportMonksPlayerById,
+  getSportMonksPredictionsByFixtureId,
+  getSportMonksStandingsBySeason,
+  getSportMonksTopScorersBySeason,
+  sportMonksEnabled,
+  type SportMonksBallCoordinate,
+  type SportMonksEvent,
+  type SportMonksFixture,
+  type SportMonksLineupEntry,
+  type SportMonksParticipant,
+  type SportMonksScore,
+  type SportMonksStanding,
+  type SportMonksStatistic,
+  type SportMonksTopScorer,
+} from "../services/sportmonks/client.js";
 import { db, matchResultsTable } from "../../../../lib/db/src/index.js";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
@@ -56,6 +78,240 @@ function extractProviderMatchId(rawId: string): string {
     .replace(/^[a-z]+-v\d+-/i, "")
     .replace(/^mrdoge-[a-z_]+-/i, "")
     .replace(/^sportmonks-[a-z_]+-/i, "");
+}
+
+function normalizeSportEntityName(value: string): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(fc|cf|sc|ac|cd|club|fk|afc|women|wfc)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sportMonksParticipantLocation(
+  participant: SportMonksParticipant | undefined,
+): "home" | "away" | null {
+  const raw = String(
+    participant?.meta?.location ?? participant?.location ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  if (raw === "home") return "home";
+  if (raw === "away") return "away";
+  return null;
+}
+
+function sportMonksTeams(fixture: SportMonksFixture): {
+  home: SportMonksParticipant | null;
+  away: SportMonksParticipant | null;
+} {
+  const participants = Array.isArray(fixture.participants)
+    ? fixture.participants
+    : [];
+  const home =
+    participants.find((item) => sportMonksParticipantLocation(item) === "home") ??
+    null;
+  const away =
+    participants.find((item) => sportMonksParticipantLocation(item) === "away") ??
+    null;
+  if (home && away) return { home, away };
+  const [first, second] = participants;
+  return {
+    home: home ?? first ?? null,
+    away: away ?? second ?? null,
+  };
+}
+
+function sportMonksTimestampMs(fixture: SportMonksFixture): number | null {
+  const ts = Number(fixture.starting_at_timestamp ?? 0);
+  if (Number.isFinite(ts) && ts > 0) return ts * 1000;
+  const parsed = Date.parse(String(fixture.starting_at ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sportMonksTimerSeconds(timer: string | null | undefined): number {
+  const parts = String(timer ?? "")
+    .trim()
+    .split(":")
+    .map((part) => Number(part));
+  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return -1;
+  }
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    return minutes * 60 + seconds;
+  }
+  const [hours, minutes, seconds] = parts;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function sportMonksVsMrDogeMatch(
+  fixture: SportMonksFixture,
+  match: Match,
+): boolean {
+  const teams = sportMonksTeams(fixture);
+  if (!teams.home || !teams.away) return false;
+  const sameHome =
+    normalizeSportEntityName(String(teams.home.name ?? "")) ===
+    normalizeSportEntityName(String(match.homeTeam?.name ?? ""));
+  const sameAway =
+    normalizeSportEntityName(String(teams.away.name ?? "")) ===
+    normalizeSportEntityName(String(match.awayTeam?.name ?? ""));
+  if (!sameHome || !sameAway) return false;
+  const smTime = sportMonksTimestampMs(fixture);
+  const mrTime = Date.parse(String(match.startTime ?? ""));
+  if (!Number.isFinite(smTime) || !Number.isFinite(mrTime)) return true;
+  return Math.abs(smTime - mrTime) <= 90 * 60_000;
+}
+
+function sportMonksLatestBallPosition(
+  fixture: SportMonksFixture,
+): LiveMatchState["_ballPosition"] {
+  const rows = Array.isArray(fixture.ballCoordinates)
+    ? fixture.ballCoordinates
+    : Array.isArray(fixture.ballcoordinates)
+      ? fixture.ballcoordinates
+      : [];
+  const last = rows
+    .map((row) => ({
+      row,
+      id: Number(row.id ?? NaN),
+      x: Number(row.x ?? NaN),
+      y: Number(row.y ?? NaN),
+      timerSec: sportMonksTimerSeconds(row.timer),
+    }))
+    .filter((row) => Number.isFinite(row.x) && Number.isFinite(row.y))
+    .sort((a, b) => {
+      if (a.timerSec !== b.timerSec) return a.timerSec - b.timerSec;
+      if (Number.isFinite(a.id) && Number.isFinite(b.id)) return a.id - b.id;
+      return 0;
+    })
+    .at(-1);
+  if (!last) return null;
+  const side =
+    last.x < 0.4 ? "home" : last.x > 0.62 ? "away" : null;
+  const situation =
+    last.x < 0.2
+      ? "defensive-third"
+      : last.x > 0.8
+        ? "attacking-third"
+        : "middle-third";
+  return {
+    x: last.x,
+    y: last.y,
+    side,
+    situation,
+    updatedAt: Date.now(),
+  };
+}
+
+function sportMonksEventType(event: SportMonksEvent): string {
+  const raw = normalizeSportEntityName(
+    String(event.name ?? event.addition ?? event.result ?? event.type_id ?? ""),
+  );
+  if (raw.includes("goal")) return "goal";
+  if (raw.includes("red")) return "red_card";
+  if (raw.includes("yellow")) return "yellow_card";
+  if (raw.includes("var")) return "var";
+  if (raw.includes("penalty")) return "penalty";
+  if (raw.includes("substitution")) return "substitution";
+  return raw || "event";
+}
+
+function sportMonksEvents(
+  fixture: SportMonksFixture,
+): LiveMatchState["events"] {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  const rows = Array.isArray(fixture.events) ? fixture.events : [];
+  return rows
+    .map((event) => {
+      const participantId = String(event.participant_id ?? "");
+      return {
+        type: sportMonksEventType(event),
+        team:
+          participantId && participantId === homeId
+            ? "home"
+            : participantId && participantId === awayId
+              ? "away"
+              : "",
+        minute:
+          Number(event.minute ?? 0) +
+          Number(event.extra_minute ?? 0 || 0),
+        player: String(event.player_name ?? ""),
+        playerId:
+          event.player_id == null ? undefined : String(event.player_id),
+        detail: String(event.addition ?? event.result ?? ""),
+      };
+    })
+    .filter((event) => event.type && event.minute >= 0);
+}
+
+function sportMonksMatchStats(
+  fixture: SportMonksFixture,
+): LiveMatchState["matchStats"] {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  const stats = Array.isArray(fixture.statistics) ? fixture.statistics : [];
+  const rows = new Map<string, { name: string; home: string; away: string }>();
+  for (const stat of stats) {
+    const name = String(
+      stat.type?.name ??
+        stat.type?.developer_name ??
+        stat.type_id ??
+        "",
+    ).trim();
+    if (!name) continue;
+    const value =
+      stat.data?.value ??
+      stat.data?.total ??
+      stat.data?.percentage ??
+      stat.value ??
+      "-";
+    const key = normalizeSportEntityName(name);
+    const row = rows.get(key) ?? { name, home: "-", away: "-" };
+    const participantId = String(stat.participant_id ?? "");
+    if (participantId && participantId === homeId) row.home = String(value);
+    else if (participantId && participantId === awayId) row.away = String(value);
+    rows.set(key, row);
+  }
+  const values = [...rows.values()].filter(
+    (row) => row.home !== "-" || row.away !== "-",
+  );
+  return values.length ? [{ title: "Estatísticas", rows: values }] : undefined;
+}
+
+function sportMonksCountryName(fixture: SportMonksFixture): string {
+  return String(fixture.league?.country?.name ?? "").trim();
+}
+
+function sportMonksLeagueName(fixture: SportMonksFixture): string {
+  return String(fixture.league?.name ?? "").trim();
+}
+
+function sportMonksVsBet62Match(
+  fixture: SportMonksFixture,
+  match: Pick<LiveMatchState | UpcomingMatch, "home" | "away" | "date">,
+): boolean {
+  const teams = sportMonksTeams(fixture);
+  if (!teams.home || !teams.away) return false;
+  const sameHome =
+    normalizeSportEntityName(String(teams.home.name ?? "")) ===
+    normalizeSportEntityName(String(match.home ?? ""));
+  const sameAway =
+    normalizeSportEntityName(String(teams.away.name ?? "")) ===
+    normalizeSportEntityName(String(match.away ?? ""));
+  if (!sameHome || !sameAway) return false;
+  const matchDate = String(match.date ?? "").trim();
+  if (!matchDate) return true;
+  const smTime = sportMonksTimestampMs(fixture);
+  if (!Number.isFinite(smTime)) return true;
+  return mrDogeStartTimeToLisbon(new Date(smTime).toISOString()).date === matchDate;
 }
 
 function mrDogeAllOddsGroup(market: Market): string {
@@ -611,9 +867,9 @@ export type LiveMatchState = {
   _suspensionReason?: string;
   // Feed health warning (must not be treated as a market suspension)
   _feedWarning?: string;
-  // League ID (football only) — currently unpopulated; no provider feeds it
-  // since the StatPal integration that used to set it was removed.
+  // League ID (football only)
   leagueId?: string;
+  seasonId?: string;
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
@@ -639,6 +895,10 @@ export type LiveMatchState = {
   // commentary-derived zone guess whenever it's missing — removing the
   // field would be a no-op for behavior, just churn.
   _ballPosition?: { x: number; y: number; side: "home" | "away" | null; situation: string; updatedAt: number } | null;
+  _sportMonksFixtureId?: string;
+  _sportMonksSeasonId?: string;
+  _sportMonksHomeTeamId?: string;
+  _sportMonksAwayTeamId?: string;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -836,6 +1096,7 @@ export type UpcomingMatch = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   leagueId?: string;
+  seasonId?: string;
   isWomens?: boolean;
   /** Football only — true when the league is in the curated priority allowlist
    * (footballLeagueAllowedStrict). Drives the default "today + big leagues up
@@ -858,6 +1119,12 @@ export type UpcomingMatch = {
   // homeImageVersion in getTeamBadgeAsset.
   homeLogoUrl?: string;
   awayLogoUrl?: string;
+  stadium?: string;
+  referee?: string;
+  _sportMonksFixtureId?: string;
+  _sportMonksSeasonId?: string;
+  _sportMonksHomeTeamId?: string;
+  _sportMonksAwayTeamId?: string;
   regionFlagUrl?: string;
   // Football only — GOAL API's matchStadium/matchReferee (confirmed real,
   // same fixture object every other football field here comes from).
@@ -8149,12 +8416,21 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
     const mrdoge = getMrDogeClient();
     const startDate = new Date().toISOString().slice(0, 10);
     const endDate = getUpcomingFetchEndDate();
-    const matches = await mrdoge.matches.listAll({
-      sports: ["soccer"],
-      status: ["upcoming"],
-      startDate,
-      endDate,
-    });
+    const [matches, sportMonksFixtures] = await Promise.all([
+      mrdoge.matches.listAll({
+        sports: ["soccer"],
+        status: ["upcoming"],
+        startDate,
+        endDate,
+      }),
+      sportMonksEnabled()
+        ? getSportMonksFixturesBetween({
+            startDate,
+            endDate,
+            include: "participants;league.country;state;venue",
+          }).catch(() => [] as SportMonksFixture[])
+        : Promise.resolve([] as SportMonksFixture[]),
+    ]);
     const eligibleMatches = matches.filter(
       (match) =>
         footballCompetitionVisibilityBand(
@@ -8167,6 +8443,13 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       eligibleMatches,
       [...MRDOGE_SOCCER_BET_TYPES],
     );
+    const sportMonksByMrDogeId = new Map<string, SportMonksFixture>();
+    for (const match of eligibleMatches) {
+      const found = sportMonksFixtures.find((fixture) =>
+        sportMonksVsMrDogeMatch(fixture, match),
+      );
+      if (found) sportMonksByMrDogeId.set(match.id, found);
+    }
     let withRealOdds = 0;
     const built = eligibleMatches.map((m): UpcomingMatch => {
       const { date, time } = mrDogeStartTimeToLisbon(m.startTime);
@@ -8174,6 +8457,10 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       const moneyline = extractMrDogeSoccerMoneyline(odds);
       const btts = extractMrDogeSoccerBtts(odds);
       const extended = extractMrDogeSoccerExtendedMarkets(odds);
+      const sportMonksFixture = sportMonksByMrDogeId.get(m.id);
+      const sportMonksTeamsData = sportMonksFixture
+        ? sportMonksTeams(sportMonksFixture)
+        : { home: null, away: null };
       const markets = zerofillAdvancedMarkets();
       Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
       if (btts) markets.bothTeamsScore = btts;
@@ -8222,21 +8509,48 @@ async function buildFootballUpcomingFromMrDoge(): Promise<UpcomingMatch[]> {
       if (moneyline != null) withRealOdds++;
       return {
         id: mrDogeMatchId("football", m),
-        home: m.homeTeam.name,
-        away: m.awayTeam.name,
+        home: String(sportMonksTeamsData.home?.name ?? m.homeTeam.name),
+        away: String(sportMonksTeamsData.away?.name ?? m.awayTeam.name),
         homeTeamId: String(m.homeTeam.id),
         awayTeamId: String(m.awayTeam.id),
-        homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
-        awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+        homeLogoUrl:
+          String(sportMonksTeamsData.home?.image_path ?? "").trim() ||
+          mrDogeTeamLogo(m.homeTeam.id),
+        awayLogoUrl:
+          String(sportMonksTeamsData.away?.image_path ?? "").trim() ||
+          mrDogeTeamLogo(m.awayTeam.id),
         regionFlagUrl: mrDogeRegionFlag(m.region.id),
-        league: m.competition.name,
-        country: m.region.name,
+        league: sportMonksFixture ? sportMonksLeagueName(sportMonksFixture) || m.competition.name : m.competition.name,
+        country: sportMonksFixture ? sportMonksCountryName(sportMonksFixture) || m.region.name : m.region.name,
         date,
         time,
         sport: "football",
         hasRealOdds: moneyline != null,
         odds: moneyline ?? { home: 0, draw: 0, away: 0 },
         markets,
+        leagueId:
+          sportMonksFixture?.league_id == null
+            ? undefined
+            : String(sportMonksFixture.league_id),
+        seasonId:
+          sportMonksFixture?.season_id == null
+            ? undefined
+            : String(sportMonksFixture.season_id),
+        stadium: String(sportMonksFixture?.venue?.name ?? "").trim() || undefined,
+        _sportMonksFixtureId:
+          sportMonksFixture?.id == null ? undefined : String(sportMonksFixture.id),
+        _sportMonksSeasonId:
+          sportMonksFixture?.season_id == null
+            ? undefined
+            : String(sportMonksFixture.season_id),
+        _sportMonksHomeTeamId:
+          sportMonksTeamsData.home?.id == null
+            ? undefined
+            : String(sportMonksTeamsData.home.id),
+        _sportMonksAwayTeamId:
+          sportMonksTeamsData.away?.id == null
+            ? undefined
+            : String(sportMonksTeamsData.away.id),
       };
     });
     // GET /upcoming's own filter (routes/matches.ts) hides any match
@@ -8280,6 +8594,18 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
   // doc comment gives "England"/"Inglaterra" as an example) that silently
   // dropped every match the first time this filtered on it instead.
   const matches = getMrDogeLiveMatches().filter((m) => m.stats?.sport === "soccer");
+  const sportMonksFixtures = sportMonksEnabled()
+    ? await getSportMonksInplayLivescores(
+        "participants;league.country;state;venue;events;statistics.type;ballCoordinates",
+      ).catch(() => [] as SportMonksFixture[])
+    : [];
+  const sportMonksByMrDogeId = new Map<string, SportMonksFixture>();
+  for (const match of matches) {
+    const found = sportMonksFixtures.find((fixture) =>
+      sportMonksVsMrDogeMatch(fixture, match),
+    );
+    if (found) sportMonksByMrDogeId.set(match.id, found);
+  }
   return matches.map((m): LiveMatchState => {
     const stats = m.stats?.sport === "soccer" ? m.stats : null;
     const { status, phase } = mrDogeSoccerStatus(stats?.clock);
@@ -8287,6 +8613,10 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     const moneyline = extractMrDogeSoccerMoneyline(odds);
     const btts = extractMrDogeSoccerBtts(odds);
     const extended = extractMrDogeSoccerExtendedMarkets(odds);
+    const sportMonksFixture = sportMonksByMrDogeId.get(m.id);
+    const sportMonksTeamsData = sportMonksFixture
+      ? sportMonksTeams(sportMonksFixture)
+      : { home: null, away: null };
     const markets = zerofillAdvancedMarkets();
     const liveExtra = extractMrDogeSoccerLiveExtra(stats);
     Object.assign(markets.totalGoals, totalGoalsMapToFields(extractMrDogeSoccerTotalGoals(odds)));
@@ -8335,15 +8665,19 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
     }
     return {
       id: mrDogeMatchId("football", m),
-      home: m.homeTeam.name,
-      away: m.awayTeam.name,
+      home: String(sportMonksTeamsData.home?.name ?? m.homeTeam.name),
+      away: String(sportMonksTeamsData.away?.name ?? m.awayTeam.name),
       homeTeamId: String(m.homeTeam.id),
       awayTeamId: String(m.awayTeam.id),
-      homeLogoUrl: mrDogeTeamLogo(m.homeTeam.id),
-      awayLogoUrl: mrDogeTeamLogo(m.awayTeam.id),
+      homeLogoUrl:
+        String(sportMonksTeamsData.home?.image_path ?? "").trim() ||
+        mrDogeTeamLogo(m.homeTeam.id),
+      awayLogoUrl:
+        String(sportMonksTeamsData.away?.image_path ?? "").trim() ||
+        mrDogeTeamLogo(m.awayTeam.id),
       regionFlagUrl: mrDogeRegionFlag(m.region.id),
-      league: m.competition.name,
-      country: m.region.name,
+      league: sportMonksFixture ? sportMonksLeagueName(sportMonksFixture) || m.competition.name : m.competition.name,
+      country: sportMonksFixture ? sportMonksCountryName(sportMonksFixture) || m.region.name : m.region.name,
       sport: "football",
       homeScore: stats?.homeScore ?? 0,
       awayScore: stats?.awayScore ?? 0,
@@ -8352,10 +8686,42 @@ async function buildFootballLiveFromMrDoge(): Promise<LiveMatchState[]> {
       hasRealOdds: moneyline != null,
       odds: moneyline ?? { home: 0, draw: 0, away: 0 },
       markets,
-      events: buildMrDogeTimelineEvents(m),
+      events:
+        sportMonksFixture && sportMonksEvents(sportMonksFixture).length > 0
+          ? sportMonksEvents(sportMonksFixture)
+          : buildMrDogeTimelineEvents(m),
       redCardsHome: stats?.homeRedCards ?? 0,
       redCardsAway: stats?.awayRedCards ?? 0,
-      matchStats: buildMrDogeSoccerMatchStats(stats),
+      matchStats:
+        sportMonksFixture && sportMonksMatchStats(sportMonksFixture)
+          ? sportMonksMatchStats(sportMonksFixture)
+          : buildMrDogeSoccerMatchStats(stats),
+      stadium: String(sportMonksFixture?.venue?.name ?? "").trim() || undefined,
+      leagueId:
+        sportMonksFixture?.league_id == null
+          ? undefined
+          : String(sportMonksFixture.league_id),
+      seasonId:
+        sportMonksFixture?.season_id == null
+          ? undefined
+          : String(sportMonksFixture.season_id),
+      _ballPosition: sportMonksFixture
+        ? sportMonksLatestBallPosition(sportMonksFixture)
+        : null,
+      _sportMonksFixtureId:
+        sportMonksFixture?.id == null ? undefined : String(sportMonksFixture.id),
+      _sportMonksSeasonId:
+        sportMonksFixture?.season_id == null
+          ? undefined
+          : String(sportMonksFixture.season_id),
+      _sportMonksHomeTeamId:
+        sportMonksTeamsData.home?.id == null
+          ? undefined
+          : String(sportMonksTeamsData.home.id),
+      _sportMonksAwayTeamId:
+        sportMonksTeamsData.away?.id == null
+          ? undefined
+          : String(sportMonksTeamsData.away.id),
       _liveExtra: { phase, ...liveExtra },
     };
   });
@@ -12075,7 +12441,41 @@ router.get("/football-results-stats", async (_req: Request, res: Response) => {
 // synthetic ELO-seeded table below now.
 router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
+  const leagueId = String(req.query["leagueId"] ?? "").trim();
+  const matchId = String(req.query["matchId"] ?? "").trim();
+  const explicitSeasonId = String(req.query["seasonId"] ?? "").trim();
   try {
+    if (sportMonksEnabled()) {
+      let rows: SportMonksStanding[] = [];
+      if (leagueId) {
+        rows = await getSportMonksLiveStandingsByLeague(
+          leagueId,
+          "participant",
+        ).catch(() => [] as SportMonksStanding[]);
+      }
+      let teams = mapSportMonksStandings(rows);
+      if (teams.length === 0) {
+        const seasonId = await resolveSportMonksSeasonId({
+          seasonId: explicitSeasonId,
+          matchId,
+          leagueId,
+        });
+        if (seasonId) {
+          rows = await getSportMonksStandingsBySeason(
+            seasonId,
+            "participant;details.type",
+          ).catch(() => [] as SportMonksStanding[]);
+          teams = mapSportMonksStandings(rows);
+        }
+      }
+      if (teams.length > 0) {
+        res.json({
+          league: league || "Classificação",
+          teams,
+        });
+        return;
+      }
+    }
     const standing = buildLeagueStandings(league, "", "");
     res.json(standing);
   } catch {
@@ -13042,11 +13442,314 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   res.json(result);
 });
 
+async function findFootballMatchByBet62Id(
+  matchId: string,
+): Promise<(LiveMatchState | UpcomingMatch) | null> {
+  if (!matchId) return null;
+  const targetId = String(matchId).trim();
+  const targetProviderId = extractProviderMatchId(targetId);
+  const live = await getLivePayloadCached(false).catch(() => null);
+  const liveMatch =
+    live?.matches.find(
+      (match) =>
+        match.sport === "football" &&
+        (String(match.id) === targetId ||
+          extractProviderMatchId(String(match.id)) === targetProviderId),
+    ) ?? null;
+  if (liveMatch) return liveMatch;
+  const upcoming = await getUpcomingAll().catch(() => null);
+  if (!upcoming) return null;
+  return (
+    upcoming.football.find(
+      (match) =>
+        String(match.id) === targetId ||
+        extractProviderMatchId(String(match.id)) === targetProviderId,
+    ) ?? null
+  );
+}
+
+async function resolveSportMonksFixtureContext(matchId: string): Promise<{
+  fixtureId?: string;
+  seasonId?: string;
+  leagueId?: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+}> {
+  const match = await findFootballMatchByBet62Id(matchId);
+  if (!match) return {};
+  const base = {
+    fixtureId:
+      "_sportMonksFixtureId" in match
+        ? (match._sportMonksFixtureId ?? undefined)
+        : undefined,
+    seasonId:
+      "_sportMonksSeasonId" in match
+        ? (match._sportMonksSeasonId ?? match.seasonId ?? undefined)
+        : match.seasonId,
+    leagueId: match.leagueId,
+    homeTeamId:
+      "_sportMonksHomeTeamId" in match
+        ? (match._sportMonksHomeTeamId ?? undefined)
+        : undefined,
+    awayTeamId:
+      "_sportMonksAwayTeamId" in match
+        ? (match._sportMonksAwayTeamId ?? undefined)
+        : undefined,
+  };
+  if (
+    base.fixtureId ||
+    !sportMonksEnabled()
+  ) {
+    return base;
+  }
+
+  const include = "participants;league.country;state;venue";
+  const inplayFixtures = await getSportMonksInplayLivescores(include).catch(
+    () => [] as SportMonksFixture[],
+  );
+  let fixture =
+    inplayFixtures.find((row) => sportMonksVsBet62Match(row, match)) ?? null;
+  if (!fixture) {
+    const startDate = String(match.date ?? "").trim() || new Date().toISOString().slice(0, 10);
+    const scheduledFixtures = await getSportMonksFixturesBetween({
+      startDate,
+      endDate: startDate,
+      include,
+    }).catch(() => [] as SportMonksFixture[]);
+    fixture =
+      scheduledFixtures.find((row) => sportMonksVsBet62Match(row, match)) ??
+      null;
+  }
+  if (!fixture) return base;
+  const teams = sportMonksTeams(fixture);
+  return {
+    fixtureId: base.fixtureId ?? String(fixture.id ?? ""),
+    seasonId:
+      base.seasonId ??
+      (fixture.season_id == null ? undefined : String(fixture.season_id)),
+    leagueId:
+      base.leagueId ??
+      (fixture.league_id == null ? undefined : String(fixture.league_id)),
+    homeTeamId:
+      base.homeTeamId ??
+      (teams.home?.id == null ? undefined : String(teams.home.id)),
+    awayTeamId:
+      base.awayTeamId ??
+      (teams.away?.id == null ? undefined : String(teams.away.id)),
+  };
+}
+
+function mapSportMonksStandings(rows: SportMonksStanding[]): Array<{
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+}> {
+  return rows
+    .map((row) => {
+      const record = row as Record<string, unknown>;
+      const participant =
+        record["participant"] && typeof record["participant"] === "object"
+          ? (record["participant"] as Record<string, unknown>)
+          : {};
+      const detailEntries = Array.isArray(record["details"])
+        ? (record["details"] as Array<Record<string, unknown>>)
+        : [];
+      const details: Record<string, unknown> =
+        record["details"] &&
+        typeof record["details"] === "object" &&
+        !Array.isArray(record["details"])
+          ? { ...(record["details"] as Record<string, unknown>) }
+          : {};
+      for (const detail of detailEntries) {
+        const type =
+          detail["type"] && typeof detail["type"] === "object"
+            ? (detail["type"] as Record<string, unknown>)
+            : {};
+        const key = normalizeSportEntityName(
+          String(
+            type["developer_name"] ??
+              type["name"] ??
+              detail["name"] ??
+              "",
+          ),
+        );
+        if (!key) continue;
+        details[key] = detail["value"] ?? detail["score"] ?? detail["total"];
+      }
+      return {
+        pos: Number(record["position"] ?? 0),
+        name: String(
+          participant["name"] ?? participant["display_name"] ?? "",
+        ),
+        played: Number(details["played"] ?? record["played"] ?? 0),
+        won: Number(details["won"] ?? record["won"] ?? 0),
+        drawn: Number(
+          details["draw"] ??
+            details["drawn"] ??
+            record["drawn"] ??
+            record["draw"] ??
+            0,
+        ),
+        lost: Number(details["lost"] ?? record["lost"] ?? 0),
+        gf: Number(
+          details["goals_for"] ?? details["gf"] ?? record["goals_for"] ?? 0,
+        ),
+        ga: Number(
+          details["goals_against"] ??
+            details["ga"] ??
+            record["goals_against"] ??
+            0,
+        ),
+        pts: Number(details["points"] ?? record["points"] ?? 0),
+      };
+    })
+    .filter((row) => row.name && row.pos > 0)
+    .sort((a, b) => a.pos - b.pos);
+}
+
+async function resolveSportMonksSeasonId(args: {
+  seasonId?: string;
+  matchId?: string;
+  leagueId?: string;
+}): Promise<string | undefined> {
+  const explicitSeasonId = String(args.seasonId ?? "").trim();
+  if (explicitSeasonId) return explicitSeasonId;
+  const matchId = String(args.matchId ?? "").trim();
+  if (matchId) {
+    const ctx = await resolveSportMonksFixtureContext(matchId);
+    const seasonId = String(ctx.seasonId ?? "").trim();
+    if (seasonId) return seasonId;
+  }
+  const leagueId = String(args.leagueId ?? "").trim();
+  if (!leagueId || !sportMonksEnabled()) return undefined;
+  const league = await getSportMonksLeagueById({
+    leagueId,
+    include: "currentseason",
+  }).catch(() => null);
+  const currentSeason =
+    league?.currentseason ?? league?.currentSeason ?? null;
+  return currentSeason?.id == null ? undefined : String(currentSeason.id);
+}
+
+function mapSportMonksLineups(
+  fixture: SportMonksFixture,
+): {
+  confirmed: boolean;
+  home: { formation?: string; coach?: string; starters: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>; bench: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }> };
+  away: { formation?: string; coach?: string; starters: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>; bench: Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }> };
+} {
+  const teams = sportMonksTeams(fixture);
+  const homeId = String(teams.home?.id ?? "");
+  const awayId = String(teams.away?.id ?? "");
+  const rows = Array.isArray(fixture.lineups) ? fixture.lineups : [];
+  const emptySide = {
+    formation: undefined,
+    coach: undefined,
+    starters: [] as Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>,
+    bench: [] as Array<{ name: string; shortName?: string; position: string; number: string; rating?: number }>,
+  };
+  const result = {
+    confirmed: false,
+    home: { ...emptySide },
+    away: { ...emptySide },
+  };
+  for (const row of rows) {
+    const participantId = String(
+      row.participant_id ?? row.team_id ?? "",
+    );
+    const side =
+      participantId && participantId === homeId
+        ? result.home
+        : participantId && participantId === awayId
+          ? result.away
+          : null;
+    if (!side) continue;
+    const name = String(
+      row.player?.display_name ??
+        row.player?.common_name ??
+        row.player_name ??
+        [row.player?.firstname, row.player?.lastname]
+          .filter(Boolean)
+          .join(" "),
+    ).trim();
+    if (!name) continue;
+    const typeText = (Array.isArray(row.details) ? row.details : [])
+      .map((detail) =>
+        String(
+          detail.type?.developer_name ?? detail.type?.name ?? detail.value ?? "",
+        ).toLowerCase(),
+      )
+      .join(" ");
+    const item = {
+      name,
+      shortName: name,
+      position: String(row.position_id ?? row.formation_field ?? ""),
+      number: String(row.jersey_number ?? ""),
+    };
+    if (
+      typeText.includes("bench") ||
+      typeText.includes("substitute") ||
+      typeText.includes("sub")
+    ) {
+      side.bench.push(item);
+    } else {
+      side.starters.push(item);
+    }
+    result.confirmed = true;
+  }
+  return result;
+}
+
 // ─── Próximos Jogos ─────────────────────────────────────────────────────────
-// Used to be sourced from SportMonks team schedules; that provider was
-// removed. This endpoint currently returns empty data by design.
-router.get("/team-upcoming", async (_req: Request, res: Response) => {
-  res.json({ fixtures: [] });
+router.get("/team-upcoming", async (req: Request, res: Response) => {
+  const matchId = String(req.query["matchId"] ?? "").trim();
+  const side = String(req.query["side"] ?? "home").trim().toLowerCase();
+  const limit = Math.max(1, Math.min(10, Number(req.query["limit"] ?? 5) || 5));
+  if (!matchId || !sportMonksEnabled()) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const ctx = await resolveSportMonksFixtureContext(matchId);
+  const teamId =
+    side === "away" ? ctx.awayTeamId : ctx.homeTeamId;
+  if (!teamId) {
+    res.json({ fixtures: [] });
+    return;
+  }
+  const startDate = new Date().toISOString().slice(0, 10);
+  const endDate = new Date(Date.now() + 30 * 24 * 60 * 60_000)
+    .toISOString()
+    .slice(0, 10);
+  const fixtures = await getSportMonksFixturesByTeamRange({
+    teamId,
+    startDate,
+    endDate,
+    include: "participants;league.country;state",
+  }).catch(() => [] as SportMonksFixture[]);
+  const mapped = fixtures
+    .filter((fixture) => String(fixture.id) !== String(ctx.fixtureId ?? ""))
+    .slice(0, limit)
+    .map((fixture) => {
+      const teams = sportMonksTeams(fixture);
+      const kickoffMs = sportMonksTimestampMs(fixture);
+      const kickoff = kickoffMs ? mrDogeStartTimeToLisbon(new Date(kickoffMs).toISOString()) : { date: "", time: "" };
+      return {
+        id: String(fixture.id ?? ""),
+        home: String(teams.home?.name ?? ""),
+        away: String(teams.away?.name ?? ""),
+        league: sportMonksLeagueName(fixture),
+        country: sportMonksCountryName(fixture),
+        date: kickoff.date,
+        time: kickoff.time,
+      };
+    });
+  res.json({ fixtures: mapped });
 });
 
 // ─── Player Profile ─────────────────────────────────────────────────────────
@@ -13055,10 +13758,18 @@ router.get("/team-upcoming", async (_req: Request, res: Response) => {
 // (confirmed real 2026-09-09) is the real replacement — ids are opaque cuid
 // strings, not numbers, hence the frontend's playerId type moving from
 // number to string alongside this fix.
-// GOAL API and api-tennis both removed 2026-09-20 (user decision) —
-// football and tennis player profiles always 404 now.
-router.get("/player-profile/:id", async (_req: Request, res: Response) => {
-  res.status(404).json({ error: "player profile unavailable" });
+router.get("/player-profile/:id", async (req: Request, res: Response) => {
+  const id = String(req.params["id"] ?? "").trim();
+  if (!id || !sportMonksEnabled()) {
+    res.status(404).json({ error: "player profile unavailable" });
+    return;
+  }
+  const player = await getSportMonksPlayerById(id).catch(() => null);
+  if (!player) {
+    res.status(404).json({ error: "player profile unavailable" });
+    return;
+  }
+  res.json({ player });
 });
 
 // ─── Live Storylines ────────────────────────────────────────────────────────
@@ -13071,25 +13782,84 @@ router.get("/storylines/:matchId", async (_req: Request, res: Response) => {
 });
 
 // ─── Lineups ────────────────────────────────────────────────────────────────
-// GOAL API removed 2026-09-20 (user decision) — always empty now, same
-// dead-but-valid shape the frontend already treats as "not available".
 // ─── Top Scorers (Artilheiros) ────────────────────────────────────────────
-// GOAL API's /leagues/:id/top-scorers — confirmed real (2026-09-09). Keyed
-// by GOAL API's own leagueId (fx.leagueId, now populated on the football
-// upcoming/live builders above), not by league name like the legacy
-// /league-standings route.
-// GOAL API removed 2026-09-20 (user decision) — always empty now.
-router.get("/top-scorers/:leagueId", async (_req: Request, res: Response) => {
-  res.json({ scorers: [] });
+router.get("/top-scorers/:leagueId", async (req: Request, res: Response) => {
+  const leagueId = String(req.params["leagueId"] ?? "").trim();
+  const matchId = String(req.query["matchId"] ?? "").trim();
+  const seasonId = await resolveSportMonksSeasonId({
+    seasonId: String(req.query["seasonId"] ?? "").trim(),
+    matchId,
+    leagueId,
+  });
+  if (!seasonId || !sportMonksEnabled()) {
+    res.json({ scorers: [] });
+    return;
+  }
+  const scorers = await getSportMonksTopScorersBySeason(
+    seasonId,
+    "player;participant",
+  ).catch(() => [] as SportMonksTopScorer[]);
+  const mapped = scorers
+    .map((row, index) => {
+      const record = row as Record<string, unknown>;
+      const player =
+        record["player"] && typeof record["player"] === "object"
+          ? (record["player"] as Record<string, unknown>)
+          : {};
+      const participant =
+        record["participant"] && typeof record["participant"] === "object"
+          ? (record["participant"] as Record<string, unknown>)
+          : {};
+      return {
+        rank: Number(record["position"] ?? index + 1),
+        playerName: String(
+          player["display_name"] ??
+            player["common_name"] ??
+            player["name"] ??
+            "",
+        ),
+        teamName: String(participant["name"] ?? ""),
+        goals: Number(record["goals"] ?? record["total"] ?? 0),
+        assists: Number(record["assists"] ?? 0),
+        penaltyGoals: Number(record["penalty_goals"] ?? 0),
+      };
+    })
+    .filter((row) => row.playerName);
+  res.json({ scorers: mapped });
 });
 
 router.get("/lineups/:matchId", async (req: Request, res: Response) => {
-  void req;
-  res.json({
-    confirmed: false,
-    home: { starters: [], bench: [] },
-    away: { starters: [], bench: [] },
-  });
+  const matchId = String(req.params["matchId"] ?? "").trim();
+  if (!matchId || !sportMonksEnabled()) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  const ctx = await resolveSportMonksFixtureContext(matchId);
+  if (!ctx.fixtureId) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  const fixture = await getSportMonksFixtureById({
+    fixtureId: ctx.fixtureId,
+    include: "participants;lineups.player;lineups.details.type",
+  }).catch(() => null);
+  if (!fixture) {
+    res.json({
+      confirmed: false,
+      home: { starters: [], bench: [] },
+      away: { starters: [], bench: [] },
+    });
+    return;
+  }
+  res.json(mapSportMonksLineups(fixture));
 });
 
 // GOAL API's own model-computed match-outcome probabilities — a distinct
@@ -13097,9 +13867,21 @@ router.get("/lineups/:matchId", async (req: Request, res: Response) => {
 // (predictions.ts's publishCombosForMatch, which works off match.odds/
 // markets, not this endpoint). Informational only — feeds the "Previsão"
 // card, not settlement.
-// GOAL API removed 2026-09-20 (user decision) — always empty now.
-router.get("/prediction/:matchId", async (_req: Request, res: Response) => {
-  res.json({ prediction: null });
+router.get("/prediction/:matchId", async (req: Request, res: Response) => {
+  const matchId = String(req.params["matchId"] ?? "").trim();
+  if (!matchId || !sportMonksEnabled()) {
+    res.json({ prediction: null });
+    return;
+  }
+  const ctx = await resolveSportMonksFixtureContext(matchId);
+  if (!ctx.fixtureId) {
+    res.json({ prediction: null });
+    return;
+  }
+  const predictions = await getSportMonksPredictionsByFixtureId(
+    ctx.fixtureId,
+  ).catch(() => [] as Record<string, unknown>[]);
+  res.json({ prediction: predictions[0] ?? null });
 });
 
 // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────
