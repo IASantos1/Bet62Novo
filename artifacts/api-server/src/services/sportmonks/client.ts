@@ -247,6 +247,36 @@ export function sportMonksEnabled(): boolean {
   return CONFIG.SPORTMONKS_API_TOKEN.trim().length > 0;
 }
 
+function sportMonksFallbackDate(daysFromTodayUtc: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromTodayUtc);
+  return d.toISOString().slice(0, 10);
+}
+
+function sportMonksStateText(fixture: SportMonksFixture): string {
+  return String(
+    fixture.state?.short_name ??
+      fixture.state?.developer_name ??
+      fixture.state?.state ??
+      fixture.state?.name ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function sportMonksIsUpcomingState(fixture: SportMonksFixture): boolean {
+  const state = sportMonksStateText(fixture);
+  return /not_started|ns|upcoming|scheduled/.test(state);
+}
+
+function sportMonksIsFinishedState(fixture: SportMonksFixture): boolean {
+  const state = sportMonksStateText(fixture);
+  return /finished|full.?time|after_extra_time|after_penalties|ended|closed|ft/.test(
+    state,
+  );
+}
+
 function buildUrl(path: string, query?: Record<string, string | number | boolean | undefined>): string {
   const base = CONFIG.SPORTMONKS_BASE_URL.replace(/\/+$/, "");
   const url = new URL(`${base}${path.startsWith("/") ? path : `/${path}`}`);
@@ -303,7 +333,20 @@ export async function getSportMonksInplayLivescores(include?: string): Promise<S
       ttlMs: 5_000,
     },
   );
-  return Array.isArray(data) ? data : data ? [data] : [];
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  if (rows.length > 0) return rows;
+
+  const fallback = await getSportMonksFixturesBetween({
+    startDate: sportMonksFallbackDate(-1),
+    endDate: sportMonksFallbackDate(1),
+    include,
+  }).catch(() => [] as SportMonksFixture[]);
+
+  return fallback.filter(
+    (fixture) =>
+      !sportMonksIsUpcomingState(fixture) &&
+      !sportMonksIsFinishedState(fixture),
+  );
 }
 
 export async function getSportMonksFixturesBetween(args: {

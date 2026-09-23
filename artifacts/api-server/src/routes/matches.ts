@@ -2569,6 +2569,7 @@ function footballLeagueAllowedStrict(
 
 const FOOTBALL_PRIMARY_VISIBILITY_PRIORITY_MAX = 60;
 const FOOTBALL_MINOR_LIVE_FALLBACK_LIMIT = 2;
+const FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT = 8;
 
 function isMajorWomensLeague(name: string): boolean {
   const lower = String(name ?? "")
@@ -8623,19 +8624,30 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       endDate,
       include: "participants;league.country;state;venue",
     }).catch(() => [] as SportMonksFixture[]);
-    const visibleFixtures = fixtures
+    const eligibleFixtures = fixtures
       .filter((fixture) => !sportMonksIsFinished(fixture))
       .filter((fixture) => {
         const kickoffMs = sportMonksTimestampMs(fixture);
         return kickoffMs == null || kickoffMs >= Date.now() - 30 * 60 * 1000;
-      })
+      });
+    const preferredFixtures = eligibleFixtures.filter(
+      (fixture) =>
+        footballCompetitionVisibilityBand(
+          sportMonksCountryName(fixture),
+          sportMonksLeagueName(fixture),
+        ) === "preferred",
+    );
+    const fallbackFixtures = eligibleFixtures
       .filter(
         (fixture) =>
           footballCompetitionVisibilityBand(
             sportMonksCountryName(fixture),
             sportMonksLeagueName(fixture),
-          ) === "preferred",
-      );
+          ) === "fallback",
+      )
+      .slice(0, FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT);
+    const visibleFixtures =
+      preferredFixtures.length > 0 ? preferredFixtures : fallbackFixtures;
     const oddsByFixtureId = await fetchSportMonksOddsBatch(
       visibleFixtures
         .map((fixture) =>
