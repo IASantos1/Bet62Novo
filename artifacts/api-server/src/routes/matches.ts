@@ -26,6 +26,13 @@ import {
   getBsdPlayers,
   getBsdPlayerStats,
   getBsdPlayerTransfers,
+  getBsdManagerById,
+  getBsdManagerCareer,
+  getBsdManagerMatches,
+  getBsdManagers,
+  getBsdRefereeById,
+  getBsdRefereeMatches,
+  getBsdReferees,
   getBsdTeamById,
   getBsdTeamFixtures,
   getBsdTeams,
@@ -33,15 +40,21 @@ import {
   getBsdTransfers,
   getBsdTransfersLedger,
   getBsdTransfersRoutes,
+  getBsdVenueById,
+  getBsdVenueCompetitions,
+  getBsdVenues,
   getBsdWorldCupSquadByTeam,
   getBsdWorldCupSquads,
   type BSDEvent,
   type BSDH2HResponse,
   type BSDLeague,
   type BSDLineupsResponse,
+  type BSDManager,
+  type BSDManagerCareerRow,
   type BSDOddsRow,
   type BSDPlayer,
   type BSDPredictionResponse,
+  type BSDReferee,
   type BSDStandingRow,
   type BSDStatsResponse,
   type BSDTeam,
@@ -50,6 +63,7 @@ import {
   type BSDTransferRouteRow,
   type BSDTransferRow,
   type BSDVenue,
+  type BSDVenueCompetitionRow,
   type BSDWorldCupSquadRow,
 } from "../services/bsd/client.js";
 
@@ -971,6 +985,106 @@ function mapSocialItem(row: Record<string, unknown>) {
     publishedAt: pickText(row, ["published_at", "created_at", "date"]) || null,
     source: pickText(row, ["source", "provider"]) || null,
     thumbnailUrl: pickText(row, ["thumbnail_url", "image_url"]) || null,
+  };
+}
+
+function mapManagerSummary(row: BSDManager) {
+  return {
+    id: row.id != null ? String(row.id) : null,
+    name: text(row.name) || null,
+    shortName: text(row.short_name) || null,
+    nationality: text(row.nationality) || null,
+    nationalityCode: text(row.nationality_code) || null,
+    teamId: row.team_id != null ? String(row.team_id) : null,
+    team: text(row.team_name) || null,
+    teamLogoUrl: row.team_id != null ? toTeamLogo(row.team_id) ?? null : null,
+    preferredFormation: text(row.preferred_formation) || null,
+    tacticalProfile: text(row.tactical_profile) || null,
+    teamStyle: text(row.team_style) || null,
+    matches: row.matches != null ? parseNumber(row.matches) : null,
+    wins: row.wins != null ? parseNumber(row.wins) : null,
+    draws: row.draws != null ? parseNumber(row.draws) : null,
+    losses: row.losses != null ? parseNumber(row.losses) : null,
+    ppm: row.ppm != null ? parseNumber(row.ppm) : null,
+  };
+}
+
+function mapManagerCareerRow(row: BSDManagerCareerRow) {
+  const appointmentEffect = getNestedRecord(row, "appointment_effect");
+  const home = getNestedRecord(row, "home");
+  const away = getNestedRecord(row, "away");
+  return {
+    teamId: pickText(getNestedRecord(row, "team") ?? row, ["id", "team_id"]) || null,
+    team: pickText(getNestedRecord(row, "team") ?? row, ["name", "team_name", "team"]) || null,
+    fromDate: pickDate(row, ["from_date", "start_date", "appointed_at"]) || null,
+    toDate: pickDate(row, ["to_date", "end_date", "left_at"]) || null,
+    matches: row["matches"] != null ? parseNumber(row["matches"]) : null,
+    wins: row["wins"] != null ? parseNumber(row["wins"]) : null,
+    draws: row["draws"] != null ? parseNumber(row["draws"]) : null,
+    losses: row["losses"] != null ? parseNumber(row["losses"]) : null,
+    points: row["points"] != null ? parseNumber(row["points"]) : null,
+    ppm: row["ppm"] != null ? parseNumber(row["ppm"]) : null,
+    goalsFor: row["goals_for"] != null ? parseNumber(row["goals_for"]) : null,
+    goalsAgainst: row["goals_against"] != null ? parseNumber(row["goals_against"]) : null,
+    goalDiff: row["goal_diff"] != null ? parseNumber(row["goal_diff"]) : null,
+    home: home
+      ? {
+          matches: home["matches"] != null ? parseNumber(home["matches"]) : null,
+          wins: home["wins"] != null ? parseNumber(home["wins"]) : null,
+          draws: home["draws"] != null ? parseNumber(home["draws"]) : null,
+          losses: home["losses"] != null ? parseNumber(home["losses"]) : null,
+          points: home["points"] != null ? parseNumber(home["points"]) : null,
+          ppm: home["ppm"] != null ? parseNumber(home["ppm"]) : null,
+        }
+      : null,
+    away: away
+      ? {
+          matches: away["matches"] != null ? parseNumber(away["matches"]) : null,
+          wins: away["wins"] != null ? parseNumber(away["wins"]) : null,
+          draws: away["draws"] != null ? parseNumber(away["draws"]) : null,
+          losses: away["losses"] != null ? parseNumber(away["losses"]) : null,
+          points: away["points"] != null ? parseNumber(away["points"]) : null,
+          ppm: away["ppm"] != null ? parseNumber(away["ppm"]) : null,
+        }
+      : null,
+    appointmentEffect: appointmentEffect
+      ? {
+          window: appointmentEffect["window"] != null ? parseNumber(appointmentEffect["window"]) : null,
+          before: getNestedRecord(appointmentEffect, "before"),
+          after: getNestedRecord(appointmentEffect, "after"),
+          ppmChange:
+            appointmentEffect["ppm_change"] != null ? parseNumber(appointmentEffect["ppm_change"]) : null,
+        }
+      : null,
+  };
+}
+
+function mapRefereeSummary(row: BSDReferee) {
+  return {
+    id: row.id != null ? String(row.id) : null,
+    name: text(row.name) || null,
+    country: text(row.country) || null,
+    countryCode: text(row.country_code) || null,
+    matches: row.matches != null ? parseNumber(row.matches) : null,
+    yellowCardsPerMatch:
+      row.yellow_cards_per_match != null ? parseNumber(row.yellow_cards_per_match) : null,
+    redCardsPerMatch:
+      row.red_cards_per_match != null ? parseNumber(row.red_cards_per_match) : null,
+    foulsPerMatch:
+      row.fouls_per_match != null ? parseNumber(row.fouls_per_match) : null,
+    penaltiesPerMatch:
+      row.penalties_per_match != null ? parseNumber(row.penalties_per_match) : null,
+  };
+}
+
+function mapVenueCompetition(row: BSDVenueCompetitionRow) {
+  return {
+    id: pickText(row, ["league_id", "competition_id", "id"]) || null,
+    name: pickText(row, ["league_name", "competition_name", "name"]) || null,
+    seasonId: pickText(row, ["season_id"]) || null,
+    season: pickText(row, ["season_name", "season"]) || null,
+    country: pickText(row, ["country", "country_name"]) || null,
+    logoUrl: toLeagueLogo(row["league_id"] ?? row["competition_id"] ?? row["id"]),
   };
 }
 
@@ -2121,6 +2235,209 @@ router.get("/worldcup/squads/:teamId", async (req: Request, res: Response) => {
     sendJson(res, { squad: payload ? mapWorldCupSquadRow(payload) : null });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ squad: null });
+  }
+});
+
+router.get("/managers", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdManagers({
+      name: String(req.query["name"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      nationalityCode: String(req.query["nationalityCode"] ?? "").trim() || undefined,
+      tacticalProfile: String(req.query["tacticalProfile"] ?? "").trim() || undefined,
+      teamStyle: String(req.query["teamStyle"] ?? "").trim() || undefined,
+      minMatches:
+        req.query["minMatches"] != null ? parseNumber(req.query["minMatches"]) : undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      managers: Array.isArray(payload.results) ? payload.results.map(mapManagerSummary) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, managers: [] });
+  }
+});
+
+router.get("/managers/:id", async (req: Request, res: Response) => {
+  try {
+    const managerId = String(req.params["id"] ?? "").trim();
+    if (!managerId) return res.status(400).json({ error: "manager id required" });
+    const manager = await getBsdManagerById(managerId);
+    if (!manager) return res.status(404).json({ error: "manager unavailable" });
+    sendJson(res, mapManagerSummary(manager));
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ error: "manager unavailable" });
+  }
+});
+
+router.get("/managers/:id/career", async (req: Request, res: Response) => {
+  try {
+    const managerId = String(req.params["id"] ?? "").trim();
+    if (!managerId) return res.status(400).json({ error: "manager id required" });
+    const rows = await getBsdManagerCareer({
+      managerId,
+      window:
+        req.query["window"] != null ? parseNumber(req.query["window"]) : undefined,
+    });
+    sendJson(res, {
+      career: rows
+        .filter((row): row is BSDManagerCareerRow => Boolean(row && typeof row === "object"))
+        .map(mapManagerCareerRow),
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ career: [] });
+  }
+});
+
+router.get("/managers/:id/matches", async (req: Request, res: Response) => {
+  try {
+    const managerId = String(req.params["id"] ?? "").trim();
+    if (!managerId) return res.status(400).json({ error: "manager id required" });
+    const payload = await getBsdManagerMatches({
+      managerId,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      status: String(req.query["status"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      matches: Array.isArray(payload.results) ? payload.results.map(mapLeagueEventCard) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, matches: [] });
+  }
+});
+
+router.get("/managers/:id/social", async (req: Request, res: Response) => {
+  try {
+    const managerId = String(req.params["id"] ?? "").trim();
+    if (!managerId) return res.status(400).json({ error: "manager id required" });
+    const rows = await getBsdEntitySocial({
+      entity: "managers",
+      id: managerId,
+      type: String(req.query["type"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 20))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, { items: rows.map(mapSocialItem) });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ items: [] });
+  }
+});
+
+router.get("/referees", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdReferees({
+      name: String(req.query["name"] ?? "").trim() || undefined,
+      countryCode: String(req.query["countryCode"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      minMatches:
+        req.query["minMatches"] != null ? parseNumber(req.query["minMatches"]) : undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      referees: Array.isArray(payload.results) ? payload.results.map(mapRefereeSummary) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, referees: [] });
+  }
+});
+
+router.get("/referees/:id", async (req: Request, res: Response) => {
+  try {
+    const refereeId = String(req.params["id"] ?? "").trim();
+    if (!refereeId) return res.status(400).json({ error: "referee id required" });
+    const referee = await getBsdRefereeById(refereeId);
+    if (!referee) return res.status(404).json({ error: "referee unavailable" });
+    sendJson(res, mapRefereeSummary(referee));
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ error: "referee unavailable" });
+  }
+});
+
+router.get("/referees/:id/matches", async (req: Request, res: Response) => {
+  try {
+    const refereeId = String(req.params["id"] ?? "").trim();
+    if (!refereeId) return res.status(400).json({ error: "referee id required" });
+    const payload = await getBsdRefereeMatches({
+      refereeId,
+      dateFrom: String(req.query["dateFrom"] ?? "").trim() || undefined,
+      dateTo: String(req.query["dateTo"] ?? "").trim() || undefined,
+      leagueId: String(req.query["leagueId"] ?? "").trim() || undefined,
+      seasonId: String(req.query["seasonId"] ?? "").trim() || undefined,
+      status: String(req.query["status"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      matches: Array.isArray(payload.results) ? payload.results.map(mapLeagueEventCard) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, matches: [] });
+  }
+});
+
+router.get("/venues", async (req: Request, res: Response) => {
+  try {
+    const payload = await getBsdVenues({
+      name: String(req.query["name"] ?? "").trim() || undefined,
+      countryCode: String(req.query["countryCode"] ?? "").trim() || undefined,
+      city: String(req.query["city"] ?? "").trim() || undefined,
+      minCapacity:
+        req.query["minCapacity"] != null ? parseNumber(req.query["minCapacity"]) : undefined,
+      teamId: String(req.query["teamId"] ?? "").trim() || undefined,
+      limit: Math.max(1, Math.min(200, parseNumber(req.query["limit"] ?? 50))),
+      offset: Math.max(0, parseNumber(req.query["offset"] ?? 0)),
+    });
+    sendJson(res, {
+      count: payload.count ?? (payload.results?.length ?? 0),
+      venues: Array.isArray(payload.results) ? payload.results.map(mapVenue) : [],
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ count: 0, venues: [] });
+  }
+});
+
+router.get("/venues/:id", async (req: Request, res: Response) => {
+  try {
+    const venueId = String(req.params["id"] ?? "").trim();
+    if (!venueId) return res.status(400).json({ error: "venue id required" });
+    const venue = await getBsdVenueById(venueId);
+    if (!venue) return res.status(404).json({ error: "venue unavailable" });
+    sendJson(res, {
+      ...mapVenue(venue),
+      countryCode: text(venue.country_code) || null,
+      latitude: venue.latitude != null ? parseNumber(venue.latitude) : null,
+      longitude: venue.longitude != null ? parseNumber(venue.longitude) : null,
+      imageUrl: `https://sports.bzzoiro.com/img/venue/${encodeURIComponent(venueId)}/`,
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ error: "venue unavailable" });
+  }
+});
+
+router.get("/venues/:id/competitions", async (req: Request, res: Response) => {
+  try {
+    const venueId = String(req.params["id"] ?? "").trim();
+    if (!venueId) return res.status(400).json({ error: "venue id required" });
+    const rows = await getBsdVenueCompetitions(venueId);
+    sendJson(res, {
+      competitions: rows
+        .filter((row): row is BSDVenueCompetitionRow => Boolean(row && typeof row === "object"))
+        .map(mapVenueCompetition),
+    });
+  } catch (error) {
+    res.status(formatErrorStatus(error, 500)).json({ competitions: [] });
   }
 });
 
