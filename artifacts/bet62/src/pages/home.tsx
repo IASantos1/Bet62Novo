@@ -3405,14 +3405,7 @@ type SidebarCatalogCompetition = {
   eventCount: number;
 };
 
-const MRDOGE_CATALOG_SPORTS = new Set([
-  "football",
-  "tennis",
-  "basketball",
-  "hockey",
-  "volleyball",
-  "baseball",
-]);
+const MRDOGE_CATALOG_SPORTS = new Set<string>();
 
 type SidebarTreeContentProps = {
   selectedSport: string;

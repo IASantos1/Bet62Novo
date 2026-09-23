@@ -46,7 +46,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   live_delay: "5",
   default_margin: "0.06",
   bet_limits_enabled: "true",
-  sports_enabled: "football,basketball,tennis,hockey,volleyball",
+  sports_enabled: "",
   cashout_enabled: "true",
   cashout_unfavorable_cycle_ms: "60000",
   cashout_unfavorable_open_ms: "15000",

@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { CONFIG } from "../lib/config.js";
 
 const router: IRouter = Router();
 
@@ -24,13 +23,9 @@ router.get("/version", (_req, res) => {
 router.get("/health-data-providers", (_req, res) => {
   const g = globalThis as any;
   res.json({
-    flags: {
-      sportMonksFootballEnabled: Boolean(CONFIG.SPORTMONKS_API_TOKEN),
-    },
-    keys: {
-      sportMonks: Boolean(CONFIG.SPORTMONKS_API_TOKEN),
-    },
-    activeProvider: CONFIG.SPORTMONKS_API_TOKEN ? "sportmonks" : null,
+    flags: {},
+    keys: {},
+    activeProvider: null,
     lastSuccessfulFetch: {},
     livePayloadDebug: g.__livePayloadDebug ?? null,
   });

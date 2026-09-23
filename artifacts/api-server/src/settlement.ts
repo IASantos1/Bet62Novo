@@ -4124,7 +4124,7 @@ function providerMatchIdPrefixesForSport(
 ): string[] {
   switch (sport) {
     case "football":
-      return ["sportmonks-football"];
+      return [];
     default:
       return [];
   }
@@ -4215,9 +4215,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  return /^sportmonks-football-.+$/.test(
-    String(matchId ?? "").trim(),
-  );
+  return false;
 }
 
 export function parseSelectionKickoffTimestamp(

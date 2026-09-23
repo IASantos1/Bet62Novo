@@ -30,11 +30,6 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
-const SPORTMONKS_API_TOKEN = process.env["SPORTMONKS_API_TOKEN"] ?? "";
-const SPORTMONKS_BASE_URL =
-  process.env["SPORTMONKS_BASE_URL"]?.trim() || "https://api.sportmonks.com/v3";
-const SPORTMONKS_ODDS_BOOKMAKER =
-  process.env["SPORTMONKS_ODDS_BOOKMAKER"]?.trim() || "bet365";
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
@@ -52,9 +47,6 @@ const SMYTDRYT_DEFAULT_STATS_HOST =
   process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
 
 export const CONFIG = {
-  SPORTMONKS_API_TOKEN,
-  SPORTMONKS_BASE_URL,
-  SPORTMONKS_ODDS_BOOKMAKER,
   BIGBANG_API_KEY,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
