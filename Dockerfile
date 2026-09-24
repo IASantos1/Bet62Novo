@@ -27,6 +27,18 @@ COPY lib/api-zod lib/api-zod
 COPY lib/db lib/db
 COPY scripts scripts
 
+# Vite inlines VITE_-prefixed vars into the frontend bundle at build time,
+# reading them from this RUN's own process env — Railway service variables
+# never reach a `docker build` stage unless declared as ARG here (and Railway
+# only passes them as --build-arg for ARGs the Dockerfile actually declares).
+# Without this, VITE_WINHOUSE_EMBED_KEY/LANG stay empty in the built bundle no
+# matter how many times the service variable is set or redeployed (Santos,
+# 2026-09-24 — WinHouse Sportsbook iframe loading blank in production).
+ARG VITE_WINHOUSE_EMBED_KEY
+ARG VITE_WINHOUSE_LANG
+ENV VITE_WINHOUSE_EMBED_KEY=$VITE_WINHOUSE_EMBED_KEY
+ENV VITE_WINHOUSE_LANG=$VITE_WINHOUSE_LANG
+
 RUN pnpm --filter @workspace/bet62 run build \
   && pnpm --filter @workspace/api-server run build
 
