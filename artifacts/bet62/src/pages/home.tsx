@@ -24094,11 +24094,21 @@ export default function Home({
                       />
                       <span className="text-xs text-zinc-400 leading-relaxed">
                         Li e aceito os{" "}
-                        <a href="#" className="text-red-400 hover:underline">
+                        <a
+                          href="/termos"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-red-400 hover:underline"
+                        >
                           Termos de Uso
                         </a>{" "}
                         e a{" "}
-                        <a href="#" className="text-red-400 hover:underline">
+                        <a
+                          href="/privacidade"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-red-400 hover:underline"
+                        >
                           Política de Privacidade
                         </a>
                       </span>

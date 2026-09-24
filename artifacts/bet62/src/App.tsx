@@ -24,6 +24,20 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import LivePage from "@/pages/live";
 import SplashScreen from "@/components/SplashScreen";
+import {
+  SobrePage,
+  ImprensaPage,
+  CarreirasPage,
+  AfiliadosPage,
+  TermosPage,
+  PrivacidadePage,
+  CookiesPage,
+  JogoResponsavelPage,
+  AjudaPage,
+  ContactoPage,
+  PagamentosPage,
+  RegrasPage,
+} from "@/pages/info-pages";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 
@@ -108,6 +122,18 @@ function Router() {
       <Route path="/live">{() => <LivePage />}</Route>
       <Route path="/liga/:id">{() => <Redirect to="/" />}</Route>
       <Route path="/league/:id">{() => <Redirect to="/" />}</Route>
+      <Route path="/sobre" component={SobrePage} />
+      <Route path="/imprensa" component={ImprensaPage} />
+      <Route path="/carreiras" component={CarreirasPage} />
+      <Route path="/afiliados" component={AfiliadosPage} />
+      <Route path="/termos" component={TermosPage} />
+      <Route path="/privacidade" component={PrivacidadePage} />
+      <Route path="/cookies" component={CookiesPage} />
+      <Route path="/jogo-responsavel" component={JogoResponsavelPage} />
+      <Route path="/ajuda" component={AjudaPage} />
+      <Route path="/contacto" component={ContactoPage} />
+      <Route path="/pagamentos" component={PagamentosPage} />
+      <Route path="/regras" component={RegrasPage} />
       <Route path="/admin">
         {() => (
           <Suspense
