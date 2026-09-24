@@ -334,78 +334,42 @@ function applyLiveSocketOverlay(match: LiveMatchState): LiveMatchState {
     asianHandicapRows.find((row) => parseNumber(row["line"]) === 0) ??
     asianHandicapRows[0] ??
     null;
+  const livePrice = (current: number, candidate: unknown): number => {
+    const parsed = parseNumber(candidate);
+    return parsed > 1 ? parsed : current;
+  };
+  const liveLine = (current: number, candidate: unknown): number => {
+    const parsed = parseNumber(candidate);
+    return Number.isFinite(parsed) ? parsed : current;
+  };
 
   const odds: Odds1X2 = {
-    home:
-      match.odds.home > 1
-        ? match.odds.home
-        : parseNumber(matchWinner?.["home"]) || match.odds.home,
-    draw:
-      match.odds.draw > 1
-        ? match.odds.draw
-        : parseNumber(matchWinner?.["draw"]) || match.odds.draw,
-    away:
-      match.odds.away > 1
-        ? match.odds.away
-        : parseNumber(matchWinner?.["away"]) || match.odds.away,
+    home: livePrice(match.odds.home, matchWinner?.["home"]),
+    draw: livePrice(match.odds.draw, matchWinner?.["draw"]),
+    away: livePrice(match.odds.away, matchWinner?.["away"]),
   };
 
   const markets: GenericMarkets = {
     ...match.markets,
     bothTeamsScore: {
-      yes:
-        match.markets.bothTeamsScore.yes > 1
-          ? match.markets.bothTeamsScore.yes
-          : parseNumber(btts?.["yes"]) || match.markets.bothTeamsScore.yes,
-      no:
-        match.markets.bothTeamsScore.no > 1
-          ? match.markets.bothTeamsScore.no
-          : parseNumber(btts?.["no"]) || match.markets.bothTeamsScore.no,
+      yes: livePrice(match.markets.bothTeamsScore.yes, btts?.["yes"]),
+      no: livePrice(match.markets.bothTeamsScore.no, btts?.["no"]),
     },
     totalGoals: {
       ...match.markets.totalGoals,
-      over15:
-        match.markets.totalGoals.over15 > 1
-          ? match.markets.totalGoals.over15
-          : parseNumber(overUnder?.["over_15"]) || match.markets.totalGoals.over15,
-      under15:
-        match.markets.totalGoals.under15 > 1
-          ? match.markets.totalGoals.under15
-          : parseNumber(overUnder?.["under_15"]) || match.markets.totalGoals.under15,
-      over25:
-        match.markets.totalGoals.over25 > 1
-          ? match.markets.totalGoals.over25
-          : parseNumber(overUnder?.["over_25"]) || match.markets.totalGoals.over25,
-      under25:
-        match.markets.totalGoals.under25 > 1
-          ? match.markets.totalGoals.under25
-          : parseNumber(overUnder?.["under_25"]) || match.markets.totalGoals.under25,
-      over35:
-        match.markets.totalGoals.over35 > 1
-          ? match.markets.totalGoals.over35
-          : parseNumber(overUnder?.["over_35"]) || match.markets.totalGoals.over35,
-      under35:
-        match.markets.totalGoals.under35 > 1
-          ? match.markets.totalGoals.under35
-          : parseNumber(overUnder?.["under_35"]) || match.markets.totalGoals.under35,
+      over15: livePrice(match.markets.totalGoals.over15, overUnder?.["over_15"]),
+      under15: livePrice(match.markets.totalGoals.under15, overUnder?.["under_15"]),
+      over25: livePrice(match.markets.totalGoals.over25, overUnder?.["over_25"]),
+      under25: livePrice(match.markets.totalGoals.under25, overUnder?.["under_25"]),
+      over35: livePrice(match.markets.totalGoals.over35, overUnder?.["over_35"]),
+      under35: livePrice(match.markets.totalGoals.under35, overUnder?.["under_35"]),
     },
     asianHandicap:
       levelAsianHandicap != null
         ? {
-            line:
-              match.markets.asianHandicap.line !== 0
-                ? match.markets.asianHandicap.line
-                : parseNumber(levelAsianHandicap["line"]),
-            home:
-              match.markets.asianHandicap.home > 1
-                ? match.markets.asianHandicap.home
-                : parseNumber(levelAsianHandicap["home"]) ||
-                  match.markets.asianHandicap.home,
-            away:
-              match.markets.asianHandicap.away > 1
-                ? match.markets.asianHandicap.away
-                : parseNumber(levelAsianHandicap["away"]) ||
-                  match.markets.asianHandicap.away,
+            line: liveLine(match.markets.asianHandicap.line, levelAsianHandicap["line"]),
+            home: livePrice(match.markets.asianHandicap.home, levelAsianHandicap["home"]),
+            away: livePrice(match.markets.asianHandicap.away, levelAsianHandicap["away"]),
           }
         : match.markets.asianHandicap,
   };
@@ -498,6 +462,58 @@ function statsLabel(key: string): string {
   return labels[key] ?? key.replace(/_/g, " ");
 }
 
+function statDisplayValue(value: unknown): string {
+  if (value == null) return "-";
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "-";
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || "-";
+  }
+  if (typeof value === "boolean") {
+    return value ? "Sim" : "Não";
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "-";
+  }
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = [
+    "value",
+    "total",
+    "display",
+    "label",
+    "percentage",
+    "percent",
+    "home",
+    "away",
+    "xg",
+  ];
+  for (const key of preferredKeys) {
+    const candidate = record[key];
+    if (candidate == null) continue;
+    if (typeof candidate === "number") {
+      return Number.isFinite(candidate) ? String(candidate) : "-";
+    }
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+
+  const numericEntries = Object.values(record).filter(
+    (entry): entry is number | string =>
+      (typeof entry === "number" && Number.isFinite(entry)) ||
+      (typeof entry === "string" && entry.trim().length > 0),
+  );
+  if (numericEntries.length === 1) {
+    return String(numericEntries[0]);
+  }
+
+  return "-";
+}
+
 function buildMatchStats(stats: BSDStatsResponse | null): MatchStatsGroup[] {
   const home = stats?.stats?.home ?? {};
   const away = stats?.stats?.away ?? {};
@@ -520,8 +536,8 @@ function buildMatchStats(stats: BSDStatsResponse | null): MatchStatsGroup[] {
       title: "Estatísticas",
       rows: keys.map((key) => ({
         name: statsLabel(key),
-        home: String(home[key] ?? "-"),
-        away: String(away[key] ?? "-"),
+        home: statDisplayValue(home[key]),
+        away: statDisplayValue(away[key]),
       })),
     },
   ];
@@ -549,6 +565,13 @@ function applyOddsRows(rows: BSDOddsRow[]): {
     const key = `${group}::${name}`;
     const existing = grouped.get(key);
     if (existing) {
+      const existingChoice = existing.choices.find(
+        (choice) => normalizeOutcome(choice.label) === normalizeOutcome(label),
+      );
+      if (existingChoice) {
+        if (price > existingChoice.odds) existingChoice.odds = price;
+        return;
+      }
       existing.choices.push({ name: label, label, odds: price });
       return;
     }
