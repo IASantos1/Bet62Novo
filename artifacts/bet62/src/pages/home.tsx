@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
+import WinHouseSportsbookEmbed from "@/components/WinHouseSportsbookEmbed";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -475,7 +476,16 @@ const TEAM_BANNERS: Record<string, string> = {
   "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
-type MainTab = "home" | "sports" | "live" | "casino" | "promos" | "mybets" | "wallet" | "profile";
+type MainTab =
+  | "home"
+  | "sportsbook"
+  | "sports"
+  | "live"
+  | "casino"
+  | "promos"
+  | "mybets"
+  | "wallet"
+  | "profile";
 
 type CasinoGame = {
   id: string;
@@ -519,6 +529,7 @@ function normalizeMainTabPath(path: string): string {
 
 function getPathForMainTab(tab: MainTab): string {
   if (tab === "home") return "/destaques";
+  if (tab === "sportsbook") return "/sportsbook";
   if (tab === "sports") return "/esportes";
   if (tab === "live") return "/ao-vivo";
   if (tab === "casino") return "/casino";
@@ -5114,6 +5125,8 @@ export default function Home({
 
   const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
   const activeTabRef = useRef(activeTab);
+  const isShellOnlyTab =
+    activeTab === "casino" || activeTab === "sportsbook";
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
@@ -8780,6 +8793,9 @@ export default function Home({
     (id: typeof activeTab, onSelect?: () => void) => {
       const prev = activeTabRef.current;
       if (prev !== id) setActiveTab(id);
+      if (id === "sportsbook" || id === "casino") {
+        setExpandedMatch(null);
+      }
       const targetPath = getPathForMainTab(id);
       const currentPath = normalizeMainTabPath(window.location.pathname);
       if (currentPath !== targetPath) navigate(targetPath);
@@ -20614,7 +20630,7 @@ export default function Home({
       >
         <div className="flex items-center justify-between px-4 h-16 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-4">
-            {activeTab !== "casino" && (
+            {!isShellOnlyTab && (
               <button
                 className="lg:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors"
                 onClick={() => setSidebarOpen(true)}
@@ -20631,6 +20647,7 @@ export default function Home({
             <div className="hidden lg:flex items-center ml-12 h-16">
               {[
                 { id: "home", icon: <Star size={15} />, label: "DESTAQUES" },
+                { id: "sportsbook", icon: <Flag size={15} />, label: "SPORT" },
                 { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
                 { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
                 { id: "casino", icon: <Activity size={15} />, label: "CASINO" },
@@ -20818,7 +20835,7 @@ export default function Home({
           {(
             [
               { id: "home", icon: HomeIcon, label: "Início", badge: false },
-              { id: "sports", icon: Trophy, label: "Esportes", badge: false },
+              { id: "sportsbook", icon: Flag, label: "Sport", badge: false },
               { id: "live", icon: Activity, label: "Ao Vivo", badge: true },
             ] as const
           ).map((tab) => (
@@ -20843,7 +20860,7 @@ export default function Home({
             <Dices size={17} />
             <span className="text-[8.5px] font-semibold">Casino</span>
           </button>
-          {activeTab !== "casino" && (
+          {!isShellOnlyTab && (
             <button
               aria-label="Boletim"
               {...makeTap(() => setBetSlipOpenMobile(true))}
@@ -20865,7 +20882,7 @@ export default function Home({
 
       {/* MOBILE SIDEBAR OVERLAY */}
       <AnimatePresence>
-        {sidebarOpen && activeTab !== "casino" && (
+        {sidebarOpen && !isShellOnlyTab && (
           <>
             <motion.div
               initial={{ opacity: 0 }}
@@ -20924,81 +20941,83 @@ export default function Home({
       {/* MAIN — 3-column desktop layout */}
       <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
         {/* DESKTOP LEFT SIDEBAR — always visible on lg+ */}
-        <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
-          <div className="p-3">
-            {activeTab === "casino" ? (
-              <div className="space-y-3">
-                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-500/10 to-transparent p-3">
-                  <div className="flex items-center gap-2 text-violet-300 text-[11px] font-black uppercase tracking-[0.18em]">
-                    <Gift size={14} />
-                    Promoções
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-300 leading-relaxed">
-                    Destaques, campanhas e atalhos rápidos do casino numa coluna própria.
-                  </p>
-                  <button
-                    {...makeTap(() => selectMainTab("promos", fetchCashback))}
-                    className="mt-3 w-full rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-wide py-2"
-                  >
-                    Ver Promoções
-                  </button>
-                </div>
-                {[...casinoTopBanners.slice(0, 1), ...casinoMiddleBanners.slice(0, 2)].map((banner) => (
-                  <button
-                    key={banner.id}
-                    onClick={() => {
-                      if (banner.linkUrl) {
-                        window.open(banner.linkUrl, "_blank", "noopener,noreferrer");
-                        return;
-                      }
-                      if (banner.games[0]) launchCasinoGame(banner.games[0]);
-                    }}
-                    className="group overflow-hidden rounded-2xl border border-zinc-800 hover:border-violet-500/50 bg-zinc-900 text-left"
-                  >
-                    <img
-                      src={banner.imageUrl}
-                      alt={banner.title}
-                      className="h-28 w-full object-cover"
-                      loading="lazy"
-                    />
-                    <div className="p-3">
-                      <div className="text-[11px] font-black uppercase tracking-[0.16em] text-white">
-                        {banner.title}
-                      </div>
-                      {banner.subtitle && (
-                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-                          {banner.subtitle}
-                        </div>
-                      )}
+        {!isShellOnlyTab && (
+          <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
+            <div className="p-3">
+              {activeTab === "casino" ? (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-500/10 to-transparent p-3">
+                    <div className="flex items-center gap-2 text-violet-300 text-[11px] font-black uppercase tracking-[0.18em]">
+                      <Gift size={14} />
+                      Promoções
                     </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <SidebarTreeContent
-                selectedSport={selectedSport}
-                setSelectedSport={setSelectedSport}
-                setActiveTab={setActiveTab}
-                expandedSport={sidebarExpandedSport}
-                setExpandedSport={setSidebarExpandedSport}
-                expandedCountry={sidebarExpandedCountry}
-                setExpandedCountry={setSidebarExpandedCountry}
-                compact
-                topLeagues={sidebarTopLeagues}
-                selectedLeague={selectedLeague}
-                setSelectedLeague={setSelectedLeague}
-                selectedCountry={selectedCountry}
-                setSelectedCountry={setSelectedCountry}
-                catalogBySport={catalogBySport}
-                competitionCatalogByRegion={competitionCatalogByRegion}
-                catalogLoadingSport={catalogLoadingSport}
-                competitionLoadingKey={competitionLoadingKey}
-                ensureSportCatalog={ensureSportCatalog}
-                ensureCompetitionCatalog={ensureCompetitionCatalog}
-              />
-            )}
-          </div>
-        </aside>
+                    <p className="mt-2 text-xs text-zinc-300 leading-relaxed">
+                      Destaques, campanhas e atalhos rápidos do casino numa coluna própria.
+                    </p>
+                    <button
+                      {...makeTap(() => selectMainTab("promos", fetchCashback))}
+                      className="mt-3 w-full rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-wide py-2"
+                    >
+                      Ver Promoções
+                    </button>
+                  </div>
+                  {[...casinoTopBanners.slice(0, 1), ...casinoMiddleBanners.slice(0, 2)].map((banner) => (
+                    <button
+                      key={banner.id}
+                      onClick={() => {
+                        if (banner.linkUrl) {
+                          window.open(banner.linkUrl, "_blank", "noopener,noreferrer");
+                          return;
+                        }
+                        if (banner.games[0]) launchCasinoGame(banner.games[0]);
+                      }}
+                      className="group overflow-hidden rounded-2xl border border-zinc-800 hover:border-violet-500/50 bg-zinc-900 text-left"
+                    >
+                      <img
+                        src={banner.imageUrl}
+                        alt={banner.title}
+                        className="h-28 w-full object-cover"
+                        loading="lazy"
+                      />
+                      <div className="p-3">
+                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-white">
+                          {banner.title}
+                        </div>
+                        {banner.subtitle && (
+                          <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                            {banner.subtitle}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <SidebarTreeContent
+                  selectedSport={selectedSport}
+                  setSelectedSport={setSelectedSport}
+                  setActiveTab={setActiveTab}
+                  expandedSport={sidebarExpandedSport}
+                  setExpandedSport={setSidebarExpandedSport}
+                  expandedCountry={sidebarExpandedCountry}
+                  setExpandedCountry={setSidebarExpandedCountry}
+                  compact
+                  topLeagues={sidebarTopLeagues}
+                  selectedLeague={selectedLeague}
+                  setSelectedLeague={setSelectedLeague}
+                  selectedCountry={selectedCountry}
+                  setSelectedCountry={setSelectedCountry}
+                  catalogBySport={catalogBySport}
+                  competitionCatalogByRegion={competitionCatalogByRegion}
+                  catalogLoadingSport={catalogLoadingSport}
+                  competitionLoadingKey={competitionLoadingKey}
+                  ensureSportCatalog={ensureSportCatalog}
+                  ensureCompetitionCatalog={ensureCompetitionCatalog}
+                />
+              )}
+            </div>
+          </aside>
+        )}
 
         <main className="flex-1 pb-32 lg:pb-8 overflow-x-clip min-w-0">
           <div className="p-4 lg:p-8">
@@ -26793,6 +26812,17 @@ export default function Home({
               </div>
             )}
 
+            {!expandedMatch && activeTab === "sportsbook" && (
+              <div className="-mx-4 -my-4 lg:-mx-8 lg:-my-8">
+                <div className="p-4 lg:p-8">
+                  <WinHouseSportsbookEmbed
+                    isDarkTheme={isDarkTheme}
+                    isLoggedIn={!!auth.user}
+                  />
+                </div>
+              </div>
+            )}
+
             {!expandedMatch && activeTab === "casino" && (() => {
               const hasMore = casinoCategory !== "Favoritos" && casinoGames.length < casinoTotal;
 
@@ -28264,7 +28294,7 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        {activeTab !== "casino" && (() => {
+        {!isShellOnlyTab && (() => {
           const showDesktopPitchTracker = !!(
             expandedMatch &&
             expandedMatch.isLive &&
@@ -28275,32 +28305,32 @@ export default function Home({
               expandedMatch._ballPosition)
           );
           return (
-        <aside
-          className={`hidden lg:flex lg:flex-col w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] ${
-            showDesktopPitchTracker ? "overflow-y-auto" : ""
-          }`}
-        >
-          {/* Mini pitch tracker — user-requested 2026-09-11: shown above
-              the bet slip, on the Mercados tab of a live football match.
-              The component itself renders nothing when the match has no
-              commentary feed — gated here too so no empty wrapper is left
-              behind in that case. */}
-          {showDesktopPitchTracker && expandedMatch && (
-              <div className="p-3 border-b border-zinc-800/60 shrink-0">
-                <FootballPitchTracker
-                  home={expandedMatch.home}
-                  away={expandedMatch.away}
-                  homeScore={expandedMatch.homeScore}
-                  awayScore={expandedMatch.awayScore}
-                  commentary={expandedMatch._commentary}
-                  v2StatsGroups={v2StatsGroups}
-                  confrontosRecentMeetings={confrontosData?.recentMeetings}
-                  realBallPosition={expandedMatch._ballPosition}
-                />
-              </div>
-            )}
-          {BetSlipContent()}
-        </aside>
+            <aside
+              className={`hidden lg:flex lg:flex-col w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] ${
+                showDesktopPitchTracker ? "overflow-y-auto" : ""
+              }`}
+            >
+              {/* Mini pitch tracker — user-requested 2026-09-11: shown above
+                  the bet slip, on the Mercados tab of a live football match.
+                  The component itself renders nothing when the match has no
+                  commentary feed — gated here too so no empty wrapper is left
+                  behind in that case. */}
+              {showDesktopPitchTracker && expandedMatch && (
+                <div className="p-3 border-b border-zinc-800/60 shrink-0">
+                  <FootballPitchTracker
+                    home={expandedMatch.home}
+                    away={expandedMatch.away}
+                    homeScore={expandedMatch.homeScore}
+                    awayScore={expandedMatch.awayScore}
+                    commentary={expandedMatch._commentary}
+                    v2StatsGroups={v2StatsGroups}
+                    confrontosRecentMeetings={confrontosData?.recentMeetings}
+                    realBallPosition={expandedMatch._ballPosition}
+                  />
+                </div>
+              )}
+              {BetSlipContent()}
+            </aside>
           );
         })()}
       </div>
@@ -28311,7 +28341,7 @@ export default function Home({
           live selection count and opens this same overlay, so the pill
           was a redundant second indicator stacked above it. */}
       <AnimatePresence>
-        {betSlipOpenMobile && activeTab !== "casino" && (
+        {betSlipOpenMobile && !isShellOnlyTab && (
           <motion.div
             key="betslip-fullscreen"
             initial={{ y: "100%" }}
