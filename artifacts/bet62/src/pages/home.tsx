@@ -25497,88 +25497,94 @@ export default function Home({
       </AnimatePresence>
 
       {/* FOOTER */}
-      <footer className="border-t border-zinc-900 bg-zinc-950 py-12 mt-auto">
+      <footer className="border-t border-zinc-900 bg-zinc-950 py-10 mt-auto">
         <div className="max-w-[1600px] mx-auto px-4">
-          <div className="text-center mb-10">
-            <div className="font-black text-3xl tracking-tighter italic mb-2">
-              <span>BET</span>
-              <span>62</span>
-            </div>
-            <p className="text-sm text-zinc-500 max-w-md mx-auto mb-5">
-              BET62 Apostas Esportivas · A plataforma futurista de
-              entretenimento desportivo e cassino online. Licenciado,
-              regulamentado e seguro.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-zinc-500">
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                <ShieldCheck size={14} className="text-emerald-500" />
-                MGA / Malta Gaming
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                <Lock size={14} className="text-emerald-500" />
-                SSL 256-bit
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                €EUR
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                18+ Jogo Responsável
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 mb-10 text-sm">
-            <div>
-              <div className="font-bold text-white mb-3">A BET62</div>
-              <div className="flex flex-col gap-2 text-zinc-500">
-                <Link href="/sobre" className="hover:text-white transition-colors">
-                  Sobre Nós
-                </Link>
-                <Link href="/imprensa" className="hover:text-white transition-colors">
-                  Imprensa
-                </Link>
-                <Link href="/carreiras" className="hover:text-white transition-colors">
-                  Carreiras
-                </Link>
-                <Link href="/afiliados" className="hover:text-white transition-colors">
-                  Afiliados
-                </Link>
+          {/* Brand block and the three link columns sit side by side on
+              lg+ (Santos, 2026-09-24) instead of stacking, so the footer
+              doesn't run so tall. They stay stacked below lg, where there
+              isn't room for a row. */}
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-8 lg:gap-12 mb-8">
+            <div className="text-center lg:text-left lg:max-w-xs lg:shrink-0">
+              <div className="font-black text-3xl tracking-tighter italic mb-2">
+                <span>BET</span>
+                <span>62</span>
+              </div>
+              <p className="text-sm text-zinc-500 max-w-md lg:max-w-none mx-auto lg:mx-0 mb-5">
+                BET62 Apostas Esportivas · A plataforma futurista de
+                entretenimento desportivo e cassino online. Licenciado,
+                regulamentado e seguro.
+              </p>
+              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 text-xs text-zinc-500">
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  <ShieldCheck size={14} className="text-emerald-500" />
+                  MGA / Malta Gaming
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  <Lock size={14} className="text-emerald-500" />
+                  SSL 256-bit
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  €EUR
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  18+ Jogo Responsável
+                </span>
               </div>
             </div>
 
-            <div>
-              <div className="font-bold text-white mb-3">Legal</div>
-              <div className="flex flex-col gap-2 text-zinc-500">
-                <Link href="/termos" className="hover:text-white transition-colors">
-                  Termos e Condições
-                </Link>
-                <Link href="/privacidade" className="hover:text-white transition-colors">
-                  Política de Privacidade
-                </Link>
-                <Link href="/cookies" className="hover:text-white transition-colors">
-                  Cookies
-                </Link>
-                <Link href="/jogo-responsavel" className="hover:text-white transition-colors">
-                  Responsabilidade Social
-                </Link>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-sm text-center lg:text-left lg:flex-1 lg:max-w-xl">
+              <div>
+                <div className="font-bold text-white mb-3">A BET62</div>
+                <div className="flex flex-col gap-2 text-zinc-500">
+                  <Link href="/sobre" className="hover:text-white transition-colors">
+                    Sobre Nós
+                  </Link>
+                  <Link href="/imprensa" className="hover:text-white transition-colors">
+                    Imprensa
+                  </Link>
+                  <Link href="/carreiras" className="hover:text-white transition-colors">
+                    Carreiras
+                  </Link>
+                  <Link href="/afiliados" className="hover:text-white transition-colors">
+                    Afiliados
+                  </Link>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <div className="font-bold text-white mb-3">Apoio ao Cliente</div>
-              <div className="flex flex-col gap-2 text-zinc-500">
-                <Link href="/ajuda" className="hover:text-white transition-colors">
-                  Central de Ajuda
-                </Link>
-                <Link href="/contacto" className="hover:text-white transition-colors">
-                  Contacto
-                </Link>
-                <Link href="/pagamentos" className="hover:text-white transition-colors">
-                  Métodos de Pagamento
-                </Link>
-                <Link href="/regras" className="hover:text-white transition-colors">
-                  Regras de Apostas
-                </Link>
+              <div>
+                <div className="font-bold text-white mb-3">Legal</div>
+                <div className="flex flex-col gap-2 text-zinc-500">
+                  <Link href="/termos" className="hover:text-white transition-colors">
+                    Termos e Condições
+                  </Link>
+                  <Link href="/privacidade" className="hover:text-white transition-colors">
+                    Política de Privacidade
+                  </Link>
+                  <Link href="/cookies" className="hover:text-white transition-colors">
+                    Cookies
+                  </Link>
+                  <Link href="/jogo-responsavel" className="hover:text-white transition-colors">
+                    Responsabilidade Social
+                  </Link>
+                </div>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1">
+                <div className="font-bold text-white mb-3">Apoio ao Cliente</div>
+                <div className="flex flex-col gap-2 text-zinc-500">
+                  <Link href="/ajuda" className="hover:text-white transition-colors">
+                    Central de Ajuda
+                  </Link>
+                  <Link href="/contacto" className="hover:text-white transition-colors">
+                    Contacto
+                  </Link>
+                  <Link href="/pagamentos" className="hover:text-white transition-colors">
+                    Métodos de Pagamento
+                  </Link>
+                  <Link href="/regras" className="hover:text-white transition-colors">
+                    Regras de Apostas
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
