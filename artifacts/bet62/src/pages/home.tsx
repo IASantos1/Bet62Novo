@@ -5125,15 +5125,20 @@ export default function Home({
 
   const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
   const activeTabRef = useRef(activeTab);
+  // "home" (Destaques) is included here too: betting now happens inside
+  // the WinHouse Sportsbook iframe, so BET62's own game-tree sidebar and
+  // bet slip no longer have a purpose on Destaques either (Santos,
+  // 2026-09-24).
   const isShellOnlyTab =
+    activeTab === "home" ||
     activeTab === "casino" ||
     activeTab === "sportsbook" ||
     activeTab === "sports";
-  // Sportsbook (and Esportes, which now opens the same WinHouse embed —
-  // BET62's own match/odds engine was retired) owns the whole viewport
-  // when opened — the WinHouse iframe has its own header/nav/betslip, so
-  // BET62's chrome (header, bottom dock, desktop sidebar/max-width) gets
-  // out of the way entirely instead of framing it like every other tab.
+  // Sportsbook (and Esportes, which opens the same WinHouse embed — BET62's
+  // own match/odds engine was retired) drops the max-width/padding of a
+  // normal tab so the iframe can fill the whole content area edge to edge.
+  // BET62's header and footer stay visible around it (Santos, 2026-09-24) —
+  // unlike the old PR #509 behavior, this no longer hides them.
   const isFullScreenSportsbook =
     activeTab === "sportsbook" || activeTab === "sports";
   useEffect(() => {
@@ -20565,8 +20570,10 @@ export default function Home({
         </DialogContent>
       </Dialog>
 
-      {/* HEADER */}
-      {!isFullScreenSportsbook && (
+      {/* HEADER — stays visible on every tab, including the WinHouse
+          Sportsbook embed: Santos wants the iframe to fill only the area
+          between the top menu and the footer, not hide BET62's own chrome
+          entirely (that was the old full-screen behavior from PR #509). */}
       <header
         className="sticky top-0 z-40 bg-background border-b border-zinc-800/60"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
@@ -20751,27 +20758,6 @@ export default function Home({
         </div>
 
       </header>
-      )}
-
-      {/* Full-screen Sportsbook/Esportes hides BET62's own header and dock
-          entirely so the WinHouse iframe owns the whole viewport. If the
-          embed fails to load (bad key, blocked domain, offline) or is just
-          slow, the user is otherwise stuck on a plain black screen with no
-          way back — no header, no dock, nothing to click. This small
-          floating control is the one thing that always renders above the
-          iframe, so "clicar em qualquer aba" from here can always escape
-          back to Destaques instead of leaving a dead black screen. */}
-      {isFullScreenSportsbook && (
-        <button
-          onClick={() => selectMainTab("home")}
-          aria-label="Voltar"
-          className="fixed z-[60] left-3 flex items-center gap-1.5 rounded-full bg-black/70 border border-zinc-700 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm hover:bg-black/90 transition-colors"
-          style={{ top: "calc(0.75rem + env(safe-area-inset-top, 0px))" }}
-        >
-          <X size={14} />
-          Voltar
-        </button>
-      )}
 
       {/* MOBILE BOTTOM DOCK — replaces the old underline tab strip on
           mobile (2026-09-20 futurist redesign). Desktop keeps the inline
@@ -20780,8 +20766,9 @@ export default function Home({
           avatar already in the header up top. The purple Boletim bubble
           moves from the raised center slot into Perfil's old spot at the
           end — a normal-height icon like the others now, not elevated.
-          Hidden entirely for the full-screen Sportsbook tab. */}
-      {!isFullScreenSportsbook && (
+          Kept visible on the Sportsbook tab too, since the WinHouse iframe
+          no longer takes over the whole viewport (header/dock/footer stay
+          up) — it's still how mobile switches away from Esporte. */}
       <div
         className="lg:hidden fixed left-0 right-0 z-[50] px-3"
         style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
@@ -20836,7 +20823,6 @@ export default function Home({
           )}
         </div>
       </div>
-      )}
 
       {/* MOBILE SIDEBAR OVERLAY */}
       <AnimatePresence>
@@ -25339,88 +25325,94 @@ export default function Home({
       </AnimatePresence>
 
       {/* FOOTER */}
-      <footer className="border-t border-zinc-900 bg-zinc-950 py-12 mt-auto">
+      <footer className="border-t border-zinc-900 bg-zinc-950 py-10 mt-auto">
         <div className="max-w-[1600px] mx-auto px-4">
-          <div className="text-center mb-10">
-            <div className="font-black text-3xl tracking-tighter italic mb-2">
-              <span>BET</span>
-              <span>62</span>
-            </div>
-            <p className="text-sm text-zinc-500 max-w-md mx-auto mb-5">
-              BET62 Apostas Esportivas · A plataforma futurista de
-              entretenimento desportivo e cassino online. Licenciado,
-              regulamentado e seguro.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-zinc-500">
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                <ShieldCheck size={14} className="text-emerald-500" />
-                MGA / Malta Gaming
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                <Lock size={14} className="text-emerald-500" />
-                SSL 256-bit
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                €EUR
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                18+ Jogo Responsável
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 mb-10 text-sm">
-            <div>
-              <div className="font-bold text-white mb-3">A BET62</div>
-              <div className="flex flex-col gap-2 text-zinc-500">
-                <Link href="/sobre" className="hover:text-white transition-colors">
-                  Sobre Nós
-                </Link>
-                <Link href="/imprensa" className="hover:text-white transition-colors">
-                  Imprensa
-                </Link>
-                <Link href="/carreiras" className="hover:text-white transition-colors">
-                  Carreiras
-                </Link>
-                <Link href="/afiliados" className="hover:text-white transition-colors">
-                  Afiliados
-                </Link>
+          {/* Brand block and the three link columns sit side by side on
+              lg+ (Santos, 2026-09-24) instead of stacking, so the footer
+              doesn't run so tall. They stay stacked below lg, where there
+              isn't room for a row. */}
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-8 lg:gap-12 mb-8">
+            <div className="text-center lg:text-left lg:max-w-xs lg:shrink-0">
+              <div className="font-black text-3xl tracking-tighter italic mb-2">
+                <span>BET</span>
+                <span>62</span>
+              </div>
+              <p className="text-sm text-zinc-500 max-w-md lg:max-w-none mx-auto lg:mx-0 mb-5">
+                BET62 Apostas Esportivas · A plataforma futurista de
+                entretenimento desportivo e cassino online. Licenciado,
+                regulamentado e seguro.
+              </p>
+              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 text-xs text-zinc-500">
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  <ShieldCheck size={14} className="text-emerald-500" />
+                  MGA / Malta Gaming
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  <Lock size={14} className="text-emerald-500" />
+                  SSL 256-bit
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  €EUR
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                  18+ Jogo Responsável
+                </span>
               </div>
             </div>
 
-            <div>
-              <div className="font-bold text-white mb-3">Legal</div>
-              <div className="flex flex-col gap-2 text-zinc-500">
-                <Link href="/termos" className="hover:text-white transition-colors">
-                  Termos e Condições
-                </Link>
-                <Link href="/privacidade" className="hover:text-white transition-colors">
-                  Política de Privacidade
-                </Link>
-                <Link href="/cookies" className="hover:text-white transition-colors">
-                  Cookies
-                </Link>
-                <Link href="/jogo-responsavel" className="hover:text-white transition-colors">
-                  Responsabilidade Social
-                </Link>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-sm text-center lg:text-left lg:flex-1 lg:max-w-xl">
+              <div>
+                <div className="font-bold text-white mb-3">A BET62</div>
+                <div className="flex flex-col gap-2 text-zinc-500">
+                  <Link href="/sobre" className="hover:text-white transition-colors">
+                    Sobre Nós
+                  </Link>
+                  <Link href="/imprensa" className="hover:text-white transition-colors">
+                    Imprensa
+                  </Link>
+                  <Link href="/carreiras" className="hover:text-white transition-colors">
+                    Carreiras
+                  </Link>
+                  <Link href="/afiliados" className="hover:text-white transition-colors">
+                    Afiliados
+                  </Link>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <div className="font-bold text-white mb-3">Apoio ao Cliente</div>
-              <div className="flex flex-col gap-2 text-zinc-500">
-                <Link href="/ajuda" className="hover:text-white transition-colors">
-                  Central de Ajuda
-                </Link>
-                <Link href="/contacto" className="hover:text-white transition-colors">
-                  Contacto
-                </Link>
-                <Link href="/pagamentos" className="hover:text-white transition-colors">
-                  Métodos de Pagamento
-                </Link>
-                <Link href="/regras" className="hover:text-white transition-colors">
-                  Regras de Apostas
-                </Link>
+              <div>
+                <div className="font-bold text-white mb-3">Legal</div>
+                <div className="flex flex-col gap-2 text-zinc-500">
+                  <Link href="/termos" className="hover:text-white transition-colors">
+                    Termos e Condições
+                  </Link>
+                  <Link href="/privacidade" className="hover:text-white transition-colors">
+                    Política de Privacidade
+                  </Link>
+                  <Link href="/cookies" className="hover:text-white transition-colors">
+                    Cookies
+                  </Link>
+                  <Link href="/jogo-responsavel" className="hover:text-white transition-colors">
+                    Responsabilidade Social
+                  </Link>
+                </div>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1">
+                <div className="font-bold text-white mb-3">Apoio ao Cliente</div>
+                <div className="flex flex-col gap-2 text-zinc-500">
+                  <Link href="/ajuda" className="hover:text-white transition-colors">
+                    Central de Ajuda
+                  </Link>
+                  <Link href="/contacto" className="hover:text-white transition-colors">
+                    Contacto
+                  </Link>
+                  <Link href="/pagamentos" className="hover:text-white transition-colors">
+                    Métodos de Pagamento
+                  </Link>
+                  <Link href="/regras" className="hover:text-white transition-colors">
+                    Regras de Apostas
+                  </Link>
+                </div>
               </div>
             </div>
           </div>

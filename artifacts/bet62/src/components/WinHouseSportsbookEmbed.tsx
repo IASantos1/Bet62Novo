@@ -6,6 +6,11 @@ type WinHouseSportsbookEmbedProps = {
   authToken?: string | null;
 };
 
+// Fills the content area between BET62's header (h-16 = 4rem) and footer,
+// matching the calc(100vh-4rem) used elsewhere in home.tsx for the same
+// header height.
+const EMBED_HEIGHT = "calc(100dvh - 4rem)";
+
 export default function WinHouseSportsbookEmbed({
   isDarkTheme,
   authToken,
@@ -56,10 +61,11 @@ export default function WinHouseSportsbookEmbed({
       if (embedKey) script.dataset.key = embedKey;
       script.dataset.target = `#${containerId}`;
       script.dataset.width = "100%";
-      // BET62's own header/nav/dock are hidden entirely on this tab (see
-      // isFullScreenSportsbook in home.tsx), so the embed owns the whole
-      // viewport height — no reserved gap for chrome that no longer renders.
-      script.dataset.height = "100dvh";
+      // BET62's header (h-16, i.e. 4rem) stays visible above this tab (see
+      // isFullScreenSportsbook in home.tsx) and the footer follows right
+      // after — the embed only owns the space between them, not the whole
+      // viewport.
+      script.dataset.height = EMBED_HEIGHT;
       script.dataset.bottomGap = "0";
       script.dataset.embed = "1";
       script.dataset.lang = language;
@@ -95,7 +101,7 @@ export default function WinHouseSportsbookEmbed({
   }, [authToken, containerId, embedKey, isDarkTheme, language]);
 
   return (
-    <div className="relative bg-black" style={{ height: "100dvh", width: "100%" }}>
+    <div className="relative bg-black" style={{ height: EMBED_HEIGHT, width: "100%" }}>
       {loadState !== "ready" && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm">
           <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/90 px-4 py-3 text-sm text-zinc-300 shadow-xl shadow-black/40">
