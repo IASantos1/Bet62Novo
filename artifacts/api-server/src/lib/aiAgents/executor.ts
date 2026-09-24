@@ -9,11 +9,10 @@
 // transaction and customer emails — see applyWithdrawalAdminDecision in
 // routes/withdrawals.ts), this reuses that exact function instead of
 // re-deriving the money-moving logic a second time.
-import { db, usersTable, manualReviewQueueTable, kycDocumentsTable, betsTable, eventAdminOverridesTable, type AiAgentProposal } from "@workspace/db";
+import { db, usersTable, manualReviewQueueTable, kycDocumentsTable, eventAdminOverridesTable, type AiAgentProposal } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { applyWithdrawalAdminDecision } from "../../routes/withdrawals.js";
-import { settleBet } from "../../services/settlement/settleBet.js";
 import { markProposalStatus } from "./proposals.js";
 
 export interface ExecutionResult {
@@ -25,9 +24,6 @@ export interface ExecutionResult {
 // clicking approve first — explicit, one-at-a-time user requests,
 // 2026-08-11, each a deliberate follow-up to the platform's general "só
 // propõe, humano aprova" rule:
-//  - ticketsettlement/finalize_bet_settlement: "agente liquida sozinho,
-//    sem aprovação" for stuck ticket settlement. Can only force a stake
-//    refund, never invent a win payout (settleBet.ts's forceVoidReason).
 //  - odds/suspend_event: real execution authority for the Odds agent to
 //    protect the house when a live feed goes unstable. Can only turn
 //    betting OFF (event_admin_overrides.forceSuspend=true, the same lever
@@ -43,7 +39,6 @@ export interface ExecutionResult {
 // must match together, so a bug in an unrelated role can never fall into
 // this path, and every other agent's proposals keep requiring approval.
 const AUTO_EXECUTE_PAIRS: ReadonlySet<string> = new Set([
-  "ticketsettlement:finalize_bet_settlement",
   "odds:suspend_event",
   "risk:suspend_event",
 ]);
@@ -163,25 +158,6 @@ export async function executeProposal(proposal: AiAgentProposal, adminUsername: 
         if (updated.length === 0) {
           return { ok: false, error: "Item da fila de revisão manual não encontrado para esta aposta" };
         }
-        return { ok: true };
-      }
-
-      case "finalize_bet_settlement": {
-        const betId = Number(proposal.targetId);
-        if (!Number.isFinite(betId)) return { ok: false, error: "targetId de aposta inválido" };
-        const [bet] = await db.select().from(betsTable).where(eq(betsTable.id, betId)).limit(1);
-        if (!bet) return { ok: false, error: "Aposta não encontrada" };
-        if (bet.status !== "pending") return { ok: true }; // already resolved elsewhere — nothing to do, not an error
-        const decision = await settleBet({
-          bet,
-          trigger: "ai-agent:ticketsettlement",
-          selections: Array.isArray(bet.selections) ? bet.selections : [],
-          cycleId: `ai-agent:ticketsettlement:${proposal.id}`,
-          forceVoidReason: proposal.reasoning,
-        });
-        // undefined means settleBet's own idempotency/optimistic-lock guard
-        // caught a race (already settled elsewhere) — not a failure.
-        void decision;
         return { ok: true };
       }
 
