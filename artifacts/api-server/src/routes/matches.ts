@@ -852,6 +852,28 @@ function mapCommentary(incidents: Array<Record<string, unknown>>) {
     .filter((entry) => entry.text.trim().length > 0);
 }
 
+function extractLeagueMeta(event: BSDEvent): { name: string; id?: string } {
+  const directName = text(event.league_name) || text(event.league);
+  const directId =
+    event.league_id != null && String(event.league_id).trim()
+      ? String(event.league_id)
+      : undefined;
+  if (directName) return { name: directName, id: directId };
+
+  const eventRecord = event as unknown as Record<string, unknown>;
+  const nestedLeague =
+    getNestedRecord(eventRecord, "league", "competition", "tournament", "category") ??
+    null;
+  if (!nestedLeague) return { name: "Futebol", id: directId };
+
+  return {
+    name:
+      pickText(nestedLeague, ["name", "league_name", "competition_name"], "Futebol") ||
+      "Futebol",
+    id: pickText(nestedLeague, ["id", "league_id", "competition_id"]) || directId,
+  };
+}
+
 function mapMatchFromEvent(
   event: BSDEvent,
   args?: {
@@ -866,7 +888,8 @@ function mapMatchFromEvent(
   const id = toMatchId(event.id);
   const home = text(event.home_team_name ?? event.home_team, "Casa");
   const away = text(event.away_team_name ?? event.away_team, "Fora");
-  const league = text(event.league_name ?? event.league, "Futebol");
+  const leagueMeta = extractLeagueMeta(event);
+  const league = leagueMeta.name;
   const country = text(event.country_name ?? event.country);
   const fallbackOdds = applyOddsRows(args?.oddsRows ?? []);
   const odds = args?.odds ?? fallbackOdds.odds;
@@ -904,7 +927,7 @@ function mapMatchFromEvent(
     referee: text(event.referee_name ?? event.referee) || undefined,
     matchTier: mapTier(league, country),
     matchStats: buildMatchStats(args?.stats ?? null),
-    leagueId: event.league_id != null ? String(event.league_id) : undefined,
+    leagueId: leagueMeta.id,
     seasonId: event.season_id != null ? String(event.season_id) : undefined,
     _commentary: mapCommentary(incidents),
   };
