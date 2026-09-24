@@ -811,11 +811,168 @@ function sportMonksMatchStats(
 }
 
 function sportMonksCountryName(fixture: SportMonksFixture): string {
-  return String(fixture.league?.country?.name ?? "").trim();
+  return sportMonksCountryNameFromSource(fixture);
 }
 
 function sportMonksLeagueName(fixture: SportMonksFixture): string {
-  return String(fixture.league?.name ?? "").trim();
+  return sportMonksLeagueNameFromSource(fixture);
+}
+
+function sportMonksPathText(value: unknown, path: string[]): string {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return "";
+    current = (current as Record<string, unknown>)[key];
+  }
+  if (typeof current === "string" || typeof current === "number") {
+    return String(current).trim();
+  }
+  return "";
+}
+
+function sportMonksPickText(value: unknown, paths: string[][]): string {
+  for (const path of paths) {
+    const text = sportMonksPathText(value, path);
+    if (text) return text;
+  }
+  return "";
+}
+
+function sportMonksLeagueNameFromSource(value: unknown): string {
+  return sportMonksPickText(value, [
+    ["league", "name"],
+    ["league", "data", "name"],
+    ["league", "attributes", "name"],
+    ["competition", "name"],
+    ["competition", "data", "name"],
+    ["tournament", "name"],
+    ["category", "name"],
+    ["name"],
+    ["league_name"],
+    ["competition_name"],
+    ["tournament_name"],
+    ["category_name"],
+    ["title"],
+    ["short_name"],
+    ["short_code"],
+  ]);
+}
+
+function sportMonksCountryNameFromSource(value: unknown): string {
+  return sportMonksPickText(value, [
+    ["league", "country", "name"],
+    ["league", "data", "country", "name"],
+    ["league", "attributes", "country", "name"],
+    ["competition", "country", "name"],
+    ["tournament", "country", "name"],
+    ["country", "name"],
+    ["country_name"],
+  ]);
+}
+
+const sportMonksLeagueMetaCache = new Map<
+  string,
+  { name: string; country: string; fetchedAt: number }
+>();
+const SPORTMONKS_LEAGUE_META_TTL_MS = 6 * 60 * 60_000;
+
+async function resolveSportMonksLeagueMetaBatch(
+  fixtures: SportMonksFixture[],
+): Promise<Map<string, { name: string; country: string }>> {
+  const now = Date.now();
+  for (const [leagueId, cached] of sportMonksLeagueMetaCache.entries()) {
+    if (now - cached.fetchedAt > SPORTMONKS_LEAGUE_META_TTL_MS) {
+      sportMonksLeagueMetaCache.delete(leagueId);
+    }
+  }
+
+  const resolved = new Map<string, { name: string; country: string }>();
+  const missingIds: string[] = [];
+
+  for (const fixture of fixtures) {
+    const leagueId =
+      fixture.league_id == null ? "" : String(fixture.league_id).trim();
+    if (!leagueId) continue;
+    if (resolved.has(leagueId)) continue;
+
+    const directName = sportMonksLeagueName(fixture);
+    const directCountry = sportMonksCountryName(fixture);
+
+    if (directName) {
+      resolved.set(leagueId, {
+        name: directName,
+        country: directCountry,
+      });
+      continue;
+    }
+
+    const cached = sportMonksLeagueMetaCache.get(leagueId);
+    if (cached) {
+      resolved.set(leagueId, {
+        name: cached.name,
+        country: cached.country || directCountry,
+      });
+      continue;
+    }
+
+    missingIds.push(leagueId);
+  }
+
+  const uniqueMissingIds = [...new Set(missingIds)];
+  const batchSize = 8;
+
+  for (let offset = 0; offset < uniqueMissingIds.length; offset += batchSize) {
+    const batch = uniqueMissingIds.slice(offset, offset + batchSize);
+    const rows = await Promise.all(
+      batch.map(async (leagueId) => {
+        const league = await getSportMonksLeagueById({
+          leagueId,
+          include: "country",
+        }).catch((error) => {
+          logger.warn(
+            {
+              leagueId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "[sportmonks] league lookup failed",
+          );
+          return null;
+        });
+        const name = sportMonksLeagueNameFromSource(league);
+        const country = sportMonksCountryNameFromSource(league);
+        return [leagueId, { name, country }] as const;
+      }),
+    );
+
+    for (const [leagueId, meta] of rows) {
+      sportMonksLeagueMetaCache.set(leagueId, {
+        name: meta.name,
+        country: meta.country,
+        fetchedAt: now,
+      });
+      if (meta.name || meta.country) {
+        resolved.set(leagueId, meta);
+      }
+    }
+  }
+
+  return resolved;
+}
+
+function sportMonksResolvedLeagueMeta(
+  fixture: SportMonksFixture,
+  resolvedByLeagueId: Map<string, { name: string; country: string }>,
+): { name: string; country: string } {
+  const leagueId =
+    fixture.league_id == null ? "" : String(fixture.league_id).trim();
+  const directName = sportMonksLeagueName(fixture);
+  const directCountry = sportMonksCountryName(fixture);
+  const resolved = leagueId ? resolvedByLeagueId.get(leagueId) : undefined;
+
+  return {
+    name: directName || resolved?.name || "Futebol",
+    country: directCountry || resolved?.country || "",
+  };
 }
 
 function sportMonksStateText(fixture: SportMonksFixture): string {
@@ -8889,24 +9046,40 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
         const kickoffMs = sportMonksTimestampMs(fixture);
         return kickoffMs == null || kickoffMs >= Date.now() - 30 * 60 * 1000;
       });
+    const leagueMetaById =
+      await resolveSportMonksLeagueMetaBatch(eligibleFixtures);
     const preferredFixtures = eligibleFixtures.filter(
-      (fixture) =>
-        footballVisibilityBandForFixtureLike({
-          leagueId:
-            fixture.league_id == null ? undefined : String(fixture.league_id),
-          country: sportMonksCountryName(fixture),
-          league: sportMonksLeagueName(fixture),
-        }) === "preferred",
-    );
-    const fallbackFixtures = eligibleFixtures
-      .filter(
-        (fixture) =>
+      (fixture) => {
+        const leagueMeta = sportMonksResolvedLeagueMeta(
+          fixture,
+          leagueMetaById,
+        );
+        return (
           footballVisibilityBandForFixtureLike({
             leagueId:
               fixture.league_id == null ? undefined : String(fixture.league_id),
-            country: sportMonksCountryName(fixture),
-            league: sportMonksLeagueName(fixture),
-          }) === "fallback",
+            country: leagueMeta.country,
+            league: leagueMeta.name,
+          }) === "preferred"
+        );
+      },
+    );
+    const fallbackFixtures = eligibleFixtures
+      .filter(
+        (fixture) => {
+          const leagueMeta = sportMonksResolvedLeagueMeta(
+            fixture,
+            leagueMetaById,
+          );
+          return (
+            footballVisibilityBandForFixtureLike({
+              leagueId:
+                fixture.league_id == null ? undefined : String(fixture.league_id),
+              country: leagueMeta.country,
+              league: leagueMeta.name,
+            }) === "fallback"
+          );
+        },
       )
       .slice(0, FOOTBALL_MINOR_UPCOMING_FALLBACK_LIMIT);
     const visibleFixtures =
@@ -8923,6 +9096,10 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
       .map((fixture): UpcomingMatch | null => {
         const teams = sportMonksTeams(fixture);
         if (!teams.home?.name || !teams.away?.name) return null;
+        const leagueMeta = sportMonksResolvedLeagueMeta(
+          fixture,
+          leagueMetaById,
+        );
         const kickoffMs = sportMonksTimestampMs(fixture);
         const kickoff = kickoffMs
           ? formatIsoToLisbonDateTime(new Date(kickoffMs).toISOString())
@@ -8942,8 +9119,8 @@ async function buildFootballUpcomingFromSportMonks(): Promise<UpcomingMatch[]> {
           awayTeamId: teams.away.id == null ? undefined : String(teams.away.id),
           homeLogoUrl: String(teams.home.image_path ?? "").trim() || undefined,
           awayLogoUrl: String(teams.away.image_path ?? "").trim() || undefined,
-          league: sportMonksLeagueName(fixture),
-          country: sportMonksCountryName(fixture),
+          league: leagueMeta.name,
+          country: leagueMeta.country,
           date: kickoff.date,
           time: kickoff.time,
           sport: "football",
@@ -13608,10 +13785,16 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
     endDate,
     include: "participants;league.country;state",
   }).catch(() => [] as SportMonksFixture[]);
-  const mapped = fixtures
+  const visibleFixtures = fixtures
     .filter((fixture) => String(fixture.id) !== String(ctx.fixtureId ?? ""))
-    .slice(0, limit)
-    .map((fixture) => {
+    .slice(0, limit);
+  const leagueMetaById =
+    await resolveSportMonksLeagueMetaBatch(visibleFixtures);
+  const mapped = visibleFixtures.map((fixture) => {
+      const leagueMeta = sportMonksResolvedLeagueMeta(
+        fixture,
+        leagueMetaById,
+      );
       const teams = sportMonksTeams(fixture);
       const kickoffMs = sportMonksTimestampMs(fixture);
       const kickoff = kickoffMs
@@ -13621,8 +13804,8 @@ router.get("/team-upcoming", async (req: Request, res: Response) => {
         id: String(fixture.id ?? ""),
         home: String(teams.home?.name ?? ""),
         away: String(teams.away?.name ?? ""),
-        league: sportMonksLeagueName(fixture),
-        country: sportMonksCountryName(fixture),
+        league: leagueMeta.name,
+        country: leagueMeta.country,
         date: kickoff.date,
         time: kickoff.time,
       };
