@@ -60,7 +60,6 @@ const INTERVALS: { role: Exclude<AgentRole, "orchestrator"> | "orchestrator"; en
   { role: "odds",            env: "AI_CRON_ODDS_INTERVAL_MS",            defaultMs: 30 * 60 * 1000,            minMs: 5 * 60 * 1000 },
   { role: "livematch",       env: "AI_CRON_LIVEMATCH_INTERVAL_MS",       defaultMs: 15 * 60 * 1000,            minMs: 5 * 60 * 1000 },
   { role: "risk",            env: "AI_CRON_RISK_INTERVAL_MS",            defaultMs: 60 * 60 * 1000,            minMs: 15 * 60 * 1000 },
-  { role: "ticketsettlement", env: "AI_CRON_TICKETSETTLE_INTERVAL_MS",   defaultMs: 60 * 60 * 1000,            minMs: 15 * 60 * 1000 },
   { role: "settlement",      env: "AI_CRON_SETTLEMENT_INTERVAL_MS",      defaultMs: 3 * 60 * 60 * 1000,        minMs: 60 * 60 * 1000 },
   { role: "support",         env: "AI_CRON_SUPPORT_INTERVAL_MS",         defaultMs: 2 * 60 * 60 * 1000,        minMs: 60 * 60 * 1000 },
   { role: "payments",        env: "AI_CRON_PAYMENTS_INTERVAL_MS",        defaultMs: 6 * 60 * 60 * 1000,        minMs: 60 * 60 * 1000 },

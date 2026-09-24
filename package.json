@@ -7,13 +7,11 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "test:settlement": "pnpm --filter @workspace/api-server test:settlement",
     "test:core": "pnpm --filter @workspace/api-server test:core",
-    "test": "pnpm run test:settlement && pnpm run test:core",
+    "test": "pnpm run test:core",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
-    "check": "pnpm run typecheck && pnpm run build && pnpm run test",
-    "settlement:coverage": "pnpm --filter @workspace/scripts settlement:coverage"
+    "check": "pnpm run typecheck && pnpm run build && pnpm run test"
   },
   "private": true,
   "packageManager": "pnpm@10.26.1",

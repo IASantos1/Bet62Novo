@@ -2,7 +2,6 @@ import "dotenv/config";
 import { createServer } from "http";
 import app from "../app.js";
 import { logger } from "../lib/logger.js";
-import { startSettlementWorker } from "../settlement.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 
@@ -34,12 +33,6 @@ const server = createServer(app);
 
 server.listen(port, () => {
   logger.info({ port }, "API server started");
-
-  // Start the auto-settlement worker after the server is up.
-  // This scans all pending bets and settles them as matches finish
-  // (or early in-play when the outcome is already determined).
-  startSettlementWorker();
-  logger.info("Auto-settlement worker started");
 
   // BigBang casino catalog bootstrap. Public casino routes also self-heal by
   // syncing on demand, but warming the catalog here avoids the first casino

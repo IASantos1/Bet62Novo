@@ -5257,14 +5257,6 @@ export default function Home({
   // this can't affect anything already working there.
   const [homeCasinoPreview, setHomeCasinoPreview] = useState<CasinoGame[]>([]);
   const [homeCasinoPreviewLoading, setHomeCasinoPreviewLoading] = useState(false);
-  // Same pattern for "Destaques" upcoming-matches preview — own isolated
-  // state/effect, real data from the existing /api/matches/upcoming
-  // endpoint, never touches upcomingMatches (the sports tab's own data).
-  // Typed as Match[] (not a narrower shape) so these feed directly into the
-  // renders as a simple card (own preview row), not the full sports-tab
-  // event card — matches the reference design.
-  const [homeUpcomingPreview, setHomeUpcomingPreview] = useState<Match[]>([]);
-  const [homeUpcomingPreviewLoading, setHomeUpcomingPreviewLoading] = useState(false);
   const [casinoSearch, setCasinoSearch] = useState("");
   const [casinoSearchDebounced, setCasinoSearchDebounced] = useState("");
   const [casinoPage, setCasinoPage] = useState(1);
@@ -9779,37 +9771,6 @@ export default function Home({
       .catch(() => {})
       .finally(() => setHomeCasinoPreviewLoading(false));
   }, [activeTab, homeCasinoPreview.length]);
-
-  useEffect(() => {
-    if (activeTab !== "home") return;
-    let cancelled = false;
-    const tick = (showSpinner: boolean) => {
-      if (showSpinner) setHomeUpcomingPreviewLoading(true);
-      fetch("/api/matches/upcoming?sport=football")
-        .then((r) => r.json())
-        .then((data) => {
-          if (cancelled) return;
-          if (Array.isArray(data?.matches))
-            setHomeUpcomingPreview(
-              data.matches
-                .slice(0, 4)
-                .map((m: any) =>
-                  normalizeMatchForUi({ ...(m as any), isLive: false } as Match),
-                ),
-            );
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (!cancelled) setHomeUpcomingPreviewLoading(false);
-        });
-    };
-    tick(true);
-    const interval = setInterval(() => tick(false), 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [activeTab]);
 
 
   // "Populares"/"Novos" are primarily sort-order views, while the rest of
@@ -23269,139 +23230,6 @@ export default function Home({
                         ))}
                   </div>
                 </div>
-
-                {(() => {
-                  const fmtWhen = (date?: string, time?: string): string => {
-                    if (!date) return time ?? "";
-                    const todayKey = new Date().toISOString().slice(0, 10);
-                    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-                    const label = date === todayKey ? "Hoje" : date === tomorrow ? "Amanhã" : date;
-                    return time ? `${label} · ${time}` : label;
-                  };
-                  return (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <CalendarDays size={16} className="text-red-500" />
-                        <h2 className="font-black text-sm uppercase tracking-wide">
-                          Próximos Jogos em Destaque
-                        </h2>
-                        <button
-                          onClick={() => {
-                            setSelectedSport("football");
-                            setSelectedLeague(null);
-                            setSelectedCountry(null);
-                            setUpcomingSearchQuery("");
-                            selectMainTab("sports");
-                          }}
-                          className="ml-auto text-red-500 text-xs font-bold flex items-center gap-0.5 hover:text-red-400"
-                        >
-                          Ver todos <ChevronRight size={13} />
-                        </button>
-                      </div>
-                      {homeUpcomingPreviewLoading && homeUpcomingPreview.length === 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                          {Array.from({ length: 4 }).map((_, i) => (
-                            <div
-                              key={i}
-                              className="h-32 rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
-                            />
-                          ))}
-                        </div>
-                      ) : homeUpcomingPreview.length === 0 ? (
-                        <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
-                          Sem jogos agendados neste momento.
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                          {homeUpcomingPreview.map((m) => {
-                            const homeBadge = getTeamBadgeAsset(m, "home");
-                            const awayBadge = getTeamBadgeAsset(m, "away");
-                            return (
-                            <button
-                              key={m.id}
-                              onClick={() => {
-                                setSelectedSport("football");
-                                setSelectedLeague(null);
-                                setSelectedCountry(null);
-                                setUpcomingSearchQuery("");
-                                selectMainTab("sports");
-                              }}
-                              className="text-left rounded-xl border bg-zinc-900 hover:border-red-500/40 transition-colors p-3.5"
-                              style={{ borderColor: "var(--b62-glass-border)" }}
-                            >
-                              <div className="flex items-baseline justify-between gap-2 mb-2">
-                                <span className="text-[11px] font-bold text-red-500">
-                                  {fmtWhen(m.date, m.time)}
-                                </span>
-                                <span className="text-[9px] font-bold text-zinc-500 uppercase truncate">
-                                  {m.league}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-center gap-3 py-2">
-                                <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                                  {homeBadge.src && (
-                                    <span
-                                      className={`w-8 h-8 rounded-full bg-white border border-zinc-200 flex items-center justify-center overflow-hidden shrink-0 ${homeBadge.padded ? "p-1" : ""}`}
-                                    >
-                                      <img
-                                        src={homeBadge.src}
-                                        alt={m.home}
-                                        className={`w-full h-full ${homeBadge.fit === "contain" ? "object-contain" : "object-cover"}`}
-                                        loading="lazy"
-                                        decoding="async"
-                                      />
-                                    </span>
-                                  )}
-                                  <span className="text-[11px] font-bold text-center truncate w-full">
-                                    {m.home}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] font-black text-zinc-600">VS</span>
-                                <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                                  {awayBadge.src && (
-                                    <span
-                                      className={`w-8 h-8 rounded-full bg-white border border-zinc-200 flex items-center justify-center overflow-hidden shrink-0 ${awayBadge.padded ? "p-1" : ""}`}
-                                    >
-                                      <img
-                                        src={awayBadge.src}
-                                        alt={m.away}
-                                        className={`w-full h-full ${awayBadge.fit === "contain" ? "object-contain" : "object-cover"}`}
-                                        loading="lazy"
-                                        decoding="async"
-                                      />
-                                    </span>
-                                  )}
-                                  <span className="text-[11px] font-bold text-center truncate w-full">
-                                    {m.away}
-                                  </span>
-                                </div>
-                              </div>
-                              {m.odds && (m.odds.home > 1.01 || m.odds.away > 1.01) && (
-                                <div className="grid grid-cols-3 gap-1.5 mt-1">
-                                  <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
-                                    {m.odds.home.toFixed(2)}
-                                  </span>
-                                  {m.odds.draw > 1.01 ? (
-                                    <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
-                                      {m.odds.draw.toFixed(2)}
-                                    </span>
-                                  ) : (
-                                    <span />
-                                  )}
-                                  <span className="b62-font-display text-center text-xs font-bold tabular-nums bg-white/[0.05] border border-white/10 rounded-lg py-1 hover:border-red-500/60 hover:bg-red-600/10 hover:text-red-400 transition-colors">
-                                    {m.odds.away.toFixed(2)}
-                                  </span>
-                                </div>
-                              )}
-                            </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2 border-t border-zinc-800">
                   {[
                     {
