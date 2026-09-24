@@ -925,50 +925,231 @@ function mapProviderMarketsToAllOdds(value: unknown): Array<{
   choices: Array<{ name: string; label: string; odds: number }>;
 }> {
   if (!Array.isArray(value)) return [];
-  const selectionKey = (selection: string): string =>
-    selection
+  const normalizeKeyPart = (input: string): string =>
+    input
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, " ")
       .trim();
+  const scalarText = (input: unknown): string => {
+    if (typeof input === "string" || typeof input === "number") {
+      return String(input).trim();
+    }
+    return "";
+  };
+  const firstText = (...inputs: unknown[]): string => {
+    for (const input of inputs) {
+      const direct = scalarText(input);
+      if (direct) return direct;
+      if (!input || typeof input !== "object") continue;
+      const record = input as Record<string, unknown>;
+      const nested = firstText(
+        record["marketName"],
+        record["market_name"],
+        record["marketType"],
+        record["market_type"],
+        record["selection"],
+        record["outcome"],
+        record["label"],
+        record["name"],
+        record["developer_name"],
+        record["type"],
+        record["value"],
+      );
+      if (nested) return nested;
+    }
+    return "";
+  };
+  const normalizeMarketType = (row: Record<string, unknown>): string => {
+    const value = normalizeKeyPart(
+      firstText(
+        row["marketType"],
+        row["market_type"],
+        row["marketName"],
+        row["market_name"],
+        row["market"],
+        row["type"],
+        row["name"],
+      ),
+    );
+    const hasOuToken = /\bou\b/.test(value);
+    if (
+      value.includes("over") ||
+      value.includes("under") ||
+      value.includes("total") ||
+      hasOuToken ||
+      value.includes("goals")
+    ) {
+      return "over_under";
+    }
+    if (
+      value.includes("btts") ||
+      value.includes("both teams") ||
+      value.includes("ambas")
+    ) {
+      return "btts";
+    }
+    if (value.includes("handicap") || value.includes("asian handicap")) {
+      return "handicap";
+    }
+    if (
+      value.includes("match result") ||
+      value.includes("1x2") ||
+      value === "resultado"
+    ) {
+      return "match_result";
+    }
+    if (
+      value.includes("double chance") ||
+      value.includes("dupla chance") ||
+      value.includes("dupla hipotese")
+    ) {
+      return "double_chance";
+    }
+    if (
+      value.includes("correct score") ||
+      value.includes("placar exato")
+    ) {
+      return "correct_score";
+    }
+    if (value.includes("corners") || value.includes("cantos")) {
+      return "corners";
+    }
+    if (value.includes("cards") || value.includes("cartoes")) {
+      return "cards";
+    }
+    return "other";
+  };
+  const normalizeLine = (row: Record<string, unknown>): string | null => {
+    const value = firstText(row["line"], row["handicap"], row["total"]);
+    return value ? value : null;
+  };
+  const normalizePrice = (row: Record<string, unknown>): number | null => {
+    for (const candidate of [
+      row["price"],
+      row["odds"],
+      row["oddsDecimal"],
+      row["value"],
+      row["dp3"],
+    ]) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  };
+  const normalizeOutcomeName = (row: Record<string, unknown>): string =>
+    firstText(
+      row["selection"],
+      row["outcome"],
+      row["label"],
+      row["name"],
+      row["value"],
+    );
+  const classifyGroup = (
+    marketType: string,
+    marketName: string,
+    period: string | null,
+  ): string => {
+    const value = normalizeKeyPart([marketType, marketName, period ?? ""].join(" "));
+    if (/(corner|corners|canto|cantos|escanteio|escanteios)/.test(value)) {
+      return "Cantos";
+    }
+    if (/(card|cards|cartao|cartoes)/.test(value)) {
+      return "Cartões";
+    }
+    if (/(player|players|jogador|jogadores)/.test(value)) {
+      return "Jogadores";
+    }
+    if (/\bset\b/.test(value)) {
+      return "Sets";
+    }
+    if (/\bgame\b/.test(value)) {
+      return "Games";
+    }
+    if (
+      /(team|teams|equipe|equipa|home team|away team)/.test(value) &&
+      !/(both teams|btts)/.test(value)
+    ) {
+      return "Equipas";
+    }
+    if (
+      /(1st half|first half|2nd half|second half|half time|halftime|1o tempo|1 tempo|2o tempo|2 tempo|period)/.test(
+        value,
+      )
+    ) {
+      return "Tempos";
+    }
+    if (/(handicap|spread|asian)/.test(value)) {
+      return "Handicap";
+    }
+    if (
+      /(goal|goals|golo|golos|gol|gols|score|placar|total|btts|both teams)/.test(
+        value,
+      )
+    ) {
+      return "Golos";
+    }
+    return "Principal";
+  };
   const groups = new Map<string, {
     name: string;
     group: string;
-    choices: Array<{ name: string; label: string; odds: number }>;
+    choices: Array<{ key: string; name: string; label: string; odds: number }>;
   }>();
   for (const candidate of value) {
     if (!candidate || typeof candidate !== "object") continue;
     const row = candidate as Record<string, unknown>;
-    const market = String(row["market"] ?? "Mercado");
-    const period = String(row["period"] ?? "");
-    const line = row["line"] == null ? "" : String(row["line"]);
-    const key = `${market}|${period}|${line}`;
+    const marketType = normalizeMarketType(row);
+    const marketName =
+      firstText(
+        row["marketName"],
+        row["market_name"],
+        row["market"],
+        row["marketType"],
+        row["market_type"],
+        row["type"],
+        row["name"],
+      ) || "Mercado";
+    const period = firstText(row["period"], row["period_name"], row["scope"]) || null;
+    const line = normalizeLine(row);
+    const key = [
+      marketType,
+      normalizeKeyPart(marketName),
+      normalizeKeyPart(period ?? ""),
+      line ?? "no-line",
+    ].join("::");
     const item = groups.get(key) ?? {
-      name: [market, period, line].filter(Boolean).join(" · "),
-      group: /total|goal|score/i.test(market)
-        ? "Golos"
-        : /spread|handicap/i.test(market)
-          ? "Handicap"
-          : "Principal",
+      name: [marketName, period, line].filter(Boolean).join(" · "),
+      group: classifyGroup(marketType, marketName, period),
       choices: [],
     };
-    const selection = String(row["selection"] ?? "");
-    const odds = Number(row["odds"] ?? row["oddsDecimal"] ?? 0);
-    if (selection && Number.isFinite(odds) && odds > 1.001) {
-      const normalizedSelection = selectionKey(selection);
+    const selection = normalizeOutcomeName(row);
+    const odds = normalizePrice(row);
+    if (selection && odds != null && odds > 1.001) {
+      const outcomeKey = [normalizeKeyPart(selection), line ?? ""].join("::");
       const existing = item.choices.find(
-        (choice) => selectionKey(choice.name) === normalizedSelection,
+        (choice) => choice.key === outcomeKey,
       );
       if (!existing) {
-        item.choices.push({ name: selection, label: selection, odds });
-      } else if (odds > existing.odds) {
+        item.choices.push({ key: outcomeKey, name: selection, label: selection, odds });
+      } else {
         existing.odds = odds;
       }
     }
     groups.set(key, item);
   }
-  return [...groups.values()].filter((item) => item.choices.length > 0);
+  return [...groups.values()]
+    .filter((item) => item.choices.length > 0)
+    .map((item) => ({
+      name: item.name,
+      group: item.group,
+      choices: item.choices.map((choice) => ({
+        name: choice.name,
+        label: choice.label,
+        odds: choice.odds,
+      })),
+    }));
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
