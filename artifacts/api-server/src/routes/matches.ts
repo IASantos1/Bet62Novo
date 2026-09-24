@@ -972,8 +972,8 @@ export async function buildUpcomingMatches(args?: {
     upcomingSnapshot = [];
     return [];
   }
-  const normalizedRange = String(args?.range ?? "fortnight").trim().toLowerCase();
-  const windowDays = normalizedRange === "month" ? 30 : 15;
+  const normalizedRange = String(args?.range ?? "default").trim().toLowerCase();
+  const windowDays = normalizedRange === "month" ? 30 : 7;
   let payload: Awaited<ReturnType<typeof getBsdEvents>>;
   try {
     payload = await getBsdEvents({
@@ -2065,7 +2065,7 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
 
 router.get("/upcoming", async (req: Request, res: Response) => {
   try {
-    const range = String(req.query["range"] ?? "fortnight").trim().toLowerCase();
+    const range = String(req.query["range"] ?? "default").trim().toLowerCase();
     sendJson(res, { matches: await buildUpcomingMatches({ range }) });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ matches: [] });
