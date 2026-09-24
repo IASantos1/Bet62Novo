@@ -35,6 +35,8 @@ const BZZOIRO_BASE_URL =
   process.env["BZZOIRO_BASE_URL"]?.trim() || "https://sports.bzzoiro.com/api/v2/";
 
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
+const WINHOUSE_WALLET_API_KEY = process.env["WINHOUSE_WALLET_API_KEY"] ?? "";
+const WINHOUSE_CALLBACK_TOKEN = process.env["WINHOUSE_CALLBACK_TOKEN"] ?? "";
 
 //  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
 //  7 campos de vídeo em live_stream_mappings por evento.
@@ -54,6 +56,8 @@ export const CONFIG = {
   BZZOIRO_API_TOKEN,
   BZZOIRO_BASE_URL,
   BIGBANG_API_KEY,
+  WINHOUSE_WALLET_API_KEY,
+  WINHOUSE_CALLBACK_TOKEN,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

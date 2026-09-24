@@ -26818,6 +26818,7 @@ export default function Home({
                   <WinHouseSportsbookEmbed
                     isDarkTheme={isDarkTheme}
                     isLoggedIn={!!auth.user}
+                    authToken={auth.token}
                   />
                 </div>
               </div>

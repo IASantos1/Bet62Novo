@@ -4,6 +4,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 type WinHouseSportsbookEmbedProps = {
   isDarkTheme: boolean;
   isLoggedIn: boolean;
+  authToken?: string | null;
 };
 
 function buildStatusLabel(isLoggedIn: boolean): string {
@@ -13,11 +14,13 @@ function buildStatusLabel(isLoggedIn: boolean): string {
 export default function WinHouseSportsbookEmbed({
   isDarkTheme,
   isLoggedIn,
+  authToken,
 }: WinHouseSportsbookEmbedProps) {
   const containerId = useId().replace(/:/g, "");
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
     "loading",
   );
+  const [authState, setAuthState] = useState<"public" | "signed">("public");
 
   const embedKey = useMemo(
     () => String(import.meta.env.VITE_WINHOUSE_EMBED_KEY ?? "").trim(),
@@ -31,45 +34,71 @@ export default function WinHouseSportsbookEmbed({
   useEffect(() => {
     const target = document.getElementById(containerId);
     if (!target) return;
+    let cancelled = false;
+    let resizeId = 0;
 
-    target.innerHTML = "";
-    setLoadState("loading");
+    const mountEmbed = async () => {
+      target.innerHTML = "";
+      setLoadState("loading");
+      setAuthState("public");
 
-    const script = document.createElement("script");
-    script.src = "https://iframe.winhouse.bet/embed.js";
-    script.async = true;
-    if (embedKey) script.dataset.key = embedKey;
-    script.dataset.target = `#${containerId}`;
-    script.dataset.width = "100%";
-    script.dataset.height = "calc(100dvh - 9rem)";
-    script.dataset.bottomGap = "84";
-    script.dataset.embed = "1";
-    script.dataset.lang = language;
-    script.dataset.theme = isDarkTheme ? "dark" : "light";
+      let launchToken = "";
+      if (authToken) {
+        try {
+          const res = await fetch("/api/winhouse/launch", {
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && typeof data?.launch === "string" && data.launch.trim()) {
+            launchToken = data.launch.trim();
+          }
+        } catch {}
+      }
+      if (cancelled) return;
 
-    script.onload = () => {
-      setLoadState("ready");
+      const script = document.createElement("script");
+      script.src = "https://iframe.winhouse.bet/embed.js";
+      script.async = true;
+      if (embedKey) script.dataset.key = embedKey;
+      script.dataset.target = `#${containerId}`;
+      script.dataset.width = "100%";
+      script.dataset.height = "calc(100dvh - 9rem)";
+      script.dataset.bottomGap = "84";
+      script.dataset.embed = "1";
+      script.dataset.lang = language;
+      script.dataset.theme = isDarkTheme ? "dark" : "light";
+      if (launchToken) script.dataset.launch = launchToken;
+
+      script.onload = () => {
+        setLoadState("ready");
+        setAuthState(launchToken ? "signed" : "public");
+      };
+      script.onerror = () => {
+        setLoadState("error");
+      };
+
+      target.appendChild(script);
+
+      resizeId = window.setTimeout(() => {
+        const embedApi = (
+          window as Window & {
+            WinHouseEmbed?: { refit?: () => void };
+          }
+        ).WinHouseEmbed;
+        embedApi?.refit?.();
+      }, 350);
     };
-    script.onerror = () => {
-      setLoadState("error");
-    };
 
-    target.appendChild(script);
-
-    const resizeId = window.setTimeout(() => {
-      const embedApi = (
-        window as Window & {
-          WinHouseEmbed?: { refit?: () => void };
-        }
-      ).WinHouseEmbed;
-      embedApi?.refit?.();
-    }, 350);
+    void mountEmbed();
 
     return () => {
+      cancelled = true;
       window.clearTimeout(resizeId);
       target.innerHTML = "";
     };
-  }, [containerId, embedKey, isDarkTheme, language]);
+  }, [authToken, containerId, embedKey, isDarkTheme, language]);
 
   return (
     <div className="space-y-4">
@@ -98,7 +127,9 @@ export default function WinHouseSportsbookEmbed({
                 {embedKey ? "Chave configurada" : "Modo por dominio"}
               </div>
               <div className="rounded-full border border-zinc-700 bg-zinc-950/80 px-3 py-1.5 text-[11px] font-bold text-zinc-300">
-                {buildStatusLabel(isLoggedIn)}
+                {authState === "signed"
+                  ? "Login sincronizado"
+                  : buildStatusLabel(isLoggedIn)}
               </div>
               <a
                 href="https://iframe.winhouse.bet/docs"
@@ -160,11 +191,14 @@ export default function WinHouseSportsbookEmbed({
             Login
           </div>
           <div className="mt-2 text-sm font-semibold text-white">
-            Navegacao publica, SSO depois
+            {authState === "signed"
+              ? "Entrou no sportsbook com a conta BET62"
+              : "Navegacao publica, SSO depois"}
           </div>
           <div className="mt-1 text-sm text-zinc-400">
-            Nesta fase o visitante ja consegue visualizar o sportsbook sem popup
-            e sem sair do BET62.
+            {authState === "signed"
+              ? "O launch token foi emitido no backend e o book abriu autenticado dentro do nosso shell."
+              : "Nesta fase o visitante ja consegue visualizar o sportsbook sem popup e sem sair do BET62."}
           </div>
         </div>
 
