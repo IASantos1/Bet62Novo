@@ -7013,6 +7013,35 @@ export default function Home({
     return Math.max(0, Math.min(isFootball ? 130 : 999, computed));
   };
 
+  const isFootballPenaltyShootoutStatus = (rawStatus: unknown): boolean => {
+    const status = String(rawStatus ?? "")
+      .trim()
+      .toLowerCase();
+    return (
+      status === "pen" ||
+      status === "penalty" ||
+      status === "penalties" ||
+      status === "shootout" ||
+      status.includes("penalty shootout") ||
+      status.includes("penalty-shootout") ||
+      status.includes("shootout")
+    );
+  };
+
+  const isFootballExtraTimeStatus = (rawStatus: unknown): boolean => {
+    const status = String(rawStatus ?? "")
+      .trim()
+      .toLowerCase();
+    return (
+      status === "et" ||
+      status === "extra" ||
+      status === "aet" ||
+      status.includes("extra time") ||
+      status.includes("extra-time") ||
+      status.includes("overtime")
+    );
+  };
+
   const getFootballPhaseTag = (
     match: Match,
     minute: number,
@@ -7020,12 +7049,8 @@ export default function Home({
     const status = String(match.status ?? "")
       .trim()
       .toLowerCase();
-    const showET =
-      !!match.markets?.etExtra || status.includes("extra") || status === "et";
-    const showPen =
-      !!match.markets?.penExtra ||
-      status.includes("pen") ||
-      status.includes("shootout");
+    const showET = !!match.isLive && isFootballExtraTimeStatus(status);
+    const showPen = !!match.isLive && isFootballPenaltyShootoutStatus(status);
     if (showPen) return "PEN";
     if (
       status === "ht" ||
@@ -7709,10 +7734,16 @@ export default function Home({
     setAllOddsData(null);
     setAllOddsLoading(false);
     // Auto-switch to ET/Pen tab if match is already in that phase
-    if (expandedMatch?.markets?.etExtra) {
+    if (
+      expandedMatch?.isLive &&
+      isFootballExtraTimeStatus(expandedMatch.status)
+    ) {
       setModalTab("prolongamento");
       setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0);
-    } else if (expandedMatch?.markets?.penExtra) {
+    } else if (
+      expandedMatch?.isLive &&
+      isFootballPenaltyShootoutStatus(expandedMatch.status)
+    ) {
       setModalTab("penaltis");
       setTimeout(() => scrollTabIntoView("penaltis", "instant"), 0);
     } else {
@@ -7724,18 +7755,26 @@ export default function Home({
   // Auto-switch to ET/Pen tab when a live match enters extra time / penalties
   useEffect(() => {
     if (!expandedMatch?.isLive) return;
-    if (expandedMatch.markets?.penExtra && modalTab !== "penaltis") {
+    const isActuallyInPenaltyShootout = isFootballPenaltyShootoutStatus(
+      expandedMatch.status,
+    );
+    const isActuallyInExtraTime = isFootballExtraTimeStatus(
+      expandedMatch.status,
+    );
+    if (isActuallyInPenaltyShootout && modalTab !== "penaltis") {
       setModalTab("penaltis");
       setTimeout(() => scrollTabIntoView("penaltis", "instant"), 0);
       return;
     }
-    if (expandedMatch.markets?.etExtra && modalTab === "todos") {
+    if (isActuallyInExtraTime && modalTab === "todos") {
       setModalTab("prolongamento");
       setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0);
     }
   }, [
-    !!(expandedMatch as any)?.markets?.etExtra,
-    !!(expandedMatch as any)?.markets?.penExtra,
+    expandedMatch?.isLive,
+    expandedMatch?.status,
+    modalTab,
+    scrollTabIntoView,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -7751,7 +7790,10 @@ export default function Home({
       (expandedMatch.sport ?? "football") !== "football"
     )
       return;
-    if (expandedMatch.markets?.etExtra || expandedMatch.markets?.penExtra)
+    if (
+      isFootballExtraTimeStatus(expandedMatch.status) ||
+      isFootballPenaltyShootoutStatus(expandedMatch.status)
+    )
       return;
     const minute = getDisplayMinute(expandedMatch);
     if (minute < 85) return;
@@ -7766,8 +7808,6 @@ export default function Home({
     expandedMatch?.sport,
     expandedMatch?.minute,
     expandedMatch?.status,
-    !!(expandedMatch as any)?.markets?.etExtra,
-    !!(expandedMatch as any)?.markets?.penExtra,
     modalTab,
     scrollTabIntoView,
   ]);
@@ -11716,8 +11756,13 @@ export default function Home({
       })();
 
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
+    const normalizedStatus = String(match.status ?? "")
+      .trim()
+      .toLowerCase();
     const isPenShootout =
-      match.isLive && sport === "football" && !!match.markets?.penExtra;
+      match.isLive &&
+      sport === "football" &&
+      isFootballPenaltyShootoutStatus(normalizedStatus);
 
     const canShowOdds = hasPlayableOddsOnCard;
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) =>
@@ -13978,9 +14023,13 @@ export default function Home({
         ? parseInt(((match as any).status as string).replace("P", "")) || 0
         : 0;
     // showET: show Prolongamento markets (match in extra time)
-    const showET = isFootball && match.isLive && !!match.markets?.etExtra;
+    const showET =
+      isFootball && match.isLive && isFootballExtraTimeStatus(match.status);
     // showPen: show Penáltis markets (match in penalty shootout)
-    const showPen = isFootball && match.isLive && !!match.markets?.penExtra;
+    const showPen =
+      isFootball &&
+      match.isLive &&
+      isFootballPenaltyShootoutStatus(match.status);
     // Football half lifecycle: null=pre-match/ET/Pen (show all), 1=1st half, 0=HT break, 2=2nd half
     // ET and Pen phases show all full-match markets too
     const rawStat = (match as any).status as string | undefined;
