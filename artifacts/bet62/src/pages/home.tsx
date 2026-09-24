@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import trophyImg from "/trophy-bet62.png";
 import { useLocation, Link } from "wouter";
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
@@ -5125,12 +5124,13 @@ export default function Home({
 
   const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
   const activeTabRef = useRef(activeTab);
-  // "home" (Destaques) is included here too: betting now happens inside
-  // the WinHouse Sportsbook iframe, so BET62's own game-tree sidebar and
-  // bet slip no longer have a purpose on Destaques either (Santos,
-  // 2026-09-24).
+  // "home" (Destaques) and "promos" (Promoções) are included here too:
+  // betting now happens inside the WinHouse Sportsbook iframe, so BET62's
+  // own game-tree sidebar and bet slip no longer have a purpose on those
+  // pages either (Santos, 2026-09-24).
   const isShellOnlyTab =
     activeTab === "home" ||
+    activeTab === "promos" ||
     activeTab === "casino" ||
     activeTab === "sportsbook" ||
     activeTab === "sports";
@@ -20597,7 +20597,7 @@ export default function Home({
             <div className="hidden lg:flex items-center ml-12 h-16">
               {[
                 { id: "home", icon: <Star size={15} />, label: "DESTAQUES" },
-                { id: "sportsbook", icon: <Flag size={15} />, label: "Esporte" },
+                { id: "sportsbook", icon: <Flag size={15} />, label: "ESPORTE" },
                 { id: "casino", icon: <Activity size={15} />, label: "CASINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
               ].map((tab) => (
@@ -26356,35 +26356,11 @@ function PromosPage({
   onFetchCashback: () => void;
   onClaimCashback: () => void;
 }) {
-  const [, navigate] = useLocation();
   useEffect(() => {
     onFetchCashback();
   }, []);
 
   const promos = [
-    {
-      id: "worldcup",
-      title: "FIFA WORLD CUP 2026",
-      subtitle: "CANADA · MÉXICO · USA — COMEÇA 11 JUN",
-      description:
-        "A maior Copa do Mundo da história com 48 seleções. Aposte em todos os grupos, oitavas, quartas e finais com odds exclusivas.",
-      badge: "🏆 COPA DO MUNDO",
-      image:
-        "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1400&auto=format&fit=crop",
-      overlayImg: trophyImg,
-      gradient: "from-yellow-500/60 via-orange-600/40 to-purple-800/55",
-      highlight: "48",
-      highlightLabel: "seleções · 104 jogos",
-      terms: [
-        "Disponível para todos os utilizadores.",
-        "Odds ao vivo durante a Copa.",
-        "Mercados: 1X2, Golos, Especiais.",
-        "Apostas combinadas com boost disponíveis.",
-      ],
-      cta: "VER JOGOS DA COPA",
-      alwaysActive: true,
-      action: () => navigate("/copa-do-mundo"),
-    },
     {
       id: "boost6x",
       title: "BOOST 6% NA MÚLTIPLA",
