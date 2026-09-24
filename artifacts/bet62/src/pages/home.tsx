@@ -12,7 +12,7 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import trophyImg from "/trophy-bet62.png";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -54,6 +54,8 @@ import {
   SortAsc,
   ChevronLeft,
   CircleDot,
+  Mail,
+  MessageCircle,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -28872,27 +28874,131 @@ export default function Home({
 
       {/* FOOTER */}
       <footer className="border-t border-zinc-900 bg-zinc-950 py-12 mt-auto">
-        <div className="max-w-[1600px] mx-auto px-4 text-center">
-          <div className="font-black text-3xl tracking-tighter italic opacity-20 mb-8">
-            <span>BET</span>
-            <span>62</span>
+        <div className="max-w-[1600px] mx-auto px-4">
+          <div className="text-center mb-10">
+            <div className="font-black text-3xl tracking-tighter italic mb-2">
+              <span>BET</span>
+              <span>62</span>
+            </div>
+            <p className="text-sm text-zinc-500 max-w-md mx-auto mb-5">
+              BET62 Apostas Esportivas · A plataforma futurista de
+              entretenimento desportivo e cassino online. Licenciado,
+              regulamentado e seguro.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-zinc-500">
+              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                <ShieldCheck size={14} className="text-emerald-500" />
+                MGA / Malta Gaming
+              </span>
+              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                <Lock size={14} className="text-emerald-500" />
+                SSL 256-bit
+              </span>
+              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                €EUR
+              </span>
+              <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                18+ Jogo Responsável
+              </span>
+            </div>
           </div>
-          <div className="flex flex-wrap justify-center gap-6 text-sm text-zinc-500 mb-8">
-            <a href="#" className="hover:text-white transition-colors">
-              Termos e Condições
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 mb-10 text-sm">
+            <div>
+              <div className="font-bold text-white mb-3">A BET62</div>
+              <div className="flex flex-col gap-2 text-zinc-500">
+                <Link href="/sobre" className="hover:text-white transition-colors">
+                  Sobre Nós
+                </Link>
+                <Link href="/imprensa" className="hover:text-white transition-colors">
+                  Imprensa
+                </Link>
+                <Link href="/carreiras" className="hover:text-white transition-colors">
+                  Carreiras
+                </Link>
+                <Link href="/afiliados" className="hover:text-white transition-colors">
+                  Afiliados
+                </Link>
+              </div>
+            </div>
+
+            <div>
+              <div className="font-bold text-white mb-3">Legal</div>
+              <div className="flex flex-col gap-2 text-zinc-500">
+                <Link href="/termos" className="hover:text-white transition-colors">
+                  Termos e Condições
+                </Link>
+                <Link href="/privacidade" className="hover:text-white transition-colors">
+                  Política de Privacidade
+                </Link>
+                <Link href="/cookies" className="hover:text-white transition-colors">
+                  Cookies
+                </Link>
+                <Link href="/jogo-responsavel" className="hover:text-white transition-colors">
+                  Responsabilidade Social
+                </Link>
+              </div>
+            </div>
+
+            <div>
+              <div className="font-bold text-white mb-3">Apoio ao Cliente</div>
+              <div className="flex flex-col gap-2 text-zinc-500">
+                <Link href="/ajuda" className="hover:text-white transition-colors">
+                  Central de Ajuda
+                </Link>
+                <Link href="/contacto" className="hover:text-white transition-colors">
+                  Contacto
+                </Link>
+                <Link href="/pagamentos" className="hover:text-white transition-colors">
+                  Métodos de Pagamento
+                </Link>
+                <Link href="/regras" className="hover:text-white transition-colors">
+                  Regras de Apostas
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-zinc-500 mb-8">
+            <a
+              href="mailto:suportebet62@gmail.com"
+              className="flex items-center gap-1.5 hover:text-white transition-colors"
+            >
+              <Mail size={14} />
+              suportebet62@gmail.com
             </a>
-            <a href="#" className="hover:text-white transition-colors">
-              Política de Privacidade
+            <span className="flex items-center gap-1.5">
+              <MessageCircle size={14} />
+              Chat 24/7 disponível
+            </span>
+            <a
+              href="https://www.gamblersanonymous.org/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-white transition-colors"
+            >
+              Jogadores Anónimos
+              <ExternalLink size={12} />
             </a>
-            <a href="#" className="hover:text-white transition-colors">
-              Jogo Responsável
+            <a
+              href="https://www.gamcare.org.uk/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-white transition-colors"
+            >
+              Auto-Exclusão / GamCare
+              <ExternalLink size={12} />
             </a>
           </div>
-          <div className="flex items-center justify-center gap-3 text-xs text-zinc-600">
-            <div className="w-8 h-8 rounded-full border border-zinc-700 flex items-center justify-center font-bold">
+
+          <div className="flex items-center justify-center gap-3 text-xs text-zinc-600 text-center border-t border-zinc-900 pt-6">
+            <div className="w-8 h-8 rounded-full border border-zinc-700 flex items-center justify-center font-bold shrink-0">
               18+
             </div>
-            <span>© 2026 Bet62 • Apostas Responsáveis</span>
+            <span>
+              © 2025 BET62 Apostas Esportivas · Todos os direitos reservados ·
+              Jogo 18+ · Jogue com responsabilidade
+            </span>
           </div>
         </div>
       </footer>
