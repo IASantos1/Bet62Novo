@@ -27178,16 +27178,35 @@ export default function Home({
                     setActiveTab("wallet");
                   }}
                   onFetchCashback={fetchCashback}
-                  onClaimCashback={() => {
-                    if (cashbackData && cashbackData.cashback > 0) {
-                      setPromoNotif({
-                        type: "cashback",
-                        amount: cashbackData.cashback,
-                      });
-                      setCashbackData(null);
-                    } else {
+                  onClaimCashback={async () => {
+                    if (!cashbackData || cashbackData.cashback <= 0) {
                       toast.info(
                         "Ainda não há cashback disponível esta semana.",
+                      );
+                      return;
+                    }
+                    try {
+                      const token = localStorage.getItem("bet62_token");
+                      const r = await fetch("/api/auth/cashback/claim", {
+                        method: "POST",
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      const body = await r.json().catch(() => ({}));
+                      if (!r.ok) {
+                        toast.error(
+                          body?.error ?? "Não foi possível resgatar o cashback. Tente novamente.",
+                        );
+                        return;
+                      }
+                      setPromoNotif({
+                        type: "cashback",
+                        amount: body.amount ?? cashbackData.cashback,
+                      });
+                      setCashbackData(null);
+                      auth.refreshUser();
+                    } catch {
+                      toast.error(
+                        "Não foi possível resgatar o cashback. Verifique a sua ligação e tente novamente.",
                       );
                     }
                   }}
