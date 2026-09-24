@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Redirect, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,7 +23,6 @@ import {
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import LivePage from "@/pages/live";
-import LeaguePage from "@/pages/league";
 import SplashScreen from "@/components/SplashScreen";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
@@ -107,12 +106,8 @@ function Router() {
       <Route path="/perfil">{() => <Home initialTab="profile" />}</Route>
       <Route path="/ao-vivo">{() => <LivePage />}</Route>
       <Route path="/live">{() => <LivePage />}</Route>
-      <Route path="/liga/:id">
-        {(params) => <LeaguePage leagueId={params.id} />}
-      </Route>
-      <Route path="/league/:id">
-        {(params) => <LeaguePage leagueId={params.id} />}
-      </Route>
+      <Route path="/liga/:id">{() => <Redirect to="/" />}</Route>
+      <Route path="/league/:id">{() => <Redirect to="/" />}</Route>
       <Route path="/admin">
         {() => (
           <Suspense
