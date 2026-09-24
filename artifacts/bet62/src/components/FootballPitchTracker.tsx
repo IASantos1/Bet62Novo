@@ -456,9 +456,10 @@ export default function FootballPitchTracker({
   const compactStats = useMemo(() => extractCompactStats(v2StatsGroups), [v2StatsGroups]);
   const lastThreeMeetings = useMemo(() => (confrontosRecentMeetings ?? []).slice(0, 3), [confrontosRecentMeetings]);
 
-  // No commentary feed at all for this fixture → don't show the mini
-  // pitch in any form, same traditional layout as before this feature.
-  if (!commentary || commentary.length === 0) return null;
+  // Show nothing only when BOTH signals are absent. Commentary remains the
+  // richer fallback, but a fresh real bzzoiro ball fix is enough to power
+  // the 2D mini pitch on its own.
+  if ((!commentary || commentary.length === 0) && !hasFreshRealBall) return null;
 
   return (
     <div className="bet62-tracker">

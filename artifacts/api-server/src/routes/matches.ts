@@ -76,6 +76,12 @@ import {
   type BSDVenueCompetitionRow,
   type BSDWorldCupSquadRow,
 } from "../services/bsd/client.js";
+import {
+  getBsdFootballLiveSocketOverlay,
+  hintBsdFootballLiveSocketEvent,
+  syncBsdFootballLiveSocketCandidates,
+  type BSDLiveSocketBallPosition,
+} from "../services/bsd/liveSocket.js";
 
 type Odds1X2 = {
   home: number;
@@ -157,6 +163,7 @@ export type LiveMatchState = {
   leagueId?: string;
   seasonId?: string;
   _commentary?: Array<{ id: string; time: string; text: string }>;
+  _ballPosition?: BSDLiveSocketBallPosition | null;
 };
 
 export type UpcomingMatch = Omit<LiveMatchState, "minute" | "homeScore" | "awayScore" | "events" | "isLive"> & {
@@ -202,6 +209,8 @@ const emptyMarkets = (): GenericMarkets => ({
 });
 
 let upcomingSnapshot: UpcomingMatch[] = [];
+let liveSnapshotBuiltAt = 0;
+let liveSnapshotPromise: Promise<LiveMatchState[]> | null = null;
 
 export const liveMatchState = new Map<string, LiveMatchState>();
 export const finishedMatchResults = new Map<
@@ -260,6 +269,21 @@ function toEventId(matchId: string | number): string {
     .trim();
 }
 
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function arrayValue(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          !!item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+}
+
 function toDateParts(iso: string | null | undefined): { date?: string; time?: string } {
   if (!iso) return {};
   const date = new Date(iso);
@@ -295,6 +319,159 @@ function mapStatus(status: string): string {
   if (normalized === "cancelled") return "cancelled";
   if (normalized === "postponed") return "postponed";
   return normalized;
+}
+
+function applyLiveSocketOverlay(match: LiveMatchState): LiveMatchState {
+  const overlay = getBsdFootballLiveSocketOverlay(toEventId(match.id));
+  if (!overlay) return match;
+
+  const oddsBlock = objectValue(overlay.odds);
+  const matchWinner = objectValue(oddsBlock?.["match_winner"]);
+  const overUnder = objectValue(oddsBlock?.["over_under"]);
+  const btts = objectValue(oddsBlock?.["btts"]);
+  const asianHandicapRows = arrayValue(oddsBlock?.["asian_handicap"]);
+  const levelAsianHandicap =
+    asianHandicapRows.find((row) => parseNumber(row["line"]) === 0) ??
+    asianHandicapRows[0] ??
+    null;
+
+  const odds: Odds1X2 = {
+    home:
+      match.odds.home > 1
+        ? match.odds.home
+        : parseNumber(matchWinner?.["home"]) || match.odds.home,
+    draw:
+      match.odds.draw > 1
+        ? match.odds.draw
+        : parseNumber(matchWinner?.["draw"]) || match.odds.draw,
+    away:
+      match.odds.away > 1
+        ? match.odds.away
+        : parseNumber(matchWinner?.["away"]) || match.odds.away,
+  };
+
+  const markets: GenericMarkets = {
+    ...match.markets,
+    bothTeamsScore: {
+      yes:
+        match.markets.bothTeamsScore.yes > 1
+          ? match.markets.bothTeamsScore.yes
+          : parseNumber(btts?.["yes"]) || match.markets.bothTeamsScore.yes,
+      no:
+        match.markets.bothTeamsScore.no > 1
+          ? match.markets.bothTeamsScore.no
+          : parseNumber(btts?.["no"]) || match.markets.bothTeamsScore.no,
+    },
+    totalGoals: {
+      ...match.markets.totalGoals,
+      over15:
+        match.markets.totalGoals.over15 > 1
+          ? match.markets.totalGoals.over15
+          : parseNumber(overUnder?.["over_15"]) || match.markets.totalGoals.over15,
+      under15:
+        match.markets.totalGoals.under15 > 1
+          ? match.markets.totalGoals.under15
+          : parseNumber(overUnder?.["under_15"]) || match.markets.totalGoals.under15,
+      over25:
+        match.markets.totalGoals.over25 > 1
+          ? match.markets.totalGoals.over25
+          : parseNumber(overUnder?.["over_25"]) || match.markets.totalGoals.over25,
+      under25:
+        match.markets.totalGoals.under25 > 1
+          ? match.markets.totalGoals.under25
+          : parseNumber(overUnder?.["under_25"]) || match.markets.totalGoals.under25,
+      over35:
+        match.markets.totalGoals.over35 > 1
+          ? match.markets.totalGoals.over35
+          : parseNumber(overUnder?.["over_35"]) || match.markets.totalGoals.over35,
+      under35:
+        match.markets.totalGoals.under35 > 1
+          ? match.markets.totalGoals.under35
+          : parseNumber(overUnder?.["under_35"]) || match.markets.totalGoals.under35,
+    },
+    asianHandicap:
+      levelAsianHandicap != null
+        ? {
+            line:
+              match.markets.asianHandicap.line !== 0
+                ? match.markets.asianHandicap.line
+                : parseNumber(levelAsianHandicap["line"]),
+            home:
+              match.markets.asianHandicap.home > 1
+                ? match.markets.asianHandicap.home
+                : parseNumber(levelAsianHandicap["home"]) ||
+                  match.markets.asianHandicap.home,
+            away:
+              match.markets.asianHandicap.away > 1
+                ? match.markets.asianHandicap.away
+                : parseNumber(levelAsianHandicap["away"]) ||
+                  match.markets.asianHandicap.away,
+          }
+        : match.markets.asianHandicap,
+  };
+
+  const status = overlay.status != null ? mapStatus(overlay.status) : match.status;
+  const hasRealOdds =
+    match.hasRealOdds ||
+    odds.home > 1 ||
+    odds.draw > 1 ||
+    odds.away > 1 ||
+    markets.bothTeamsScore.yes > 1 ||
+    markets.bothTeamsScore.no > 1 ||
+    markets.totalGoals.over15 > 1 ||
+    markets.totalGoals.over25 > 1 ||
+    markets.totalGoals.over35 > 1 ||
+    markets.asianHandicap.home > 1 ||
+    markets.asianHandicap.away > 1;
+
+  return {
+    ...match,
+    isLive: status === "live",
+    homeScore: overlay.homeScore ?? match.homeScore,
+    awayScore: overlay.awayScore ?? match.awayScore,
+    minute: overlay.minute ?? match.minute,
+    status,
+    hasRealOdds,
+    odds,
+    markets,
+    _ballPosition: overlay.ballPosition ?? match._ballPosition ?? null,
+  };
+}
+
+function setLiveMatchesSnapshot(matches: LiveMatchState[]): LiveMatchState[] {
+  const withOverlay = matches.map(applyLiveSocketOverlay);
+  liveMatchState.clear();
+  for (const match of withOverlay) liveMatchState.set(String(match.id), match);
+  liveSnapshotBuiltAt = Date.now();
+  return withOverlay;
+}
+
+function snapshotLiveMatches(): LiveMatchState[] {
+  const withOverlay = Array.from(liveMatchState.values()).map(applyLiveSocketOverlay);
+  liveMatchState.clear();
+  for (const match of withOverlay) liveMatchState.set(String(match.id), match);
+  return withOverlay;
+}
+
+async function getCurrentLiveMatches(args?: {
+  forceFresh?: boolean;
+  maxAgeMs?: number;
+}): Promise<LiveMatchState[]> {
+  const maxAgeMs = Math.max(1_000, args?.maxAgeMs ?? 10_000);
+  const stale =
+    args?.forceFresh === true ||
+    liveMatchState.size === 0 ||
+    Date.now() - liveSnapshotBuiltAt > maxAgeMs;
+
+  if (!stale) return snapshotLiveMatches();
+
+  if (!liveSnapshotPromise) {
+    liveSnapshotPromise = buildLiveMatches().finally(() => {
+      liveSnapshotPromise = null;
+    });
+  }
+
+  return liveSnapshotPromise;
 }
 
 function mapTier(_league: string, _country?: string): 1 | 2 | 3 | 4 {
@@ -742,6 +919,7 @@ async function enrichEventsInBatches(
 async function buildLiveMatches(): Promise<LiveMatchState[]> {
   if (!bsdEnabled()) {
     liveMatchState.clear();
+    liveSnapshotBuiltAt = 0;
     return [];
   }
   let events: BSDEvent[] = [];
@@ -759,12 +937,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     console.error("[BSD LIVE] failed", error);
     throw error;
   }
+  syncBsdFootballLiveSocketCandidates(events);
   const matches = await enrichEventsInBatches(events, { maxItems: 100, batchSize: 10 });
-  liveMatchState.clear();
-  for (const match of matches) {
-    liveMatchState.set(String(match.id), match);
-  }
-  return matches;
+  return setLiveMatchesSnapshot(matches);
 }
 
 export async function buildUpcomingMatches(args?: {
@@ -1651,7 +1826,7 @@ function mapConfrontos(payload: BSDH2HResponse | null, req: Request) {
 
 router.get("/live", async (_req: Request, res: Response) => {
   try {
-    sendJson(res, { matches: await buildLiveMatches() });
+    sendJson(res, { matches: await getCurrentLiveMatches({ forceFresh: true }) });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ matches: [] });
   }
@@ -1659,7 +1834,7 @@ router.get("/live", async (_req: Request, res: Response) => {
 
 router.get("/live-filler", async (_req: Request, res: Response) => {
   try {
-    sendJson(res, { matches: await buildLiveMatches() });
+    sendJson(res, { matches: await getCurrentLiveMatches({ maxAgeMs: 20_000 }) });
   } catch {
     sendJson(res, { matches: [] });
   }
@@ -1669,7 +1844,8 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
   try {
     const eventId = toEventId(req.params["id"] ?? "");
     const event = await getBsdEventById(eventId);
-    const match = await enrichEvent(event);
+    hintBsdFootballLiveSocketEvent(event);
+    const match = applyLiveSocketOverlay(await enrichEvent(event));
     sendJson(res, { match });
   } catch (error) {
     res.status(formatErrorStatus(error, 404)).json({ error: "match unavailable" });
@@ -1762,20 +1938,31 @@ router.get("/live-stream", async (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
+  let lastPayload = "";
+  let lastKeepAliveAt = 0;
 
   const push = async () => {
     try {
-      const matches = await buildLiveMatches();
-      res.write(`data: ${JSON.stringify({ matches })}\n\n`);
+      const matches = await getCurrentLiveMatches({ maxAgeMs: 12_000 });
+      const payload = JSON.stringify({ matches });
+      if (payload !== lastPayload) {
+        lastPayload = payload;
+        res.write(`data: ${payload}\n\n`);
+        lastKeepAliveAt = Date.now();
+      } else if (Date.now() - lastKeepAliveAt >= 15_000) {
+        res.write(`: keep-alive\n\n`);
+        lastKeepAliveAt = Date.now();
+      }
     } catch {
       res.write(`data: ${JSON.stringify({ matches: [] })}\n\n`);
+      lastKeepAliveAt = Date.now();
     }
   };
 
   await push();
   const interval = setInterval(() => {
     void push();
-  }, 10_000);
+  }, 1_000);
 
   res.on("close", () => {
     clearInterval(interval);
@@ -1864,7 +2051,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
 
 router.get("/", async (_req: Request, res: Response) => {
   try {
-    sendJson(res, { matches: await buildLiveMatches() });
+    sendJson(res, { matches: await getCurrentLiveMatches({ forceFresh: true }) });
   } catch {
     sendJson(res, { matches: [] });
   }
@@ -2249,7 +2436,7 @@ router.get("/leagues/:id/venues", async (req: Request, res: Response) => {
 
 router.get("/football-livescores", async (_req: Request, res: Response) => {
   try {
-    const matches = await buildLiveMatches();
+    const matches = await getCurrentLiveMatches({ forceFresh: true });
     const grouped = new Map<string, { league: string; matches: LiveMatchState[] }>();
     for (const match of matches) {
       const key = `${match.leagueId ?? match.league}`;

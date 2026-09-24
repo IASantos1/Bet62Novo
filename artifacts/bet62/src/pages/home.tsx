@@ -9081,8 +9081,9 @@ export default function Home({
       };
     };
 
-    // BSD live WebSocket requires a paid addon. On the base plan we stay on
-    // SSE + HTTP fallback so the app does not attempt an unavailable upgrade.
+    // The browser still consumes our backend SSE, but the backend can now
+    // upgrade to BSD's paid football WebSocket and stream those updates
+    // through the same SSE channel to the UI.
     openSSE();
 
     // ── 3. HTTP fallback poll while push transport is degraded ────────────────
@@ -21108,15 +21109,16 @@ export default function Home({
 
                 {/* Mini pitch tracker — PWA only (see .bet62-hide-in-pwa /
                     .bet62-show-in-pwa, index.css): replaces the header
-                    above directly above the Mercados odds markets. The
-                    component itself renders nothing when the match has no
-                    commentary feed — gated here too so no empty wrapper
-                    is left behind in that case. */}
+                    above directly above the Mercados odds markets. Render
+                    it whenever we have either commentary or real ball
+                    position from BSD WebSocket, so the 2D pitch works even
+                    on fixtures without commentary text. */}
                 {expandedMatch.isLive &&
                   (expandedMatch.sport ?? "football") === "football" &&
                   matchViewTab === "markets" &&
-                  expandedMatch._commentary &&
-                  expandedMatch._commentary.length > 0 && (
+                  ((expandedMatch._commentary &&
+                    expandedMatch._commentary.length > 0) ||
+                    expandedMatch._ballPosition) && (
                     <div className="bet62-show-in-pwa mb-3">
                       <FootballPitchTracker
                         home={expandedMatch.home}
@@ -28182,8 +28184,9 @@ export default function Home({
             expandedMatch.isLive &&
             (expandedMatch.sport ?? "football") === "football" &&
             matchViewTab === "markets" &&
-            expandedMatch._commentary &&
-            expandedMatch._commentary.length > 0
+            ((expandedMatch._commentary &&
+              expandedMatch._commentary.length > 0) ||
+              expandedMatch._ballPosition)
           );
           return (
         <aside
