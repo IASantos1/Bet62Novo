@@ -159,6 +159,7 @@ router.post("/login", loginRateLimit, async (req, res): Promise<void> => {
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { type Response } from "express";
 import { sql } from "drizzle-orm";
+import { applyFreebetBalanceDelta } from "../lib/ledger.js";
 
 // ─── WEEKLY CASHBACK CHECK ───────────────────────────────────────────────────
 router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
@@ -179,6 +180,73 @@ router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response):
   } catch (err) {
     logger.error({ err }, "Cashback check error");
     res.status(500).json({ error: "Erro ao calcular cashback" });
+  }
+});
+
+/** ISO-8601 week key, e.g. "2026-W39" — Monday-anchored, matches the
+ * standard week numbering most people mean by "semanal". */
+function isoWeekKey(date: Date): string {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+}
+
+// ─── WEEKLY CASHBACK CLAIM ────────────────────────────────────────────────────
+// The frontend's "RESGATAR" button used to just show a success toast and
+// clear local state — it never told the server, so the balance never
+// actually moved (real-money bug: user sees "credited" but nothing lands).
+// Recomputes the cashback server-side (never trust a client-submitted
+// amount for money) and credits it via applyFreebetBalanceDelta, same
+// bonus-balance destination the UI already promises ("creditado em saldo
+// bónus"). idempotencyKey is scoped to the calendar ISO week, and
+// ledgerEntriesTable.idempotencyKey has a real DB-level UNIQUE constraint
+// (lib/ledger.ts's insert ... onConflictDoNothing pattern), so a double
+// click, a retry, or two tabs open at once can never double-credit —
+// the second attempt's insert simply no-ops and the route reports 409.
+router.post("/cashback/claim", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.id;
+    const { betsTable } = await import("@workspace/db");
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const lostBets = await db
+      .select()
+      .from(betsTable)
+      .where(
+        sql`${betsTable.userId} = ${userId} AND ${betsTable.status} = 'lost' AND ${betsTable.createdAt} >= ${oneWeekAgo}`
+      );
+    const totalLost = lostBets.reduce((sum, b) => sum + parseFloat(b.stake), 0);
+    const cashback = Math.min(100, +(totalLost * 0.10).toFixed(2));
+    if (cashback <= 0) {
+      res.status(400).json({ error: "Ainda não há cashback disponível esta semana." });
+      return;
+    }
+
+    const weekKey = isoWeekKey(new Date());
+    const credited = await db.transaction(async (tx) =>
+      applyFreebetBalanceDelta(tx, {
+        userId,
+        amount: cashback.toFixed(2),
+        kind: "cashback_weekly",
+        idempotencyKey: `cashback:${userId}:${weekKey}`,
+        refType: "cashback",
+        refId: weekKey,
+        metadata: { totalLost, bets: lostBets.length },
+      }),
+    );
+
+    if (!credited) {
+      res.status(409).json({ error: "O cashback desta semana já foi resgatado." });
+      return;
+    }
+
+    logger.info({ userId, cashback, weekKey }, "Weekly cashback claimed");
+    res.json({ credited: true, amount: cashback });
+  } catch (err) {
+    logger.error({ err }, "Cashback claim error");
+    res.status(500).json({ error: "Erro ao resgatar cashback" });
   }
 });
 
