@@ -79,6 +79,7 @@ import {
 import {
   getBsdFootballLiveSocketOverlay,
   hintBsdFootballLiveSocketEvent,
+  onBsdFootballLiveSocketOverlay,
   syncBsdFootballLiveSocketCandidates,
   type BSDLiveSocketBallPosition,
 } from "../services/bsd/liveSocket.js";
@@ -164,6 +165,7 @@ export type LiveMatchState = {
   seasonId?: string;
   _commentary?: Array<{ id: string; time: string; text: string }>;
   _ballPosition?: BSDLiveSocketBallPosition | null;
+  _allOdds?: AllOddsMarket[];
 };
 
 export type UpcomingMatch = Omit<LiveMatchState, "minute" | "homeScore" | "awayScore" | "events" | "isLive"> & {
@@ -213,6 +215,7 @@ let liveSnapshotBuiltAt = 0;
 let liveSnapshotPromise: Promise<LiveMatchState[]> | null = null;
 
 export const liveMatchState = new Map<string, LiveMatchState>();
+const liveSseClients = new Map<Response, string>();
 export const finishedMatchResults = new Map<
   string,
   {
@@ -402,6 +405,7 @@ function applyLiveSocketOverlay(match: LiveMatchState): LiveMatchState {
     odds,
     markets,
     _ballPosition: overlay.ballPosition ?? match._ballPosition ?? null,
+    _allOdds: mergeAllOddsMarkets(match._allOdds ?? [], odds, markets),
   };
 }
 
@@ -418,6 +422,24 @@ function snapshotLiveMatches(): LiveMatchState[] {
   liveMatchState.clear();
   for (const match of withOverlay) liveMatchState.set(String(match.id), match);
   return withOverlay;
+}
+
+function serializeLiveMatches(matches: LiveMatchState[]): string {
+  return JSON.stringify({ matches });
+}
+
+function broadcastLiveMatches(matches?: LiveMatchState[]): void {
+  if (liveSseClients.size === 0) return;
+  const payload = serializeLiveMatches(matches ?? snapshotLiveMatches());
+  for (const [client, lastPayload] of liveSseClients.entries()) {
+    if (lastPayload === payload) continue;
+    try {
+      client.write(`data: ${payload}\n\n`);
+      liveSseClients.set(client, payload);
+    } catch {
+      liveSseClients.delete(client);
+    }
+  }
 }
 
 async function getCurrentLiveMatches(args?: {
@@ -551,6 +573,104 @@ function normalizeOutcome(value: unknown): string {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_");
+}
+
+function normalizeAllOddsKeyText(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, " ");
+}
+
+function mergeAllOddsMarkets(
+  current: AllOddsMarket[],
+  odds: Odds1X2,
+  markets: GenericMarkets,
+): AllOddsMarket[] {
+  const grouped = new Map<string, AllOddsMarket>();
+  const put = (group: string, name: string, label: string, price: number) => {
+    if (!(price > 1)) return;
+    const key = `${normalizeAllOddsKeyText(group)}::${normalizeAllOddsKeyText(name)}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        group,
+        name,
+        choices: [{ name: label, label, odds: price }],
+      });
+      return;
+    }
+    const normalizedLabel = normalizeAllOddsKeyText(label);
+    const choice = existing.choices.find(
+      (entry) => normalizeAllOddsKeyText(entry.label) === normalizedLabel,
+    );
+    if (choice) {
+      choice.odds = price;
+      return;
+    }
+    existing.choices.push({ name: label, label, odds: price });
+  };
+
+  put("Resultado Final", "Resultado Final", "Casa", odds.home);
+  put("Resultado Final", "Resultado Final", "Empate", odds.draw);
+  put("Resultado Final", "Resultado Final", "Fora", odds.away);
+
+  put("Dupla Chance", "Dupla Chance", "Casa ou Empate", markets.doubleChance.homeOrDraw);
+  put("Dupla Chance", "Dupla Chance", "Casa ou Fora", markets.doubleChance.homeOrAway);
+  put("Dupla Chance", "Dupla Chance", "Empate ou Fora", markets.doubleChance.awayOrDraw);
+
+  put("Ambas Equipas Marcam", "Ambas Equipas Marcam", "Sim", markets.bothTeamsScore.yes);
+  put("Ambas Equipas Marcam", "Ambas Equipas Marcam", "Não", markets.bothTeamsScore.no);
+
+  put("Draw No Bet", "Draw No Bet", "Casa", markets.drawNoBet.home);
+  put("Draw No Bet", "Draw No Bet", "Fora", markets.drawNoBet.away);
+
+  const totalGoalLines: Array<[string, number, number]> = [
+    ["0.5", markets.totalGoals.over05, markets.totalGoals.under05],
+    ["1.5", markets.totalGoals.over15, markets.totalGoals.under15],
+    ["2.5", markets.totalGoals.over25, markets.totalGoals.under25],
+    ["3.5", markets.totalGoals.over35, markets.totalGoals.under35],
+  ];
+  for (const [line, over, under] of totalGoalLines) {
+    put("Totais de Golos", `Golos ${line}`, "Mais", over);
+    put("Totais de Golos", `Golos ${line}`, "Menos", under);
+  }
+
+  if (Number.isFinite(markets.asianHandicap.line)) {
+    const line = String(markets.asianHandicap.line);
+    put("Handicap Asiático", `Handicap Asiático ${line}`, "Casa", markets.asianHandicap.home);
+    put("Handicap Asiático", `Handicap Asiático ${line}`, "Fora", markets.asianHandicap.away);
+  }
+
+  const totalCornerLines: Array<[string, number, number]> = [
+    ["8.5", markets.totalCorners.over85, markets.totalCorners.under85],
+    ["9.5", markets.totalCorners.over95, markets.totalCorners.under95],
+    ["10.5", markets.totalCorners.over105, markets.totalCorners.under105],
+  ];
+  for (const [line, over, under] of totalCornerLines) {
+    put("Cantos", `Cantos ${line}`, "Mais", over);
+    put("Cantos", `Cantos ${line}`, "Menos", under);
+  }
+
+  for (const [score, price] of Object.entries(markets.correctScore ?? {})) {
+    put("Placar Exato", "Placar Exato", score, price);
+  }
+
+  const canonical = Array.from(grouped.values());
+  const canonicalKeys = new Set(
+    canonical.map(
+      (market) =>
+        `${normalizeAllOddsKeyText(market.group)}::${normalizeAllOddsKeyText(market.name)}`,
+    ),
+  );
+  const extras = current.filter((market) => {
+    const key =
+      `${normalizeAllOddsKeyText(market.group)}::${normalizeAllOddsKeyText(market.name)}`;
+    return !canonicalKeys.has(key);
+  });
+  return [...canonical, ...extras];
 }
 
 function formatOddsMarketName(rawMarket: unknown, line?: number): string {
@@ -778,7 +898,7 @@ function mergeOddsSummary(
       markets.totalGoals.over15 > 1 ||
       markets.totalGoals.over25 > 1 ||
       markets.totalGoals.over35 > 1,
-    allOdds: current.allOdds,
+    allOdds: mergeAllOddsMarkets(current.allOdds, odds, markets),
   };
 }
 
@@ -883,6 +1003,7 @@ function mapMatchFromEvent(
     hasRealOdds?: boolean;
     incidents?: Array<Record<string, unknown>>;
     stats?: BSDStatsResponse | null;
+    allOdds?: AllOddsMarket[];
   },
 ): LiveMatchState {
   const id = toMatchId(event.id);
@@ -930,6 +1051,7 @@ function mapMatchFromEvent(
     leagueId: leagueMeta.id,
     seasonId: event.season_id != null ? String(event.season_id) : undefined,
     _commentary: mapCommentary(incidents),
+    _allOdds: args?.allOdds ?? fallbackOdds.allOdds,
   };
 }
 
@@ -966,6 +1088,7 @@ async function enrichEvent(event: BSDEvent): Promise<LiveMatchState> {
     hasRealOdds: mergedOdds.hasRealOdds,
     incidents,
     stats,
+    allOdds: mergedOdds.allOdds,
   });
 }
 
@@ -1013,8 +1136,20 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
   }
   syncBsdFootballLiveSocketCandidates(events);
   const matches = await enrichEventsInBatches(events, { maxItems: 100, batchSize: 10 });
-  return setLiveMatchesSnapshot(matches);
+  const snapshot = setLiveMatchesSnapshot(matches);
+  broadcastLiveMatches(snapshot);
+  return snapshot;
 }
+
+onBsdFootballLiveSocketOverlay((eventId) => {
+  const matchId = toMatchId(eventId);
+  const current = liveMatchState.get(matchId);
+  if (!current) return;
+  const next = applyLiveSocketOverlay(current);
+  liveMatchState.set(matchId, next);
+  liveSnapshotBuiltAt = Date.now();
+  broadcastLiveMatches(Array.from(liveMatchState.values()));
+});
 
 export async function buildUpcomingMatches(args?: {
   range?: string;
@@ -1951,8 +2086,16 @@ router.get("/upcoming-match/:id", async (req: Request, res: Response) => {
 router.get("/all-odds/:id", async (req: Request, res: Response) => {
   try {
     const eventId = toEventId(req.params["id"] ?? "");
-    const rows = await getBsdOddsForEvent(eventId);
-    const { allOdds } = applyOddsRows(rows);
+    const liveMatch = liveMatchState.get(toMatchId(eventId));
+    if (liveMatch?._allOdds?.length) {
+      sendJson(res, { markets: liveMatch._allOdds });
+      return;
+    }
+    const [rows, summary] = await Promise.all([
+      getBsdOddsForEvent(eventId),
+      getBsdEventOddsSummary(eventId).catch(() => null),
+    ]);
+    const { allOdds } = mergeOddsSummary(applyOddsRows(rows), summary);
     sendJson(res, { markets: allOdds });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ markets: [] });
@@ -2023,34 +2166,35 @@ router.get("/live-stream", async (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
-  let lastPayload = "";
-  let lastKeepAliveAt = 0;
+  liveSseClients.set(res, "");
 
-  const push = async () => {
-    try {
-      const matches = await getCurrentLiveMatches({ maxAgeMs: 12_000 });
-      const payload = JSON.stringify({ matches });
-      if (payload !== lastPayload) {
-        lastPayload = payload;
-        res.write(`data: ${payload}\n\n`);
-        lastKeepAliveAt = Date.now();
-      } else if (Date.now() - lastKeepAliveAt >= 15_000) {
-        res.write(`: keep-alive\n\n`);
-        lastKeepAliveAt = Date.now();
-      }
-    } catch {
-      res.write(`data: ${JSON.stringify({ matches: [] })}\n\n`);
-      lastKeepAliveAt = Date.now();
-    }
-  };
+  try {
+    const matches = await getCurrentLiveMatches({ maxAgeMs: 12_000 });
+    const payload = serializeLiveMatches(matches);
+    res.write(`data: ${payload}\n\n`);
+    liveSseClients.set(res, payload);
+  } catch {
+    const payload = serializeLiveMatches([]);
+    res.write(`data: ${payload}\n\n`);
+    liveSseClients.set(res, payload);
+  }
 
-  await push();
   const interval = setInterval(() => {
-    void push();
-  }, 1_000);
+    res.write(`: keep-alive\n\n`);
+  }, 15_000);
+
+  const refreshInterval = setInterval(() => {
+    void getCurrentLiveMatches({ maxAgeMs: 12_000 })
+      .then((matches) => {
+        broadcastLiveMatches(matches);
+      })
+      .catch(() => {});
+  }, 5_000);
 
   res.on("close", () => {
     clearInterval(interval);
+    clearInterval(refreshInterval);
+    liveSseClients.delete(res);
     res.end();
   });
 });

@@ -34,6 +34,8 @@ export type BSDLiveSocketOverlay = {
   updatedAt: number;
 };
 
+type OverlayListener = (eventId: string, overlay: BSDLiveSocketOverlay) => void;
+
 const FOOTBALL_WS_URL =
   process.env["BZZOIRO_FOOTBALL_WS_URL"]?.trim() ||
   "wss://sports.bzzoiro.com/live/football/";
@@ -54,6 +56,7 @@ const candidates = new Map<string, Candidate>();
 const desiredIds = new Set<string>();
 const subscribedIds = new Set<string>();
 const overlays = new Map<string, BSDLiveSocketOverlay>();
+const overlayListeners = new Set<OverlayListener>();
 
 function wsEnabled(): boolean {
   return Boolean(CONFIG.BZZOIRO_API_TOKEN && FOOTBALL_WS_URL);
@@ -122,7 +125,15 @@ function updateOverlay(
   eventId: string,
   updater: (current: BSDLiveSocketOverlay) => BSDLiveSocketOverlay,
 ): void {
-  overlays.set(eventId, updater(overlayFor(eventId)));
+  const next = updater(overlayFor(eventId));
+  overlays.set(eventId, next);
+  for (const listener of overlayListeners) {
+    try {
+      listener(eventId, next);
+    } catch (error) {
+      console.error("[BSD WS] overlay listener failed", error);
+    }
+  }
 }
 
 function pruneHints(): void {
@@ -553,4 +564,13 @@ export function getBsdFootballLiveSocketOverlay(
   const key = String(eventId).trim();
   if (!key) return null;
   return overlays.get(key) ?? null;
+}
+
+export function onBsdFootballLiveSocketOverlay(
+  listener: OverlayListener,
+): () => void {
+  overlayListeners.add(listener);
+  return () => {
+    overlayListeners.delete(listener);
+  };
 }

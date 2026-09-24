@@ -4084,6 +4084,11 @@ type Match = {
   // Live text commentary feed (GOAL API football only) — free-text
   // play-by-play narration, newest entry first. See FootballPitchTracker.
   _commentary?: Array<{ id: string; time: string; text: string }>;
+  _allOdds?: Array<{
+    name: string;
+    group: string;
+    choices: Array<{ name: string; label: string; odds: number }>;
+  }>;
   // Real ball position (GOAL API + sports.bzzoiro.com hybrid, football
   // only) — see FootballPitchTracker's realBallPosition prop. Absent
   // whenever bzzoiro hasn't matched/priced this fixture yet; the tracker
@@ -4370,6 +4375,7 @@ function normalizeMatchForUi(match: Match): Match {
     },
     markets: mergeWithDefaults(DEFAULT_ADVANCED_MARKETS, match.markets),
     events: Array.isArray(match.events) ? match.events : [],
+    _allOdds: Array.isArray(match._allOdds) ? match._allOdds : [],
   };
 }
 
@@ -6595,6 +6601,18 @@ export default function Home({
       "placar exato",
     ].some((pattern) => full.includes(pattern));
   }, [normalizeAllOddsText]);
+  const buildAllOddsArrowKey = useCallback(
+    (market: Pick<AllOddsMarket, "group" | "name">, label: string) => {
+      const marketKey = [
+        "allodds",
+        normalizeAllOddsText(market.group ?? ""),
+        normalizeAllOddsText(market.name ?? ""),
+      ].join(":");
+      const selKey = normalizeAllOddsText(label);
+      return { marketKey, selKey };
+    },
+    [normalizeAllOddsText],
+  );
   const classifyExtraAllOddsBucket = useCallback(
     (market: AllOddsMarket): "gols" | "escanteios" | "cartoes" | "handicap" | "asiatico" | "especiais" | null => {
       const group = normalizeAllOddsText(market.group ?? "");
@@ -8022,38 +8040,11 @@ export default function Home({
       !!expandedMatch &&
       (matchViewTab === "markets" || matchViewTab === "odds");
     if (!shouldLoadAllOdds || !expandedMatch) return;
-    const sport = expandedMatch.sport ?? "football";
-    if (sport !== "football") {
-      setAllOddsData([]);
-      setAllOddsLoading(false);
-      return;
-    }
-    const rawId = getProviderMatchId(expandedMatch.id);
-    if (!rawId) {
-      setAllOddsData([]);
-      setAllOddsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setAllOddsLoading(true);
-    fetch(`/api/matches/all-odds/${encodeURIComponent(rawId)}?sport=${encodeURIComponent(sport)}`)
-      .then((r) => (r.ok ? r.json() : { markets: [] }))
-      .then((d) => {
-        if (cancelled) return;
-        setAllOddsData(Array.isArray(d?.markets) ? d.markets : []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAllOddsData([]);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setAllOddsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [matchViewTab, modalTab, expandedMatch?.id, getProviderMatchId]);
+    setAllOddsLoading(false);
+    setAllOddsData(
+      Array.isArray(expandedMatch._allOdds) ? expandedMatch._allOdds : [],
+    );
+  }, [matchViewTab, modalTab, expandedMatch?.id, expandedMatch?._allOdds]);
 
   useEffect(() => {
     if (matchViewTab !== "odds") return;
@@ -13636,6 +13627,18 @@ export default function Home({
           f[`placar:s2-${entry.label}`] = entry.odds;
       }
     }
+    if (Array.isArray(match._allOdds)) {
+      match._allOdds.forEach((market) => {
+        market.choices.forEach((choice) => {
+          if (!(choice.odds > 0) || !Number.isFinite(choice.odds)) return;
+          const keys = buildAllOddsArrowKey(
+            market,
+            choice.label || choice.name,
+          );
+          f[`${keys.marketKey}:${keys.selKey}`] = choice.odds;
+        });
+      });
+    }
     return f;
   }
 
@@ -14527,8 +14530,8 @@ export default function Home({
                       odds: number;
                     }
                   >();
-                  group.items.forEach(({ market, originalIndex }) => {
-                    market.choices.forEach((choice, choiceIndex) => {
+                  group.items.forEach(({ market }) => {
+                    market.choices.forEach((choice) => {
                       if (!(choice.odds > 0) || !Number.isFinite(choice.odds)) return;
                       const label = formatExtraAllOddsChoiceLabel(
                         market,
@@ -14537,10 +14540,14 @@ export default function Home({
                       );
                       const dedupeKey = normalizeAllOddsText(label);
                       const current = dedupedChoices.get(dedupeKey);
+                      const keys = buildAllOddsArrowKey(
+                        market,
+                        choice.label || choice.name,
+                      );
                       if (!current || choice.odds > current.odds) {
                         dedupedChoices.set(dedupeKey, {
-                          marketKey: `all-${bucket}-${originalIndex}`,
-                          selKey: `all-${bucket}-${originalIndex}-${choiceIndex}`,
+                          marketKey: keys.marketKey,
+                          selKey: keys.selKey,
                           label,
                           odds: choice.odds,
                         });
