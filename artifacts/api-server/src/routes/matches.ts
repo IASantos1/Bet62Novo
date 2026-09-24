@@ -243,6 +243,13 @@ function todayIsoDate(offsetDays = 0): string {
   return utc.toISOString().slice(0, 10);
 }
 
+function eventKickoffMs(event: Pick<BSDEvent, "event_date">): number {
+  const raw = text(event.event_date);
+  if (!raw) return Number.MAX_SAFE_INTEGER;
+  const value = new Date(raw).getTime();
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
 function toMatchId(eventId: string | number): string {
   return `football-v2-${String(eventId)}`;
 }
@@ -760,20 +767,26 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
   return matches;
 }
 
-export async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
+export async function buildUpcomingMatches(args?: {
+  range?: string;
+}): Promise<UpcomingMatch[]> {
   if (!bsdEnabled()) {
     upcomingSnapshot = [];
     return [];
   }
+  const normalizedRange = String(args?.range ?? "fortnight").trim().toLowerCase();
+  const windowDays = normalizedRange === "month" ? 30 : 15;
   let payload: Awaited<ReturnType<typeof getBsdEvents>>;
   try {
     payload = await getBsdEvents({
       dateFrom: todayIsoDate(0),
-      dateTo: todayIsoDate(30),
+      dateTo: todayIsoDate(windowDays),
       limit: 200,
       offset: 0,
     });
     console.log("[BSD UPCOMING]", {
+      range: normalizedRange,
+      windowDays,
       count: payload.count ?? 0,
       results: payload.results?.length ?? 0,
     });
@@ -781,10 +794,16 @@ export async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     console.error("[BSD UPCOMING] failed", error);
     throw error;
   }
-  const events = (Array.isArray(payload.results) ? payload.results : []).filter((event) => {
-    const status = String(event.status ?? "").trim().toLowerCase();
-    return status === "notstarted" || status === "upcoming";
-  });
+  const events = (Array.isArray(payload.results) ? payload.results : [])
+    .filter((event) => {
+      const status = String(event.status ?? "").trim().toLowerCase();
+      return status === "notstarted" || status === "upcoming";
+    })
+    .sort((a, b) => {
+      const byKickoff = eventKickoffMs(a) - eventKickoffMs(b);
+      if (byKickoff !== 0) return byKickoff;
+      return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+    });
   const matches = await enrichEventsInBatches(events, { maxItems: 100, batchSize: 10 });
   upcomingSnapshot = matches.map((match) => ({
     ...match,
@@ -1834,9 +1853,10 @@ router.get("/catalog/competitions", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/upcoming", async (_req: Request, res: Response) => {
+router.get("/upcoming", async (req: Request, res: Response) => {
   try {
-    sendJson(res, { matches: await buildUpcomingMatches() });
+    const range = String(req.query["range"] ?? "fortnight").trim().toLowerCase();
+    sendJson(res, { matches: await buildUpcomingMatches({ range }) });
   } catch (error) {
     res.status(formatErrorStatus(error, 500)).json({ matches: [] });
   }

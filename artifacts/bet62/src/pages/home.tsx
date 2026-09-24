@@ -4203,6 +4203,176 @@ type Match = {
   };
 };
 
+const DEFAULT_ADVANCED_MARKETS: AdvancedMarkets = {
+  doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+  bothTeamsScore: { yes: 0, no: 0 },
+  totalGoals: {
+    over05: 0,
+    under05: 0,
+    over15: 0,
+    under15: 0,
+    over25: 0,
+    under25: 0,
+    over35: 0,
+    under35: 0,
+    over45: 0,
+    under45: 0,
+    over55: 0,
+    under55: 0,
+    over65: 0,
+    under65: 0,
+  },
+  handicap: {
+    homeMinusOne: 0,
+    awayPlusOne: 0,
+    homeMinusOneHalf: 0,
+    awayPlusOneHalf: 0,
+  },
+  halfTime: { home: 0, draw: 0, away: 0 },
+  period2: { home: 0, draw: 0, away: 0 },
+  period3: { home: 0, draw: 0, away: 0 },
+  firstGoal: { home: 0, noGoal: 0, away: 0 },
+  firstHalfTotal: { line: 0, over: 0, under: 0 },
+  drawNoBet: { home: 0, away: 0 },
+  asianHandicap: { line: 0, home: 0, away: 0 },
+  europeanHandicap: { line: 0, home: 0, draw: 0, away: 0 },
+  asianTotals: {
+    o05: 0,
+    u05: 0,
+    o45: 0,
+    u45: 0,
+    o55: 0,
+    u55: 0,
+    o225: 0,
+    u225: 0,
+    o275: 0,
+    u275: 0,
+  },
+  htft: { hh: 0, hd: 0, ha: 0, dh: 0, dd: 0, da: 0, ah: 0, ad: 0, aa: 0 },
+  correctScore: {},
+  anytimeGoalscorer: [],
+  firstGoalscorer: [],
+  lastGoalscorer: [],
+  corners: { o85: 0, u85: 0, o95: 0, u95: 0, o105: 0, u105: 0 },
+  homeCorners: { line: 0, over: 0, under: 0 },
+  awayCorners: { line: 0, over: 0, under: 0 },
+  cornersHandicap: { line: 0, home: 0, away: 0 },
+  cards: { o35: 0, u35: 0, o45: 0, u45: 0 },
+  homeCards: { line: 0, over: 0, under: 0 },
+  awayCards: { line: 0, over: 0, under: 0 },
+  winningMargin: {
+    home1: 0,
+    home2: 0,
+    home3: 0,
+    home4plus: 0,
+    away1: 0,
+    away2: 0,
+    away3: 0,
+    away4plus: 0,
+    drawScoring: 0,
+    noGoal: 0,
+  },
+  twoPlusGoals: [],
+  goalOrAssist: [],
+  playerAssists: [],
+  playerTwoPlusAssists: [],
+  h2hEarlyPayout: { home: 0, draw: 0, away: 0 },
+  secondHalf: { home: 0, draw: 0, away: 0 },
+  etExtra: {
+    tieWinner: { home: 0, away: 0 },
+    etResult: { home: 0, draw: 0, away: 0 },
+    totalGoals: {
+      o05: 0,
+      u05: 0,
+      o15: 0,
+      u15: 0,
+      o25: 0,
+      u25: 0,
+      o35: 0,
+      u35: 0,
+      o45: 0,
+      u45: 0,
+    },
+    nextGoal: { home: 0, away: 0 },
+    firstHalfResult: { home: 0, draw: 0, away: 0 },
+    secondHalfResult: { home: 0, draw: 0, away: 0 },
+    corners: { o15: 0, u15: 0, o25: 0, u25: 0, o35: 0, u35: 0 },
+    cards: { o05: 0, u05: 0, o15: 0, u15: 0, o25: 0, u25: 0 },
+    exactScore: {},
+  },
+  penExtra: {
+    winner: { home: 0, away: 0 },
+  },
+  winToNil: { home: 0, away: 0 },
+  cleanSheet: { home: 0, away: 0 },
+  goalOddEven: { odd: 0, even: 0 },
+  exactGoals: { g0: 0, g1: 0, g2: 0, g3: 0, g4: 0, g5plus: 0 },
+  btts1H: { yes: 0, no: 0 },
+  btts2H: { yes: 0, no: 0 },
+  toWinBothHalves: { home: 0, away: 0 },
+  highestScoringHalf: { first: 0, second: 0, equal: 0 },
+  htCorrectScore: {},
+  h2CorrectScore: {},
+  teamGoals: {
+    homeOver05: 0,
+    homeUnder05: 0,
+    homeOver15: 0,
+    homeUnder15: 0,
+    homeOver25: 0,
+    homeUnder25: 0,
+    awayOver05: 0,
+    awayUnder05: 0,
+    awayOver15: 0,
+    awayUnder15: 0,
+    awayOver25: 0,
+    awayUnder25: 0,
+  },
+  tennisExtra: {
+    firstSet: { home: 0, away: 0 },
+    setHandicap: { line: 0, home: 0, away: 0 },
+    gameHandicap: { line: 0, home: 0, away: 0 },
+    setExactScore: {},
+    set1ExactScore: {},
+    set2ExactScore: {},
+    currentSetNum: 0,
+  },
+};
+
+function mergeWithDefaults<T>(defaults: T, value: unknown): T {
+  if (Array.isArray(defaults)) {
+    return (Array.isArray(value) ? value : defaults) as T;
+  }
+
+  if (defaults && typeof defaults === "object") {
+    const source =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    const merged: Record<string, unknown> = { ...source };
+    for (const [key, defaultValue] of Object.entries(
+      defaults as Record<string, unknown>,
+    )) {
+      merged[key] = mergeWithDefaults(defaultValue, source[key]);
+    }
+    return merged as T;
+  }
+
+  return (value == null ? defaults : value) as T;
+}
+
+function normalizeMatchForUi(match: Match): Match {
+  return {
+    ...match,
+    odds: {
+      home: Number(match.odds?.home ?? 0),
+      draw: Number(match.odds?.draw ?? 0),
+      away: Number(match.odds?.away ?? 0),
+    },
+    markets: mergeWithDefaults(DEFAULT_ADVANCED_MARKETS, match.markets),
+    events: Array.isArray(match.events) ? match.events : [],
+  };
+}
+
 type BetSelection = {
   matchId: string | number;
   matchTitle: string;
@@ -5285,7 +5455,9 @@ export default function Home({
         typeof raw.savedAt === "number" &&
         Date.now() - raw.savedAt < 10 * 60_000
       ) {
-        return (raw.value as any[]).map((m) => ({ ...m, isLive: false }));
+        return (raw.value as any[]).map((m) =>
+          normalizeMatchForUi({ ...(m as any), isLive: false } as Match),
+        );
       }
     } catch {}
     return [];
@@ -7047,7 +7219,6 @@ export default function Home({
         .map((match) => getLiveMatchIdentityKey(match)),
     );
     const UPCOMING_POST_KICKOFF_GRACE_MS = 30 * 60 * 1000;
-    let changed = false;
 
     const filtered = matches.filter((match) => {
       const sameLiveMatch =
@@ -7055,25 +7226,28 @@ export default function Home({
         (activeTab !== "live" &&
           liveIdentityKeys.has(getLiveMatchIdentityKey(match)));
       if (sameLiveMatch) {
-        changed = true;
         return false;
       }
 
       if (isFinishedMatchStatus(match.status)) {
-        changed = true;
         return false;
       }
 
       const kickoffMs = parseMatchKickoffMs(match);
       if (kickoffMs != null && now - kickoffMs > UPCOMING_POST_KICKOFF_GRACE_MS) {
-        changed = true;
         return false;
       }
 
       return true;
     });
+    const sorted = [...filtered].sort((a, b) => {
+      const aKickoff = parseMatchKickoffMs(a) ?? Number.MAX_SAFE_INTEGER;
+      const bKickoff = parseMatchKickoffMs(b) ?? Number.MAX_SAFE_INTEGER;
+      if (aKickoff !== bKickoff) return aKickoff - bKickoff;
+      return String(a.id).localeCompare(String(b.id));
+    });
 
-    return changed ? filtered : matches;
+    return sorted;
   }, [activeTab]);
 
   const hasPlayableMarketOdds = (
@@ -7350,8 +7524,9 @@ export default function Home({
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          const m =
+          const rawMatch =
             ((d?.match ?? (d && typeof d === "object" && "id" in d ? d : null)) as Match | null | undefined);
+          const m = rawMatch ? normalizeMatchForUi(rawMatch) : null;
           if (!m) return false;
           writeSnapshot(matchSnapshotKey(id, "live"), m as any);
           setExpandedMatch((prev) => {
@@ -7410,7 +7585,7 @@ export default function Home({
     if (canUseSnap) {
       setExpandedMatch((prev) =>
         prev && String(prev.id) === id
-          ? ({ ...(snap.value as any), isLive: false } as Match)
+          ? normalizeMatchForUi({ ...(snap.value as any), isLive: false } as Match)
           : prev,
       );
     }
@@ -7432,18 +7607,21 @@ export default function Home({
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          const m =
+          const rawMatch =
             ((d?.match ?? (d && typeof d === "object" && "id" in d ? d : null)) as Match | null | undefined);
+          const m = rawMatch ? normalizeMatchForUi(rawMatch) : null;
           if (!m) return false;
           writeSnapshot(matchSnapshotKey(id, "upcoming"), m as any);
           setUpcomingMatches((prev) =>
             prev.map((item) =>
-              String(item.id) === id ? ({ ...m, isLive: false } as Match) : item,
+              String(item.id) === id
+                ? normalizeMatchForUi({ ...m, isLive: false } as Match)
+                : item,
             ),
           );
           setExpandedMatch((prev) => {
             if (!prev || String(prev.id) !== id) return prev;
-            return { ...(m as any), isLive: false } as Match;
+            return normalizeMatchForUi({ ...(m as any), isLive: false } as Match);
           });
           return !!(m as any).markets;
         })
@@ -8121,7 +8299,7 @@ export default function Home({
           signal: ctrl.signal,
         });
         const data = r.ok ? await r.json() : { matches: [] };
-        const matches = (data.matches || []) as Array<{
+        const matches = ((data.matches || []) as Array<{
           id: string;
           home: string;
           away: string;
@@ -8140,7 +8318,7 @@ export default function Home({
           homeLogoUrl?: string;
           awayLogoUrl?: string;
           regionFlagUrl?: string;
-        }>;
+        }>).map((m) => normalizeMatchForUi({ ...(m as Match), isLive: false }));
         // Stable merge: update existing cards in-place, add new ones at the
         // end, drop gone ones — prevents visible layout shift on re-fetch.
         // A genuinely empty response is far more likely a transient backend
@@ -8151,20 +8329,17 @@ export default function Home({
         setUpcomingMatches((prev) => {
           if (matches.length === 0 && prev.length > 0) return prev;
           if (prev.length === 0)
-            return pruneUpcomingMatches(
-              matches.map((m) => ({ ...m, isLive: false })),
-            );
+            return pruneUpcomingMatches(matches);
           const freshById = new Map(matches.map((m) => [String(m.id), m]));
           const merged: Match[] = [];
           for (const p of prev) {
             const fresh = freshById.get(String(p.id));
             if (fresh) {
-              merged.push({ ...fresh, isLive: false });
+              merged.push(fresh);
               freshById.delete(String(p.id));
             }
           }
-          for (const [, m] of freshById)
-            merged.push({ ...m, isLive: false });
+          for (const [, m] of freshById) merged.push(m);
           return pruneUpcomingMatches(merged);
         });
         writeSnapshot(upcomingSnapshotKey(selectedSport, upcomingRange), matches);
@@ -8191,7 +8366,9 @@ export default function Home({
     if (canUseSnap) {
       setUpcomingMatches(
         pruneUpcomingMatches(
-          (snap.value as any[]).map((m) => ({ ...(m as any), isLive: false })),
+          (snap.value as any[]).map((m) =>
+            normalizeMatchForUi({ ...(m as any), isLive: false } as Match),
+          ),
         ),
       );
       setUpcomingLoading(false);
@@ -8349,7 +8526,8 @@ export default function Home({
     }
     emptyLiveStreakRef.current = 0;
     const newMins: Record<string, number> = {};
-    const normalizedMatches = matches.map((m) => {
+    const normalizedMatches = matches.map((rawMatch) => {
+      const m = normalizeMatchForUi(rawMatch as Match);
       const id = String(m.id);
       const prevMinute = apiMinutesRef.current[id];
       const nextMinuteRaw = Number.isFinite(Number(m.minute ?? 0))
@@ -8501,7 +8679,10 @@ export default function Home({
           const data = await res.json();
           if (!Array.isArray((data as any)?.matches))
             throw new Error("live_fetch_invalid_payload");
-          writeSnapshot(liveSnapshotKey(), (data as any).matches);
+          writeSnapshot(
+            liveSnapshotKey(),
+            ((data as any).matches as Match[]).map((m) => normalizeMatchForUi(m)),
+          );
           processLiveData(data);
           setLiveTransport(sseActiveRef.current ? "sse" : "polling");
           return "success";
@@ -8537,7 +8718,8 @@ export default function Home({
           `/api/matches/live-match/${encodeURIComponent(id)}${qs}`,
         );
         const d = r.ok ? await r.json() : null;
-        const match = d?.match as Match | null | undefined;
+        const rawMatch = d?.match as Match | null | undefined;
+        const match = rawMatch ? normalizeMatchForUi(rawMatch) : null;
         if (!match) return;
         writeSnapshot(matchSnapshotKey(id, "live"), match as any);
         setLiveMatches((prev) =>
@@ -8545,13 +8727,13 @@ export default function Home({
             if (String(item.id) !== id) return item;
             prevLiveOdds.current[id] = item.odds;
             prevLiveMarkets.current[id] = flattenMatchMarketsForArrows(item);
-            return { ...match, isLive: true };
+            return normalizeMatchForUi({ ...match, isLive: true } as Match);
           }),
         );
         if (options?.syncExpanded !== false) {
           setExpandedMatch((prev) =>
             prev && String(prev.id) === id
-              ? ({ ...match, isLive: true } as Match)
+              ? normalizeMatchForUi({ ...match, isLive: true } as Match)
               : prev,
           );
         }
@@ -8588,7 +8770,9 @@ export default function Home({
           // duplicates on screen until the fresh fetch below replaces it.
           setLiveMatches(
             dedupeLiveMatches(
-              (snap.value as any[]).map((m) => ({ ...(m as any), isLive: true })),
+              (snap.value as any[]).map((m) =>
+                normalizeMatchForUi({ ...(m as any), isLive: true } as Match),
+              ),
             ),
           );
           setLiveLoading(false);
@@ -8625,7 +8809,11 @@ export default function Home({
         const r = await fetch("/api/matches/live-filler");
         const data = r.ok ? await r.json() : null;
         if (!cancelled && data?.isFillerMode && Array.isArray(data.matches)) {
-          setFillerMatches(data.matches.map((m: any) => ({ ...m, isLive: false })));
+          setFillerMatches(
+            data.matches.map((m: any) =>
+              normalizeMatchForUi({ ...(m as any), isLive: false } as Match),
+            ),
+          );
         }
       } catch { /* non-critical */ }
     };
@@ -8658,7 +8846,12 @@ export default function Home({
       fetch("/api/matches/live?lean=1&limit=500", { signal: ctrl.signal })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (data?.matches) writeSnapshot(liveSnapshotKey(), data.matches);
+          if (data?.matches) {
+            writeSnapshot(
+              liveSnapshotKey(),
+              (data.matches as Match[]).map((m) => normalizeMatchForUi(m)),
+            );
+          }
         })
         .catch(() => {});
     };
@@ -8702,7 +8895,9 @@ export default function Home({
       );
       if (snap && canUseSnap) {
         setLiveMatches(
-          (snap.value as any[]).map((m) => ({ ...(m as any), isLive: true })),
+          (snap.value as any[]).map((m) =>
+            normalizeMatchForUi({ ...(m as any), isLive: true } as Match),
+          ),
         );
         setLiveLoading(false);
         setLiveTransport("cache");
@@ -8826,7 +9021,10 @@ export default function Home({
           });
         }
       } else if (Array.isArray(data.matches)) {
-        writeSnapshot(liveSnapshotKey(), data.matches);
+        writeSnapshot(
+          liveSnapshotKey(),
+          (data.matches as Match[]).map((m) => normalizeMatchForUi(m)),
+        );
         processLiveData(data);
         setLiveLoading(false);
       }
@@ -8987,7 +9185,8 @@ export default function Home({
             { signal: ctrl.signal },
           );
           const d = r.ok ? await r.json() : null;
-          const m = d?.match as Match | null | undefined;
+          const rawMatch = d?.match as Match | null | undefined;
+          const m = rawMatch ? normalizeMatchForUi(rawMatch) : null;
           if (m) writeSnapshot(matchSnapshotKey(id, "live"), m as any);
         } catch {
         } finally {
@@ -9536,7 +9735,11 @@ export default function Home({
           if (cancelled) return;
           if (Array.isArray(data?.matches))
             setHomeUpcomingPreview(
-              data.matches.slice(0, 4).map((m: any) => ({ ...m, isLive: false })),
+              data.matches
+                .slice(0, 4)
+                .map((m: any) =>
+                  normalizeMatchForUi({ ...(m as any), isLive: false } as Match),
+                ),
             );
         })
         .catch(() => {})
