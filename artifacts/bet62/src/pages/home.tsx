@@ -4197,7 +4197,7 @@ export default function Home({
     getResolvedTheme(null),
   );
   const isDarkTheme = resolvedTheme === "dark";
-  const { isIdle, resetIdle } = useIdle(120_000);
+  const { isIdle, resetIdle } = useIdle(60_000);
   const isIdleRef = useRef(false);
   useEffect(() => subscribeThemeChange(setResolvedTheme), []);
   useEffect(() => {
@@ -19111,7 +19111,7 @@ export default function Home({
               Ative o desbloqueio com{" "}
               <strong className="text-white">Face ID</strong> ou{" "}
               <strong className="text-white">Impressão Digital</strong> para
-              desbloquear a sessão após 120 segundos sem atividade.
+              desbloquear a sessão após 60 segundos sem atividade.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
               <ShieldCheck size={18} className="text-blue-400 shrink-0" />
