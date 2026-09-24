@@ -102,7 +102,7 @@ const TOOL_REGISTRY: ToolDef[] = [
   },
   {
     name: "run_agent",
-    description: `Corre um dos agentes especializados agora mesmo. Parâmetro obrigatório: role (um de: ${AGENT_ROLES.join(", ")}). Usa "ticketsettlement" para "liquida os bilhetes presos/confirmados", "fraud" para "mostra utilizadores com risco de fraude", "orchestrator" para correr todos e obter um resumo executivo.`,
+    description: `Corre um dos agentes especializados agora mesmo. Parâmetro obrigatório: role (um de: ${AGENT_ROLES.join(", ")}). Usa "fraud" para "mostra utilizadores com risco de fraude", "orchestrator" para correr todos e obter um resumo executivo.`,
     handler: async (params) => {
       const role = String(params["role"] ?? "");
       if (!isAgentRole(role)) return { summary: `Agente desconhecido: "${role}". Agentes disponíveis: ${AGENT_ROLES.join(", ")}.` };

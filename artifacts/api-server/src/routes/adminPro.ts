@@ -17,7 +17,6 @@ import { eq, desc, count, sum, sql, ne } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
 import { logger } from "../lib/logger.js";
 import { invalidateCompetitionCatalogSnapshot } from "../lib/liveCompetitionCatalog.js";
-import { liveMatchState, getUpcomingMatchesSnapshot } from "./matches.js";
 
 const router: IRouter = Router();
 
@@ -407,38 +406,18 @@ router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Re
       LIMIT 500
     `);
 
-    // Cross-reference against the in-memory live/upcoming state for team
-    // names — event_runtime_states is DB-persisted canonical tracking
-    // (Fase 0, multi-provider/multi-sport) and stores no team names.
-    // liveMatchState and the upcoming-matches cache (both routes/matches.ts)
-    // are keyed by the exact same id string as this table's event_id for
-    // every provider, so a single lookup against each works regardless of
-    // sport — pré-jogo fixtures (not yet live) only ever show up in the
-    // upcoming snapshot.
-    // The old provider-specific "real price vs estimate" indicator is gone
-    // now that those removed providers are out of the runtime (2026-09-20,
-    // user decision) —
-    // pulse_score_price_status is kept in the response shape, always null,
-    // for frontend compatibility.
-    const upcomingById = new Map(getUpcomingMatchesSnapshot().map((m) => [m.id, m]));
-    const events = rows.rows.map((row: any) => {
-      const pulseScorePriceStatus: "real" | "estimated" | null = null;
-      let homeTeam: string | null = null;
-      let awayTeam: string | null = null;
-      const eventId = typeof row.event_id === "string" ? row.event_id : "";
-      const live = eventId ? liveMatchState.get(eventId) : undefined;
-      if (live) {
-        homeTeam = live.home;
-        awayTeam = live.away;
-      } else {
-        const upcoming = eventId ? upcomingById.get(eventId) : undefined;
-        if (upcoming) {
-          homeTeam = upcoming.home;
-          awayTeam = upcoming.away;
-        }
-      }
-      return { ...row, pulse_score_price_status: pulseScorePriceStatus, home_team: homeTeam, away_team: awayTeam };
-    });
+    // Team-name cross-reference used to read from the in-memory live/
+    // upcoming match state (routes/matches.ts), which is gone now that
+    // BET62's own sports-data engine was retired in favor of WinHouse's
+    // sportsbook (2026-09-24, user decision) — home_team/away_team are
+    // kept in the response shape, always null, for frontend compatibility,
+    // same as pulse_score_price_status already was.
+    const events = rows.rows.map((row: any) => ({
+      ...row,
+      pulse_score_price_status: null as "real" | "estimated" | null,
+      home_team: null as string | null,
+      away_team: null as string | null,
+    }));
 
     // Pré-jogo (not yet live) fixtures never get a event_runtime_states row
     // at all — syncLiveCompetitionCatalog (which populates that table) is

@@ -21,13 +21,18 @@ import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, applyFreebetBalanceDelta } from "../lib/ledger.js";
 import { CONFIG } from "../lib/config.js";
-import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
+
+// BET62's own settlement engine (bsd/matches.ts/bets.ts/settlement.ts) was
+// retired — WinHouse now settles sportsbook bets on its own side and only
+// calls the seamless wallet endpoints. These dashboards have nothing left
+// to report, so they always read as empty rather than 500ing.
+function getSettlementFallbackMetrics(): Record<string, never> {
+  return {};
+}
 import { timingSafeEqualString } from "../lib/security.js";
 import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
-import { replayEngine } from "../lib/replayEngine.js";
-import { liveMatchState, buildUpcomingMatches } from "./matches.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 
 function escapeCsv(val: unknown): string {
@@ -2085,62 +2090,6 @@ router.get(
 
 // Mount manual review sub-router
 router.use("/review", manualReviewRouter);
-
-// POST /api/admin/replay/:matchId — trigger a settlement replay for a match
-router.post(
-  "/replay/:matchId",
-  adminMiddleware,
-  async (req: AdminRequest, res) => {
-    try {
-      const { matchId } = req.params;
-      if (!matchId) {
-        res.status(400).json({ error: "matchId é obrigatório" });
-        return;
-      }
-
-      const reason: string = req.body?.reason ?? "Manual admin replay";
-      const triggeredBy = req.admin!.username;
-
-      const result = await replayEngine.replayMatch(matchId, triggeredBy, reason);
-
-      logger.info(
-        { matchId, triggeredBy, ...result },
-        "Admin triggered settlement replay",
-      );
-
-      res.json({
-        success: true,
-        matchId,
-        ...result,
-      });
-    } catch (err) {
-      logger.error({ err }, "POST /api/admin/replay/:matchId error");
-      res.status(500).json({ error: "Erro ao executar replay do settlement" });
-    }
-  },
-);
-
-// GET /api/admin/replay/:matchId/history — get replay history for a match
-router.get(
-  "/replay/:matchId/history",
-  adminMiddleware,
-  async (req: AdminRequest, res) => {
-    try {
-      const { matchId } = req.params;
-      if (!matchId) {
-        res.status(400).json({ error: "matchId é obrigatório" });
-        return;
-      }
-
-      const history = await replayEngine.getReplayHistory(matchId);
-
-      res.json({ matchId, history });
-    } catch (err) {
-      logger.error({ err }, "GET /api/admin/replay/:matchId/history error");
-      res.status(500).json({ error: "Erro ao carregar histórico de replays" });
-    }
-  },
-);
 
 // ── Casino admin: overview / catalog / transactions ─────────────────────────
 // Kinds recorded by the BigBang seamless-wallet callback (routes/casino.ts).
