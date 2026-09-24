@@ -19319,77 +19319,60 @@ export default function Home({
           </div>
         </div>
 
-      </header>
-
-      {/* MOBILE BOTTOM DOCK — replaces the old underline tab strip on
-          mobile (2026-09-20 futurist redesign). Desktop keeps the inline
-          header nav above unchanged for this phase. Perfil removed from
-          here (user-requested, real device): it's redundant with the
-          avatar already in the header up top. The purple Boletim bubble
-          moves from the raised center slot into Perfil's old spot at the
-          end — a normal-height icon like the others now, not elevated.
-          Kept visible on the Sportsbook tab too, since the WinHouse iframe
-          no longer takes over the whole viewport (header/dock/footer stay
-          up) — it's still how mobile switches away from Esporte. */}
-      <div
-        className="lg:hidden fixed left-0 right-0 z-[50] px-3"
-        style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
-      >
-        <div
-          className="b62-glass flex items-center justify-between px-1.5 py-2 mx-auto max-w-[420px]"
-          style={{ backdropFilter: "blur(20px)", boxShadow: "0 12px 28px rgba(0,0,0,0.5)" }}
-        >
-          {(
-            [
-              { id: "home", icon: HomeIcon, label: "Início", badge: false },
-              { id: "sportsbook", icon: Flag, label: "Esporte", badge: false },
-            ] as const
-          ).map((tab) => (
+        {/* MOBILE TAB STRIP — Santos asked to revert the fixed bottom dock
+            (2026-09-20 futurist redesign) back to a scrollable underline
+            strip in the top header, right below the balance/avatar row
+            (2026-09-24). Mirrors the desktop inline nav above so mobile and
+            desktop stay in sync. */}
+        <div className="lg:hidden flex items-center gap-1 px-2 h-11 overflow-x-auto no-scrollbar border-t border-zinc-800/60">
+          {[
+            { id: "home", icon: <Star size={14} />, label: "DESTAQUES" },
+            { id: "sportsbook", icon: <Flag size={14} />, label: "ESPORTE" },
+            { id: "casino", icon: <Activity size={14} />, label: "CASINO" },
+            { id: "promos", icon: <Gift size={14} />, label: "PROMOÇÕES", onSelect: fetchCashback },
+          ].map((tab) => (
             <button
               key={tab.id}
-              {...makeTap(() => selectMainTab(tab.id))}
-              className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === tab.id ? "bg-red-600/15 text-red-500" : "text-zinc-500"}`}
+              {...makeTap(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
+              className={`h-full px-3 font-semibold text-xs transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 shrink-0 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500"}`}
             >
-              <span className="relative">
-                <tab.icon size={17} />
-                {tab.badge && (
-                  <span className="b62-live-dot absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
-                )}
-              </span>
-              <span className="text-[8.5px] font-semibold">{tab.label}</span>
+              {tab.icon}
+              {tab.label}
             </button>
           ))}
-          <button
-            {...makeTap(() => selectMainTab("casino"))}
-            className={`flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors ${activeTab === "casino" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500"}`}
-          >
-            <Dices size={17} />
-            <span className="text-[8.5px] font-semibold">Casino</span>
-          </button>
+          {auth.user && (
+            <button
+              {...makeTap(() => selectMainTab("wallet", () => { void fetchMyBets(true); }))}
+              className={`h-full px-3 font-semibold text-xs transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 shrink-0 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500"}`}
+            >
+              <Wallet size={14} />
+              CARTEIRA
+            </button>
+          )}
           {!isShellOnlyTab && (
             <button
               aria-label="Boletim"
               {...makeTap(() => setBetSlipOpenMobile(true))}
-              className="flex flex-col items-center gap-1 py-1.5 px-2 rounded-2xl transition-colors text-zinc-500"
+              className="h-full px-3 font-semibold text-xs transition-colors border-b-2 border-transparent whitespace-nowrap flex items-center gap-1.5 shrink-0 text-zinc-500"
             >
-              <span className="relative w-7 h-7 rounded-full b62-gradient-cta flex items-center justify-center">
-                <Ticket size={14} className="text-white" />
+              <span className="relative">
+                <Ticket size={14} />
                 {bets.length > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-black text-[9px] font-black flex items-center justify-center">
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-amber-500 text-black text-[8px] font-black flex items-center justify-center">
                     {bets.length}
                   </span>
                 )}
               </span>
-              <span className="text-[8.5px] font-semibold">Boletim</span>
+              BOLETIM
             </button>
           )}
         </div>
-      </div>
+      </header>
 
       {/* MAIN — 3-column desktop layout (edge-to-edge, no max-width, for
           the full-screen Sportsbook tab) */}
       <div className={isFullScreenSportsbook ? "flex-1 flex w-full" : "flex-1 flex max-w-[1600px] w-full mx-auto"}>
-        <main className={isFullScreenSportsbook ? "flex-1 overflow-x-clip min-w-0" : "flex-1 pb-32 lg:pb-8 overflow-x-clip min-w-0"}>
+        <main className={isFullScreenSportsbook ? "flex-1 overflow-x-clip min-w-0" : "flex-1 pb-8 overflow-x-clip min-w-0"}>
           <div className={isFullScreenSportsbook ? "" : "p-4 lg:p-8"}>
             {/* Inline market detail view — replaces match list when a match is expanded */}
             {expandedMatch && (

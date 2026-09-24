@@ -392,6 +392,16 @@ html.light-mode textarea::placeholder { color: #71717a !important; }
 html.light-mode ::-webkit-scrollbar-thumb { background-color: #c7c7cc; }
 html.light-mode ::-webkit-scrollbar-track { background-color: #f0f0f3; }
 
+/* Hides the scrollbar on an overflow-x-auto element while keeping it
+   scrollable — used on the mobile top nav strip (Santos, 2026-09-24). */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Bet slip card items — visible on light background */
 html.light-mode .bet-slip-card {
   background: rgba(0,0,0,0.055) !important;
