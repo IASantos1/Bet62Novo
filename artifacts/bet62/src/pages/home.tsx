@@ -21655,42 +21655,6 @@ export default function Home({
                         ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2 border-t border-zinc-800">
-                  {[
-                    {
-                      icon: <Wallet size={18} />,
-                      title: "Pagamentos Rápidos",
-                      desc: "Depósitos e saques rápidos e seguros",
-                    },
-                    {
-                      icon: <Gift size={18} />,
-                      title: "Bónus Exclusivos",
-                      desc: "Ofertas e promoções todos os dias",
-                    },
-                    {
-                      icon: <ShieldCheck size={18} />,
-                      title: "Segurança Total",
-                      desc: "Seus dados sempre protegidos",
-                    },
-                    {
-                      icon: <Activity size={18} />,
-                      title: "Suporte 24/7",
-                      desc: "Atendimento rápido e eficiente",
-                    },
-                  ].map((item) => (
-                    <div key={item.title} className="flex gap-2.5 items-start">
-                      <div className="w-9 h-9 rounded-lg bg-red-600/15 text-red-500 flex items-center justify-center shrink-0">
-                        {item.icon}
-                      </div>
-                      <div>
-                        <div className="text-xs font-black">{item.title}</div>
-                        <div className="text-[11px] text-zinc-500 leading-tight mt-0.5">
-                          {item.desc}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
