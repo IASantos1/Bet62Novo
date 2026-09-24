@@ -462,7 +462,9 @@ async function fetchAllPages<T>(
   const out: T[] = [];
 
   while (page < maxPages) {
-    const payload = await bsdFetch<PaginatedResponse<T>>(path, {
+    const payload = await bsdFetch<
+      PaginatedResponse<T> | T[] | { results?: T[]; events?: T[]; next?: string | null }
+    >(path, {
       query: {
         ...(args?.query ?? {}),
         limit,
@@ -470,9 +472,16 @@ async function fetchAllPages<T>(
       },
       ttlMs: args?.ttlMs,
     });
-    const rows = Array.isArray(payload.results) ? payload.results : [];
+    const rows = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload.results)
+        ? payload.results
+        : Array.isArray(payload.events)
+          ? payload.events
+          : [];
     out.push(...rows);
-    if (rows.length < limit || !payload.next) break;
+    const next = !Array.isArray(payload) && "next" in payload ? payload.next : null;
+    if (rows.length < limit || !next) break;
     offset += limit;
     page += 1;
   }
@@ -533,15 +542,20 @@ export async function getBsdEventById(eventId: string | number): Promise<BSDEven
 }
 
 export async function getBsdOddsForEvent(eventId: string | number): Promise<BSDOddsRow[]> {
-  return fetchAllPages<BSDOddsRow>("/odds/", {
+  const payload = await bsdFetch<BSDOddsRow[] | PaginatedResponse<BSDOddsRow>>("/odds/", {
     query: {
       event_id: String(eventId),
       limit: 200,
       offset: 0,
     },
     ttlMs: 20_000,
-    maxPages: 3,
   });
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  return Array.isArray(payload.results) ? payload.results : [];
 }
 
 export async function getBsdEventOddsSummary(

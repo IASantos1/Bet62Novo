@@ -383,17 +383,19 @@ function applyOddsRows(rows: BSDOddsRow[]): {
     if (!(price > 1)) continue;
 
     if (market === "1x2") {
-      if (outcome === "home") odds.home = price;
-      if (outcome === "draw") odds.draw = price;
-      if (outcome === "away") odds.away = price;
+      if (["home", "1"].includes(outcome)) odds.home = price;
+      if (["draw", "x"].includes(outcome)) odds.draw = price;
+      if (["away", "2"].includes(outcome)) odds.away = price;
       putAllOdds("Resultado Final", "Resultado Final", outcome.toUpperCase(), price);
       continue;
     }
 
     if (market === "btts") {
-      if (outcome === "yes") markets.bothTeamsScore.yes = price;
-      if (outcome === "no") markets.bothTeamsScore.no = price;
-      putAllOdds("Ambas Equipas Marcam", "Ambas Equipas Marcam", outcome === "yes" ? "Sim" : "Não", price);
+      const yes = ["yes", "sim"].includes(outcome);
+      const no = ["no", "nao", "não"].includes(outcome);
+      if (yes) markets.bothTeamsScore.yes = price;
+      if (no) markets.bothTeamsScore.no = price;
+      putAllOdds("Ambas Equipas Marcam", "Ambas Equipas Marcam", yes ? "Sim" : "Não", price);
       continue;
     }
 
@@ -675,11 +677,29 @@ function mapMatchFromEvent(
 
 async function enrichEvent(event: BSDEvent): Promise<LiveMatchState> {
   const [oddsRows, oddsSummary, incidents, stats] = await Promise.all([
-    getBsdOddsForEvent(event.id).catch(() => []),
+    getBsdOddsForEvent(event.id).catch((error) => {
+      console.error("[BSD ODDS]", {
+        eventId: event.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }),
     getBsdEventOddsSummary(event.id).catch(() => null),
     getBsdEventIncidents(event.id).catch(() => []),
     getBsdEventStats(event.id).catch(() => null),
   ]);
+  console.log("[BSD ODDS RESULT]", {
+    eventId: event.id,
+    rows: oddsRows.length,
+    markets: Array.from(
+      new Set(oddsRows.map((row) => String(row.market ?? "").trim()).filter(Boolean)),
+    ),
+    summary1x2: {
+      home: parseNumber(oddsSummary?.odds?.home_win),
+      draw: parseNumber(oddsSummary?.odds?.draw),
+      away: parseNumber(oddsSummary?.odds?.away_win),
+    },
+  });
   const mergedOdds = mergeOddsSummary(applyOddsRows(oddsRows), oddsSummary);
   return mapMatchFromEvent(event, {
     oddsRows,

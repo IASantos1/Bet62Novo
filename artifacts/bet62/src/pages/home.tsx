@@ -8467,12 +8467,11 @@ export default function Home({
 
       const freshMatches = normalizedMatches
         // Live matches (startsIn === undefined) always show.
-        // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
+        // "Em Breve" entries show when there are real/playable odds.
         .filter(
           (m) =>
             m.startsIn === undefined ||
-            m.hasRealOdds !== false ||
-            (m.odds.home > 0 && m.odds.away > 0),
+            matchHasPlayableOdds(m),
         )
         .map((m) => ({ ...m, isLive: true }));
 

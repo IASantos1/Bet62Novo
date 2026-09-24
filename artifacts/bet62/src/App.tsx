@@ -53,8 +53,17 @@ class AppErrorBoundary extends Component<
     } catch {}
   }
 
+  private getErrorMessage(): string | null {
+    const error = this.state.error;
+    if (!error) return null;
+    if (error instanceof Error) return error.message || error.name;
+    const text = String(error).trim();
+    return text.length > 0 ? text : null;
+  }
+
   render() {
     if (this.state.error) {
+      const errorMessage = this.getErrorMessage();
       return (
         <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white px-6">
           <div className="max-w-md w-full rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
@@ -63,6 +72,11 @@ class AppErrorBoundary extends Component<
               Toque para recarregar. Se continuar, limpe a cache do
               navegador/PWA.
             </div>
+            {errorMessage && (
+              <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-300 break-words">
+                {errorMessage}
+              </div>
+            )}
             <button
               className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-sm rounded-xl py-3 transition-colors"
               onClick={() => {
