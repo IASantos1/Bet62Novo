@@ -2,7 +2,6 @@ import "dotenv/config";
 import { createServer } from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
-import { startSettlementWorker } from "./settlement.js";
 import { startAiAgentsCron } from "./lib/aiAgentsCron.js";
 import { ensureBigBangCatalogFresh } from "./services/bigbang/sync.js";
 
@@ -28,9 +27,6 @@ const server = createServer(app);
 
 server.listen(port, () => {
   logger.info({ port }, "API server started");
-
-  startSettlementWorker();
-  logger.info("Auto-settlement worker started");
 
   void ensureBigBangCatalogFresh().catch((err) => {
     logger.warn({ err }, "[bigbang] initial catalog sync failed");

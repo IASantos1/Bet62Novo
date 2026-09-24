@@ -7,10 +7,10 @@
 const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"] ?? "";
 
 // The internal AI-operations agent system (Risk/Odds/Settlement/Fraud/
-// Payments/Compliance/Support/Orchestrator/Ao Vivo/Pré-Jogo/Liquidação de
-// Bilhetes — see lib/aiAgents/). Deliberately NOT tied to Anthropic — user
-// request, 2026-08-11: run this on a free/open-source model instead of a
-// paid one, without needing to self-host a GPU server. Talks to any
+// Payments/Compliance/Support/Orchestrator/Ao Vivo/Pré-Jogo — see
+// lib/aiAgents/). Deliberately NOT tied to Anthropic — user request,
+// 2026-08-11: run this on a free/open-source model instead of a paid
+// one, without needing to self-host a GPU server. Talks to any
 // OpenAI-compatible chat-completions endpoint (client.ts), so the default
 // below points at OpenRouter, which fronts open-source models (Llama,
 // Qwen, GPT-OSS, ...) including a genuinely free ":free" tier — but the
@@ -30,31 +30,11 @@ const AI_AGENTS_BASE_URL =
 const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
-const BZZOIRO_API_TOKEN = process.env["BZZOIRO_API_TOKEN"] ?? "";
-const BZZOIRO_BASE_URL =
-  process.env["BZZOIRO_BASE_URL"]?.trim() || "https://sports.bzzoiro.com/api/v2/";
-
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 const WINHOUSE_WALLET_API_KEY = process.env["WINHOUSE_WALLET_API_KEY"] ?? "";
 const WINHOUSE_CALLBACK_TOKEN = process.env["WINHOUSE_CALLBACK_TOKEN"] ?? "";
 
-//  STREAM HLS: SMYTDRYT — playlist .m3u8, admin preenche manualmente os
-//  7 campos de vídeo em live_stream_mappings por evento.
-// SMYTDRYT HLS stream — only the host is fixed/global. The hex path segment
-// between the host and /playlist.m3u8 was originally assumed to be a fixed
-// per-account value, but two real BetBY captures for two different matches
-// showed two different segments — it's per-match/per-stream, so it lives in
-// live_stream_mappings.videoBasePath (admin-set per event, like the key)
-// rather than as a config default here. statsHost + per-video
-// matchId/sportId/tournamentId/key/basePath come from live_stream_mappings.
-const SMYTDRYT_HOST_URL =
-  process.env["SMYTDRYT_HOST_URL"]?.trim() || "https://edg05.smytdryt.live";
-const SMYTDRYT_DEFAULT_STATS_HOST =
-  process.env["SMYTDRYT_DEFAULT_STATS_HOST"]?.trim() || "statsstart26.sptpub.com";
-
 export const CONFIG = {
-  BZZOIRO_API_TOKEN,
-  BZZOIRO_BASE_URL,
   BIGBANG_API_KEY,
   WINHOUSE_WALLET_API_KEY,
   WINHOUSE_CALLBACK_TOKEN,
@@ -62,128 +42,4 @@ export const CONFIG = {
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
-  SMYTDRYT_HOST_URL,
-  SMYTDRYT_DEFAULT_STATS_HOST,
-  LIVE_UPDATE_INTERVAL: 750,
-  PREMATCH_UPDATE_INTERVAL: 300_000,
-  REOPEN_DELAY_GOAL_LOW: 12_000,
-  REOPEN_DELAY_VAR_LOW: 20_000,
-  REOPEN_DELAY_GOAL_HIGH: 25_000,
-  REOPEN_DELAY_VAR_HIGH: 45_000,
-  MAX_ODDS_DRIFT: 0.40,
-  CACHE_TTL_MS: 86_400_000,
-
-  // Kept well below LIVE_UPDATE_INTERVAL (the SSE broadcastLive() tick) on
-  // purpose: broadcastLive() forces a fresh payload rebuild every tick, but
-  // that rebuild reads these same per-sport caches — if this TTL matched or
-  // exceeded the tick interval, the two timers could drift out of phase and
-  // serve up to ~2x LIVE_UPDATE_INTERVAL-stale data at some ticks instead of
-  // the ~750ms the broadcast cadence implies.
-  // MAX plan allows 3 req/sec per bookmaker, so 350ms is safe (~2.85 req/s
-  // = ~95% of the 333ms floor, leaving headroom for manual debug calls).
-  LIVE_CACHE_TTL: 350,
-  DAILY_CACHE_TTL: 300_000,
-  TOMORROW_CACHE_TTL: 1_800_000,
-  ODDS_CACHE_TTL: 300_000,
 } as const;
-
-export const CRITICAL_EVENTS = ["goal", "var", "red_card", "penalty", "touchdown"] as const;
-
-export type CriticalEvent = typeof CRITICAL_EVENTS[number];
-
-export const FOOTBALL_SUSP_KEYS = [
-  "result",
-  "doubleChance",
-  "totalGoals",
-  "handicap",
-  "halfTime",
-  "htft",
-  "correctScore",
-  "asianHandicap",
-  "asianTotals",
-  "drawNoBet",
-  "firstGoal",
-  "winToNil",
-  "cleanSheet",
-  "goalOddEven",
-  "exactGoals",
-  "btts1H",
-  "btts2H",
-  "toWinBothHalves",
-  "highestScoringHalf",
-  "htCorrectScore",
-  "h2CorrectScore",
-  "teamGoals",
-  "secondHalf",
-  "drawNoBet2",
-  "handicapPoints",
-  "anytimeGoalscorer",
-] as const;
-
-export type FootballSuspensionEvent = "goal" | "var";
-
-const FOOTBALL_LOW_RISK_KEYS = new Set([
-  "result",
-  "doubleChance",
-  "halfTime",
-  "drawNoBet",
-  "firstGoal",
-  "winToNil",
-  "cleanSheet",
-  "btts1H",
-  "btts2H",
-  "highestScoringHalf",
-  "secondHalf",
-  "drawNoBet2",
-] as const);
-
-const FOOTBALL_GOAL_HIGH_MULT: Record<string, number> = {
-  totalGoals: 28 / 25,
-  handicap: 28 / 25,
-  goalOddEven: 28 / 25,
-  toWinBothHalves: 28 / 25,
-  teamGoals: 28 / 25,
-  handicapPoints: 28 / 25,
-  htft: 30 / 25,
-  asianHandicap: 30 / 25,
-  asianTotals: 30 / 25,
-  exactGoals: 30 / 25,
-  correctScore: 35 / 25,
-  htCorrectScore: 35 / 25,
-  h2CorrectScore: 35 / 25,
-};
-
-const FOOTBALL_VAR_HIGH_MULT: Record<string, number> = {
-  totalGoals: 50 / 45,
-  handicap: 50 / 45,
-  goalOddEven: 50 / 45,
-  toWinBothHalves: 50 / 45,
-  teamGoals: 50 / 45,
-  handicapPoints: 50 / 45,
-  asianHandicap: 55 / 45,
-  asianTotals: 55 / 45,
-  exactGoals: 55 / 45,
-  htft: 60 / 45,
-  correctScore: 60 / 45,
-  htCorrectScore: 60 / 45,
-  h2CorrectScore: 60 / 45,
-};
-
-export function footballSuspensionDelayMs(event: FootballSuspensionEvent, marketKey: string): number {
-  const low = FOOTBALL_LOW_RISK_KEYS.has(marketKey as any);
-  const base =
-    event === "goal"
-      ? (low ? CONFIG.REOPEN_DELAY_GOAL_LOW : CONFIG.REOPEN_DELAY_GOAL_HIGH)
-      : (low ? CONFIG.REOPEN_DELAY_VAR_LOW : CONFIG.REOPEN_DELAY_VAR_HIGH);
-  const mult = event === "goal" ? (FOOTBALL_GOAL_HIGH_MULT[marketKey] ?? 1) : (FOOTBALL_VAR_HIGH_MULT[marketKey] ?? 1);
-  const ms = Math.round(base * mult);
-  return Number.isFinite(ms) && ms > 0 ? ms : base;
-}
-
-export function shouldSuspend(eventType: string): boolean {
-  return (CRITICAL_EVENTS as readonly string[]).includes(eventType);
-}
-
-export function detectOddsDrift(oldOdd: number, newOdd: number): boolean {
-  return Math.abs(newOdd - oldOdd) > CONFIG.MAX_ODDS_DRIFT;
-}
