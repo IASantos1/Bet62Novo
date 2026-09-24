@@ -4197,7 +4197,7 @@ export default function Home({
     getResolvedTheme(null),
   );
   const isDarkTheme = resolvedTheme === "dark";
-  const { isIdle, resetIdle } = useIdle(120_000);
+  const { isIdle, resetIdle } = useIdle(60_000);
   const isIdleRef = useRef(false);
   useEffect(() => subscribeThemeChange(setResolvedTheme), []);
   useEffect(() => {
@@ -5272,7 +5272,17 @@ export default function Home({
   );
 
   // ── Lock screen state ────────────────────────────────────────────────────────
-  const [isLocked, setIsLocked] = useState(false);
+  // Lazy-initialized from localStorage so a "Sair" that only locks (see
+  // handleSignOut below) still requires Face ID after the browser/app is
+  // closed and reopened, not just while this tab stays alive in memory.
+  const [isLocked, setIsLocked] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("bet62_session_locked") === "1";
+    } catch {
+      return false;
+    }
+  });
   const isLockedRef = useRef(false);
   const [lockPassword, setLockPassword] = useState("");
   const [lockError, setLockError] = useState("");
@@ -8965,6 +8975,11 @@ export default function Home({
       });
       if (res.ok) {
         setIsLocked(false);
+        try {
+          localStorage.removeItem("bet62_session_locked");
+        } catch {
+          /* private mode */
+        }
         resetIdle();
         auth.refreshUser();
       } else {
@@ -9005,6 +9020,11 @@ export default function Home({
       });
       if (assertion) {
         setIsLocked(false);
+        try {
+          localStorage.removeItem("bet62_session_locked");
+        } catch {
+          /* private mode */
+        }
         resetIdle();
         auth.refreshUser();
       }
@@ -9067,6 +9087,38 @@ export default function Home({
       toast.error("Não foi possível ativar o desbloqueio biométrico.");
       setShowBiometricSetup(false);
     }
+  };
+
+  // "Sair" no aparelho onde o Face ID já está configurado apenas bloqueia
+  // a sessão (mesma tela do bloqueio por inatividade) em vez de apagá-la —
+  // assim, ao reabrir o site, o desbloqueio biométrico volta a dar acesso
+  // sem pedir email/senha de novo (Santos, 2026-09-24). "Remover conta
+  // deste aparelho" é o botão que de fato encerra a sessão e apaga a
+  // credencial biométrica local.
+  const handleSignOut = () => {
+    if (biometricAvailable && biometricCredentialId) {
+      setLockError("");
+      setIsLocked(true);
+      try {
+        localStorage.setItem("bet62_session_locked", "1");
+      } catch {
+        /* private mode */
+      }
+      return;
+    }
+    auth.logout();
+  };
+
+  const forgetDevice = () => {
+    try {
+      localStorage.removeItem("bet62_biometric_credential");
+      localStorage.removeItem("bet62_session_locked");
+    } catch {
+      /* private mode */
+    }
+    setBiometricCredentialId(null);
+    setIsLocked(false);
+    auth.logout();
   };
 
   const handleLoginSubmit = async (e: any) => {
@@ -19111,7 +19163,7 @@ export default function Home({
               Ative o desbloqueio com{" "}
               <strong className="text-white">Face ID</strong> ou{" "}
               <strong className="text-white">Impressão Digital</strong> para
-              desbloquear a sessão após 120 segundos sem atividade.
+              desbloquear a sessão após 60 segundos sem atividade.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
               <ShieldCheck size={18} className="text-blue-400 shrink-0" />
@@ -19298,10 +19350,18 @@ export default function Home({
                     <DropdownMenuSeparator className="bg-zinc-700" />
                     <DropdownMenuItem
                       className="hover:bg-zinc-800 cursor-pointer text-red-400"
-                      onClick={auth.logout}
+                      onClick={handleSignOut}
                     >
                       <LogOut size={14} className="mr-2" /> Sair
                     </DropdownMenuItem>
+                    {biometricCredentialId && (
+                      <DropdownMenuItem
+                        className="hover:bg-zinc-800 cursor-pointer text-zinc-500"
+                        onClick={forgetDevice}
+                      >
+                        <X size={14} className="mr-2" /> Remover conta deste aparelho
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>
