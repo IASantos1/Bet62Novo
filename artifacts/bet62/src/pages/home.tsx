@@ -20629,8 +20629,7 @@ export default function Home({
             <div className="hidden lg:flex items-center ml-12 h-16">
               {[
                 { id: "home", icon: <Star size={15} />, label: "DESTAQUES" },
-                { id: "sportsbook", icon: <Flag size={15} />, label: "SPORT" },
-                { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
+                { id: "sportsbook", icon: <Flag size={15} />, label: "Esporte" },
                 { id: "casino", icon: <Activity size={15} />, label: "CASINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
               ].map((tab) => (
@@ -20793,6 +20792,26 @@ export default function Home({
       </header>
       )}
 
+      {/* Full-screen Sportsbook/Esportes hides BET62's own header and dock
+          entirely so the WinHouse iframe owns the whole viewport. If the
+          embed fails to load (bad key, blocked domain, offline) or is just
+          slow, the user is otherwise stuck on a plain black screen with no
+          way back — no header, no dock, nothing to click. This small
+          floating control is the one thing that always renders above the
+          iframe, so "clicar em qualquer aba" from here can always escape
+          back to Destaques instead of leaving a dead black screen. */}
+      {isFullScreenSportsbook && (
+        <button
+          onClick={() => selectMainTab("home")}
+          aria-label="Voltar"
+          className="fixed z-[60] left-3 flex items-center gap-1.5 rounded-full bg-black/70 border border-zinc-700 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm hover:bg-black/90 transition-colors"
+          style={{ top: "calc(0.75rem + env(safe-area-inset-top, 0px))" }}
+        >
+          <X size={14} />
+          Voltar
+        </button>
+      )}
+
       {/* MOBILE BOTTOM DOCK — replaces the old underline tab strip on
           mobile (2026-09-20 futurist redesign). Desktop keeps the inline
           header nav above unchanged for this phase. Perfil removed from
@@ -20813,8 +20832,7 @@ export default function Home({
           {(
             [
               { id: "home", icon: HomeIcon, label: "Início", badge: false },
-              { id: "sportsbook", icon: Flag, label: "Sport", badge: false },
-              { id: "sports", icon: Trophy, label: "Esportes", badge: false },
+              { id: "sportsbook", icon: Flag, label: "Esporte", badge: false },
             ] as const
           ).map((tab) => (
             <button
