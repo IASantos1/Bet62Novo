@@ -41,11 +41,14 @@ const FOOTBALL_WS_URL =
 const MAX_SUBSCRIPTIONS = 10;
 const HINT_TTL_MS = 5 * 60_000;
 const RECONNECT_DELAY_MS = 3_000;
+const PING_INTERVAL_MS = 20_000;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectScheduled = false;
 let disabledUntil = 0;
+let pingTimer: ReturnType<typeof setInterval> | null = null;
+let authMode: "subprotocol" | "query" = "subprotocol";
 
 const candidates = new Map<string, Candidate>();
 const desiredIds = new Set<string>();
@@ -169,6 +172,31 @@ function sendFrame(frame: Record<string, unknown>): void {
   }
 }
 
+function clearPingTimer(): void {
+  if (!pingTimer) return;
+  clearInterval(pingTimer);
+  pingTimer = null;
+}
+
+function startPingTimer(): void {
+  clearPingTimer();
+  pingTimer = setInterval(() => {
+    sendFrame({ action: "ping" });
+  }, PING_INTERVAL_MS);
+}
+
+function buildSocketUrl(useQueryToken: boolean): string {
+  if (!useQueryToken) return FOOTBALL_WS_URL;
+  try {
+    const url = new URL(FOOTBALL_WS_URL);
+    url.searchParams.set("token", CONFIG.BZZOIRO_API_TOKEN);
+    return url.toString();
+  } catch {
+    const separator = FOOTBALL_WS_URL.includes("?") ? "&" : "?";
+    return `${FOOTBALL_WS_URL}${separator}token=${encodeURIComponent(CONFIG.BZZOIRO_API_TOKEN)}`;
+  }
+}
+
 function subscribe(eventId: string): void {
   sendFrame({ action: "subscribe", event_id: Number(eventId) || eventId });
 }
@@ -178,6 +206,7 @@ function unsubscribe(eventId: string): void {
 }
 
 function closeSocket(): void {
+  clearPingTimer();
   if (!socket) return;
   try {
     socket.close();
@@ -417,9 +446,13 @@ function ensureConnected(): void {
     return;
   }
 
-  socket = new WebSocket(FOOTBALL_WS_URL, ["token", CONFIG.BZZOIRO_API_TOKEN]);
+  socket =
+    authMode === "query"
+      ? new WebSocket(buildSocketUrl(true))
+      : new WebSocket(FOOTBALL_WS_URL, ["token", CONFIG.BZZOIRO_API_TOKEN]);
 
   socket.on("open", () => {
+    startPingTimer();
     subscribedIds.clear();
     for (const eventId of desiredIds) subscribe(eventId);
   });
@@ -434,9 +467,16 @@ function ensureConnected(): void {
 
   socket.on("close", (code, reason) => {
     const message = reason.toString();
+    clearPingTimer();
     console.warn("[BSD WS] socket closed", { code, reason: message || undefined });
     socket = null;
     subscribedIds.clear();
+
+    if (code === 4401 && authMode === "subprotocol") {
+      authMode = "query";
+      scheduleReconnect();
+      return;
+    }
 
     if (code === 4401) disabledUntil = nowMs() + 60 * 60_000;
     else if (code === 4402) disabledUntil = nowMs() + 15 * 60_000;

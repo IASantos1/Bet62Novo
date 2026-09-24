@@ -14517,61 +14517,61 @@ export default function Home({
             }, []);
             return (
               <div key={`inline-${bucket}-${section.section}`} className="space-y-2">
-                {groupedMarkets.map((group, groupIndex) => (
-                  <MarketGroup
-                    key={`inline-${bucket}-${section.section}-${groupIndex}`}
-                    title={group.title}
-                  >
-                    {(() => {
-                      const dedupedChoices = new Map<
-                        string,
-                        {
-                          marketKey: string;
-                          selKey: string;
-                          label: string;
-                          odds: number;
-                        }
-                      >();
-                      group.items.forEach(({ market, originalIndex }) => {
-                        market.choices.forEach((choice, choiceIndex) => {
-                          const label = formatExtraAllOddsChoiceLabel(
-                            market,
-                            choice,
-                            bucket,
-                          );
-                          const dedupeKey = normalizeAllOddsText(label);
-                          const current = dedupedChoices.get(dedupeKey);
-                          if (!current || choice.odds > current.odds) {
-                            dedupedChoices.set(dedupeKey, {
-                              marketKey: `all-${bucket}-${originalIndex}`,
-                              selKey: `all-${bucket}-${originalIndex}-${choiceIndex}`,
-                              label,
-                              odds: choice.odds,
-                            });
-                          }
+                {groupedMarkets.map((group, groupIndex) => {
+                  const dedupedChoices = new Map<
+                    string,
+                    {
+                      marketKey: string;
+                      selKey: string;
+                      label: string;
+                      odds: number;
+                    }
+                  >();
+                  group.items.forEach(({ market, originalIndex }) => {
+                    market.choices.forEach((choice, choiceIndex) => {
+                      if (!(choice.odds > 0) || !Number.isFinite(choice.odds)) return;
+                      const label = formatExtraAllOddsChoiceLabel(
+                        market,
+                        choice,
+                        bucket,
+                      );
+                      const dedupeKey = normalizeAllOddsText(label);
+                      const current = dedupedChoices.get(dedupeKey);
+                      if (!current || choice.odds > current.odds) {
+                        dedupedChoices.set(dedupeKey, {
+                          marketKey: `all-${bucket}-${originalIndex}`,
+                          selKey: `all-${bucket}-${originalIndex}-${choiceIndex}`,
+                          label,
+                          odds: choice.odds,
                         });
-                      });
-                      const choices = Array.from(dedupedChoices.values()).sort(
-                        (a, b) => a.label.localeCompare(b.label, "pt"),
-                      );
-                      return (
-                        <div className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {choices.map((choice) => (
-                            <MarketOddsBtn
-                              key={choice.selKey}
-                              match={match}
-                              sel={choice.selKey}
-                              odd={choice.odds}
-                              market={choice.marketKey}
-                              label={choice.label}
-                              allowWrap
-                            />
-                          ))}
-                        </div>
-                      );
-                    })()}
-                  </MarketGroup>
-                ))}
+                      }
+                    });
+                  });
+                  const choices = Array.from(dedupedChoices.values()).sort(
+                    (a, b) => a.label.localeCompare(b.label, "pt"),
+                  );
+                  if (choices.length === 0) return null;
+                  return (
+                    <MarketGroup
+                      key={`inline-${bucket}-${section.section}-${groupIndex}`}
+                      title={group.title}
+                    >
+                      <div className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {choices.map((choice) => (
+                          <MarketOddsBtn
+                            key={choice.selKey}
+                            match={match}
+                            sel={choice.selKey}
+                            odd={choice.odds}
+                            market={choice.marketKey}
+                            label={choice.label}
+                            allowWrap
+                          />
+                        ))}
+                      </div>
+                    </MarketGroup>
+                  );
+                })}
               </div>
             );
           })}
