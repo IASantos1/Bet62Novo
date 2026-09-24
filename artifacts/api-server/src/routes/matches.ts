@@ -313,6 +313,9 @@ function mapStatus(status: string): string {
   const normalized = status.trim().toLowerCase();
   if (!normalized) return "unknown";
   if (normalized === "live" || normalized === "inprogress") return "live";
+  if (normalized === "scheduled" || normalized === "not_started" || normalized === "ns") {
+    return "upcoming";
+  }
   if (normalized === "notstarted") return "upcoming";
   if (normalized === "upcoming") return "upcoming";
   if (normalized === "finished") return "finished";
@@ -550,6 +553,24 @@ function normalizeOutcome(value: unknown): string {
     .replace(/\s+/g, "_");
 }
 
+function formatOddsMarketName(rawMarket: unknown, line?: number): string {
+  const base = String(rawMarket ?? "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  if (!base) return line != null && line !== 0 ? `Linha ${line}` : "Mercado";
+  const titled = base.replace(/\b\w/g, (char) => char.toUpperCase());
+  return line != null && line !== 0 ? `${titled} — ${line}` : titled;
+}
+
+function formatOddsChoiceLabel(row: BSDOddsRow, outcome: string): string {
+  const preferred =
+    text(row.outcome_name) ||
+    text(row.outcome) ||
+    outcome.replace(/_/g, " ");
+  return preferred || "Opção";
+}
+
 function applyOddsRows(rows: BSDOddsRow[]): {
   odds: Odds1X2;
   markets: GenericMarkets;
@@ -648,6 +669,13 @@ function applyOddsRows(rows: BSDOddsRow[]): {
       putAllOdds("Cantos", `Cantos ${line || ""}`.trim(), outcome === "over" ? "Mais" : "Menos", price);
       continue;
     }
+
+    putAllOdds(
+      formatOddsMarketName(row.market, line),
+      formatOddsMarketName(row.market, line),
+      formatOddsChoiceLabel(row, outcome),
+      price,
+    );
   }
 
   const hasRealOdds =
@@ -977,6 +1005,7 @@ export async function buildUpcomingMatches(args?: {
   let payload: Awaited<ReturnType<typeof getBsdEvents>>;
   try {
     payload = await getBsdEvents({
+      status: "upcoming",
       dateFrom: todayIsoDate(0),
       dateTo: todayIsoDate(windowDays),
       limit: 200,
@@ -994,8 +1023,18 @@ export async function buildUpcomingMatches(args?: {
   }
   const events = (Array.isArray(payload.results) ? payload.results : [])
     .filter((event) => {
-      const status = String(event.status ?? "").trim().toLowerCase();
-      return status === "notstarted" || status === "upcoming";
+      const status = mapStatus(text(event.status));
+      const kickoffMs = eventKickoffMs(event);
+      if (!Number.isFinite(kickoffMs) || kickoffMs === Number.MAX_SAFE_INTEGER) {
+        return status === "upcoming";
+      }
+      return (
+        kickoffMs >= Date.now() - 5 * 60_000 &&
+        status !== "live" &&
+        status !== "finished" &&
+        status !== "cancelled" &&
+        status !== "postponed"
+      );
     })
     .sort((a, b) => {
       const byKickoff = eventKickoffMs(a) - eventKickoffMs(b);
