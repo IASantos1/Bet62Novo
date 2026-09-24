@@ -19324,7 +19324,7 @@ export default function Home({
             strip in the top header, right below the balance/avatar row
             (2026-09-24). Mirrors the desktop inline nav above so mobile and
             desktop stay in sync. */}
-        <div className="lg:hidden flex items-center gap-1 px-2 h-11 overflow-x-auto border-t border-zinc-800/60">
+        <div className="lg:hidden flex items-center gap-1 px-2 h-11 overflow-x-auto no-scrollbar border-t border-zinc-800/60">
           {[
             { id: "home", icon: <Star size={14} />, label: "DESTAQUES" },
             { id: "sportsbook", icon: <Flag size={14} />, label: "ESPORTE" },
