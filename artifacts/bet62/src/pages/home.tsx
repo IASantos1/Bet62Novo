@@ -59,7 +59,6 @@ import {
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
 import WinHouseSportsbookEmbed from "@/components/WinHouseSportsbookEmbed";
-import SportsbookPromoBanner from "@/components/SportsbookPromoBanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21718,15 +21717,10 @@ export default function Home({
 
             {!expandedMatch &&
               (activeTab === "sportsbook" || activeTab === "sports") && (
-                <>
-                  <div className="p-4 pb-0 lg:p-8 lg:pb-0">
-                    <SportsbookPromoBanner />
-                  </div>
-                  <WinHouseSportsbookEmbed
-                    isDarkTheme={isDarkTheme}
-                    authToken={auth.token}
-                  />
-                </>
+                <WinHouseSportsbookEmbed
+                  isDarkTheme={isDarkTheme}
+                  authToken={auth.token}
+                />
               )}
 
             {!expandedMatch && activeTab === "casino" && (() => {
