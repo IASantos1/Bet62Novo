@@ -1622,6 +1622,63 @@ export default function AdminPage() {
     sortOrder: 0,
   });
   const [featuredBannerSaving, setFeaturedBannerSaving] = useState(false);
+  const [homeLogoLookupLoading, setHomeLogoLookupLoading] = useState(false);
+  const [awayLogoLookupLoading, setAwayLogoLookupLoading] = useState(false);
+
+  // Auto-fill homeTeamLogoUrl/awayTeamLogoUrl from api-football.com as the
+  // admin types a team name — no more pasting a URL by hand. Debounced so
+  // typing doesn't fire a request per keystroke; only fires once the modal
+  // is open, the name has 3+ chars, and the corresponding URL field is
+  // still empty (never overwrites a URL the admin already pasted, same
+  // "only fill empty" rule as suggestBannerTemplateLogo below). Silent on
+  // any failure (no API_FOOTBALL_KEY configured, no match, network error)
+  // — the admin can always paste a URL manually instead, exactly like
+  // before this existed.
+  const useTeamLogoLookup = (
+    team: string,
+    logoUrl: string,
+    field: "homeTeamLogoUrl" | "awayTeamLogoUrl",
+    setLoading: (v: boolean) => void,
+  ) => {
+    useEffect(() => {
+      if (!featuredBannerModal) return;
+      const name = team.trim();
+      if (name.length < 3 || logoUrl.trim()) return;
+      let cancelled = false;
+      const t = setTimeout(() => {
+        setLoading(true);
+        fetch(`/api/admin/team-logo-lookup?name=${encodeURIComponent(name)}`, {
+          headers: authHeader,
+        })
+          .then((r) => r.json())
+          .then((data: { logoUrl?: string | null }) => {
+            if (cancelled || !data?.logoUrl) return;
+            setFeaturedBannerForm((p) => (p[field].trim() ? p : { ...p, [field]: data.logoUrl! }));
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          });
+      }, 600);
+      return () => {
+        cancelled = true;
+        clearTimeout(t);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [team, featuredBannerModal]);
+  };
+  useTeamLogoLookup(
+    featuredBannerForm.homeTeam,
+    featuredBannerForm.homeTeamLogoUrl,
+    "homeTeamLogoUrl",
+    setHomeLogoLookupLoading,
+  );
+  useTeamLogoLookup(
+    featuredBannerForm.awayTeam,
+    featuredBannerForm.awayTeamLogoUrl,
+    "awayTeamLogoUrl",
+    setAwayLogoLookupLoading,
+  );
 
   const toLocalDatetimeInputValue = (iso: string) => {
     const d = new Date(iso);
@@ -8772,9 +8829,14 @@ export default function AdminPage() {
                       onChange={(e) =>
                         setFeaturedBannerForm((p) => ({ ...p, homeTeamLogoUrl: e.target.value }))
                       }
-                      placeholder="https://..."
+                      placeholder="Preenchido automaticamente…"
                       className="bg-zinc-800 border-zinc-700 text-white mt-1"
                     />
+                    {homeLogoLookupLoading && (
+                      <p className="text-[11px] text-zinc-500 mt-1 flex items-center gap-1">
+                        <Loader2 className="animate-spin" size={11} /> A procurar escudo…
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label className="text-xs text-zinc-400">Escudo do Visitante (URL)</Label>
@@ -8783,15 +8845,22 @@ export default function AdminPage() {
                       onChange={(e) =>
                         setFeaturedBannerForm((p) => ({ ...p, awayTeamLogoUrl: e.target.value }))
                       }
-                      placeholder="https://..."
+                      placeholder="Preenchido automaticamente…"
                       className="bg-zinc-800 border-zinc-700 text-white mt-1"
                     />
+                    {awayLogoLookupLoading && (
+                      <p className="text-[11px] text-zinc-500 mt-1 flex items-center gap-1">
+                        <Loader2 className="animate-spin" size={11} /> A procurar escudo…
+                      </p>
+                    )}
                   </div>
                 </div>
                 <p className="text-[11px] text-zinc-600">
-                  Opcional — com os dois escudos preenchidos, o banner mostra o
-                  visual "realista" (escudos + VS). Sem eles, mostra o texto
-                  "Time A vs Time B" normal.
+                  Os escudos são procurados automaticamente na api-football.com
+                  pelo nome da equipa — cola uma URL aqui só se quiseres
+                  substituir o resultado automático. Com os dois preenchidos,
+                  o banner mostra o visual "realista" (escudos + VS); sem
+                  eles, mostra o texto "Time A vs Time B" normal.
                 </p>
 
                 {(() => {
