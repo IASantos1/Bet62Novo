@@ -83,3 +83,19 @@ export async function getFixturesByDate(dateYYYYMMDD: string): Promise<ApiFootba
 export async function getLiveFixtures(): Promise<ApiFootballFixture[]> {
   return apiFootballFetch<ApiFootballFixture[]>("/fixtures?live=all");
 }
+
+type ApiFootballTeamSearchResult = {
+  team: { id: number; name: string; logo: string };
+};
+
+// On-demand lookup (routes/admin.ts GET /team-logo-lookup) — lets the admin
+// "Novo Jogo" modal auto-fill a team's crest from just its name, instead of
+// the admin pasting a URL. Called only when an admin is actively typing in
+// that modal, never from the automated sync cron, so it's outside
+// bannerSync.ts's own per-cycle request budget.
+export async function searchTeamLogo(name: string): Promise<string | null> {
+  const results = await apiFootballFetch<ApiFootballTeamSearchResult[]>(
+    `/teams?search=${encodeURIComponent(name)}`,
+  );
+  return results[0]?.team?.logo ?? null;
+}

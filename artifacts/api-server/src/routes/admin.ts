@@ -44,6 +44,7 @@ import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
+import { searchTeamLogo } from "../services/apiFootball/client.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2821,6 +2822,27 @@ router.put("/banner-automation-settings", adminMiddleware, async (req: AdminRequ
   } catch (err) {
     logger.error({ err }, "PUT /api/admin/banner-automation-settings error");
     res.status(500).json({ error: "Erro ao atualizar configuração de automação" });
+  }
+});
+
+// Team-logo lookup (api-football.com) — the "Novo Jogo" (Destaques) modal
+// calls this as the admin types a team name, to auto-fill homeTeamLogoUrl/
+// awayTeamLogoUrl instead of the admin pasting a URL. Fails closed: no
+// API_FOOTBALL_KEY configured, no match found, or any upstream error all
+// just return logoUrl: null — the admin can still paste a URL manually,
+// exactly like before this existed.
+router.get("/team-logo-lookup", adminMiddleware, async (req: AdminRequest, res) => {
+  const name = String(req.query["name"] ?? "").trim();
+  if (name.length < 3) {
+    res.json({ logoUrl: null });
+    return;
+  }
+  try {
+    const logoUrl = await searchTeamLogo(name);
+    res.json({ logoUrl });
+  } catch (err) {
+    logger.warn({ err, name }, "GET /api/admin/team-logo-lookup failed");
+    res.json({ logoUrl: null });
   }
 });
 
