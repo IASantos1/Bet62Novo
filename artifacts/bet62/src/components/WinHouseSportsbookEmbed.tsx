@@ -50,8 +50,22 @@ export default function WinHouseSportsbookEmbed({
           const data = await res.json().catch(() => ({}));
           if (res.ok && typeof data?.launch === "string" && data.launch.trim()) {
             launchToken = data.launch.trim();
+          } else if (!cancelled) {
+            // Logged-in users landing on WinHouse's own login/register modal
+            // instead of being auto-signed-in trace back to exactly this
+            // failing silently — most commonly a missing/misconfigured
+            // WINHOUSE_WALLET_API_KEY on the backend (503 here), which the
+            // embed has no other way to surface (Santos, 2026-09-25).
+            console.warn(
+              "[WinHouse] launch token request failed — the embed will show WinHouse's own login instead of SSO-signing the user in.",
+              { status: res.status, body: data },
+            );
           }
-        } catch {}
+        } catch (err) {
+          if (!cancelled) {
+            console.warn("[WinHouse] launch token request threw", err);
+          }
+        }
       }
       if (cancelled) return;
 
