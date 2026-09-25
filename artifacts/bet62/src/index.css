@@ -149,7 +149,12 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 220 18% 12%;
+  /* Near-black (was 220 18% 12%, a visibly lighter navy-gray) to match the
+     WinHouse Sportsbook iframe's own fixed dark background — with the
+     theme now permanently dark (lib/theme.ts) and no way to restyle the
+     iframe's colors, this keeps the seam between BET62's chrome and the
+     embed from reading as two different shades (Santos, 2026-09-25). */
+  --background: 0 0% 4%;
   --foreground: 0 0% 98%;
   --card: 220 16% 16%;
   --card-foreground: 0 0% 98%;
