@@ -546,6 +546,128 @@ export async function initDb(): Promise<void> {
         updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      -- Admin-curated visual templates ("Modelos de Banner") for the
+      -- featured_match_banners above — one per competition, with a logo URL
+      -- (same "admin pastes a URL" convention as casino_banners.image_url,
+      -- there's no upload-to-storage pipeline anywhere in this repo) and a
+      -- 3-color gradient/accent scheme. Created before
+      -- featured_match_banners' own banner_template_id column below so the
+      -- FK target already exists.
+      CREATE TABLE IF NOT EXISTS banner_templates (
+        id               SERIAL PRIMARY KEY,
+        sport            TEXT NOT NULL DEFAULT 'football',
+        competition_name TEXT NOT NULL,
+        logo_url         TEXT,
+        primary_color    TEXT NOT NULL DEFAULT '#1e3a8a',
+        secondary_color  TEXT NOT NULL DEFAULT '#0f172a',
+        accent_color     TEXT NOT NULL DEFAULT '#dc2626',
+        is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order       INTEGER NOT NULL DEFAULT 0,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS banner_templates_sport_competition_idx
+        ON banner_templates (sport, competition_name);
+
+      -- Starter gallery so the admin's "Modelos de Banner" tab isn't empty
+      -- on day one — logo URLs reused from the same LEAGUE_LOGOS the
+      -- frontend already trusts (artifacts/bet62/src/lib/leagueLogos.ts).
+      -- Idempotent (ON CONFLICT DO NOTHING) and purely a starting point:
+      -- the admin can freely edit/delete these or add any other
+      -- competition/sport through the same UI.
+      INSERT INTO banner_templates
+        (sport, competition_name, logo_url, primary_color, secondary_color, accent_color, sort_order)
+      VALUES
+        ('football', 'UEFA Champions League', 'https://media.api-sports.io/football/leagues/2.png', '#0a2472', '#041c4a', '#00d2ff', 10),
+        ('football', 'UEFA Europa League', 'https://media.api-sports.io/football/leagues/3.png', '#ff6600', '#331300', '#ffffff', 20),
+        ('football', 'La Liga', 'https://media.api-sports.io/football/leagues/140.png', '#ee3524', '#7a0f08', '#ffcc00', 30),
+        ('football', 'Premier League', 'https://media.api-sports.io/football/leagues/39.png', '#3d195b', '#1a0a28', '#00ff85', 40),
+        ('football', 'Bundesliga', 'https://media.api-sports.io/football/leagues/78.png', '#d20515', '#6b0209', '#ffffff', 50),
+        ('football', 'Serie A', 'https://media.api-sports.io/football/leagues/135.png', '#024494', '#011d3d', '#ffffff', 60),
+        ('football', 'Ligue 1', 'https://media.api-sports.io/football/leagues/61.png', '#10182b', '#050810', '#dae025', 70),
+        ('football', 'Primeira Liga', 'https://media.api-sports.io/football/leagues/94.png', '#006600', '#003300', '#ff0000', 80),
+        ('football', 'Brasileirão', 'https://media.api-sports.io/football/leagues/71.png', '#009c3b', '#002776', '#ffdf00', 90),
+        ('football', 'Copa Libertadores', 'https://media.api-sports.io/football/leagues/13.png', '#f7b500', '#7a3d00', '#003057', 100),
+        ('football', 'Copa Sudamericana', 'https://media.api-sports.io/football/leagues/11.png', '#c8102e', '#5c0813', '#ffffff', 110),
+        ('football', 'MLS', 'https://media.api-sports.io/football/leagues/253.png', '#041e42', '#020f21', '#ee3524', 120),
+        ('football', 'Liga MX', 'https://media.api-sports.io/football/leagues/262.png', '#006847', '#00291d', '#ce1126', 130),
+        ('football', 'FIFA World Cup', 'https://media.api-sports.io/football/leagues/1.png', '#a67c00', '#4d3900', '#ffffff', 140),
+        ('football', 'Amistoso Internacional', 'https://media.api-sports.io/football/leagues/10.png', '#1e3a8a', '#0f172a', '#64748b', 150),
+        ('football', 'Outro / Genérico', NULL, '#18181b', '#09090b', '#dc2626', 999)
+      ON CONFLICT (sport, competition_name) DO NOTHING;
+
+      -- Nullable FK: picking a template fills in the banner's logo/colors.
+      -- ON DELETE SET NULL — removing a template must never take an
+      -- already-scheduled banner down with it.
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS banner_template_id
+        INTEGER REFERENCES banner_templates(id) ON DELETE SET NULL;
+
+      -- Links each starter template to its real api-football.com league id
+      -- (same numeric id already embedded in the logo_url seeded above,
+      -- e.g. leagues/2.png = Champions League) — lets the automation sync
+      -- (services/apiFootball/bannerSync.ts) match a fixture's league to
+      -- the right template with zero guesswork. NULL means "never offered
+      -- in automatic mode" (kept manual-only, e.g. "Outro / Genérico").
+      ALTER TABLE banner_templates ADD COLUMN IF NOT EXISTS api_football_league_id INTEGER;
+
+      UPDATE banner_templates SET api_football_league_id = CASE competition_name
+        WHEN 'UEFA Champions League' THEN 2
+        WHEN 'UEFA Europa League' THEN 3
+        WHEN 'La Liga' THEN 140
+        WHEN 'Premier League' THEN 39
+        WHEN 'Bundesliga' THEN 78
+        WHEN 'Serie A' THEN 135
+        WHEN 'Ligue 1' THEN 61
+        WHEN 'Primeira Liga' THEN 94
+        WHEN 'Brasileirão' THEN 71
+        WHEN 'Copa Libertadores' THEN 13
+        WHEN 'Copa Sudamericana' THEN 11
+        WHEN 'MLS' THEN 253
+        WHEN 'Liga MX' THEN 262
+        WHEN 'FIFA World Cup' THEN 1
+        WHEN 'Amistoso Internacional' THEN 10
+        ELSE api_football_league_id
+      END
+      WHERE sport = 'football' AND api_football_league_id IS NULL;
+
+      -- Real team crest URLs (from api-football.com fixtures, or pasted by
+      -- the admin for a manual banner — same "paste a URL" convention as
+      -- every other image field in this repo) plus automation bookkeeping.
+      -- external_fixture_id + its partial unique index below let the sync
+      -- cron (services/apiFootball/bannerSync.ts) upsert one row per real
+      -- fixture instead of duplicating it every cycle; source distinguishes
+      -- cron-managed rows ('auto') from admin-entered ones ('manual'), which
+      -- the cron must never touch.
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS home_team_logo_url TEXT;
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS away_team_logo_url TEXT;
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS external_fixture_id TEXT;
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS featured_match_banners_external_fixture_id_idx
+        ON featured_match_banners (external_fixture_id) WHERE external_fixture_id IS NOT NULL;
+
+      -- Single-row (id fixed at 1) config for the "Automação de Banners"
+      -- admin panel — see services/apiFootball/bannerSync.ts. Defaults to
+      -- mode='manual' so nothing changes in behavior until an admin
+      -- explicitly opts into automatic sync from api-football.com.
+      CREATE TABLE IF NOT EXISTS banner_automation_settings (
+        id                             INTEGER PRIMARY KEY DEFAULT 1,
+        mode                           TEXT NOT NULL DEFAULT 'manual',
+        quantidade                     INTEGER NOT NULL DEFAULT 3,
+        criterio                       TEXT NOT NULL DEFAULT 'upcoming',
+        antecedencia_minutes           INTEGER NOT NULL DEFAULT 120,
+        mostrar_ao_vivo                BOOLEAN NOT NULL DEFAULT TRUE,
+        manter_apos_termino            BOOLEAN NOT NULL DEFAULT FALSE,
+        tempo_para_substituir_minutes  INTEGER,
+        allowed_competition_ids        JSONB NOT NULL DEFAULT '[]',
+        excluded_competition_ids       JSONB NOT NULL DEFAULT '[]',
+        updated_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT banner_automation_settings_single_row CHECK (id = 1)
+      );
+
+      INSERT INTO banner_automation_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
       -- Session-lock + WebAuthn (passkey) auth — see lib/sessions.ts.
       -- sessions.id is the SHA-256 hex digest of the random opaque token
       -- stored in the bet62_session/bet62_refresh cookies, never the raw

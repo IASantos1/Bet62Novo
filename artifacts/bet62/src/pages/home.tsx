@@ -79,6 +79,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { apiFetch, SESSION_LOCKED_EVENT } from "@/lib/api";
+import { LEAGUE_LOGOS } from "@/lib/leagueLogos";
+import { CompetitionBanner } from "@/components/CompetitionBanner";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import {
   Elements,
@@ -544,11 +546,21 @@ type CasinoBanner = {
   position: "top" | "middle";
   games: CasinoGame[];
 };
+type FeaturedMatchBannerTemplate = {
+  competitionName: string;
+  logoUrl: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+};
 type FeaturedMatchBanner = {
   id: number;
   homeTeam: string;
   awayTeam: string;
   competition: string | null;
+  template: FeaturedMatchBannerTemplate | null;
+  homeTeamLogoUrl: string | null;
+  awayTeamLogoUrl: string | null;
   kickoffAt: string;
   endsAt: string;
 };
@@ -1415,158 +1427,6 @@ function flagBgStyle(url: string | null): React.CSSProperties {
   return { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" };
 }
 
-const LEAGUE_LOGOS: Record<string, string> = {
-  "Champions League": "https://media.api-sports.io/football/leagues/2.png",
-  "UEFA Champions League": "https://media.api-sports.io/football/leagues/2.png",
-  "Europa League": "https://media.api-sports.io/football/leagues/3.png",
-  "UEFA Europa League": "https://media.api-sports.io/football/leagues/3.png",
-  "Conference League": "https://media.api-sports.io/football/leagues/848.png",
-  "UEFA Super Cup": "https://media.api-sports.io/football/leagues/531.png",
-  "UEFA Nations League": "https://media.api-sports.io/football/leagues/5.png",
-  "UEFA European Championship":
-    "https://media.api-sports.io/football/leagues/4.png",
-  "FIFA World Cup": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group A": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group B": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group C": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group D": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group E": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group F": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group G": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group H": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group I": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group J": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group K": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group L": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Round of 32": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Round of 16": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Quarter-Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Quarter Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Semi-Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Semi Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - 3rd Place": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Final": "https://media.api-sports.io/football/leagues/1.png",
-  "World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
-  "World Cup": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa do Mundo 2026": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa do Mundo FIFA": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa do Mundo": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa América": "https://media.api-sports.io/football/leagues/9.png",
-  "Copa America": "https://media.api-sports.io/football/leagues/9.png",
-  "CONCACAF Gold Cup": "https://media.api-sports.io/football/leagues/22.png",
-  "Africa Cup of Nations": "https://media.api-sports.io/football/leagues/6.png",
-  "AFC Asian Cup": "https://media.api-sports.io/football/leagues/7.png",
-  "International Friendlies":
-    "https://media.api-sports.io/football/leagues/10.png",
-  "International Friendly":
-    "https://media.api-sports.io/football/leagues/10.png",
-  "Amistosos internacionais":
-    "https://media.api-sports.io/football/leagues/10.png",
-  // ── Major domestic football leagues ──────────────────────────────────
-  "Premier League": "https://media.api-sports.io/football/leagues/39.png",
-  "English Premier League": "https://media.api-sports.io/football/leagues/39.png",
-  "Championship": "https://media.api-sports.io/football/leagues/40.png",
-  "EFL Championship": "https://media.api-sports.io/football/leagues/40.png",
-  "League One": "https://media.api-sports.io/football/leagues/41.png",
-  "League Two": "https://media.api-sports.io/football/leagues/42.png",
-  "FA Cup": "https://media.api-sports.io/football/leagues/45.png",
-  "Carabao Cup": "https://media.api-sports.io/football/leagues/48.png",
-  "La Liga": "https://media.api-sports.io/football/leagues/140.png",
-  "LaLiga": "https://media.api-sports.io/football/leagues/140.png",
-  "Segunda División": "https://media.api-sports.io/football/leagues/141.png",
-  "Segunda Division": "https://media.api-sports.io/football/leagues/141.png",
-  "Bundesliga": "https://media.api-sports.io/football/leagues/78.png",
-  "2. Bundesliga": "https://media.api-sports.io/football/leagues/79.png",
-  "DFB Pokal": "https://media.api-sports.io/football/leagues/81.png",
-  "Serie A": "https://media.api-sports.io/football/leagues/135.png",
-  "Serie B": "https://media.api-sports.io/football/leagues/136.png",
-  "Coppa Italia": "https://media.api-sports.io/football/leagues/137.png",
-  "Ligue 1": "https://media.api-sports.io/football/leagues/61.png",
-  "Ligue 2": "https://media.api-sports.io/football/leagues/62.png",
-  "Coupe de France": "https://media.api-sports.io/football/leagues/66.png",
-  "Eredivisie": "https://media.api-sports.io/football/leagues/88.png",
-  "Primeira Liga": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga Portugal": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga NOS": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga Portugal Betclic": "https://media.api-sports.io/football/leagues/94.png",
-  "Taça de Portugal": "https://media.api-sports.io/football/leagues/96.png",
-  "Pro League": "https://media.api-sports.io/football/leagues/144.png",
-  "Belgian Pro League": "https://media.api-sports.io/football/leagues/144.png",
-  "Süper Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Super Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Turkish Super Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Scottish Premiership": "https://media.api-sports.io/football/leagues/179.png",
-  "Allsvenskan": "https://media.api-sports.io/football/leagues/113.png",
-  "Eliteserien": "https://media.api-sports.io/football/leagues/103.png",
-  "Superliga": "https://media.api-sports.io/football/leagues/119.png",
-  "Veikkausliiga": "https://media.api-sports.io/football/leagues/244.png",
-  "Ekstraklasa": "https://media.api-sports.io/football/leagues/106.png",
-  "Czech First League": "https://media.api-sports.io/football/leagues/345.png",
-  "Fortuna Liga": "https://media.api-sports.io/football/leagues/345.png",
-  "Slovak Super Liga": "https://media.api-sports.io/football/leagues/332.png",
-  "Superliga Romania": "https://media.api-sports.io/football/leagues/283.png",
-  "Romanian Superliga": "https://media.api-sports.io/football/leagues/283.png",
-  "Super League Greece": "https://media.api-sports.io/football/leagues/197.png",
-  "Super League 1": "https://media.api-sports.io/football/leagues/197.png",
-  "Austrian Football Bundesliga": "https://media.api-sports.io/football/leagues/218.png",
-  "Austrian Bundesliga": "https://media.api-sports.io/football/leagues/218.png",
-  "Swiss Super League": "https://media.api-sports.io/football/leagues/207.png",
-  "Ukrainian Premier League": "https://media.api-sports.io/football/leagues/333.png",
-  "Russian Premier League": "https://media.api-sports.io/football/leagues/235.png",
-  "RPL": "https://media.api-sports.io/football/leagues/235.png",
-  "HNL": "https://media.api-sports.io/football/leagues/210.png",
-  "Croatian Football League": "https://media.api-sports.io/football/leagues/210.png",
-  "Super Liga Serbia": "https://media.api-sports.io/football/leagues/286.png",
-  "Serbian Super Liga": "https://media.api-sports.io/football/leagues/286.png",
-  "Premijer Liga": "https://media.api-sports.io/football/leagues/213.png",
-  "Israeli Premier League": "https://media.api-sports.io/football/leagues/271.png",
-  "Cypriot First Division": "https://media.api-sports.io/football/leagues/262.png",
-  // ── Americas ──────────────────────────────────────────────────────────
-  "Brasileirao Serie A": "https://media.api-sports.io/football/leagues/71.png",
-  "Brasileirão": "https://media.api-sports.io/football/leagues/71.png",
-  "Campeonato Brasileiro": "https://media.api-sports.io/football/leagues/71.png",
-  "Serie A Brasil": "https://media.api-sports.io/football/leagues/71.png",
-  "Serie B Brasil": "https://media.api-sports.io/football/leagues/72.png",
-  "Copa do Brasil": "https://media.api-sports.io/football/leagues/73.png",
-  "Primera División Argentina": "https://media.api-sports.io/football/leagues/128.png",
-  "Liga Profesional Argentina": "https://media.api-sports.io/football/leagues/128.png",
-  "Copa de la Liga Argentina": "https://media.api-sports.io/football/leagues/130.png",
-  "MLS": "https://media.api-sports.io/football/leagues/253.png",
-  "Major League Soccer": "https://media.api-sports.io/football/leagues/253.png",
-  "USL Championship": "https://media.api-sports.io/football/leagues/254.png",
-  "CONCACAF Champions Cup": "https://media.api-sports.io/football/leagues/26.png",
-  "Liga MX": "https://media.api-sports.io/football/leagues/262.png",
-  "Copa Libertadores": "https://media.api-sports.io/football/leagues/13.png",
-  "Copa Sudamericana": "https://media.api-sports.io/football/leagues/11.png",
-  "CONMEBOL Libertadores": "https://media.api-sports.io/football/leagues/13.png",
-  "CONMEBOL Sudamericana": "https://media.api-sports.io/football/leagues/11.png",
-  "Recopa Sudamericana": "https://media.api-sports.io/football/leagues/12.png",
-  "Chilean Primera División": "https://media.api-sports.io/football/leagues/265.png",
-  "Clausura Chile": "https://media.api-sports.io/football/leagues/265.png",
-  "Apertura Chile": "https://media.api-sports.io/football/leagues/265.png",
-  "Liga 1 Peru": "https://media.api-sports.io/football/leagues/281.png",
-  "Primera División Uruguay": "https://media.api-sports.io/football/leagues/268.png",
-  "Primera División Colombia": "https://media.api-sports.io/football/leagues/239.png",
-  "Liga BetPlay": "https://media.api-sports.io/football/leagues/239.png",
-  "Primera División Ecuador": "https://media.api-sports.io/football/leagues/240.png",
-  "Liga Pro Ecuador": "https://media.api-sports.io/football/leagues/240.png",
-  // ── Asia / Middle East / Africa ───────────────────────────────────────
-  "J1 League": "https://media.api-sports.io/football/leagues/98.png",
-  "J. League": "https://media.api-sports.io/football/leagues/98.png",
-  "K League 1": "https://media.api-sports.io/football/leagues/292.png",
-  "Saudi Pro League": "https://media.api-sports.io/football/leagues/307.png",
-  "Saudi Professional League": "https://media.api-sports.io/football/leagues/307.png",
-  "UAE Pro League": "https://media.api-sports.io/football/leagues/435.png",
-  "Chinese Super League": "https://media.api-sports.io/football/leagues/169.png",
-  "Indian Super League": "https://media.api-sports.io/football/leagues/323.png",
-  "A-League": "https://media.api-sports.io/football/leagues/188.png",
-  "Thai League 1": "https://media.api-sports.io/football/leagues/290.png",
-  "Egyptian Premier League": "https://media.api-sports.io/football/leagues/233.png",
-  "South African Premier Division": "https://media.api-sports.io/football/leagues/288.png",
-  "CAFCL": "https://media.api-sports.io/football/leagues/20.png",
-  "CAF Champions League": "https://media.api-sports.io/football/leagues/20.png",
-};
 
 // Does a LEAGUE_LOGOS candidate key belong (per LEAGUE_ISO_MAP — the same
 // table getCountryFlagIso already trusts for this exact ambiguity) to a
@@ -8521,29 +8381,37 @@ export default function Home({
 
   // "Destaques" (home) tab — small real-games preview, fetched once per tab
   // open. Fully separate from the casino tab's own casinoGames.
-  // Curated by real title search (not a generic /limit=N fetch) — these are
-  // the specific games requested for this section; each title is searched
-  // individually and only real matches from the catalog are shown, no
-  // fabricated entries.
+  // Composition: 3 newest games + 1 roulette + 1 "ao vivo" game-show title —
+  // same query params the full Casino tab grid uses (see casinoGridParams
+  // below), just 3 small parallel requests instead of one big page. Roulette/
+  // "ao vivo" may come back empty (name-keyword matching, not a real DB
+  // category — see routes/casino.ts) — the row just shows fewer cards then,
+  // no placeholder/error for a missing slot. Deduped by id in case a
+  // roulette/live pick is also among the newest games.
   useEffect(() => {
     if (activeTab !== "home") return;
     if (homeCasinoPreview.length > 0) return;
     setHomeCasinoPreviewLoading(true);
-    const titles = [
-      "Fortune Tiger",
-      "Aviator",
-      "Gates of Olympus",
-      "Sweet Bonanza",
-      "Big Bass Bonanza",
-      "Starlight Princess",
-    ];
-    // One batched request for all 6 titles (was 6 sequential
-    // `search=<title>&limit=1` round trips).
-    fetch(`/api/casino/games?titles=${encodeURIComponent(titles.join(","))}&limit=30`)
-      .then((r) => r.json())
-      .then((data) => {
-        const pool: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
-        setHomeCasinoPreview(pickFirstMatchPerTitle(pool, titles));
+    Promise.all([
+      fetch(`/api/casino/games?sort=new&limit=3`).then((r) => r.json()),
+      fetch(`/api/casino/games?category=roulette&limit=1`).then((r) => r.json()),
+      fetch(`/api/casino/games?category=${encodeURIComponent("Ao Vivo")}&limit=1`).then((r) =>
+        r.json(),
+      ),
+    ])
+      .then(([newest, roulette, live]) => {
+        const seen = new Set<string>();
+        const combined: CasinoGame[] = [];
+        for (const data of [newest, roulette, live]) {
+          const games: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
+          for (const game of games) {
+            const key = `${game.source ?? "silentapi"}-${game.provider}-${game.id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            combined.push(game);
+          }
+        }
+        setHomeCasinoPreview(combined);
       })
       .catch(() => {})
       .finally(() => setHomeCasinoPreviewLoading(false));
@@ -21679,106 +21547,113 @@ export default function Home({
                 card), per the reference design. */}
             {!expandedMatch && activeTab === "home" && (
               <div className="space-y-6 max-w-[1100px] mx-auto">
-                <div
-                  className="relative rounded-2xl overflow-hidden border p-6 sm:p-8"
-                  style={{
-                    borderColor: "var(--b62-glass-border)",
-                    backgroundImage:
-                      "linear-gradient(115deg, rgba(220,38,38,0.22), rgba(139,92,246,0.16)), linear-gradient(115deg, rgba(24,4,4,0.88), rgba(9,9,11,0.94)), url(https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop)",
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                >
-                  <p className="text-red-400 text-xs font-bold uppercase tracking-wider mb-2">
-                    Free Bet · 1.º Depósito
-                  </p>
-                  <div className="b62-font-display text-4xl sm:text-5xl font-extrabold text-white leading-none">
-                    Deposite €10
-                  </div>
-                  <div className="b62-font-display text-xl sm:text-2xl font-bold text-white mt-1 mb-5">
-                    Ganhe <span className="text-red-500">€5</span> em Free Bets
-                  </div>
-                  {auth.user ? (
-                    <button
-                      onClick={() => {
-                        setDepositModalOpen(true);
-                        setActiveTab("wallet");
-                      }}
-                      className="b62-gradient-cta text-white font-bold px-6 py-3 rounded-lg transition-transform active:scale-[0.98]"
-                      style={{ boxShadow: "0 8px 20px rgba(220,38,38,0.35)" }}
-                    >
-                      Depositar Agora
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        setAuthMode("register");
-                        setAuthModalOpen(true);
-                      }}
-                      className="b62-gradient-cta text-white font-bold px-6 py-3 rounded-lg transition-transform active:scale-[0.98]"
-                      style={{ boxShadow: "0 8px 20px rgba(220,38,38,0.35)" }}
-                    >
-                      Registre-se Agora
-                    </button>
-                  )}
-                </div>
-
                 {/* Jogos em Destaque — admin-scheduled banners (pages/admin.tsx
                     "featured-banners" tab). Status (Agendado/AO VIVO) is
                     derived client-side from kickoffAt/endsAt, not written by
-                    the admin — see the polling effect above. */}
+                    the admin — see the polling effect above. Horizontal-scroll
+                    carousel at every breakpoint: one card + a peek of the next
+                    below sm, ~3 cards visible (still scrollable for more) at
+                    sm+ — same overflow-x-auto + snap pattern as the other
+                    carousels on this tab. */}
                 {featuredMatchBanners.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
                     {featuredMatchBanners.map((banner) => {
                       const isLive = Date.now() >= new Date(banner.kickoffAt).getTime();
                       return (
-                        <div
+                        <button
                           key={banner.id}
-                          className="rounded-xl border p-4 flex items-center justify-between gap-3"
-                          style={{
-                            borderColor: isLive ? "rgba(220,38,38,0.5)" : "var(--b62-glass-border)",
-                            background: isLive
-                              ? "linear-gradient(115deg, rgba(220,38,38,0.16), rgba(9,9,11,0.94))"
-                              : "rgba(24,24,27,0.6)",
-                          }}
+                          onClick={() => selectMainTab("sportsbook")}
+                          className="w-[85%] shrink-0 snap-start text-left transition-transform active:scale-[0.98] sm:w-[calc(33.33%-0.5rem)]"
                         >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              {isLive ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white animate-pulse">
-                                  AO VIVO
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
-                                  {new Date(banner.kickoffAt).toLocaleString("pt-PT", {
-                                    day: "2-digit",
-                                    month: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}
-                                </span>
-                              )}
-                              {banner.competition && (
-                                <span className="text-[11px] text-zinc-500 truncate">
-                                  {banner.competition}
-                                </span>
-                              )}
-                            </div>
-                            <div className="font-bold text-white truncate">
-                              {banner.homeTeam} <span className="text-zinc-500">vs</span> {banner.awayTeam}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => selectMainTab("sportsbook")}
-                            className="b62-gradient-cta text-white text-sm font-bold px-4 py-2 rounded-lg shrink-0 transition-transform active:scale-[0.98]"
-                          >
-                            Apostar
-                          </button>
-                        </div>
+                          <CompetitionBanner
+                            competitionName={banner.template?.competitionName ?? banner.competition}
+                            logoUrl={banner.template?.logoUrl}
+                            primaryColor={banner.template?.primaryColor}
+                            secondaryColor={banner.template?.secondaryColor}
+                            accentColor={banner.template?.accentColor}
+                            homeTeam={banner.homeTeam}
+                            awayTeam={banner.awayTeam}
+                            homeLogoUrl={banner.homeTeamLogoUrl}
+                            awayLogoUrl={banner.awayTeamLogoUrl}
+                            kickoffAt={banner.kickoffAt}
+                            isLive={isLive}
+                          />
+                        </button>
                       );
                     })}
                   </div>
                 )}
+
+                {/* Casino em Destaque — small real-games carousel (state/effect
+                    above: 3 newest + 1 roulette + 1 "ao vivo" game-show title,
+                    same /api/casino/games query params as the full Casino tab
+                    grid). Horizontal scroll like the other carousels here,
+                    cards a bit larger than the old static grid for visibility. */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Dices size={16} className="text-violet-400" />
+                    <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide">
+                      Casino em Destaque
+                    </h2>
+                    <button
+                      onClick={() => selectMainTab("casino")}
+                      className="ml-auto text-violet-400 text-xs font-bold flex items-center gap-0.5 hover:text-violet-300"
+                    >
+                      Ver todos <ChevronRight size={13} />
+                    </button>
+                  </div>
+                  <div
+                    className={
+                      homeCasinoPreview.length === 0 && !homeCasinoPreviewLoading
+                        ? ""
+                        : "flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth"
+                    }
+                  >
+                    {homeCasinoPreviewLoading && homeCasinoPreview.length === 0
+                      ? Array.from({ length: 5 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="w-32 sm:w-40 shrink-0 aspect-[3/4] rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
+                          />
+                        ))
+                      : homeCasinoPreview.length === 0
+                        ? (
+                          <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
+                            Sem jogos disponíveis neste momento.
+                          </div>
+                        )
+                        : homeCasinoPreview.map((game) => (
+                          <button
+                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
+                            disabled={casinoLoadingGame === game.id}
+                            onClick={() => launchCasinoGame(game)}
+                            title={game.name}
+                            aria-label={game.name}
+                            className="w-32 sm:w-40 shrink-0 snap-start aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
+                          >
+                            {casinoLoadingGame === game.id ? (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <RefreshCw className="animate-spin text-zinc-400" size={22} />
+                              </div>
+                            ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
+                              <img
+                                src={game.img}
+                                alt={game.name}
+                                className="absolute inset-0 w-full h-full object-fill"
+                                loading="lazy"
+                                onError={() => {
+                                  setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
+                                }}
+                              />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <Dices className="text-red-600" size={22} />
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                  </div>
+                </div>
 
                 {/* Full banner images (text already baked into the artwork) —
                     side by side (3-up) on the web. Inside an installed PWA
@@ -21821,63 +21696,40 @@ export default function Home({
                   </button>
                 </div>
 
+                {/* Promoções — compact teaser carousel, last section (right
+                    above the footer). Sourced from the same PROMO_CONTENT
+                    shared with the full Promoções tab (PromosPage) — the old
+                    big "Deposite €10" hero above is gone; that same promotion
+                    (id "freebets10") now just lives here as one of the cards,
+                    much shorter. Every card opens the full Promoções tab. */}
                 <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Dices size={16} className="text-violet-400" />
-                    <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide">
-                      Casino em Destaque
-                    </h2>
-                    <button
-                      onClick={() => selectMainTab("casino")}
-                      className="ml-auto text-violet-400 text-xs font-bold flex items-center gap-0.5 hover:text-violet-300"
-                    >
-                      Ver todos <ChevronRight size={13} />
-                    </button>
-                  </div>
-                  <div className={homeCasinoPreview.length === 0 && !homeCasinoPreviewLoading ? "" : "grid grid-cols-3 sm:grid-cols-6 gap-3"}>
-                    {homeCasinoPreviewLoading && homeCasinoPreview.length === 0
-                      ? Array.from({ length: 6 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="aspect-[3/4] rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
-                          />
-                        ))
-                      : homeCasinoPreview.length === 0
-                        ? (
-                          <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
-                            Sem jogos disponíveis neste momento.
+                  <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide mb-3">
+                    Promoções
+                  </h2>
+                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
+                    {PROMO_CONTENT.map((promo) => (
+                      <button
+                        key={promo.id}
+                        onClick={() => selectMainTab("promos")}
+                        className="relative w-[80%] sm:w-[46%] lg:w-[31%] shrink-0 snap-start aspect-[16/9] rounded-xl overflow-hidden text-left transition-transform active:scale-[0.98]"
+                      >
+                        <img
+                          src={promo.image}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+                        <div className="absolute bottom-0 left-0 right-0 p-3">
+                          <span className="inline-block bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 mb-1">
+                            {promo.highlight} {promo.highlightLabel}
+                          </span>
+                          <div className="text-white text-xs font-bold uppercase leading-tight line-clamp-2">
+                            {promo.title}
                           </div>
-                        )
-                        : homeCasinoPreview.map((game) => (
-                          <button
-                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
-                            disabled={casinoLoadingGame === game.id}
-                            onClick={() => launchCasinoGame(game)}
-                            title={game.name}
-                            aria-label={game.name}
-                            className="aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
-                          >
-                            {casinoLoadingGame === game.id ? (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <RefreshCw className="animate-spin text-zinc-400" size={22} />
-                              </div>
-                            ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
-                              <img
-                                src={game.img}
-                                alt={game.name}
-                                className="absolute inset-0 w-full h-full object-fill"
-                                loading="lazy"
-                                onError={() => {
-                                  setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
-                                }}
-                              />
-                            ) : (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <Dices className="text-red-600" size={22} />
-                              </div>
-                            )}
-                          </button>
-                        ))}
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -24788,6 +24640,151 @@ type PromoItem = {
   overlayImg?: string;
 };
 
+// Static content shared between the full Promoções page (PromosPage below)
+// and the compact "Promoções" teaser carousel on the Destaques home tab.
+// No `action` closure here (that depends on props only PromosPage has) —
+// each item carries an `actionKey` instead, resolved to a real handler by
+// whichever screen renders it. `highlightLabel`/`cta` below are the static
+// defaults; PromosPage still overrides them for "cashback" using live
+// cashbackData, exactly like before this was extracted.
+type PromoContentItem = Omit<PromoItem, "action"> & {
+  actionKey: "deposit" | "cashback" | "none";
+};
+
+const PROMO_CONTENT: PromoContentItem[] = [
+  {
+    id: "boost6x",
+    title: "BOOST 6% NA MÚLTIPLA",
+    subtitle: "6 SELEÇÕES · QUALQUER ESPORTE",
+    description:
+      "Faça Múltiplas de 6 jogos e ganhe 6% extra na sua múltipla. Quanto mais seleções, maior o boost — até 100% de bónus!",
+    badge: "MÚLTIPLA BOOST",
+    image:
+      "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-orange-500/60 to-red-700/60",
+    highlight: "+6%",
+    highlightLabel: "na múltipla de 6",
+    terms: [
+      "Mínimo de 6 seleções na múltipla.",
+      "Odds mínimas de 1.50 por seleção.",
+      "Boost automático calculado no momento.",
+      "Válido em todos os esportes da plataforma.",
+    ],
+    cta: "APOSTAR MÚLTIPLA",
+    cornerIcon: "🔥",
+    alwaysActive: true,
+    actionKey: "none",
+  },
+  {
+    id: "bonus100",
+    title: "100% BÓNUS DE BOAS‑VINDAS",
+    subtitle: "ATÉ €500 · ROLLOVER 5×",
+    description:
+      "Receba 100% no primeiro depósito e desbloqueie o saldo com rollover progressivo de 5× em apostas qualificadas.",
+    badge: "SPORTSBOOK",
+    image:
+      "https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-yellow-400/60 to-orange-600/60",
+    highlight: "+100%",
+    highlightLabel: "no 1.º depósito",
+    terms: [
+      "Bónus válido apenas no 1.º depósito.",
+      "Rollover total de 5× sobre depósito + bónus.",
+      "Odds mínimas qualificadas: 1.5.",
+      "Prazo de utilização: 30 dias.",
+    ],
+    cta: "ATIVAR BÓNUS",
+    actionKey: "deposit",
+  },
+  {
+    id: "freebets10",
+    title: "DEPOSITE €10 E GANHE €5",
+    subtitle: "FREE BETS PARA COMEÇAR",
+    description:
+      "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
+    badge: "FREE BET",
+    image:
+      "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-violet-500/60 to-purple-800/60",
+    highlight: "€5",
+    highlightLabel: "em free bets",
+    terms: [
+      "Depósito mínimo de €10.",
+      "Free bets creditadas automaticamente.",
+      "Odds mínimas qualificadas: 2.50.",
+      "Free bets válidas por 7 dias.",
+    ],
+    cta: "DEPOSITAR €10",
+    actionKey: "deposit",
+  },
+  {
+    id: "freebets20",
+    title: "DEPOSITE €20 E GANHE €10",
+    subtitle: "FREE BETS EXCLUSIVAS",
+    description:
+      "Faça o seu primeiro depósito de €20 e conclua 4 apostas qualificadas para receber €10 em free bets.",
+    badge: "FREE BET",
+    image:
+      "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-emerald-400/60 to-green-700/60",
+    highlight: "€10",
+    highlightLabel: "em free bets",
+    terms: [
+      "Depósito mínimo de €20.",
+      "4 apostas qualificadas obrigatórias.",
+      "Odds mínimas de 2.00.",
+      "Stake mínima de €2 por aposta.",
+      "Free bets válidas por 7 dias.",
+    ],
+    cta: "DEPOSITAR €20",
+    actionKey: "deposit",
+  },
+  {
+    id: "cashback",
+    title: "CASHBACK SEMANAL",
+    subtitle: "10% EM FREE BETS",
+    description:
+      "Recupere parte das perdas líquidas em apostas esportivas toda semana. Máximo de €100 por utilizador.",
+    badge: "HOT",
+    image:
+      "https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-cyan-400/60 to-blue-700/60",
+    highlight: "10%",
+    // Static default — PromosPage overrides this with the real amount when
+    // cashbackData has loaded, same as before this was extracted.
+    highlightLabel: "das perdas",
+    terms: [
+      "Cashback calculado semanalmente.",
+      "Máximo de €100 por utilizador.",
+      "Pago em saldo bónus.",
+      "Necessário 1× rollover para saque.",
+    ],
+    cta: "VER DETALHES",
+    actionKey: "cashback",
+  },
+  {
+    id: "superodds",
+    title: "SUPER ODDS",
+    subtitle: "BOOSTS ESPORTIVOS DIÁRIOS",
+    description:
+      "Odds turbinadas diariamente nos principais jogos e campeonatos. Maximize os seus ganhos nos eventos em destaque.",
+    badge: "BOOST",
+    image:
+      "https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-red-500/60 to-rose-700/60",
+    highlight: "+25%",
+    highlightLabel: "nas odds",
+    terms: [
+      "Disponível apenas em eventos selecionados.",
+      "Stake máxima promocional: €50.",
+      "Mercados limitados por evento.",
+      "Boosts atualizam às 10h diariamente.",
+    ],
+    cta: "VER JOGOS COM BOOST",
+    actionKey: "none",
+  },
+];
+
 function PromoCard3D({
   promo,
   index,
@@ -24988,142 +24985,29 @@ function PromosPage({
     onFetchCashback();
   }, []);
 
-  const promos = [
-    {
-      id: "boost6x",
-      title: "BOOST 6% NA MÚLTIPLA",
-      subtitle: "6 SELEÇÕES · QUALQUER ESPORTE",
-      description:
-        "Faça Múltiplas de 6 jogos e ganhe 6% extra na sua múltipla. Quanto mais seleções, maior o boost — até 100% de bónus!",
-      badge: "MÚLTIPLA BOOST",
-      image:
-        "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-orange-500/60 to-red-700/60",
-      highlight: "+6%",
-      highlightLabel: "na múltipla de 6",
-      terms: [
-        "Mínimo de 6 seleções na múltipla.",
-        "Odds mínimas de 1.50 por seleção.",
-        "Boost automático calculado no momento.",
-        "Válido em todos os esportes da plataforma.",
-      ],
-      cta: "APOSTAR MÚLTIPLA",
-      cornerIcon: "🔥",
-      alwaysActive: true,
-      action: () => {},
-    },
-    {
-      id: "bonus100",
-      title: "100% BÓNUS DE BOAS‑VINDAS",
-      subtitle: "ATÉ €500 · ROLLOVER 5×",
-      description:
-        "Receba 100% no primeiro depósito e desbloqueie o saldo com rollover progressivo de 5× em apostas qualificadas.",
-      badge: "SPORTSBOOK",
-      image:
-        "https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-yellow-400/60 to-orange-600/60",
-      highlight: "+100%",
-      highlightLabel: "no 1.º depósito",
-      terms: [
-        "Bónus válido apenas no 1.º depósito.",
-        "Rollover total de 5× sobre depósito + bónus.",
-        "Odds mínimas qualificadas: 1.5.",
-        "Prazo de utilização: 30 dias.",
-      ],
-      cta: "ATIVAR BÓNUS",
-      action: onDeposit,
-    },
-    {
-      id: "freebets10",
-      title: "DEPOSITE €10 E GANHE €5",
-      subtitle: "FREE BETS PARA COMEÇAR",
-      description:
-        "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
-      badge: "FREE BET",
-      image:
-        "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-violet-500/60 to-purple-800/60",
-      highlight: "€5",
-      highlightLabel: "em free bets",
-      terms: [
-        "Depósito mínimo de €10.",
-        "Free bets creditadas automaticamente.",
-        "Odds mínimas qualificadas: 2.50.",
-        "Free bets válidas por 7 dias.",
-      ],
-      cta: "DEPOSITAR €10",
-      action: onDeposit,
-    },
-    {
-      id: "freebets20",
-      title: "DEPOSITE €20 E GANHE €10",
-      subtitle: "FREE BETS EXCLUSIVAS",
-      description:
-        "Faça o seu primeiro depósito de €20 e conclua 4 apostas qualificadas para receber €10 em free bets.",
-      badge: "FREE BET",
-      image:
-        "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-emerald-400/60 to-green-700/60",
-      highlight: "€10",
-      highlightLabel: "em free bets",
-      terms: [
-        "Depósito mínimo de €20.",
-        "4 apostas qualificadas obrigatórias.",
-        "Odds mínimas de 2.00.",
-        "Stake mínima de €2 por aposta.",
-        "Free bets válidas por 7 dias.",
-      ],
-      cta: "DEPOSITAR €20",
-      action: onDeposit,
-    },
-    {
-      id: "cashback",
-      title: "CASHBACK SEMANAL",
-      subtitle: "10% EM FREE BETS",
-      description:
-        "Recupere parte das perdas líquidas em apostas esportivas toda semana. Máximo de €100 por utilizador.",
-      badge: "HOT",
-      image:
-        "https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-cyan-400/60 to-blue-700/60",
-      highlight: "10%",
-      highlightLabel: cashbackData
-        ? `≈ €${cashbackData.cashback.toFixed(2)} disp.`
-        : "das perdas",
-      terms: [
-        "Cashback calculado semanalmente.",
-        "Máximo de €100 por utilizador.",
-        "Pago em saldo bónus.",
-        "Necessário 1× rollover para saque.",
-      ],
-      cta:
-        cashbackData && cashbackData.cashback > 0
-          ? `RESGATAR €${cashbackData.cashback.toFixed(2)}`
-          : "VER DETALHES",
-      action: onClaimCashback,
-    },
-    {
-      id: "superodds",
-      title: "SUPER ODDS",
-      subtitle: "BOOSTS ESPORTIVOS DIÁRIOS",
-      description:
-        "Odds turbinadas diariamente nos principais jogos e campeonatos. Maximize os seus ganhos nos eventos em destaque.",
-      badge: "BOOST",
-      image:
-        "https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-red-500/60 to-rose-700/60",
-      highlight: "+25%",
-      highlightLabel: "nas odds",
-      terms: [
-        "Disponível apenas em eventos selecionados.",
-        "Stake máxima promocional: €50.",
-        "Mercados limitados por evento.",
-        "Boosts atualizam às 10h diariamente.",
-      ],
-      cta: "VER JOGOS COM BOOST",
-      action: () => {},
-    },
-  ];
+  // Resolves each static PROMO_CONTENT entry's actionKey to a real handler,
+  // and overrides cashback's highlightLabel/cta with the live amount once
+  // cashbackData has loaded — identical behavior to the inline array this
+  // replaced, just sourced from the content shared with the Destaques
+  // teaser carousel (home.tsx's "Promoções" section).
+  const promos: PromoItem[] = PROMO_CONTENT.map(({ actionKey, ...content }) => {
+    const action =
+      actionKey === "deposit" ? onDeposit : actionKey === "cashback" ? onClaimCashback : () => {};
+    if (content.id === "cashback") {
+      return {
+        ...content,
+        action,
+        highlightLabel: cashbackData
+          ? `≈ €${cashbackData.cashback.toFixed(2)} disp.`
+          : content.highlightLabel,
+        cta:
+          cashbackData && cashbackData.cashback > 0
+            ? `RESGATAR €${cashbackData.cashback.toFixed(2)}`
+            : content.cta,
+      };
+    }
+    return { ...content, action };
+  });
 
   return (
     <div className="bg-[#050816] min-h-[60vh]">
