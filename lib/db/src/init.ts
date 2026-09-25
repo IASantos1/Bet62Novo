@@ -527,6 +527,76 @@ export async function initDb(): Promise<void> {
         error            TEXT,
         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Was added as a Drizzle schema file (schema/featuredMatchBanners.ts,
+      -- PR #525) without ever being mirrored here — since this file (not
+      -- drizzle-kit push) is what actually creates tables, that table never
+      -- existed in production. Fixed here, alongside the session/passkey
+      -- tables below which needed the same file touched anyway.
+      CREATE TABLE IF NOT EXISTS featured_match_banners (
+        id           SERIAL PRIMARY KEY,
+        home_team    TEXT NOT NULL,
+        away_team    TEXT NOT NULL,
+        competition  TEXT,
+        kickoff_at   TIMESTAMPTZ NOT NULL,
+        ends_at      TIMESTAMPTZ NOT NULL,
+        is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order   INTEGER NOT NULL DEFAULT 0,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Session-lock + WebAuthn (passkey) auth — see lib/sessions.ts.
+      -- sessions.id is the SHA-256 hex digest of the random opaque token
+      -- stored in the bet62_session/bet62_refresh cookies, never the raw
+      -- token itself — a DB-only leak (backup, replica, stray log line)
+      -- can't be replayed as a working session credential this way, same
+      -- principle as never storing a password in plaintext.
+      CREATE TABLE IF NOT EXISTS sessions (
+        id                  TEXT PRIMARY KEY,
+        user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status              TEXT NOT NULL DEFAULT 'active',
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_activity_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        locked_at           TIMESTAMPTZ,
+        expires_at          TIMESTAMPTZ NOT NULL,
+        refresh_token_hash  TEXT,
+        refresh_expires_at  TIMESTAMPTZ,
+        ip                  TEXT,
+        user_agent          TEXT,
+        revoked_at          TIMESTAMPTZ,
+        revoked_reason      TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions (user_id);
+      CREATE INDEX IF NOT EXISTS sessions_refresh_token_hash_idx ON sessions (refresh_token_hash);
+
+      CREATE TABLE IF NOT EXISTS user_passkeys (
+        id            SERIAL PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        credential_id TEXT NOT NULL UNIQUE,
+        public_key    TEXT NOT NULL,
+        counter       INTEGER NOT NULL DEFAULT 0,
+        device_type   TEXT,
+        backed_up     BOOLEAN NOT NULL DEFAULT FALSE,
+        transports    JSONB,
+        name          TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at  TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS security_audit_log (
+        id          SERIAL PRIMARY KEY,
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        event       TEXT NOT NULL,
+        session_id  TEXT,
+        ip          TEXT,
+        user_agent  TEXT,
+        metadata    JSONB,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS security_audit_log_user_id_idx ON security_audit_log (user_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

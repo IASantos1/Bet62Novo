@@ -1,6 +1,8 @@
 import { type Request, type Response, type NextFunction } from "express";
 import * as jwt from "jsonwebtoken";
 import { logger } from "../lib/logger.js";
+import { evaluateSession, hashToken, touchSession } from "../lib/sessions.js";
+import type { Session } from "../../../../lib/db/src/schema/sessions.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
@@ -16,29 +18,14 @@ export interface AuthRequest extends Request {
     id: number;
     email: string;
   };
-}
-
-export function verifyAuthToken(token: string): { id: number; email: string } {
-  // Explicit algorithm allow-list (audit hardening, 2026-08-10) — the
-  // jsonwebtoken library already infers/rejects based on key type by
-  // default, so this isn't exploitable as-is, but pinning it is standard
-  // defense-in-depth a formal security review will expect regardless.
-  return jwt.verify(token, SESSION_SECRET as jwt.Secret, {
-    algorithms: ["HS256"],
-  }) as unknown as { id: number; email: string };
+  session?: Session;
 }
 
 // Short-lived, single-purpose token for the open-bet-states SSE stream
 // (routes/bets.ts's GET /open-states-stream). EventSource can't set custom
 // headers, so the only way to authenticate that connection is a token in
-// the URL query string — but the full 7-day session JWT ending up there
-// leaks via browser history and any intermediary (proxy/CDN) access logs
-// not configured to redact query strings (audit finding, 2026-08-10; this
-// app's own pino logger already strips query strings, but upstream infra
-// might not). Minting a 5-minute, stream-scoped token instead (fetched via
-// a normal authenticated header request, GET /open-states-stream-token)
-// bounds the exposure window and blast radius of a leaked URL to just this
-// one low-value read-only stream, instead of the full session.
+// the URL query string — unaffected by the session-cookie migration below,
+// left exactly as-is.
 const OPEN_BET_STREAM_TOKEN_PURPOSE = "open-states-stream";
 
 export function mintOpenBetStreamToken(user: { id: number; email: string }): string {
@@ -59,20 +46,85 @@ export function verifyOpenBetStreamToken(token: string): { id: number; email: st
   return { id: decoded.id, email: decoded.email };
 }
 
-export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Missing or invalid authorization header" });
+async function loadUserForSession(userId: number): Promise<{ id: number; email: string } | null> {
+  const { db, usersTable } = await import("@workspace/db");
+  const { eq } = await import("drizzle-orm");
+  const [user] = await db.select({ id: usersTable.id, email: usersTable.email }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  return user ?? null;
+}
+
+// Reads the bet62_session cookie and consults the real, server-side
+// session record (lib/sessions.ts) — replaces the old pure jwt.verify()
+// check, which never queried the DB and had no way to revoke or lock a
+// session. `req.user` keeps the exact same { id, email } shape as before
+// so the many existing route files that destructure it don't need to
+// change. A locked session gets its own 401 code (SESSION_LOCKED) rather
+// than the generic one, since the frontend needs to tell "show the lock
+// screen" apart from "you're logged out."
+export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  const sessionToken = req.cookies?.bet62_session as string | undefined;
+  if (!sessionToken) {
+    res.status(401).json({ error: "Missing session" });
     return;
   }
 
-  const token = authHeader.split(" ")[1];
   try {
-    const decoded = verifyAuthToken(token!);
-    req.user = decoded;
+    const evaluation = await evaluateSession(hashToken(sessionToken));
+    if (evaluation.status === "locked") {
+      res.status(401).json({ error: "SESSION_LOCKED" });
+      return;
+    }
+    if (evaluation.status !== "active") {
+      res.status(401).json({ error: "Invalid or expired session" });
+      return;
+    }
+
+    const user = await loadUserForSession(evaluation.session.userId);
+    if (!user) {
+      res.status(401).json({ error: "Invalid session" });
+      return;
+    }
+
+    await touchSession(evaluation.session);
+    req.user = user;
+    req.session = evaluation.session;
     next();
   } catch (err) {
-    logger.error({ err }, "JWT verification failed");
-    res.status(401).json({ error: "Invalid token" });
+    logger.error({ err }, "Session verification failed");
+    res.status(401).json({ error: "Invalid session" });
+  }
+};
+
+// Accepts either an active OR a locked session — used only by the small
+// set of endpoints that must work while the user is locked out: logging
+// out entirely ("forget this device"), and the two unlock ceremonies
+// (password, passkey). Never accepts expired/revoked — those still need
+// a full /login.
+export const requireLockableSession = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  const sessionToken = req.cookies?.bet62_session as string | undefined;
+  if (!sessionToken) {
+    res.status(401).json({ error: "Missing session" });
+    return;
+  }
+
+  try {
+    const evaluation = await evaluateSession(hashToken(sessionToken));
+    if (evaluation.status !== "active" && evaluation.status !== "locked") {
+      res.status(401).json({ error: "Invalid or expired session" });
+      return;
+    }
+
+    const user = await loadUserForSession(evaluation.session.userId);
+    if (!user) {
+      res.status(401).json({ error: "Invalid session" });
+      return;
+    }
+
+    req.user = user;
+    req.session = evaluation.session;
+    next();
+  } catch (err) {
+    logger.error({ err }, "Session verification failed");
+    res.status(401).json({ error: "Invalid session" });
   }
 };

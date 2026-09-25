@@ -15,6 +15,7 @@
     "casino:delete-all": "tsx src/scripts/deleteAllCasinoGames.ts"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^14.0.2",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "bcryptjs": "^3.0.3",

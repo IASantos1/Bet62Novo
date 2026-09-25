@@ -78,6 +78,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
+import { apiFetch, SESSION_LOCKED_EVENT } from "@/lib/api";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import {
   Elements,
   PaymentElement,
@@ -5294,51 +5296,113 @@ export default function Home({
   );
 
   // ── Lock screen state ────────────────────────────────────────────────────────
-  // Lazy-initialized from localStorage so a "Sair" that only locks (see
-  // handleSignOut below) still requires Face ID after the browser/app is
-  // closed and reopened, not just while this tab stays alive in memory.
-  const [isLocked, setIsLocked] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return localStorage.getItem("bet62_session_locked") === "1";
-    } catch {
-      return false;
-    }
-  });
+  // The server (lib/sessions.ts's evaluateSession) is the source of truth
+  // for whether the session is locked — this state just mirrors what
+  // GET /api/auth/session last reported, checked on mount and every time
+  // the tab becomes visible again (below), plus set immediately whenever
+  // any apiFetch call surfaces a 401 SESSION_LOCKED (see the
+  // SESSION_LOCKED_EVENT listener further down). No more trusting a
+  // client-writable localStorage flag for something that gates access.
+  const [isLocked, setIsLocked] = useState(false);
   const isLockedRef = useRef(false);
   const [lockPassword, setLockPassword] = useState("");
   const [lockError, setLockError] = useState("");
   const [lockLoading, setLockLoading] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [biometricCredentialId, setBiometricCredentialId] = useState<
-    string | null
-  >(null);
+  // Whether the CURRENT user has a passkey registered server-side
+  // (@simplewebauthn — user_passkeys table), not a locally-cached
+  // credential id. Populated from /api/auth/session's own response.
+  const [hasPasskey, setHasPasskey] = useState(false);
+  const [lockedEmail, setLockedEmail] = useState<string | null>(null);
+  const [showPasswordUnlock, setShowPasswordUnlock] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
+  // Captured the moment the session locks so a successful unlock can
+  // return to exactly where the user was, instead of the home tab.
+  const returnPathRef = useRef<string | null>(null);
 
   // Sync isLocked → ref (used in async callbacks)
   useEffect(() => {
     isLockedRef.current = isLocked;
   }, [isLocked]);
 
+  const checkSession = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/session", { cache: "no-store" });
+      const data = await res.json();
+      setHasPasskey(!!data.passkeyAvailable);
+      if (data.status === "LOCKED") {
+        setLockedEmail(data.email ?? null);
+        if (!isLockedRef.current) {
+          returnPathRef.current = window.location.pathname + window.location.search;
+        }
+        setLockError("");
+        setIsLocked(true);
+      } else if (data.status === "ACTIVE") {
+        setIsLocked(false);
+        resetIdle();
+      }
+      // EXPIRED: leave isLocked as-is — use-auth's own session check
+      // handles clearing `user`, which unmounts the app behind the lock
+      // screen entirely, making the overlay itself moot.
+    } catch {
+      /* non-critical — next check (idle tick, visibility change) retries */
+    }
+  }, [resetIdle]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onVisibility = () => {
-      if (document.visibilityState === "visible") resetIdle();
+      if (document.visibilityState === "visible") void checkSession();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [resetIdle]);
+  }, [checkSession]);
 
-  // Check WebAuthn platform authenticator availability + stored credential
+  // A locked session surfaces as 401 SESSION_LOCKED from ANY apiFetch call,
+  // not just this poll — e.g. the server may have locked the session while
+  // this tab was foregrounded but idle past AUTH_IDLE_TIMEOUT_SECONDS.
+  useEffect(() => {
+    const onLocked = () => void checkSession();
+    window.addEventListener(SESSION_LOCKED_EVENT, onLocked);
+    return () => window.removeEventListener(SESSION_LOCKED_EVENT, onLocked);
+  }, [checkSession]);
+
+  // Initial check on mount — covers reopening the app after it was closed
+  // long enough for the session to have locked server-side.
+  useEffect(() => {
+    void checkSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Explicit "lock now" — calls the server rather than just flipping a
+  // local flag, since the backend (not this timer) is what must actually
+  // decide and record that the session is locked. This is what the client
+  // idle timer below triggers: useIdle's own default (used here) fires
+  // well before AUTH_IDLE_TIMEOUT_SECONDS' production default of 15
+  // minutes, so waiting for the server's own lazy idle detection to catch
+  // up would leave the UI unlocked long after the user walked away.
+  const lockNow = useCallback(async () => {
+    if (isLockedRef.current) return;
+    try {
+      const res = await apiFetch("/api/auth/session/lock", { method: "POST" });
+      if (res.ok) {
+        returnPathRef.current = window.location.pathname + window.location.search;
+        setLockError("");
+        setIsLocked(true);
+        return;
+      }
+    } catch {
+      /* fall through to resync below */
+    }
+    void checkSession();
+  }, [checkSession]);
+
+  // Check WebAuthn platform authenticator availability (a client capability
+  // check only — whether THIS user has a passkey registered is server
+  // state, read from checkSession above).
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const stored = localStorage.getItem("bet62_biometric_credential");
-      if (stored) setBiometricCredentialId(stored);
-    } catch {
-      /* private browsing */
-    }
     if (
       window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable
     ) {
@@ -5358,10 +5422,10 @@ export default function Home({
       return;
     }
     if (!auth.user) return;
-    if (!(biometricAvailable && biometricCredentialId)) return;
-    setLockError("");
-    setIsLocked(true);
-  }, [isIdle, auth.user, biometricAvailable, biometricCredentialId, resetIdle]);
+    // Any authenticated user gets locked on idle now — password is always
+    // the fallback, biometric is just the convenient path.
+    void lockNow();
+  }, [isIdle, auth.user, resetIdle, lockNow]);
 
   // ── Tab scroll ref ────────────────────────────────────────────────────────────
   const tabContainerRef = useRef<HTMLDivElement | null>(null);
@@ -7115,12 +7179,12 @@ export default function Home({
 
   // Periodic balance refresh every 20s for logged-in users (catches server-side credits)
   useEffect(() => {
-    if (!auth.token) return;
+    if (!auth.user) return;
     const id = setInterval(() => {
       auth.refreshUser();
     }, 20000);
     return () => clearInterval(id);
-  }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [auth.user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch platform stats on mount
   useEffect(() => {
@@ -8065,12 +8129,10 @@ export default function Home({
 
   const fetchMyBets = useCallback(
     async (silent = false) => {
-      if (!auth.token) return;
+      if (!auth.user) return;
       if (!silent) setMyBetsLoading(true);
       try {
-        const res = await fetch("/api/bets/my", {
-          headers: { Authorization: `Bearer ${auth.token}` },
-        });
+        const res = await fetch("/api/bets/my");
         if (res.ok) {
           const bets: UserBet[] = await res.json();
           setMyBets((prev: any) => {
@@ -8194,7 +8256,7 @@ export default function Home({
         if (!silent) setMyBetsLoading(false);
       }
     },
-    [auth.token],
+    [auth.user],
   );
 
   const applyOpenBetStatePayload = useCallback(
@@ -8252,15 +8314,13 @@ export default function Home({
   );
 
   const fetchOpenBetStates = useCallback(async () => {
-    if (!auth.token) return;
+    if (!auth.user) return;
     const pendingIds = myBetsRef.current
       .filter((bet) => bet.status === "pending")
       .map((bet) => bet.id);
     if (pendingIds.length === 0) return;
     try {
-      const res = await fetch("/api/bets/open-states", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const res = await fetch("/api/bets/open-states");
       if (!res.ok) return;
       const data = (await res.json()) as {
         bets?: Array<{
@@ -8273,7 +8333,7 @@ export default function Home({
     } catch {
       // non-critical lightweight refresh
     }
-  }, [auth.token, applyOpenBetStatePayload]);
+  }, [auth.user, applyOpenBetStatePayload]);
 
   useEffect(() => {
     if (cashoutExpandedId == null) return;
@@ -8288,12 +8348,12 @@ export default function Home({
   // this no longer auto-polls it (Santos, 2026-09-24).
   useEffect(() => {
     return;
-  }, [auth.token, fetchMyBets]);
+  }, [auth.user, fetchMyBets]);
 
   // Immediately fetch bets whenever "Minhas Apostas" tab becomes active
   // (in addition to the interval above, so there's no wait on tab open)
   useEffect(() => {
-    if (activeTab === "mybets" && auth.token) {
+    if (activeTab === "mybets" && auth.user) {
       void fetchMyBets(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8624,7 +8684,6 @@ export default function Home({
     try {
       const res = await fetch(`/api/bets/${bet.id}/cashout`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${auth.token}` },
       });
       const data = await res.json();
       if (!res.ok) {
@@ -8647,10 +8706,7 @@ export default function Home({
   const fetchCashback = useCallback(async () => {
     if (!auth.user) return;
     try {
-      const token = localStorage.getItem("bet62_token");
-      const r = await fetch("/api/auth/cashback", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const r = await fetch("/api/auth/cashback");
       if (r.ok) setCashbackData(await r.json());
     } catch {
       /* non-critical */
@@ -8676,7 +8732,6 @@ export default function Home({
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${auth.token}`,
             },
             body: JSON.stringify(
               isPalace
@@ -8699,7 +8754,7 @@ export default function Home({
         setCasinoLoadingGame(null);
       }
     },
-    [auth.user, auth.token],
+    [auth.user],
   );
 
   const handleInvalidTokenError = (status?: number, error?: string) => {
@@ -9001,31 +9056,37 @@ export default function Home({
   };
 
   // ── Lock screen handlers ────────────────────────────────────────────────────
+  // Called after any successful unlock (password or passkey) — the server
+  // always creates a brand new session rather than reactivating the locked
+  // one (see lib/sessions.ts's rotateSession), so this just syncs the
+  // frontend to that fact and returns the user to where they were.
+  const onUnlocked = useCallback(() => {
+    setIsLocked(false);
+    setLockPassword("");
+    setLockError("");
+    setShowPasswordUnlock(false);
+    resetIdle();
+    void auth.refreshUser();
+    const returnPath = returnPathRef.current;
+    returnPathRef.current = null;
+    if (returnPath) navigate(returnPath);
+  }, [resetIdle, auth, navigate]);
+
   const handlePasswordUnlock = async (e: any) => {
     e.preventDefault();
-    if (!lockPassword || !auth.user) return;
+    if (!lockPassword) return;
     setLockLoading(true);
     setLockError("");
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await apiFetch("/api/auth/session/unlock-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: auth.user.email,
-          password: lockPassword,
-        }),
+        body: JSON.stringify({ password: lockPassword }),
       });
       if (res.ok) {
-        setIsLocked(false);
-        try {
-          localStorage.removeItem("bet62_session_locked");
-        } catch {
-          /* private mode */
-        }
-        resetIdle();
-        auth.refreshUser();
+        onUnlocked();
       } else {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setLockError(data.error || "Password incorreta");
       }
     } catch {
@@ -9036,94 +9097,64 @@ export default function Home({
   };
 
   const handleBiometricUnlock = useCallback(async () => {
-    if (!biometricCredentialId) return;
     setBiometricLoading(true);
     setLockError("");
     try {
-      const challenge = crypto.getRandomValues(new Uint8Array(32));
-      const credIdBytes = Uint8Array.from(atob(biometricCredentialId), (c) =>
-        c.charCodeAt(0),
-      );
-      const assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge,
-          rpId: window.location.hostname,
-          // transports: ["internal"] tells Safari/Chrome this credential
-          // only lives on this device's own authenticator (Face ID/Touch
-          // ID) — without it, the browser doesn't know it can skip its
-          // "sign in another way" chooser (QR code / security key) and
-          // shows that full-screen dialog before ever touching biometrics.
-          allowCredentials: [
-            { type: "public-key" as const, id: credIdBytes, transports: ["internal"] },
-          ],
-          userVerification: "required",
-          timeout: 60000,
-        },
+      const optionsRes = await apiFetch("/api/auth/passkey/login/options", {
+        method: "POST",
       });
-      if (assertion) {
-        setIsLocked(false);
-        try {
-          localStorage.removeItem("bet62_session_locked");
-        } catch {
-          /* private mode */
-        }
-        resetIdle();
-        auth.refreshUser();
+      const options = await optionsRes.json();
+      if (!optionsRes.ok) {
+        setLockError(
+          options.error === "NO_PASSKEY"
+            ? "Nenhuma biometria registada neste dispositivo."
+            : "Não foi possível iniciar a verificação biométrica.",
+        );
+        return;
+      }
+      const assertion = await startAuthentication({ optionsJSON: options });
+      const verifyRes = await apiFetch("/api/auth/passkey/login/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(assertion),
+      });
+      if (verifyRes.ok) {
+        onUnlocked();
+      } else {
+        setLockError("Verificação biométrica falhou.");
       }
     } catch {
       setLockError("Verificação biométrica cancelada ou falhou.");
     } finally {
       setBiometricLoading(false);
     }
-  }, [biometricCredentialId, resetIdle, auth]);
+  }, [onUnlocked]);
 
   const handleRegisterBiometric = async () => {
     if (!auth.user) return;
     try {
-      const challenge = crypto.getRandomValues(new Uint8Array(32));
-      const credential = (await navigator.credentials.create({
-        publicKey: {
-          challenge,
-          rp: { name: "Bet62", id: window.location.hostname },
-          user: {
-            id: new TextEncoder().encode(
-              auth.user.id?.toString() ?? auth.user.email,
-            ),
-            name: auth.user.email,
-            displayName: auth.user.name ?? auth.user.email,
-          },
-          pubKeyCredParams: [
-            { alg: -7, type: "public-key" as const },
-            { alg: -257, type: "public-key" as const },
-          ],
-          // residentKey "discouraged" (was "preferred"): "preferred" tells
-          // Safari to save this as a synced iCloud Keychain Passkey, and
-          // Safari always resolves passkey get() calls through its full
-          // "Iniciar sessão" chooser (QR code / security key options) even
-          // when a matching one exists — that's the screen this lock was
-          // supposed to skip straight past. A plain (non-resident) platform
-          // credential tied to just this device's Face ID/Touch ID goes
-          // straight to the biometric prompt instead.
-          authenticatorSelection: {
-            authenticatorAttachment: "platform",
-            userVerification: "required",
-            residentKey: "discouraged",
-          },
-          timeout: 60000,
-        },
-      })) as PublicKeyCredential | null;
-      if (credential) {
-        const credIdB64 = btoa(
-          String.fromCharCode(...new Uint8Array(credential.rawId)),
-        );
-        try {
-          localStorage.setItem("bet62_biometric_credential", credIdB64);
-        } catch {
-          /* private mode */
-        }
-        setBiometricCredentialId(credIdB64);
+      const optionsRes = await apiFetch("/api/auth/passkey/register/options", {
+        method: "POST",
+      });
+      const options = await optionsRes.json();
+      if (!optionsRes.ok) {
+        toast.error("Não foi possível iniciar o registo biométrico.");
+        setShowBiometricSetup(false);
+        return;
+      }
+      const attestation = await startRegistration({ optionsJSON: options });
+      const verifyRes = await apiFetch("/api/auth/passkey/register/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(attestation),
+      });
+      if (verifyRes.ok) {
+        setHasPasskey(true);
         setShowBiometricSetup(false);
         toast.success("Desbloqueio biométrico ativado!");
+      } else {
+        toast.error("Não foi possível ativar o desbloqueio biométrico.");
+        setShowBiometricSetup(false);
       }
     } catch {
       toast.error("Não foi possível ativar o desbloqueio biométrico.");
@@ -9135,32 +9166,18 @@ export default function Home({
   // a sessão (mesma tela do bloqueio por inatividade) em vez de apagá-la —
   // assim, ao reabrir o site, o desbloqueio biométrico volta a dar acesso
   // sem pedir email/senha de novo (Santos, 2026-09-24). "Remover conta
-  // deste aparelho" é o botão que de fato encerra a sessão e apaga a
-  // credencial biométrica local.
+  // deste aparelho" é o botão que de fato encerra a sessão.
   const handleSignOut = () => {
-    if (biometricAvailable && biometricCredentialId) {
-      setLockError("");
-      setIsLocked(true);
-      try {
-        localStorage.setItem("bet62_session_locked", "1");
-      } catch {
-        /* private mode */
-      }
+    if (biometricAvailable && hasPasskey) {
+      void lockNow();
       return;
     }
-    auth.logout();
+    void auth.logout();
   };
 
   const forgetDevice = () => {
-    try {
-      localStorage.removeItem("bet62_biometric_credential");
-      localStorage.removeItem("bet62_session_locked");
-    } catch {
-      /* private mode */
-    }
-    setBiometricCredentialId(null);
     setIsLocked(false);
-    auth.logout();
+    void auth.logout();
   };
 
   const handleLoginSubmit = async (e: any) => {
@@ -9173,7 +9190,7 @@ export default function Home({
       setLoginEmail("");
       setLoginPassword("");
       // Offer biometric setup if available and not yet registered
-      if (biometricAvailable && !biometricCredentialId) {
+      if (biometricAvailable && !hasPasskey) {
         setTimeout(() => setShowBiometricSetup(true), 800);
       }
     } catch (err) {
@@ -9299,7 +9316,6 @@ export default function Home({
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${auth.token}`,
             },
             body: JSON.stringify({
               matchId: String(bet.matchId),
@@ -9380,7 +9396,6 @@ export default function Home({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${auth.token}`,
         },
         body: JSON.stringify({
           matchId,
@@ -19157,7 +19172,7 @@ export default function Home({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35 }}
-            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center select-none"
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center select-none px-6"
             style={{
               background: "rgba(4,6,18,0.97)",
               backdropFilter: "blur(16px)",
@@ -19172,20 +19187,76 @@ export default function Home({
                 stiffness: 280,
                 damping: 24,
               }}
-              className="w-full max-w-sm px-6 flex flex-col items-center"
+              className="w-full max-w-sm flex flex-col items-center"
             >
-              <button
-                onClick={() => void handleBiometricUnlock()}
-                disabled={biometricLoading}
-                className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl disabled:opacity-70"
-                aria-label="Desbloquear"
-              >
-                {biometricLoading ? (
-                  <RefreshCw size={22} className="animate-spin text-zinc-300" />
-                ) : (
-                  <Lock size={34} className="text-red-500" />
-                )}
-              </button>
+              <Lock size={28} className="text-red-500 mb-3" />
+              <h2 className="text-white font-bold text-lg mb-1">
+                Sessão bloqueada
+              </h2>
+              <p className="text-zinc-500 text-sm text-center mb-6">
+                Por segurança, confirme a sua identidade
+                {lockedEmail ? ` (${lockedEmail})` : ""}.
+              </p>
+
+              {lockError && (
+                <p className="text-red-400 text-xs mb-3 text-center">{lockError}</p>
+              )}
+
+              {biometricAvailable && hasPasskey && !showPasswordUnlock && (
+                <>
+                  <button
+                    onClick={() => void handleBiometricUnlock()}
+                    disabled={biometricLoading}
+                    className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl disabled:opacity-70 mb-4"
+                    aria-label="Desbloquear com Face ID"
+                  >
+                    {biometricLoading ? (
+                      <RefreshCw size={22} className="animate-spin text-zinc-300" />
+                    ) : (
+                      <ShieldCheck size={30} className="text-red-500" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowPasswordUnlock(true)}
+                    className="text-zinc-500 text-sm underline hover:text-zinc-300"
+                  >
+                    Usar palavra-passe
+                  </button>
+                </>
+              )}
+
+              {(!biometricAvailable || !hasPasskey || showPasswordUnlock) && (
+                <form onSubmit={handlePasswordUnlock} className="w-full space-y-3">
+                  <Input
+                    type="password"
+                    autoFocus
+                    value={lockPassword}
+                    onChange={(e) => setLockPassword(e.target.value)}
+                    placeholder="Palavra-passe"
+                    className="bg-zinc-900 border-zinc-700 text-white"
+                  />
+                  <Button
+                    type="submit"
+                    disabled={lockLoading || !lockPassword}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold"
+                  >
+                    {lockLoading ? (
+                      <RefreshCw size={16} className="animate-spin" />
+                    ) : (
+                      "Desbloquear"
+                    )}
+                  </Button>
+                  {biometricAvailable && hasPasskey && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordUnlock(false)}
+                      className="w-full text-zinc-500 text-sm underline hover:text-zinc-300"
+                    >
+                      Usar Face ID
+                    </button>
+                  )}
+                </form>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -19205,7 +19276,7 @@ export default function Home({
               Ative o desbloqueio com{" "}
               <strong className="text-white">Face ID</strong> ou{" "}
               <strong className="text-white">Impressão Digital</strong> para
-              desbloquear a sessão após 60 segundos sem atividade.
+              desbloquear a sessão depois de um período de inatividade.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
               <ShieldCheck size={18} className="text-blue-400 shrink-0" />
@@ -19396,7 +19467,7 @@ export default function Home({
                     >
                       <LogOut size={14} className="mr-2" /> Sair
                     </DropdownMenuItem>
-                    {biometricCredentialId && (
+                    {hasPasskey && (
                       <DropdownMenuItem
                         className="hover:bg-zinc-800 cursor-pointer text-zinc-500"
                         onClick={forgetDevice}
@@ -21805,7 +21876,7 @@ export default function Home({
               (activeTab === "sportsbook" || activeTab === "sports") && (
                 <WinHouseSportsbookEmbed
                   isDarkTheme={isDarkTheme}
-                  authToken={auth.token}
+                  isAuthenticated={!!auth.user}
                 />
               )}
 
@@ -22171,10 +22242,8 @@ export default function Home({
                       return;
                     }
                     try {
-                      const token = localStorage.getItem("bet62_token");
                       const r = await fetch("/api/auth/cashback/claim", {
                         method: "POST",
-                        headers: { Authorization: `Bearer ${token}` },
                       });
                       const body = await r.json().catch(() => ({}));
                       if (!r.ok) {
@@ -24262,7 +24331,6 @@ export default function Home({
           setDepositModalOpen(false);
         }}
         balance={auth.user ? parseFloat(auth.user.balance) : 0}
-        token={auth.token}
         kycStatus={auth.user?.kycStatus ?? "not_submitted"}
       />
 
@@ -25253,7 +25321,6 @@ function DepositWithdrawModal({
   onPromoNotif,
   onAuthInvalid,
   balance,
-  token,
   kycStatus,
 }: {
   open: boolean;
@@ -25262,7 +25329,6 @@ function DepositWithdrawModal({
   onPromoNotif: (type: "freebets10" | "freebets20") => void;
   onAuthInvalid: (message?: string) => void;
   balance: number;
-  token: string | null;
   kycStatus: string;
 }) {
   const [payMethod, setPayMethod] = useState<PayMethod>("multibanco");
@@ -25358,9 +25424,7 @@ function DepositWithdrawModal({
     if (!mbwayOrderId || mbwayConfirmed) return;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/payments/status/${mbwayOrderId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const r = await fetch(`/api/payments/status/${mbwayOrderId}`);
         if (!r.ok) return;
         const data = (await r.json()) as { status: string; amount: string };
         if (data.status === "completed") {
@@ -25381,16 +25445,14 @@ function DepositWithdrawModal({
       clearInterval(id);
       clearTimeout(timeout);
     };
-  }, [mbwayOrderId, mbwayConfirmed, token, onSuccess]);
+  }, [mbwayOrderId, mbwayConfirmed, onSuccess]);
 
   // Poll Multibanco payment confirmation (every 15s while reference is displayed)
   useEffect(() => {
     if (!mbRef?.orderId) return;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/payments/status/${mbRef.orderId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const r = await fetch(`/api/payments/status/${mbRef.orderId}`);
         if (!r.ok) return;
         const data = (await r.json()) as { status: string; amount: string };
         if (data.status === "completed") {
@@ -25407,7 +25469,7 @@ function DepositWithdrawModal({
     };
     const id = setInterval(poll, 15000);
     return () => clearInterval(id);
-  }, [mbRef?.orderId, token, onSuccess, onClose]);
+  }, [mbRef?.orderId, onSuccess, onClose]);
 
   function resetCardFlow() {
     setCardClientSecret(null);
@@ -25439,7 +25501,6 @@ function DepositWithdrawModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           documentType: kycDocType,
@@ -25497,7 +25558,6 @@ function DepositWithdrawModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           amount: wAmountNum,
@@ -25547,7 +25607,6 @@ function DepositWithdrawModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ amount }),
       });
@@ -25610,7 +25669,6 @@ function DepositWithdrawModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ amount, phone: phoneClean }),
       });
@@ -25669,7 +25727,6 @@ function DepositWithdrawModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ amount }),
       });

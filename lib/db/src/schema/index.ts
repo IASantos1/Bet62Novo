@@ -45,3 +45,6 @@ export * from "./casinoBanners.js";
 export * from "./featuredMatchBanners.js";
 export * from "./aiAgents.js";
 export * from "./aiConsoleCommands.js";
+export * from "./sessions.js";
+export * from "./userPasskeys.js";
+export * from "./securityAuditLog.js";
