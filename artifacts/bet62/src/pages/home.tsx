@@ -512,6 +512,28 @@ function normalizeCasinoSearchText(value: string): string {
     .trim();
 }
 
+// Given one batched `?titles=a,b,c` response, walks the requested titles in
+// order and picks the first unused pool game whose name matches each one \u2014
+// the same "one result per curated title" shape the old per-title
+// `search=<title>&limit=1` fetches produced, just from a single response.
+function pickFirstMatchPerTitle(
+  pool: CasinoGame[],
+  titles: string[],
+  seen: Set<string> = new Set(),
+): CasinoGame[] {
+  const picked: CasinoGame[] = [];
+  for (const title of titles) {
+    const needle = normalizeCasinoSearchText(title);
+    const match = pool.find(
+      (g) => !seen.has(`${g.provider}-${g.id}`) && normalizeCasinoSearchText(g.name).includes(needle),
+    );
+    if (!match) continue;
+    seen.add(`${match.provider}-${match.id}`);
+    picked.push(match);
+  }
+  return picked;
+}
+
 type CasinoBanner = {
   id: number;
   title: string;
@@ -8430,34 +8452,26 @@ export default function Home({
       "Infinite Blackjack",
       "Dream Catcher",
     ];
-    Promise.all(
-      featuredTitles.map((title) =>
-        fetch(`/api/casino/games?search=${encodeURIComponent(title)}&limit=1`)
-          .then((r) => r.json())
-          .then((data) => (Array.isArray(data?.games) ? data.games[0] : null))
-          .catch(() => null),
-      ),
-    )
-      .then((featuredResults) => {
+    // One batched request for all 17 titles (was 17 sequential
+    // `search=<title>&limit=1` round trips) — the backend's `titles` param
+    // OR-matches them all in a single query.
+    fetch(`/api/casino/games?titles=${encodeURIComponent(featuredTitles.join(","))}&limit=60`)
+      .then((r) => r.json())
+      .then((data) => {
+        const pool: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
         const seen = new Set<string>();
-        const featured: CasinoGame[] = [];
-        for (const g of featuredResults) {
-          if (!g) continue;
-          const key = `${g.provider}-${g.id}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          featured.push(g);
-        }
+        const featured = pickFirstMatchPerTitle(pool, featuredTitles, seen);
         return fetch(`/api/casino/games?sort=popular&limit=18`)
           .then((r) => r.json())
-          .then((data) => {
-            const rest: CasinoGame[] = Array.isArray(data?.games)
-              ? data.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
+          .then((data2) => {
+            const rest: CasinoGame[] = Array.isArray(data2?.games)
+              ? data2.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
               : [];
             setCasinoPopular([...featured, ...rest].slice(0, 18));
           })
           .catch(() => setCasinoPopular(featured));
       })
+      .catch(() => {})
       .finally(() => setCasinoPopularLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
@@ -8523,25 +8537,13 @@ export default function Home({
       "Big Bass Bonanza",
       "Starlight Princess",
     ];
-    Promise.all(
-      titles.map((title) =>
-        fetch(`/api/casino/games?search=${encodeURIComponent(title)}&limit=1`)
-          .then((r) => r.json())
-          .then((data) => (Array.isArray(data?.games) ? data.games[0] : null))
-          .catch(() => null),
-      ),
-    )
-      .then((results) => {
-        const seen = new Set<string>();
-        const found: CasinoGame[] = [];
-        for (const g of results) {
-          if (!g) continue;
-          const key = `${g.provider}-${g.id}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          found.push(g);
-        }
-        setHomeCasinoPreview(found);
+    // One batched request for all 6 titles (was 6 sequential
+    // `search=<title>&limit=1` round trips).
+    fetch(`/api/casino/games?titles=${encodeURIComponent(titles.join(","))}&limit=30`)
+      .then((r) => r.json())
+      .then((data) => {
+        const pool: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
+        setHomeCasinoPreview(pickFirstMatchPerTitle(pool, titles));
       })
       .catch(() => {})
       .finally(() => setHomeCasinoPreviewLoading(false));
@@ -8682,7 +8684,7 @@ export default function Home({
   const handleCashout = async (bet: UserBet) => {
     setCashingOut(bet.id);
     try {
-      const res = await fetch(`/api/bets/${bet.id}/cashout`, {
+      const res = await apiFetch(`/api/bets/${bet.id}/cashout`, {
         method: "POST",
       });
       const data = await res.json();
@@ -8726,7 +8728,7 @@ export default function Home({
         // Legacy Palace rows, if any still exist in old data, keep their
         // former launch shape for backwards compatibility.
         const isPalace = game.source === "palace";
-        const res = await fetch(
+        const res = await apiFetch(
           isPalace ? "/api/casino/palace/launch" : "/api/casino/launch",
           {
             method: "POST",
@@ -8761,6 +8763,16 @@ export default function Home({
     const normalizedError = String(error ?? "")
       .trim()
       .toLowerCase();
+    // A locked session is still a valid, known session — it must surface the
+    // lock screen (checkSession(), already triggered by apiFetch's own
+    // SESSION_LOCKED_EVENT dispatch), never the "session expired, log in
+    // again" flow below. Treating every 401 as an invalid token used to nuke
+    // `auth.user` and pop the login modal on top of a merely-locked session,
+    // fighting the lock screen it should have shown instead.
+    if (normalizedError === "session_locked") {
+      void checkSession();
+      return true;
+    }
     const isInvalidToken =
       status === 401 ||
       normalizedError.includes("invalid token") ||
@@ -9312,7 +9324,7 @@ export default function Home({
         for (const bet of bets) {
           const sNum = parseFloat(betStakes[betKey(bet)] || "0");
           const potentialWin = (sNum * bet.odd).toFixed(2);
-          const res = await fetch("/api/bets/place", {
+          const res = await apiFetch("/api/bets/place", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -9392,7 +9404,7 @@ export default function Home({
       const matchId = bets.map((b) => b.matchId).join("-");
       const matchTitle = bets.map((b) => b.matchTitle).join(" + ");
       const potentialWin = (stakeNum * parseFloat(totalOdds)).toFixed(2);
-      const res = await fetch("/api/bets/place", {
+      const res = await apiFetch("/api/bets/place", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -25380,6 +25392,15 @@ function DepositWithdrawModal({
       normalizedError.includes("jwt")
     );
   };
+  // A locked (not expired/invalid) session must never reach
+  // isInvalidTokenError/onAuthInvalid below — it's still a valid, known
+  // session, just showing its own lock screen. The apiFetch calls in this
+  // component already dispatch SESSION_LOCKED_EVENT for that case, which
+  // the page's own listener turns into the lock overlay; routing it through
+  // onAuthInvalid instead would wipe `auth.user` and pop the login modal on
+  // top of a merely-locked deposit/withdraw.
+  const isSessionLockedError = (error?: string) =>
+    String(error ?? "").trim().toLowerCase() === "session_locked";
   const stripePromise = useMemo(
     () => (cardPublishableKey ? loadStripe(cardPublishableKey) : null),
     [cardPublishableKey],
@@ -25497,7 +25518,7 @@ function DepositWithdrawModal({
     }
     setLoading(true);
     try {
-      const r = await fetch("/api/profile/kyc/submit", {
+      const r = await apiFetch("/api/profile/kyc/submit", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -25510,6 +25531,7 @@ function DepositWithdrawModal({
       });
       const data = (await r.json()) as { kycStatus?: string; error?: string };
       if (!r.ok) {
+        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25554,7 +25576,7 @@ function DepositWithdrawModal({
     }
     setLoading(true);
     try {
-      const r = await fetch("/api/withdrawals", {
+      const r = await apiFetch("/api/withdrawals", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -25572,6 +25594,7 @@ function DepositWithdrawModal({
         code?: string;
       };
       if (!r.ok) {
+        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25603,7 +25626,7 @@ function DepositWithdrawModal({
     }
     setLoading(true);
     try {
-      const r = await fetch("/api/payments/multibanco", {
+      const r = await apiFetch("/api/payments/multibanco", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -25619,6 +25642,7 @@ function DepositWithdrawModal({
         error?: string;
       };
       if (!r.ok) {
+        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25665,7 +25689,7 @@ function DepositWithdrawModal({
     }
     setLoading(true);
     try {
-      const r = await fetch("/api/payments/mbway", {
+      const r = await apiFetch("/api/payments/mbway", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -25680,6 +25704,7 @@ function DepositWithdrawModal({
         error?: string;
       };
       if (!r.ok) {
+        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25723,7 +25748,7 @@ function DepositWithdrawModal({
     }
     setLoading(true);
     try {
-      const r = await fetch("/api/payments/card", {
+      const r = await apiFetch("/api/payments/card", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -25737,6 +25762,7 @@ function DepositWithdrawModal({
         !data.orderId ||
         !data.publishableKey
       ) {
+        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;

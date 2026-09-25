@@ -6,7 +6,7 @@ import {
   casinoBannersTable,
   usersTable,
 } from "@workspace/db";
-import { and, asc, count, desc, eq, ilike, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
@@ -238,6 +238,13 @@ router.get("/games", async (req: Request, res: Response) => {
   await maybeSyncBigBangCatalog();
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
+  // Batch title lookup — lets the frontend fetch a curated list of specific
+  // titles ("Fortune Tiger", "Aviator", ...) in one round trip instead of
+  // firing one `search=<title>&limit=1` request per title (was N sequential
+  // requests just to build the "Populares"/Destaques showcase rows).
+  const titles = typeof req.query["titles"] === "string"
+    ? req.query["titles"].split(",").map((t) => t.trim()).filter(Boolean).slice(0, 40)
+    : [];
   const category = normalizeCasinoText(
     typeof req.query["category"] === "string" ? req.query["category"].trim() : "",
   );
@@ -245,7 +252,7 @@ router.get("/games", async (req: Request, res: Response) => {
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
-  const cacheKey = `casino:games:v5:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${page}:${limit}`;
+  const cacheKey = `casino:games:v6:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${titles.join("|").toLowerCase()}:${page}:${limit}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -258,7 +265,11 @@ router.get("/games", async (req: Request, res: Response) => {
     eq(casinoGamesTable.source, CASINO_SOURCE),
   ];
   if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
-  if (search) conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
+  if (titles.length > 0) {
+    conditions.push(or(...titles.map((t) => ilike(casinoGamesTable.name, `%${t}%`)))!);
+  } else if (search) {
+    conditions.push(ilike(casinoGamesTable.name, `%${search}%`));
+  }
   const where = and(...conditions);
 
   const rows: CasinoBrowseRow[] = await db
