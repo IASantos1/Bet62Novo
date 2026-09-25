@@ -53,12 +53,15 @@ import {
   Power,
   Cpu,
   Sparkles,
+  LayoutTemplate,
   Send,
   Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CompetitionBanner } from "@/components/CompetitionBanner";
+import { LEAGUE_LOGOS } from "@/lib/leagueLogos";
 
 type AdminStats = {
   users: { total: number };
@@ -240,11 +243,27 @@ type AdminCasinoBanner = {
   updatedAt: string;
 };
 
+type BannerTemplate = {
+  id: number;
+  sport: string;
+  competitionName: string;
+  logoUrl: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type FeaturedMatchBanner = {
   id: number;
   homeTeam: string;
   awayTeam: string;
   competition: string | null;
+  bannerTemplateId: number | null;
+  template: BannerTemplate | null;
   kickoffAt: string;
   endsAt: string;
   isActive: boolean;
@@ -806,6 +825,7 @@ type TabId =
   | "settlement-logs"
   | "casino"
   | "featured-banners"
+  | "banner-templates"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -1508,6 +1528,21 @@ export default function AdminPage() {
   };
 
   // ── Featured match banners (Destaques scheduling) ──
+  // Fetched whenever either the "Destaques" (the picker in the Novo Jogo
+  // modal) or "Modelos de Banner" tab is open — small list, cheap to share.
+  const bannerTemplatesQuery = useQuery({
+    queryKey: ["admin", "banner-templates"],
+    queryFn: async (): Promise<{ templates: BannerTemplate[] }> => {
+      const res = await fetch("/api/admin/banner-templates", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load banner templates");
+      return res.json();
+    },
+    enabled: !!token && (activeTab === "featured-banners" || activeTab === "banner-templates"),
+  });
+  const bannerTemplates = bannerTemplatesQuery.data?.templates ?? [];
+  const bannerTemplatesLoading = bannerTemplatesQuery.isLoading;
+  const refetchBannerTemplates = bannerTemplatesQuery.refetch;
+
   const featuredBannersQuery = useQuery({
     queryKey: ["admin", "featured-banners"],
     queryFn: async (): Promise<{ banners: FeaturedMatchBanner[] }> => {
@@ -1527,7 +1562,7 @@ export default function AdminPage() {
   const [featuredBannerForm, setFeaturedBannerForm] = useState({
     homeTeam: "",
     awayTeam: "",
-    competition: "",
+    bannerTemplateId: null as number | null,
     kickoffAt: "",
     durationHours: "3",
     isActive: true,
@@ -1546,7 +1581,7 @@ export default function AdminPage() {
       setFeaturedBannerForm({
         homeTeam: "",
         awayTeam: "",
-        competition: "",
+        bannerTemplateId: null,
         kickoffAt: "",
         durationHours: "3",
         isActive: true,
@@ -1559,7 +1594,7 @@ export default function AdminPage() {
       setFeaturedBannerForm({
         homeTeam: banner.homeTeam,
         awayTeam: banner.awayTeam,
-        competition: banner.competition ?? "",
+        bannerTemplateId: banner.bannerTemplateId,
         kickoffAt: toLocalDatetimeInputValue(banner.kickoffAt),
         durationHours: String(Math.max(0.5, Math.round(durationHours * 100) / 100)),
         isActive: banner.isActive,
@@ -1593,7 +1628,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           homeTeam,
           awayTeam,
-          competition: featuredBannerForm.competition.trim() || null,
+          bannerTemplateId: featuredBannerForm.bannerTemplateId,
           kickoffAt: kickoffAt.toISOString(),
           endsAt: endsAt.toISOString(),
           isActive: featuredBannerForm.isActive,
@@ -1622,6 +1657,112 @@ export default function AdminPage() {
       refetchFeaturedBanners();
     } catch {
       toast.error("Erro ao apagar jogo em destaque");
+    }
+  };
+
+  // ── Banner templates ("Modelos de Banner") — same CRUD shape as featured
+  // banners above, one modal for create + edit.
+  const [bannerTemplateModal, setBannerTemplateModal] = useState<
+    "new" | BannerTemplate | null
+  >(null);
+  const [bannerTemplateForm, setBannerTemplateForm] = useState({
+    sport: "football",
+    competitionName: "",
+    logoUrl: "",
+    primaryColor: "#1e3a8a",
+    secondaryColor: "#0f172a",
+    accentColor: "#dc2626",
+    isActive: true,
+    sortOrder: 0,
+  });
+  const [bannerTemplateSaving, setBannerTemplateSaving] = useState(false);
+
+  const openBannerTemplateModal = (template: "new" | BannerTemplate) => {
+    if (template === "new") {
+      setBannerTemplateForm({
+        sport: "football",
+        competitionName: "",
+        logoUrl: "",
+        primaryColor: "#1e3a8a",
+        secondaryColor: "#0f172a",
+        accentColor: "#dc2626",
+        isActive: true,
+        sortOrder: 0,
+      });
+    } else {
+      setBannerTemplateForm({
+        sport: template.sport,
+        competitionName: template.competitionName,
+        logoUrl: template.logoUrl ?? "",
+        primaryColor: template.primaryColor,
+        secondaryColor: template.secondaryColor,
+        accentColor: template.accentColor,
+        isActive: template.isActive,
+        sortOrder: template.sortOrder,
+      });
+    }
+    setBannerTemplateModal(template);
+  };
+
+  // Only fills an EMPTY logoUrl on an exact (case-insensitive) name match —
+  // never overwrites a URL the admin already typed/pasted.
+  const suggestBannerTemplateLogo = () => {
+    const name = bannerTemplateForm.competitionName.trim();
+    if (!name || bannerTemplateForm.logoUrl.trim()) return;
+    const match = Object.entries(LEAGUE_LOGOS).find(
+      ([key]) => key.toLowerCase() === name.toLowerCase(),
+    );
+    if (match) setBannerTemplateForm((p) => ({ ...p, logoUrl: match[1] }));
+  };
+
+  const saveBannerTemplate = async () => {
+    const competitionName = bannerTemplateForm.competitionName.trim();
+    if (!competitionName) {
+      toast.error("Nome da competição é obrigatório");
+      return;
+    }
+    setBannerTemplateSaving(true);
+    try {
+      const isNew = bannerTemplateModal === "new";
+      const url = isNew
+        ? "/api/admin/banner-templates"
+        : `/api/admin/banner-templates/${(bannerTemplateModal as BannerTemplate).id}`;
+      const res = await fetch(url, {
+        method: isNew ? "POST" : "PATCH",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sport: bannerTemplateForm.sport,
+          competitionName,
+          logoUrl: bannerTemplateForm.logoUrl.trim() || null,
+          primaryColor: bannerTemplateForm.primaryColor,
+          secondaryColor: bannerTemplateForm.secondaryColor,
+          accentColor: bannerTemplateForm.accentColor,
+          isActive: bannerTemplateForm.isActive,
+          sortOrder: bannerTemplateForm.sortOrder,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(isNew ? "Modelo de banner criado" : "Modelo de banner atualizado");
+      setBannerTemplateModal(null);
+      refetchBannerTemplates();
+    } catch {
+      toast.error("Erro ao guardar modelo de banner");
+    } finally {
+      setBannerTemplateSaving(false);
+    }
+  };
+
+  const deleteBannerTemplate = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/banner-templates/${id}`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Modelo de banner apagado");
+      refetchBannerTemplates();
+    } catch {
+      toast.error("Erro ao apagar modelo de banner");
     }
   };
 
@@ -2618,6 +2759,12 @@ export default function AdminPage() {
       section: "pro",
     },
     {
+      id: "banner-templates",
+      icon: <LayoutTemplate size={18} />,
+      label: "Modelos de Banner",
+      section: "pro",
+    },
+    {
       id: "settings",
       icon: <Settings size={18} />,
       label: "Configurações",
@@ -2638,6 +2785,7 @@ export default function AdminPage() {
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
     "featured-banners": "Jogos em Destaque",
+    "banner-templates": "Modelos de Banner",
     settings: "Configurações",
   };
 
@@ -6187,7 +6335,23 @@ export default function AdminPage() {
                           key={banner.id}
                           className="p-4 flex items-center justify-between gap-4"
                         >
-                          <div className="min-w-0">
+                          <div className="flex items-center gap-3 min-w-0">
+                            {banner.template && (
+                              <div className="w-24 shrink-0 hidden sm:block">
+                                <CompetitionBanner
+                                  competitionName={banner.template.competitionName}
+                                  logoUrl={banner.template.logoUrl}
+                                  primaryColor={banner.template.primaryColor}
+                                  secondaryColor={banner.template.secondaryColor}
+                                  accentColor={banner.template.accentColor}
+                                  homeTeam={banner.homeTeam}
+                                  awayTeam={banner.awayTeam}
+                                  kickoffAt={banner.kickoffAt}
+                                  isLive={status === "live"}
+                                />
+                              </div>
+                            )}
+                            <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-white truncate">
                                 {banner.homeTeam} vs {banner.awayTeam}
@@ -6222,6 +6386,7 @@ export default function AdminPage() {
                                 minute: "2-digit",
                               })}
                             </div>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <button
@@ -6242,6 +6407,85 @@ export default function AdminPage() {
                     })
                   )}
                 </div>
+              </motion.div>
+            )}
+
+            {/* ── MODELOS DE BANNER ── */}
+            {activeTab === "banner-templates" && (
+              <motion.div
+                key="banner-templates"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div>
+                  <h2 className="text-lg font-bold text-white">Modelos de Banner</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Um modelo visual por competição (logótipo + cores). Ao
+                    agendar um Jogo em Destaque, escolhe o modelo certo (ex.:
+                    Real Madrid x Benfica → Champions League; Flamengo x
+                    Palmeiras → Brasileirão) e o banner é desenhado
+                    automaticamente.
+                  </p>
+                </div>
+
+                {bannerTemplatesLoading ? (
+                  <div className="p-8 flex justify-center">
+                    <Loader2 className="animate-spin text-zinc-500" size={24} />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {bannerTemplates.map((t) => (
+                      <div key={t.id} className="group relative">
+                        <CompetitionBanner
+                          competitionName={t.competitionName}
+                          logoUrl={t.logoUrl}
+                          primaryColor={t.primaryColor}
+                          secondaryColor={t.secondaryColor}
+                          accentColor={t.accentColor}
+                          homeTeam="Time A"
+                          awayTeam="Time B"
+                          kickoffAt={new Date().toISOString()}
+                          isLive
+                        />
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-white truncate">
+                              {t.competitionName}
+                            </div>
+                            <div className="text-[10px] text-zinc-500">
+                              {SPORT_LABEL[t.sport] ?? t.sport}
+                              {!t.isActive && " · inativo"}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => openBannerTemplateModal(t)}
+                              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                            >
+                              <FileText size={13} />
+                            </button>
+                            <button
+                              onClick={() => deleteBannerTemplate(t.id)}
+                              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-red-900/40 text-zinc-300 hover:text-red-400"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    <button
+                      onClick={() => openBannerTemplateModal("new")}
+                      className="aspect-video rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 flex flex-col items-center justify-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      <PlusCircle size={20} />
+                      <span className="text-xs font-semibold">Novo Modelo</span>
+                    </button>
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -8207,16 +8451,53 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <Label className="text-xs text-zinc-400">Competição (opcional)</Label>
-                  <Input
-                    value={featuredBannerForm.competition}
+                  <Label className="text-xs text-zinc-400">Modelo de Banner (competição)</Label>
+                  <select
+                    value={featuredBannerForm.bannerTemplateId ?? ""}
                     onChange={(e) =>
-                      setFeaturedBannerForm((p) => ({ ...p, competition: e.target.value }))
+                      setFeaturedBannerForm((p) => ({
+                        ...p,
+                        bannerTemplateId: e.target.value ? Number(e.target.value) : null,
+                      }))
                     }
-                    placeholder="Ex: Liga dos Campeões"
-                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
-                  />
+                    className="w-full h-10 mt-1 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                  >
+                    <option value="">Sem modelo (cartão simples)</option>
+                    {bannerTemplates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.competitionName}
+                      </option>
+                    ))}
+                  </select>
+                  {bannerTemplates.length === 0 && !bannerTemplatesLoading && (
+                    <p className="text-[11px] text-zinc-600 mt-1">
+                      Ainda não há modelos — cria um em "Modelos de Banner".
+                    </p>
+                  )}
                 </div>
+
+                {(() => {
+                  const selectedTemplate = bannerTemplates.find(
+                    (t) => t.id === featuredBannerForm.bannerTemplateId,
+                  );
+                  if (!selectedTemplate) return null;
+                  return (
+                    <div>
+                      <Label className="text-xs text-zinc-400 mb-1.5 block">Pré-visualização</Label>
+                      <CompetitionBanner
+                        competitionName={selectedTemplate.competitionName}
+                        logoUrl={selectedTemplate.logoUrl}
+                        primaryColor={selectedTemplate.primaryColor}
+                        secondaryColor={selectedTemplate.secondaryColor}
+                        accentColor={selectedTemplate.accentColor}
+                        homeTeam={featuredBannerForm.homeTeam || "Time A"}
+                        awayTeam={featuredBannerForm.awayTeam || "Time B"}
+                        kickoffAt={featuredBannerForm.kickoffAt || new Date().toISOString()}
+                        isLive={false}
+                      />
+                    </div>
+                  );
+                })()}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -8278,6 +8559,174 @@ export default function AdminPage() {
                     {featuredBannerSaving ? (
                       <Loader2 size={14} className="animate-spin" />
                     ) : featuredBannerModal === "new" ? (
+                      "Criar"
+                    ) : (
+                      "Guardar"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {bannerTemplateModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setBannerTemplateModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95 }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-white">
+                  {bannerTemplateModal === "new" ? "Novo Modelo de Banner" : "Editar Modelo de Banner"}
+                </h2>
+                <button
+                  onClick={() => setBannerTemplateModal(null)}
+                  className="text-zinc-500 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-zinc-400">Competição</Label>
+                    <Input
+                      value={bannerTemplateForm.competitionName}
+                      onChange={(e) =>
+                        setBannerTemplateForm((p) => ({ ...p, competitionName: e.target.value }))
+                      }
+                      onBlur={suggestBannerTemplateLogo}
+                      list="banner-template-competition-suggestions"
+                      placeholder="Ex: UEFA Champions League"
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                    <datalist id="banner-template-competition-suggestions">
+                      {Object.keys(LEAGUE_LOGOS).map((name) => (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Desporto</Label>
+                    <select
+                      value={bannerTemplateForm.sport}
+                      onChange={(e) =>
+                        setBannerTemplateForm((p) => ({ ...p, sport: e.target.value }))
+                      }
+                      className="w-full h-10 mt-1 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                    >
+                      {Object.entries(SPORT_LABEL).map(([k, v]) => (
+                        <option key={k} value={k}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">URL do logótipo (opcional)</Label>
+                  <Input
+                    value={bannerTemplateForm.logoUrl}
+                    onChange={(e) =>
+                      setBannerTemplateForm((p) => ({ ...p, logoUrl: e.target.value }))
+                    }
+                    placeholder="https://… (preenchido automaticamente para ligas conhecidas)"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <Label className="text-xs text-zinc-400">Cor primária</Label>
+                    <input
+                      type="color"
+                      value={bannerTemplateForm.primaryColor}
+                      onChange={(e) =>
+                        setBannerTemplateForm((p) => ({ ...p, primaryColor: e.target.value }))
+                      }
+                      className="w-full h-10 mt-1 rounded-md border border-zinc-700 bg-zinc-800 cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Cor secundária</Label>
+                    <input
+                      type="color"
+                      value={bannerTemplateForm.secondaryColor}
+                      onChange={(e) =>
+                        setBannerTemplateForm((p) => ({ ...p, secondaryColor: e.target.value }))
+                      }
+                      className="w-full h-10 mt-1 rounded-md border border-zinc-700 bg-zinc-800 cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Cor de destaque</Label>
+                    <input
+                      type="color"
+                      value={bannerTemplateForm.accentColor}
+                      onChange={(e) =>
+                        setBannerTemplateForm((p) => ({ ...p, accentColor: e.target.value }))
+                      }
+                      className="w-full h-10 mt-1 rounded-md border border-zinc-700 bg-zinc-800 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400 mb-1.5 block">Pré-visualização</Label>
+                  <CompetitionBanner
+                    competitionName={bannerTemplateForm.competitionName || "Nome da competição"}
+                    logoUrl={bannerTemplateForm.logoUrl || null}
+                    primaryColor={bannerTemplateForm.primaryColor}
+                    secondaryColor={bannerTemplateForm.secondaryColor}
+                    accentColor={bannerTemplateForm.accentColor}
+                    homeTeam="Time A"
+                    awayTeam="Time B"
+                    kickoffAt={new Date().toISOString()}
+                    isLive
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-zinc-400">Estado</Label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBannerTemplateForm((p) => ({ ...p, isActive: !p.isActive }))
+                    }
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${bannerTemplateForm.isActive ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                  >
+                    {bannerTemplateForm.isActive ? "Ativo" : "Inativo"}
+                  </button>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setBannerTemplateModal(null)}
+                    className="border-zinc-700 text-zinc-300"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={saveBannerTemplate}
+                    disabled={bannerTemplateSaving}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {bannerTemplateSaving ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : bannerTemplateModal === "new" ? (
                       "Criar"
                     ) : (
                       "Guardar"

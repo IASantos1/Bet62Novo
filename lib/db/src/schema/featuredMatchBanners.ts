@@ -1,4 +1,5 @@
 import { boolean, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { bannerTemplatesTable } from "./bannerTemplates.js";
 
 // Admin-scheduled "jogo em destaque" banners for the Destaques/home page —
 // BET62 has no live match data of its own anymore (the native bsd sports
@@ -13,6 +14,15 @@ export const featuredMatchBannersTable = pgTable("featured_match_banners", {
   homeTeam: text("home_team").notNull(),
   awayTeam: text("away_team").notNull(),
   competition: text("competition"),
+  // The template the admin picked when scheduling this match — the source
+  // of truth for how the banner is drawn (logo/colors). `competition`
+  // above stays a plain denormalized label (kept for anything still
+  // reading it as text) filled from bannerTemplate.competitionName at
+  // save time. Nullable + ON DELETE SET NULL: deleting a template must
+  // never take an already-scheduled banner down with it.
+  bannerTemplateId: integer("banner_template_id").references(() => bannerTemplatesTable.id, {
+    onDelete: "set null",
+  }),
   kickoffAt: timestamp("kickoff_at", { withTimezone: true }).notNull(),
   // Defaults to kickoffAt + 3h (set by the admin route) — when this passes,
   // the banner stops being returned by the public endpoint on its own,

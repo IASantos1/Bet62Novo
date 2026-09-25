@@ -42,6 +42,7 @@ export * from "./manualReviewQueue.js";
 export * from "./settlementReplayLog.js";
 export * from "./casinoGames.js";
 export * from "./casinoBanners.js";
+export * from "./bannerTemplates.js";
 export * from "./featuredMatchBanners.js";
 export * from "./aiAgents.js";
 export * from "./aiConsoleCommands.js";

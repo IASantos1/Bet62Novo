@@ -79,6 +79,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { apiFetch, SESSION_LOCKED_EVENT } from "@/lib/api";
+import { LEAGUE_LOGOS } from "@/lib/leagueLogos";
+import { CompetitionBanner } from "@/components/CompetitionBanner";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import {
   Elements,
@@ -544,11 +546,19 @@ type CasinoBanner = {
   position: "top" | "middle";
   games: CasinoGame[];
 };
+type FeaturedMatchBannerTemplate = {
+  competitionName: string;
+  logoUrl: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+};
 type FeaturedMatchBanner = {
   id: number;
   homeTeam: string;
   awayTeam: string;
   competition: string | null;
+  template: FeaturedMatchBannerTemplate | null;
   kickoffAt: string;
   endsAt: string;
 };
@@ -1415,158 +1425,6 @@ function flagBgStyle(url: string | null): React.CSSProperties {
   return { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" };
 }
 
-const LEAGUE_LOGOS: Record<string, string> = {
-  "Champions League": "https://media.api-sports.io/football/leagues/2.png",
-  "UEFA Champions League": "https://media.api-sports.io/football/leagues/2.png",
-  "Europa League": "https://media.api-sports.io/football/leagues/3.png",
-  "UEFA Europa League": "https://media.api-sports.io/football/leagues/3.png",
-  "Conference League": "https://media.api-sports.io/football/leagues/848.png",
-  "UEFA Super Cup": "https://media.api-sports.io/football/leagues/531.png",
-  "UEFA Nations League": "https://media.api-sports.io/football/leagues/5.png",
-  "UEFA European Championship":
-    "https://media.api-sports.io/football/leagues/4.png",
-  "FIFA World Cup": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group A": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group B": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group C": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group D": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group E": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group F": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group G": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group H": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group I": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group J": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group K": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Group L": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Round of 32": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Round of 16": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Quarter-Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Quarter Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Semi-Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Semi Finals": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - 3rd Place": "https://media.api-sports.io/football/leagues/1.png",
-  "FIFA World Cup - Final": "https://media.api-sports.io/football/leagues/1.png",
-  "World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
-  "World Cup": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa do Mundo 2026": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa do Mundo FIFA": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa do Mundo": "https://media.api-sports.io/football/leagues/1.png",
-  "Copa América": "https://media.api-sports.io/football/leagues/9.png",
-  "Copa America": "https://media.api-sports.io/football/leagues/9.png",
-  "CONCACAF Gold Cup": "https://media.api-sports.io/football/leagues/22.png",
-  "Africa Cup of Nations": "https://media.api-sports.io/football/leagues/6.png",
-  "AFC Asian Cup": "https://media.api-sports.io/football/leagues/7.png",
-  "International Friendlies":
-    "https://media.api-sports.io/football/leagues/10.png",
-  "International Friendly":
-    "https://media.api-sports.io/football/leagues/10.png",
-  "Amistosos internacionais":
-    "https://media.api-sports.io/football/leagues/10.png",
-  // ── Major domestic football leagues ──────────────────────────────────
-  "Premier League": "https://media.api-sports.io/football/leagues/39.png",
-  "English Premier League": "https://media.api-sports.io/football/leagues/39.png",
-  "Championship": "https://media.api-sports.io/football/leagues/40.png",
-  "EFL Championship": "https://media.api-sports.io/football/leagues/40.png",
-  "League One": "https://media.api-sports.io/football/leagues/41.png",
-  "League Two": "https://media.api-sports.io/football/leagues/42.png",
-  "FA Cup": "https://media.api-sports.io/football/leagues/45.png",
-  "Carabao Cup": "https://media.api-sports.io/football/leagues/48.png",
-  "La Liga": "https://media.api-sports.io/football/leagues/140.png",
-  "LaLiga": "https://media.api-sports.io/football/leagues/140.png",
-  "Segunda División": "https://media.api-sports.io/football/leagues/141.png",
-  "Segunda Division": "https://media.api-sports.io/football/leagues/141.png",
-  "Bundesliga": "https://media.api-sports.io/football/leagues/78.png",
-  "2. Bundesliga": "https://media.api-sports.io/football/leagues/79.png",
-  "DFB Pokal": "https://media.api-sports.io/football/leagues/81.png",
-  "Serie A": "https://media.api-sports.io/football/leagues/135.png",
-  "Serie B": "https://media.api-sports.io/football/leagues/136.png",
-  "Coppa Italia": "https://media.api-sports.io/football/leagues/137.png",
-  "Ligue 1": "https://media.api-sports.io/football/leagues/61.png",
-  "Ligue 2": "https://media.api-sports.io/football/leagues/62.png",
-  "Coupe de France": "https://media.api-sports.io/football/leagues/66.png",
-  "Eredivisie": "https://media.api-sports.io/football/leagues/88.png",
-  "Primeira Liga": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga Portugal": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga NOS": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga Portugal Betclic": "https://media.api-sports.io/football/leagues/94.png",
-  "Taça de Portugal": "https://media.api-sports.io/football/leagues/96.png",
-  "Pro League": "https://media.api-sports.io/football/leagues/144.png",
-  "Belgian Pro League": "https://media.api-sports.io/football/leagues/144.png",
-  "Süper Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Super Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Turkish Super Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Scottish Premiership": "https://media.api-sports.io/football/leagues/179.png",
-  "Allsvenskan": "https://media.api-sports.io/football/leagues/113.png",
-  "Eliteserien": "https://media.api-sports.io/football/leagues/103.png",
-  "Superliga": "https://media.api-sports.io/football/leagues/119.png",
-  "Veikkausliiga": "https://media.api-sports.io/football/leagues/244.png",
-  "Ekstraklasa": "https://media.api-sports.io/football/leagues/106.png",
-  "Czech First League": "https://media.api-sports.io/football/leagues/345.png",
-  "Fortuna Liga": "https://media.api-sports.io/football/leagues/345.png",
-  "Slovak Super Liga": "https://media.api-sports.io/football/leagues/332.png",
-  "Superliga Romania": "https://media.api-sports.io/football/leagues/283.png",
-  "Romanian Superliga": "https://media.api-sports.io/football/leagues/283.png",
-  "Super League Greece": "https://media.api-sports.io/football/leagues/197.png",
-  "Super League 1": "https://media.api-sports.io/football/leagues/197.png",
-  "Austrian Football Bundesliga": "https://media.api-sports.io/football/leagues/218.png",
-  "Austrian Bundesliga": "https://media.api-sports.io/football/leagues/218.png",
-  "Swiss Super League": "https://media.api-sports.io/football/leagues/207.png",
-  "Ukrainian Premier League": "https://media.api-sports.io/football/leagues/333.png",
-  "Russian Premier League": "https://media.api-sports.io/football/leagues/235.png",
-  "RPL": "https://media.api-sports.io/football/leagues/235.png",
-  "HNL": "https://media.api-sports.io/football/leagues/210.png",
-  "Croatian Football League": "https://media.api-sports.io/football/leagues/210.png",
-  "Super Liga Serbia": "https://media.api-sports.io/football/leagues/286.png",
-  "Serbian Super Liga": "https://media.api-sports.io/football/leagues/286.png",
-  "Premijer Liga": "https://media.api-sports.io/football/leagues/213.png",
-  "Israeli Premier League": "https://media.api-sports.io/football/leagues/271.png",
-  "Cypriot First Division": "https://media.api-sports.io/football/leagues/262.png",
-  // ── Americas ──────────────────────────────────────────────────────────
-  "Brasileirao Serie A": "https://media.api-sports.io/football/leagues/71.png",
-  "Brasileirão": "https://media.api-sports.io/football/leagues/71.png",
-  "Campeonato Brasileiro": "https://media.api-sports.io/football/leagues/71.png",
-  "Serie A Brasil": "https://media.api-sports.io/football/leagues/71.png",
-  "Serie B Brasil": "https://media.api-sports.io/football/leagues/72.png",
-  "Copa do Brasil": "https://media.api-sports.io/football/leagues/73.png",
-  "Primera División Argentina": "https://media.api-sports.io/football/leagues/128.png",
-  "Liga Profesional Argentina": "https://media.api-sports.io/football/leagues/128.png",
-  "Copa de la Liga Argentina": "https://media.api-sports.io/football/leagues/130.png",
-  "MLS": "https://media.api-sports.io/football/leagues/253.png",
-  "Major League Soccer": "https://media.api-sports.io/football/leagues/253.png",
-  "USL Championship": "https://media.api-sports.io/football/leagues/254.png",
-  "CONCACAF Champions Cup": "https://media.api-sports.io/football/leagues/26.png",
-  "Liga MX": "https://media.api-sports.io/football/leagues/262.png",
-  "Copa Libertadores": "https://media.api-sports.io/football/leagues/13.png",
-  "Copa Sudamericana": "https://media.api-sports.io/football/leagues/11.png",
-  "CONMEBOL Libertadores": "https://media.api-sports.io/football/leagues/13.png",
-  "CONMEBOL Sudamericana": "https://media.api-sports.io/football/leagues/11.png",
-  "Recopa Sudamericana": "https://media.api-sports.io/football/leagues/12.png",
-  "Chilean Primera División": "https://media.api-sports.io/football/leagues/265.png",
-  "Clausura Chile": "https://media.api-sports.io/football/leagues/265.png",
-  "Apertura Chile": "https://media.api-sports.io/football/leagues/265.png",
-  "Liga 1 Peru": "https://media.api-sports.io/football/leagues/281.png",
-  "Primera División Uruguay": "https://media.api-sports.io/football/leagues/268.png",
-  "Primera División Colombia": "https://media.api-sports.io/football/leagues/239.png",
-  "Liga BetPlay": "https://media.api-sports.io/football/leagues/239.png",
-  "Primera División Ecuador": "https://media.api-sports.io/football/leagues/240.png",
-  "Liga Pro Ecuador": "https://media.api-sports.io/football/leagues/240.png",
-  // ── Asia / Middle East / Africa ───────────────────────────────────────
-  "J1 League": "https://media.api-sports.io/football/leagues/98.png",
-  "J. League": "https://media.api-sports.io/football/leagues/98.png",
-  "K League 1": "https://media.api-sports.io/football/leagues/292.png",
-  "Saudi Pro League": "https://media.api-sports.io/football/leagues/307.png",
-  "Saudi Professional League": "https://media.api-sports.io/football/leagues/307.png",
-  "UAE Pro League": "https://media.api-sports.io/football/leagues/435.png",
-  "Chinese Super League": "https://media.api-sports.io/football/leagues/169.png",
-  "Indian Super League": "https://media.api-sports.io/football/leagues/323.png",
-  "A-League": "https://media.api-sports.io/football/leagues/188.png",
-  "Thai League 1": "https://media.api-sports.io/football/leagues/290.png",
-  "Egyptian Premier League": "https://media.api-sports.io/football/leagues/233.png",
-  "South African Premier Division": "https://media.api-sports.io/football/leagues/288.png",
-  "CAFCL": "https://media.api-sports.io/football/leagues/20.png",
-  "CAF Champions League": "https://media.api-sports.io/football/leagues/20.png",
-};
 
 // Does a LEAGUE_LOGOS candidate key belong (per LEAGUE_ISO_MAP — the same
 // table getCountryFlagIso already trusts for this exact ambiguity) to a
@@ -21732,49 +21590,23 @@ export default function Home({
                     {featuredMatchBanners.map((banner) => {
                       const isLive = Date.now() >= new Date(banner.kickoffAt).getTime();
                       return (
-                        <div
+                        <button
                           key={banner.id}
-                          className="rounded-xl border p-4 flex items-center justify-between gap-3"
-                          style={{
-                            borderColor: isLive ? "rgba(220,38,38,0.5)" : "var(--b62-glass-border)",
-                            background: isLive
-                              ? "linear-gradient(115deg, rgba(220,38,38,0.16), rgba(9,9,11,0.94))"
-                              : "rgba(24,24,27,0.6)",
-                          }}
+                          onClick={() => selectMainTab("sportsbook")}
+                          className="text-left transition-transform active:scale-[0.98]"
                         >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              {isLive ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white animate-pulse">
-                                  AO VIVO
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
-                                  {new Date(banner.kickoffAt).toLocaleString("pt-PT", {
-                                    day: "2-digit",
-                                    month: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}
-                                </span>
-                              )}
-                              {banner.competition && (
-                                <span className="text-[11px] text-zinc-500 truncate">
-                                  {banner.competition}
-                                </span>
-                              )}
-                            </div>
-                            <div className="font-bold text-white truncate">
-                              {banner.homeTeam} <span className="text-zinc-500">vs</span> {banner.awayTeam}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => selectMainTab("sportsbook")}
-                            className="b62-gradient-cta text-white text-sm font-bold px-4 py-2 rounded-lg shrink-0 transition-transform active:scale-[0.98]"
-                          >
-                            Apostar
-                          </button>
-                        </div>
+                          <CompetitionBanner
+                            competitionName={banner.template?.competitionName ?? banner.competition}
+                            logoUrl={banner.template?.logoUrl}
+                            primaryColor={banner.template?.primaryColor}
+                            secondaryColor={banner.template?.secondaryColor}
+                            accentColor={banner.template?.accentColor}
+                            homeTeam={banner.homeTeam}
+                            awayTeam={banner.awayTeam}
+                            kickoffAt={banner.kickoffAt}
+                            isLive={isLive}
+                          />
+                        </button>
                       );
                     })}
                   </div>

@@ -20,6 +20,7 @@ import {
 // it's a tsc/tsconfig-paths quirk, not a runtime issue (Node resolves the
 // real symlinked package fine either way).
 import { featuredMatchBannersTable } from "../../../../lib/db/src/schema/featuredMatchBanners.js";
+import { bannerTemplatesTable } from "../../../../lib/db/src/schema/bannerTemplates.js";
 import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
   adminMiddleware,
@@ -2413,6 +2414,116 @@ router.delete("/casino/banners/:id", adminMiddleware, async (req: AdminRequest, 
   }
 });
 
+// ── Banner templates ("Modelos de Banner") ───────────────────────────────────
+// Admin-curated visual templates (one per competition) that a "jogo em
+// destaque" can be assigned to — see banner_templates schema for the
+// column list. CRUD mirrors the featured-banners block below exactly.
+router.get("/banner-templates", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const templates = await db
+      .select()
+      .from(bannerTemplatesTable)
+      .orderBy(asc(bannerTemplatesTable.sortOrder), asc(bannerTemplatesTable.competitionName));
+    res.json({ templates });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/banner-templates error");
+    res.status(500).json({ error: "Erro ao listar modelos de banner" });
+  }
+});
+
+router.post("/banner-templates", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const competitionName = String(body["competitionName"] ?? "").trim();
+    if (!competitionName) {
+      res.status(400).json({ error: "competitionName é obrigatório." });
+      return;
+    }
+    const [created] = await db
+      .insert(bannerTemplatesTable)
+      .values({
+        sport: body["sport"] ? String(body["sport"]).trim() : "football",
+        competitionName,
+        logoUrl: body["logoUrl"] ? String(body["logoUrl"]).trim() : null,
+        primaryColor: body["primaryColor"] ? String(body["primaryColor"]).trim() : "#1e3a8a",
+        secondaryColor: body["secondaryColor"] ? String(body["secondaryColor"]).trim() : "#0f172a",
+        accentColor: body["accentColor"] ? String(body["accentColor"]).trim() : "#dc2626",
+        isActive: body["isActive"] === undefined ? true : Boolean(body["isActive"]),
+        sortOrder: Number.isFinite(Number(body["sortOrder"])) ? Number(body["sortOrder"]) : 0,
+      })
+      .returning();
+    res.status(201).json(created);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/banner-templates error");
+    res.status(500).json({ error: "Erro ao criar modelo de banner" });
+  }
+});
+
+router.patch("/banner-templates/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Id inválido" });
+    return;
+  }
+  try {
+    const body = req.body as Record<string, unknown>;
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (body["sport"] !== undefined) update["sport"] = String(body["sport"]).trim();
+    if (body["competitionName"] !== undefined) {
+      const competitionName = String(body["competitionName"]).trim();
+      if (!competitionName) {
+        res.status(400).json({ error: "competitionName não pode ficar vazio." });
+        return;
+      }
+      update["competitionName"] = competitionName;
+    }
+    if (body["logoUrl"] !== undefined) {
+      update["logoUrl"] = body["logoUrl"] ? String(body["logoUrl"]).trim() : null;
+    }
+    if (body["primaryColor"] !== undefined) update["primaryColor"] = String(body["primaryColor"]).trim();
+    if (body["secondaryColor"] !== undefined) update["secondaryColor"] = String(body["secondaryColor"]).trim();
+    if (body["accentColor"] !== undefined) update["accentColor"] = String(body["accentColor"]).trim();
+    if (body["isActive"] !== undefined) update["isActive"] = Boolean(body["isActive"]);
+    if (body["sortOrder"] !== undefined) update["sortOrder"] = Number(body["sortOrder"]) || 0;
+
+    const [updated] = await db
+      .update(bannerTemplatesTable)
+      .set(update)
+      .where(eq(bannerTemplatesTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Modelo de banner não encontrado" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    logger.error({ err, id }, "PATCH /api/admin/banner-templates/:id error");
+    res.status(500).json({ error: "Erro ao atualizar modelo de banner" });
+  }
+});
+
+router.delete("/banner-templates/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Id inválido" });
+    return;
+  }
+  try {
+    const [deleted] = await db
+      .delete(bannerTemplatesTable)
+      .where(eq(bannerTemplatesTable.id, id))
+      .returning({ id: bannerTemplatesTable.id });
+    if (!deleted) {
+      res.status(404).json({ error: "Modelo de banner não encontrado" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, id }, "DELETE /api/admin/banner-templates/:id error");
+    res.status(500).json({ error: "Erro ao apagar modelo de banner" });
+  }
+});
+
 // ── Featured match banners (Destaques scheduling) ────────────────────────────
 // Admin CRUD for the "jogo em destaque" schedule shown on the Destaques/home
 // page (routes/featuredBanners.ts GET / serves the public read side). Each
@@ -2425,10 +2536,12 @@ const DEFAULT_FEATURED_BANNER_DURATION_MS = 3 * 60 * 60 * 1000;
 
 router.get("/featured-banners", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
-    const banners = await db
-      .select()
+    const rows = await db
+      .select({ banner: featuredMatchBannersTable, template: bannerTemplatesTable })
       .from(featuredMatchBannersTable)
+      .leftJoin(bannerTemplatesTable, eq(featuredMatchBannersTable.bannerTemplateId, bannerTemplatesTable.id))
       .orderBy(asc(featuredMatchBannersTable.kickoffAt), desc(featuredMatchBannersTable.id));
+    const banners = rows.map(({ banner, template }) => ({ ...banner, template: template ?? null }));
     res.json({ banners });
   } catch (err) {
     logger.error({ err }, "GET /api/admin/featured-banners error");
@@ -2454,12 +2567,34 @@ router.post("/featured-banners", adminMiddleware, async (req: AdminRequest, res)
       return;
     }
 
+    // bannerTemplateId is the source of truth for how the banner is drawn;
+    // `competition` stays a denormalized text label filled from the
+    // template's own name so anything still reading it as plain text keeps
+    // working.
+    let bannerTemplateId: number | null = null;
+    let competition = body["competition"] ? String(body["competition"]).trim() : null;
+    const rawTemplateId = Number(body["bannerTemplateId"]);
+    if (Number.isInteger(rawTemplateId) && rawTemplateId > 0) {
+      const [template] = await db
+        .select({ id: bannerTemplatesTable.id, competitionName: bannerTemplatesTable.competitionName })
+        .from(bannerTemplatesTable)
+        .where(eq(bannerTemplatesTable.id, rawTemplateId))
+        .limit(1);
+      if (!template) {
+        res.status(400).json({ error: "bannerTemplateId inválido." });
+        return;
+      }
+      bannerTemplateId = template.id;
+      competition = template.competitionName;
+    }
+
     const [created] = await db
       .insert(featuredMatchBannersTable)
       .values({
         homeTeam,
         awayTeam,
-        competition: body["competition"] ? String(body["competition"]).trim() : null,
+        competition,
+        bannerTemplateId,
         kickoffAt,
         endsAt,
         isActive: body["isActive"] === undefined ? true : Boolean(body["isActive"]),
@@ -2484,7 +2619,28 @@ router.patch("/featured-banners/:id", adminMiddleware, async (req: AdminRequest,
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (body["homeTeam"] !== undefined) update["homeTeam"] = String(body["homeTeam"]).trim();
     if (body["awayTeam"] !== undefined) update["awayTeam"] = String(body["awayTeam"]).trim();
-    if (body["competition"] !== undefined) {
+    if (body["bannerTemplateId"] !== undefined) {
+      const rawTemplateId = Number(body["bannerTemplateId"]);
+      if (body["bannerTemplateId"] === null) {
+        update["bannerTemplateId"] = null;
+      } else if (Number.isInteger(rawTemplateId) && rawTemplateId > 0) {
+        const [template] = await db
+          .select({ id: bannerTemplatesTable.id, competitionName: bannerTemplatesTable.competitionName })
+          .from(bannerTemplatesTable)
+          .where(eq(bannerTemplatesTable.id, rawTemplateId))
+          .limit(1);
+        if (!template) {
+          res.status(400).json({ error: "bannerTemplateId inválido." });
+          return;
+        }
+        update["bannerTemplateId"] = template.id;
+        update["competition"] = template.competitionName;
+      } else {
+        res.status(400).json({ error: "bannerTemplateId inválido." });
+        return;
+      }
+    }
+    if (body["competition"] !== undefined && update["competition"] === undefined) {
       update["competition"] = body["competition"] ? String(body["competition"]).trim() : null;
     }
     if (body["kickoffAt"] !== undefined) {

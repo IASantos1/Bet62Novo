@@ -546,6 +546,63 @@ export async function initDb(): Promise<void> {
         updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      -- Admin-curated visual templates ("Modelos de Banner") for the
+      -- featured_match_banners above — one per competition, with a logo URL
+      -- (same "admin pastes a URL" convention as casino_banners.image_url,
+      -- there's no upload-to-storage pipeline anywhere in this repo) and a
+      -- 3-color gradient/accent scheme. Created before
+      -- featured_match_banners' own banner_template_id column below so the
+      -- FK target already exists.
+      CREATE TABLE IF NOT EXISTS banner_templates (
+        id               SERIAL PRIMARY KEY,
+        sport            TEXT NOT NULL DEFAULT 'football',
+        competition_name TEXT NOT NULL,
+        logo_url         TEXT,
+        primary_color    TEXT NOT NULL DEFAULT '#1e3a8a',
+        secondary_color  TEXT NOT NULL DEFAULT '#0f172a',
+        accent_color     TEXT NOT NULL DEFAULT '#dc2626',
+        is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order       INTEGER NOT NULL DEFAULT 0,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS banner_templates_sport_competition_idx
+        ON banner_templates (sport, competition_name);
+
+      -- Starter gallery so the admin's "Modelos de Banner" tab isn't empty
+      -- on day one — logo URLs reused from the same LEAGUE_LOGOS the
+      -- frontend already trusts (artifacts/bet62/src/lib/leagueLogos.ts).
+      -- Idempotent (ON CONFLICT DO NOTHING) and purely a starting point:
+      -- the admin can freely edit/delete these or add any other
+      -- competition/sport through the same UI.
+      INSERT INTO banner_templates
+        (sport, competition_name, logo_url, primary_color, secondary_color, accent_color, sort_order)
+      VALUES
+        ('football', 'UEFA Champions League', 'https://media.api-sports.io/football/leagues/2.png', '#0a2472', '#041c4a', '#00d2ff', 10),
+        ('football', 'UEFA Europa League', 'https://media.api-sports.io/football/leagues/3.png', '#ff6600', '#331300', '#ffffff', 20),
+        ('football', 'La Liga', 'https://media.api-sports.io/football/leagues/140.png', '#ee3524', '#7a0f08', '#ffcc00', 30),
+        ('football', 'Premier League', 'https://media.api-sports.io/football/leagues/39.png', '#3d195b', '#1a0a28', '#00ff85', 40),
+        ('football', 'Bundesliga', 'https://media.api-sports.io/football/leagues/78.png', '#d20515', '#6b0209', '#ffffff', 50),
+        ('football', 'Serie A', 'https://media.api-sports.io/football/leagues/135.png', '#024494', '#011d3d', '#ffffff', 60),
+        ('football', 'Ligue 1', 'https://media.api-sports.io/football/leagues/61.png', '#10182b', '#050810', '#dae025', 70),
+        ('football', 'Primeira Liga', 'https://media.api-sports.io/football/leagues/94.png', '#006600', '#003300', '#ff0000', 80),
+        ('football', 'Brasileirão', 'https://media.api-sports.io/football/leagues/71.png', '#009c3b', '#002776', '#ffdf00', 90),
+        ('football', 'Copa Libertadores', 'https://media.api-sports.io/football/leagues/13.png', '#f7b500', '#7a3d00', '#003057', 100),
+        ('football', 'Copa Sudamericana', 'https://media.api-sports.io/football/leagues/11.png', '#c8102e', '#5c0813', '#ffffff', 110),
+        ('football', 'MLS', 'https://media.api-sports.io/football/leagues/253.png', '#041e42', '#020f21', '#ee3524', 120),
+        ('football', 'Liga MX', 'https://media.api-sports.io/football/leagues/262.png', '#006847', '#00291d', '#ce1126', 130),
+        ('football', 'FIFA World Cup', 'https://media.api-sports.io/football/leagues/1.png', '#a67c00', '#4d3900', '#ffffff', 140),
+        ('football', 'Amistoso Internacional', 'https://media.api-sports.io/football/leagues/10.png', '#1e3a8a', '#0f172a', '#64748b', 150),
+        ('football', 'Outro / Genérico', NULL, '#18181b', '#09090b', '#dc2626', 999)
+      ON CONFLICT (sport, competition_name) DO NOTHING;
+
+      -- Nullable FK: picking a template fills in the banner's logo/colors.
+      -- ON DELETE SET NULL — removing a template must never take an
+      -- already-scheduled banner down with it.
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS banner_template_id
+        INTEGER REFERENCES banner_templates(id) ON DELETE SET NULL;
+
       -- Session-lock + WebAuthn (passkey) auth — see lib/sessions.ts.
       -- sessions.id is the SHA-256 hex digest of the random opaque token
       -- stored in the bet62_session/bet62_refresh cookies, never the raw
