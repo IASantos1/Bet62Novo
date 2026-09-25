@@ -559,6 +559,8 @@ type FeaturedMatchBanner = {
   awayTeam: string;
   competition: string | null;
   template: FeaturedMatchBannerTemplate | null;
+  homeTeamLogoUrl: string | null;
+  awayTeamLogoUrl: string | null;
   kickoffAt: string;
   endsAt: string;
 };
@@ -21607,6 +21609,8 @@ export default function Home({
                             accentColor={banner.template?.accentColor}
                             homeTeam={banner.homeTeam}
                             awayTeam={banner.awayTeam}
+                            homeLogoUrl={banner.homeTeamLogoUrl}
+                            awayLogoUrl={banner.awayTeamLogoUrl}
                             kickoffAt={banner.kickoffAt}
                             isLive={isLive}
                           />

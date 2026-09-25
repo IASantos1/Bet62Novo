@@ -19,6 +19,12 @@ export const bannerTemplatesTable = pgTable(
     primaryColor: text("primary_color").notNull().default("#1e3a8a"),
     secondaryColor: text("secondary_color").notNull().default("#0f172a"),
     accentColor: text("accent_color").notNull().default("#dc2626"),
+    // Real api-football.com league id (e.g. 2 = Champions League) — the
+    // same number already embedded in logoUrl for every starter template.
+    // Nullable: a template with no league id is never offered as a target
+    // for the automation sync (services/apiFootball/bannerSync.ts), only
+    // usable for manually-scheduled banners.
+    apiFootballLeagueId: integer("api_football_league_id"),
     isActive: boolean("is_active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

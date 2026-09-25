@@ -34,6 +34,13 @@ const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 const WINHOUSE_WALLET_API_KEY = process.env["WINHOUSE_WALLET_API_KEY"] ?? "";
 const WINHOUSE_CALLBACK_TOKEN = process.env["WINHOUSE_CALLBACK_TOKEN"] ?? "";
 
+// api-football.com (API-SPORTS) — powers the "Automação de Banners" sync
+// (services/apiFootball/bannerSync.ts + lib/apiFootballCron.ts). Display
+// metadata only (team/league logos, kickoff time, live status) — never
+// odds or settlement. No key set = cron doesn't start, feature stays fully
+// manual (same fail-closed convention as BIGBANG_API_KEY above).
+const API_FOOTBALL_KEY = process.env["API_FOOTBALL_KEY"] ?? "";
+
 export const CONFIG = {
   BIGBANG_API_KEY,
   WINHOUSE_WALLET_API_KEY,
@@ -42,4 +49,5 @@ export const CONFIG = {
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
+  API_FOOTBALL_KEY,
 } as const;

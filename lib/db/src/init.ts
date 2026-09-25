@@ -603,6 +603,71 @@ export async function initDb(): Promise<void> {
       ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS banner_template_id
         INTEGER REFERENCES banner_templates(id) ON DELETE SET NULL;
 
+      -- Links each starter template to its real api-football.com league id
+      -- (same numeric id already embedded in the logo_url seeded above,
+      -- e.g. leagues/2.png = Champions League) — lets the automation sync
+      -- (services/apiFootball/bannerSync.ts) match a fixture's league to
+      -- the right template with zero guesswork. NULL means "never offered
+      -- in automatic mode" (kept manual-only, e.g. "Outro / Genérico").
+      ALTER TABLE banner_templates ADD COLUMN IF NOT EXISTS api_football_league_id INTEGER;
+
+      UPDATE banner_templates SET api_football_league_id = CASE competition_name
+        WHEN 'UEFA Champions League' THEN 2
+        WHEN 'UEFA Europa League' THEN 3
+        WHEN 'La Liga' THEN 140
+        WHEN 'Premier League' THEN 39
+        WHEN 'Bundesliga' THEN 78
+        WHEN 'Serie A' THEN 135
+        WHEN 'Ligue 1' THEN 61
+        WHEN 'Primeira Liga' THEN 94
+        WHEN 'Brasileirão' THEN 71
+        WHEN 'Copa Libertadores' THEN 13
+        WHEN 'Copa Sudamericana' THEN 11
+        WHEN 'MLS' THEN 253
+        WHEN 'Liga MX' THEN 262
+        WHEN 'FIFA World Cup' THEN 1
+        WHEN 'Amistoso Internacional' THEN 10
+        ELSE api_football_league_id
+      END
+      WHERE sport = 'football' AND api_football_league_id IS NULL;
+
+      -- Real team crest URLs (from api-football.com fixtures, or pasted by
+      -- the admin for a manual banner — same "paste a URL" convention as
+      -- every other image field in this repo) plus automation bookkeeping.
+      -- external_fixture_id + its partial unique index below let the sync
+      -- cron (services/apiFootball/bannerSync.ts) upsert one row per real
+      -- fixture instead of duplicating it every cycle; source distinguishes
+      -- cron-managed rows ('auto') from admin-entered ones ('manual'), which
+      -- the cron must never touch.
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS home_team_logo_url TEXT;
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS away_team_logo_url TEXT;
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS external_fixture_id TEXT;
+      ALTER TABLE featured_match_banners ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS featured_match_banners_external_fixture_id_idx
+        ON featured_match_banners (external_fixture_id) WHERE external_fixture_id IS NOT NULL;
+
+      -- Single-row (id fixed at 1) config for the "Automação de Banners"
+      -- admin panel — see services/apiFootball/bannerSync.ts. Defaults to
+      -- mode='manual' so nothing changes in behavior until an admin
+      -- explicitly opts into automatic sync from api-football.com.
+      CREATE TABLE IF NOT EXISTS banner_automation_settings (
+        id                             INTEGER PRIMARY KEY DEFAULT 1,
+        mode                           TEXT NOT NULL DEFAULT 'manual',
+        quantidade                     INTEGER NOT NULL DEFAULT 3,
+        criterio                       TEXT NOT NULL DEFAULT 'upcoming',
+        antecedencia_minutes           INTEGER NOT NULL DEFAULT 120,
+        mostrar_ao_vivo                BOOLEAN NOT NULL DEFAULT TRUE,
+        manter_apos_termino            BOOLEAN NOT NULL DEFAULT FALSE,
+        tempo_para_substituir_minutes  INTEGER,
+        allowed_competition_ids        JSONB NOT NULL DEFAULT '[]',
+        excluded_competition_ids       JSONB NOT NULL DEFAULT '[]',
+        updated_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT banner_automation_settings_single_row CHECK (id = 1)
+      );
+
+      INSERT INTO banner_automation_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
       -- Session-lock + WebAuthn (passkey) auth — see lib/sessions.ts.
       -- sessions.id is the SHA-256 hex digest of the random opaque token
       -- stored in the bet62_session/bet62_refresh cookies, never the raw

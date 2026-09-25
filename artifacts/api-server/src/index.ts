@@ -3,6 +3,7 @@ import { createServer } from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startAiAgentsCron } from "./lib/aiAgentsCron.js";
+import { startApiFootballCron } from "./lib/apiFootballCron.js";
 import { ensureBigBangCatalogFresh } from "./services/bigbang/sync.js";
 
 // Keep the API process alive through unexpected async failures. The app has
@@ -33,4 +34,5 @@ server.listen(port, () => {
   });
 
   startAiAgentsCron();
+  startApiFootballCron();
 });

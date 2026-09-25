@@ -44,6 +44,7 @@ export * from "./casinoGames.js";
 export * from "./casinoBanners.js";
 export * from "./bannerTemplates.js";
 export * from "./featuredMatchBanners.js";
+export * from "./bannerAutomationSettings.js";
 export * from "./aiAgents.js";
 export * from "./aiConsoleCommands.js";
 export * from "./sessions.js";

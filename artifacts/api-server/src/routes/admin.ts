@@ -21,6 +21,7 @@ import {
 // real symlinked package fine either way).
 import { featuredMatchBannersTable } from "../../../../lib/db/src/schema/featuredMatchBanners.js";
 import { bannerTemplatesTable } from "../../../../lib/db/src/schema/bannerTemplates.js";
+import { bannerAutomationSettingsTable } from "../../../../lib/db/src/schema/bannerAutomationSettings.js";
 import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
   adminMiddleware,
@@ -2448,6 +2449,10 @@ router.post("/banner-templates", adminMiddleware, async (req: AdminRequest, res)
         primaryColor: body["primaryColor"] ? String(body["primaryColor"]).trim() : "#1e3a8a",
         secondaryColor: body["secondaryColor"] ? String(body["secondaryColor"]).trim() : "#0f172a",
         accentColor: body["accentColor"] ? String(body["accentColor"]).trim() : "#dc2626",
+        apiFootballLeagueId:
+          body["apiFootballLeagueId"] !== undefined && body["apiFootballLeagueId"] !== null && body["apiFootballLeagueId"] !== ""
+            ? Number(body["apiFootballLeagueId"])
+            : null,
         isActive: body["isActive"] === undefined ? true : Boolean(body["isActive"]),
         sortOrder: Number.isFinite(Number(body["sortOrder"])) ? Number(body["sortOrder"]) : 0,
       })
@@ -2483,6 +2488,12 @@ router.patch("/banner-templates/:id", adminMiddleware, async (req: AdminRequest,
     if (body["primaryColor"] !== undefined) update["primaryColor"] = String(body["primaryColor"]).trim();
     if (body["secondaryColor"] !== undefined) update["secondaryColor"] = String(body["secondaryColor"]).trim();
     if (body["accentColor"] !== undefined) update["accentColor"] = String(body["accentColor"]).trim();
+    if (body["apiFootballLeagueId"] !== undefined) {
+      update["apiFootballLeagueId"] =
+        body["apiFootballLeagueId"] === null || body["apiFootballLeagueId"] === ""
+          ? null
+          : Number(body["apiFootballLeagueId"]);
+    }
     if (body["isActive"] !== undefined) update["isActive"] = Boolean(body["isActive"]);
     if (body["sortOrder"] !== undefined) update["sortOrder"] = Number(body["sortOrder"]) || 0;
 
@@ -2595,6 +2606,11 @@ router.post("/featured-banners", adminMiddleware, async (req: AdminRequest, res)
         awayTeam,
         competition,
         bannerTemplateId,
+        // Same "admin pastes a URL" convention as the template's own
+        // logoUrl — lets a manually-scheduled banner get the same
+        // realistic two-crest look as an api-football.com-synced one.
+        homeTeamLogoUrl: body["homeTeamLogoUrl"] ? String(body["homeTeamLogoUrl"]).trim() : null,
+        awayTeamLogoUrl: body["awayTeamLogoUrl"] ? String(body["awayTeamLogoUrl"]).trim() : null,
         kickoffAt,
         endsAt,
         isActive: body["isActive"] === undefined ? true : Boolean(body["isActive"]),
@@ -2642,6 +2658,12 @@ router.patch("/featured-banners/:id", adminMiddleware, async (req: AdminRequest,
     }
     if (body["competition"] !== undefined && update["competition"] === undefined) {
       update["competition"] = body["competition"] ? String(body["competition"]).trim() : null;
+    }
+    if (body["homeTeamLogoUrl"] !== undefined) {
+      update["homeTeamLogoUrl"] = body["homeTeamLogoUrl"] ? String(body["homeTeamLogoUrl"]).trim() : null;
+    }
+    if (body["awayTeamLogoUrl"] !== undefined) {
+      update["awayTeamLogoUrl"] = body["awayTeamLogoUrl"] ? String(body["awayTeamLogoUrl"]).trim() : null;
     }
     if (body["kickoffAt"] !== undefined) {
       const kickoffAt = new Date(String(body["kickoffAt"]));
@@ -2697,6 +2719,108 @@ router.delete("/featured-banners/:id", adminMiddleware, async (req: AdminRequest
   } catch (err) {
     logger.error({ err, id }, "DELETE /api/admin/featured-banners/:id error");
     res.status(500).json({ error: "Erro ao apagar banner de destaque" });
+  }
+});
+
+// ── Banner automation settings (api-football.com sync config) ──────────────
+// Single-row config (id fixed at 1) driving services/apiFootball/
+// bannerSync.ts — see lib/db/src/schema/bannerAutomationSettings.ts for the
+// column list. Defaults to mode='manual'; nothing about the existing manual
+// flow changes until an admin explicitly switches this to 'auto'.
+router.get("/banner-automation-settings", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const [settings] = await db
+      .select()
+      .from(bannerAutomationSettingsTable)
+      .where(eq(bannerAutomationSettingsTable.id, 1))
+      .limit(1);
+    res.json(settings ?? null);
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/banner-automation-settings error");
+    res.status(500).json({ error: "Erro ao obter configuração de automação" });
+  }
+});
+
+router.put("/banner-automation-settings", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (body["mode"] !== undefined) {
+      const mode = String(body["mode"]);
+      if (mode !== "manual" && mode !== "auto") {
+        res.status(400).json({ error: "mode deve ser 'manual' ou 'auto'." });
+        return;
+      }
+      update["mode"] = mode;
+    }
+    if (body["quantidade"] !== undefined) {
+      const quantidade = Number(body["quantidade"]);
+      if (!Number.isInteger(quantidade) || quantidade < 1) {
+        res.status(400).json({ error: "quantidade inválida." });
+        return;
+      }
+      update["quantidade"] = quantidade;
+    }
+    if (body["criterio"] !== undefined) {
+      const criterio = String(body["criterio"]);
+      if (criterio !== "upcoming" && criterio !== "live" && criterio !== "custom") {
+        res.status(400).json({ error: "criterio deve ser 'upcoming', 'live' ou 'custom'." });
+        return;
+      }
+      update["criterio"] = criterio;
+    }
+    if (body["antecedenciaMinutes"] !== undefined) {
+      const antecedenciaMinutes = Number(body["antecedenciaMinutes"]);
+      if (!Number.isInteger(antecedenciaMinutes) || antecedenciaMinutes < 1) {
+        res.status(400).json({ error: "antecedenciaMinutes inválido." });
+        return;
+      }
+      update["antecedenciaMinutes"] = antecedenciaMinutes;
+    }
+    if (body["mostrarAoVivo"] !== undefined) update["mostrarAoVivo"] = Boolean(body["mostrarAoVivo"]);
+    if (body["manterAposTermino"] !== undefined) update["manterAposTermino"] = Boolean(body["manterAposTermino"]);
+    if (body["tempoParaSubstituirMinutes"] !== undefined) {
+      const raw = body["tempoParaSubstituirMinutes"];
+      if (raw === null) {
+        update["tempoParaSubstituirMinutes"] = null;
+      } else {
+        const tempoParaSubstituirMinutes = Number(raw);
+        if (!Number.isInteger(tempoParaSubstituirMinutes) || tempoParaSubstituirMinutes < 1) {
+          res.status(400).json({ error: "tempoParaSubstituirMinutes inválido." });
+          return;
+        }
+        update["tempoParaSubstituirMinutes"] = tempoParaSubstituirMinutes;
+      }
+    }
+    if (body["allowedCompetitionIds"] !== undefined) {
+      if (!Array.isArray(body["allowedCompetitionIds"])) {
+        res.status(400).json({ error: "allowedCompetitionIds deve ser uma lista." });
+        return;
+      }
+      update["allowedCompetitionIds"] = body["allowedCompetitionIds"]
+        .map((v) => Number(v))
+        .filter((v) => Number.isInteger(v));
+    }
+    if (body["excludedCompetitionIds"] !== undefined) {
+      if (!Array.isArray(body["excludedCompetitionIds"])) {
+        res.status(400).json({ error: "excludedCompetitionIds deve ser uma lista." });
+        return;
+      }
+      update["excludedCompetitionIds"] = body["excludedCompetitionIds"]
+        .map((v) => Number(v))
+        .filter((v) => Number.isInteger(v));
+    }
+
+    const [updated] = await db
+      .insert(bannerAutomationSettingsTable)
+      .values({ id: 1, ...update })
+      .onConflictDoUpdate({ target: bannerAutomationSettingsTable.id, set: update })
+      .returning();
+    res.json(updated);
+  } catch (err) {
+    logger.error({ err }, "PUT /api/admin/banner-automation-settings error");
+    res.status(500).json({ error: "Erro ao atualizar configuração de automação" });
   }
 });
 

@@ -251,6 +251,7 @@ type BannerTemplate = {
   primaryColor: string;
   secondaryColor: string;
   accentColor: string;
+  apiFootballLeagueId: number | null;
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
@@ -264,11 +265,29 @@ type FeaturedMatchBanner = {
   competition: string | null;
   bannerTemplateId: number | null;
   template: BannerTemplate | null;
+  homeTeamLogoUrl: string | null;
+  awayTeamLogoUrl: string | null;
+  externalFixtureId: string | null;
+  source: "manual" | "auto";
   kickoffAt: string;
   endsAt: string;
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
+  updatedAt: string;
+};
+
+type BannerAutomationSettings = {
+  id: number;
+  mode: "manual" | "auto";
+  quantidade: number;
+  criterio: "upcoming" | "live" | "custom";
+  antecedenciaMinutes: number;
+  mostrarAoVivo: boolean;
+  manterAposTermino: boolean;
+  tempoParaSubstituirMinutes: number | null;
+  allowedCompetitionIds: number[];
+  excludedCompetitionIds: number[];
   updatedAt: string;
 };
 
@@ -1543,6 +1562,38 @@ export default function AdminPage() {
   const bannerTemplatesLoading = bannerTemplatesQuery.isLoading;
   const refetchBannerTemplates = bannerTemplatesQuery.refetch;
 
+  // ── Automação de Banners (api-football.com sync config) — see
+  // BannerAutomationSettings above. Single row, PUT-only updates.
+  const bannerAutomationQuery = useQuery({
+    queryKey: ["admin", "banner-automation-settings"],
+    queryFn: async (): Promise<BannerAutomationSettings> => {
+      const res = await fetch("/api/admin/banner-automation-settings", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load banner automation settings");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "banner-templates",
+  });
+  const bannerAutomation = bannerAutomationQuery.data ?? null;
+  const refetchBannerAutomation = bannerAutomationQuery.refetch;
+  const [bannerAutomationSaving, setBannerAutomationSaving] = useState(false);
+
+  const saveBannerAutomation = async (patch: Partial<BannerAutomationSettings>) => {
+    setBannerAutomationSaving(true);
+    try {
+      const res = await fetch("/api/admin/banner-automation-settings", {
+        method: "PUT",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error();
+      await refetchBannerAutomation();
+    } catch {
+      toast.error("Erro ao guardar configuração de automação");
+    } finally {
+      setBannerAutomationSaving(false);
+    }
+  };
+
   const featuredBannersQuery = useQuery({
     queryKey: ["admin", "featured-banners"],
     queryFn: async (): Promise<{ banners: FeaturedMatchBanner[] }> => {
@@ -1563,6 +1614,8 @@ export default function AdminPage() {
     homeTeam: "",
     awayTeam: "",
     bannerTemplateId: null as number | null,
+    homeTeamLogoUrl: "",
+    awayTeamLogoUrl: "",
     kickoffAt: "",
     durationHours: "3",
     isActive: true,
@@ -1582,6 +1635,8 @@ export default function AdminPage() {
         homeTeam: "",
         awayTeam: "",
         bannerTemplateId: null,
+        homeTeamLogoUrl: "",
+        awayTeamLogoUrl: "",
         kickoffAt: "",
         durationHours: "3",
         isActive: true,
@@ -1595,6 +1650,8 @@ export default function AdminPage() {
         homeTeam: banner.homeTeam,
         awayTeam: banner.awayTeam,
         bannerTemplateId: banner.bannerTemplateId,
+        homeTeamLogoUrl: banner.homeTeamLogoUrl ?? "",
+        awayTeamLogoUrl: banner.awayTeamLogoUrl ?? "",
         kickoffAt: toLocalDatetimeInputValue(banner.kickoffAt),
         durationHours: String(Math.max(0.5, Math.round(durationHours * 100) / 100)),
         isActive: banner.isActive,
@@ -1629,6 +1686,8 @@ export default function AdminPage() {
           homeTeam,
           awayTeam,
           bannerTemplateId: featuredBannerForm.bannerTemplateId,
+          homeTeamLogoUrl: featuredBannerForm.homeTeamLogoUrl.trim() || null,
+          awayTeamLogoUrl: featuredBannerForm.awayTeamLogoUrl.trim() || null,
           kickoffAt: kickoffAt.toISOString(),
           endsAt: endsAt.toISOString(),
           isActive: featuredBannerForm.isActive,
@@ -1672,6 +1731,7 @@ export default function AdminPage() {
     primaryColor: "#1e3a8a",
     secondaryColor: "#0f172a",
     accentColor: "#dc2626",
+    apiFootballLeagueId: "",
     isActive: true,
     sortOrder: 0,
   });
@@ -1686,6 +1746,7 @@ export default function AdminPage() {
         primaryColor: "#1e3a8a",
         secondaryColor: "#0f172a",
         accentColor: "#dc2626",
+        apiFootballLeagueId: "",
         isActive: true,
         sortOrder: 0,
       });
@@ -1697,6 +1758,8 @@ export default function AdminPage() {
         primaryColor: template.primaryColor,
         secondaryColor: template.secondaryColor,
         accentColor: template.accentColor,
+        apiFootballLeagueId:
+          template.apiFootballLeagueId != null ? String(template.apiFootballLeagueId) : "",
         isActive: template.isActive,
         sortOrder: template.sortOrder,
       });
@@ -1737,6 +1800,7 @@ export default function AdminPage() {
           primaryColor: bannerTemplateForm.primaryColor,
           secondaryColor: bannerTemplateForm.secondaryColor,
           accentColor: bannerTemplateForm.accentColor,
+          apiFootballLeagueId: bannerTemplateForm.apiFootballLeagueId.trim() || null,
           isActive: bannerTemplateForm.isActive,
           sortOrder: bannerTemplateForm.sortOrder,
         }),
@@ -6430,6 +6494,230 @@ export default function AdminPage() {
                   </p>
                 </div>
 
+                {/* ── Automação de Banners (api-football.com) ── */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-white">Automação de Banners</h3>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        Preenche os Jogos em Destaque automaticamente a partir da
+                        api-football.com. Só usa dados de exibição (nomes/escudos/
+                        hora) — nunca odds ou mercados.
+                      </p>
+                    </div>
+                  </div>
+
+                  {!bannerAutomation ? (
+                    <div className="p-4 flex justify-center">
+                      <Loader2 className="animate-spin text-zinc-500" size={20} />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs text-zinc-400 mr-2">Modo</Label>
+                        {(["manual", "auto"] as const).map((m) => (
+                          <button
+                            key={m}
+                            disabled={bannerAutomationSaving}
+                            onClick={() => saveBannerAutomation({ mode: m })}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                              bannerAutomation.mode === m
+                                ? "bg-green-600/20 text-green-400 border border-green-500/30"
+                                : "bg-zinc-800 text-zinc-500 border border-zinc-700"
+                            }`}
+                          >
+                            {m === "manual" ? "Manual" : "Automático"}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs text-zinc-400">Quantidade</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            defaultValue={bannerAutomation.quantidade}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (Number.isInteger(v) && v > 0) saveBannerAutomation({ quantidade: v });
+                            }}
+                            className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-zinc-400">Antecedência (minutos)</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            defaultValue={bannerAutomation.antecedenciaMinutes}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (Number.isInteger(v) && v > 0)
+                                saveBannerAutomation({ antecedenciaMinutes: v });
+                            }}
+                            className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-zinc-400 mb-1.5 block">Critério</Label>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {(
+                            [
+                              ["upcoming", "Próximos jogos"],
+                              ["live", "Jogos ao vivo"],
+                              ["custom", "Personalizado"],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <button
+                              key={value}
+                              disabled={bannerAutomationSaving}
+                              onClick={() => saveBannerAutomation({ criterio: value })}
+                              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                                bannerAutomation.criterio === value
+                                  ? "bg-green-600/20 text-green-400 border border-green-500/30"
+                                  : "bg-zinc-800 text-zinc-500 border border-zinc-700"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-400">Mostrar jogo ao vivo</Label>
+                        <button
+                          onClick={() =>
+                            saveBannerAutomation({ mostrarAoVivo: !bannerAutomation.mostrarAoVivo })
+                          }
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${bannerAutomation.mostrarAoVivo ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                        >
+                          {bannerAutomation.mostrarAoVivo ? "Ativado" : "Desativado"}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-400">Manter jogo após término</Label>
+                        <button
+                          onClick={() =>
+                            saveBannerAutomation({ manterAposTermino: !bannerAutomation.manterAposTermino })
+                          }
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${bannerAutomation.manterAposTermino ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                        >
+                          {bannerAutomation.manterAposTermino ? "Ativado" : "Desativado"}
+                        </button>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-zinc-400">Tempo para substituir</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <button
+                            onClick={() => saveBannerAutomation({ tempoParaSubstituirMinutes: null })}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${bannerAutomation.tempoParaSubstituirMinutes === null ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                          >
+                            Automático
+                          </button>
+                          <Input
+                            type="number"
+                            min="1"
+                            placeholder="minutos"
+                            defaultValue={bannerAutomation.tempoParaSubstituirMinutes ?? ""}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (Number.isInteger(v) && v > 0)
+                                saveBannerAutomation({ tempoParaSubstituirMinutes: v });
+                            }}
+                            className="bg-zinc-800 border-zinc-700 text-white w-28"
+                          />
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const eligible = bannerTemplates.filter((t) => t.apiFootballLeagueId != null);
+                        if (eligible.length === 0) {
+                          return (
+                            <p className="text-[11px] text-zinc-600">
+                              Nenhum modelo tem um ID de liga da api-football.com
+                              configurado ainda — edita um modelo abaixo para o
+                              usar na automação.
+                            </p>
+                          );
+                        }
+                        const toggleInList = (
+                          list: number[],
+                          id: number,
+                          field: "allowedCompetitionIds" | "excludedCompetitionIds",
+                        ) => {
+                          const next = list.includes(id)
+                            ? list.filter((v) => v !== id)
+                            : [...list, id];
+                          saveBannerAutomation({ [field]: next });
+                        };
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <Label className="text-xs text-zinc-400 mb-1.5 block">
+                                Competições permitidas
+                              </Label>
+                              <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                                {eligible.map((t) => (
+                                  <label
+                                    key={t.id}
+                                    className="flex items-center gap-2 text-xs text-zinc-300"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={bannerAutomation.allowedCompetitionIds.includes(t.id)}
+                                      onChange={() =>
+                                        toggleInList(
+                                          bannerAutomation.allowedCompetitionIds,
+                                          t.id,
+                                          "allowedCompetitionIds",
+                                        )
+                                      }
+                                    />
+                                    {t.competitionName}
+                                  </label>
+                                ))}
+                              </div>
+                              <p className="text-[10px] text-zinc-600 mt-1">Vazio = todas permitidas.</p>
+                            </div>
+                            <div>
+                              <Label className="text-xs text-zinc-400 mb-1.5 block">
+                                Competições excluídas
+                              </Label>
+                              <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                                {eligible.map((t) => (
+                                  <label
+                                    key={t.id}
+                                    className="flex items-center gap-2 text-xs text-zinc-300"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={bannerAutomation.excludedCompetitionIds.includes(t.id)}
+                                      onChange={() =>
+                                        toggleInList(
+                                          bannerAutomation.excludedCompetitionIds,
+                                          t.id,
+                                          "excludedCompetitionIds",
+                                        )
+                                      }
+                                    />
+                                    {t.competitionName}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+
                 {bannerTemplatesLoading ? (
                   <div className="p-8 flex justify-center">
                     <Loader2 className="animate-spin text-zinc-500" size={24} />
@@ -8476,6 +8764,36 @@ export default function AdminPage() {
                   )}
                 </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-zinc-400">Escudo da Casa (URL)</Label>
+                    <Input
+                      value={featuredBannerForm.homeTeamLogoUrl}
+                      onChange={(e) =>
+                        setFeaturedBannerForm((p) => ({ ...p, homeTeamLogoUrl: e.target.value }))
+                      }
+                      placeholder="https://..."
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Escudo do Visitante (URL)</Label>
+                    <Input
+                      value={featuredBannerForm.awayTeamLogoUrl}
+                      onChange={(e) =>
+                        setFeaturedBannerForm((p) => ({ ...p, awayTeamLogoUrl: e.target.value }))
+                      }
+                      placeholder="https://..."
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-zinc-600">
+                  Opcional — com os dois escudos preenchidos, o banner mostra o
+                  visual "realista" (escudos + VS). Sem eles, mostra o texto
+                  "Time A vs Time B" normal.
+                </p>
+
                 {(() => {
                   const selectedTemplate = bannerTemplates.find(
                     (t) => t.id === featuredBannerForm.bannerTemplateId,
@@ -8492,6 +8810,8 @@ export default function AdminPage() {
                         accentColor={selectedTemplate.accentColor}
                         homeTeam={featuredBannerForm.homeTeam || "Time A"}
                         awayTeam={featuredBannerForm.awayTeam || "Time B"}
+                        homeLogoUrl={featuredBannerForm.homeTeamLogoUrl || null}
+                        awayLogoUrl={featuredBannerForm.awayTeamLogoUrl || null}
                         kickoffAt={featuredBannerForm.kickoffAt || new Date().toISOString()}
                         isLive={false}
                       />
@@ -8645,6 +8965,23 @@ export default function AdminPage() {
                     placeholder="https://… (preenchido automaticamente para ligas conhecidas)"
                     className="bg-zinc-800 border-zinc-700 text-white mt-1"
                   />
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">ID da liga na api-football.com (opcional)</Label>
+                  <Input
+                    type="number"
+                    value={bannerTemplateForm.apiFootballLeagueId}
+                    onChange={(e) =>
+                      setBannerTemplateForm((p) => ({ ...p, apiFootballLeagueId: e.target.value }))
+                    }
+                    placeholder="Ex: 2 (Champions League)"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                  <p className="text-[11px] text-zinc-600 mt-1">
+                    Necessário para este modelo entrar na automação de banners —
+                    encontra-se na documentação da api-football.com.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
