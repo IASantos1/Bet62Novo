@@ -21584,16 +21584,20 @@ export default function Home({
                 {/* Jogos em Destaque — admin-scheduled banners (pages/admin.tsx
                     "featured-banners" tab). Status (Agendado/AO VIVO) is
                     derived client-side from kickoffAt/endsAt, not written by
-                    the admin — see the polling effect above. */}
+                    the admin — see the polling effect above. Below sm this
+                    is a horizontal-scroll carousel (one card + a peek of the
+                    next, swipe/snap) instead of stacking full-width cards —
+                    same overflow-x-auto + snap pattern as the casino/promo
+                    carousels above. sm+ reverts to the 2-column grid. */}
                 {featuredMatchBanners.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 sm:overflow-visible">
                     {featuredMatchBanners.map((banner) => {
                       const isLive = Date.now() >= new Date(banner.kickoffAt).getTime();
                       return (
                         <button
                           key={banner.id}
                           onClick={() => selectMainTab("sportsbook")}
-                          className="text-left transition-transform active:scale-[0.98]"
+                          className="w-[85%] shrink-0 snap-start text-left transition-transform active:scale-[0.98] sm:w-auto sm:shrink"
                         >
                           <CompetitionBanner
                             competitionName={banner.template?.competitionName ?? banner.competition}
