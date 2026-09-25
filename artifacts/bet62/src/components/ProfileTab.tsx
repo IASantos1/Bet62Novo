@@ -182,7 +182,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
     try {
       const r = await fetch("/api/profile", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nif: nif || undefined, withdrawalIban: cleanIban || undefined, withdrawalName: ibanName || undefined }),
       });
       if (r.ok) {
@@ -202,7 +202,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
     try {
       const r = await fetch("/api/profile/self-exclude", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period }),
       });
       if (r.ok) {
@@ -229,12 +229,10 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
     });
 
   const fetchKycProfile = async () => {
-    if (!auth.token) return;
+    if (!auth.user) return;
     setKycLoading(true);
     try {
-      const r = await fetch("/api/profile", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const r = await fetch("/api/profile");
       const d = await r.json().catch(() => null) as KycProfileData | null;
       if (!r.ok || !d) return;
       setKycProfile(d);
@@ -248,19 +246,19 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   };
 
   useEffect(() => {
-    if (!auth.token) return;
+    if (!auth.user) return;
     void fetchKycProfile();
-  }, [auth.token]);
+  }, [auth.user]);
 
   const saveKycMetadata = async () => {
-    if (!auth.token) { toast.error("Sessão inválida. Faça login novamente."); return; }
+    if (!auth.user) { toast.error("Sessão inválida. Faça login novamente."); return; }
     if (!/^\d{9}$/.test(nif)) { toast.error("NIF inválido. Deve ter 9 dígitos."); return; }
     if (!kycDocNumber.trim() || kycDocNumber.trim().length < 5) { toast.error("Número do documento inválido."); return; }
     setKycSavingMeta(true);
     try {
       const r = await fetch("/api/profile/kyc/submit", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documentType: kycDocType, documentNumber: kycDocNumber.trim(), nif }),
       });
       const d = await r.json().catch(() => ({})) as { error?: string };
@@ -276,7 +274,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   };
 
   const uploadKycFiles = async (kind: "id_front" | "id_back" | "passport" | "address", fileList: FileList) => {
-    if (!auth.token) { toast.error("Sessão inválida. Faça login novamente."); return; }
+    if (!auth.user) { toast.error("Sessão inválida. Faça login novamente."); return; }
     const file = Array.from(fileList)[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { toast.error("Arquivo muito grande. Máximo 5MB por arquivo."); return; }
@@ -291,7 +289,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
 
       const r = await fetch("/api/profile/kyc/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind, files: payloadFiles }),
       });
       const d = await r.json().catch(() => ({})) as { error?: string };

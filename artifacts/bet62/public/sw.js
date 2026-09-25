@@ -58,7 +58,12 @@ function isLiveApi(url) {
   // handles, not a silently-stale answer.
   return (
     url.pathname.startsWith(`${scopePath}api/matches/`) ||
-    url.pathname.startsWith(`${scopePath}api/bets/`)
+    url.pathname.startsWith(`${scopePath}api/bets/`) ||
+    // Session-lock migration (2026-09-25): a cached GET /api/auth/session
+    // response served offline could report ACTIVE when the server has
+    // since locked the session — the same "actively wrong once stale"
+    // reasoning above, just for session state instead of odds.
+    url.pathname.startsWith(`${scopePath}api/auth/`)
   );
 }
 

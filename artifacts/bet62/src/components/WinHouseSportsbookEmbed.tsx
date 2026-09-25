@@ -3,7 +3,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 
 type WinHouseSportsbookEmbedProps = {
   isDarkTheme: boolean;
-  authToken?: string | null;
+  isAuthenticated?: boolean;
 };
 
 // Fills the content area between BET62's header (h-16 = 4rem) and footer,
@@ -13,7 +13,7 @@ const EMBED_HEIGHT = "calc(100dvh - 4rem)";
 
 export default function WinHouseSportsbookEmbed({
   isDarkTheme,
-  authToken,
+  isAuthenticated,
 }: WinHouseSportsbookEmbedProps) {
   const containerId = useId().replace(/:/g, "");
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
@@ -40,13 +40,11 @@ export default function WinHouseSportsbookEmbed({
       setLoadState("loading");
 
       let launchToken = "";
-      if (authToken) {
+      if (isAuthenticated) {
         try {
-          const res = await fetch("/api/winhouse/launch", {
-            headers: {
-              Authorization: `Bearer ${authToken}`,
-            },
-          });
+          // No Authorization header needed — the bet62_session cookie
+          // authenticates this same-origin request automatically.
+          const res = await fetch("/api/winhouse/launch");
           const data = await res.json().catch(() => ({}));
           if (res.ok && typeof data?.launch === "string" && data.launch.trim()) {
             launchToken = data.launch.trim();
@@ -112,7 +110,7 @@ export default function WinHouseSportsbookEmbed({
       window.clearTimeout(resizeId);
       target.innerHTML = "";
     };
-  }, [authToken, containerId, embedKey, isDarkTheme, language]);
+  }, [isAuthenticated, containerId, embedKey, isDarkTheme, language]);
 
   return (
     <div className="relative bg-background" style={{ height: EMBED_HEIGHT, width: "100%" }}>

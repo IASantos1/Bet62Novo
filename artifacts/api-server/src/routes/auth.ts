@@ -1,12 +1,36 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
-import * as jwt from "jsonwebtoken";
 import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
+import { applyFreebetBalanceDelta } from "../lib/ledger.js";
 import { rateLimit } from "../middlewares/rateLimit.js";
+import { csrfProtection } from "../middlewares/csrf.js";
+import { authMiddleware, requireLockableSession, type AuthRequest } from "../middlewares/auth.js";
+import {
+  createSession,
+  evaluateSession,
+  findSessionByRefreshToken,
+  hashToken,
+  lockSession,
+  revokeAllUserSessions,
+  revokeSession,
+  rotateSession,
+  setSessionCookies,
+  clearSessionCookies,
+  touchSession,
+} from "../lib/sessions.js";
+import { logSecurityEvent } from "../lib/securityAudit.js";
+// Relative import — see sessions.ts's comment for why (tsc alias-resolution
+// quirk for newly-added schema exports).
+import { userPasskeysTable } from "../../../../lib/db/src/schema/userPasskeys.js";
 
 const router: IRouter = Router();
+
+async function userHasPasskey(userId: number): Promise<boolean> {
+  const [row] = await db.select({ id: userPasskeysTable.id }).from(userPasskeysTable).where(eq(userPasskeysTable.userId, userId)).limit(1);
+  return !!row;
+}
 
 const registerRateLimit = rateLimit({
   name: "auth-register",
@@ -21,12 +45,41 @@ const loginRateLimit = rateLimit({
   max: 10,
   message: "Muitas tentativas de login. Tente novamente mais tarde.",
 });
-const SESSION_SECRET = process.env.SESSION_SECRET;
-if (!SESSION_SECRET) {
-  throw new Error(
-    "[SECURITY] SESSION_SECRET environment variable is not set. " +
-      "Set SESSION_SECRET in your deployment configuration.",
-  );
+
+// A new brute-force surface: /session/unlock-password is a second way to
+// try a password against an account, distinct from /login — it needs its
+// own limiter or it would be an unlimited guessing endpoint.
+const unlockPasswordRateLimit = rateLimit({
+  name: "auth-unlock-password",
+  windowMs: 15 * 60_000,
+  max: 10,
+  message: "Muitas tentativas de desbloqueio. Tente novamente mais tarde.",
+});
+
+const refreshRateLimit = rateLimit({
+  name: "auth-refresh",
+  windowMs: 15 * 60_000,
+  max: 30,
+  message: "Muitos pedidos de renovação de sessão.",
+});
+
+// CSRF is scoped to this router only for this phase — see middlewares/csrf.ts.
+// Naturally exempts /login and /register since neither request carries a
+// bet62_session cookie yet.
+router.use(csrfProtection);
+
+function requestMeta(req: Request): { ip: string | null; userAgent: string | null } {
+  return { ip: req.ip ?? null, userAgent: req.headers["user-agent"] ?? null };
+}
+
+function publicUser(user: typeof usersTable.$inferSelect) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    balance: user.balance,
+    freebetBalance: user.freebetBalance,
+  };
 }
 
 export function validatePortugueseNif(nif: string): boolean {
@@ -98,18 +151,12 @@ router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
       freebetBalance: "0.00",
     }).returning();
 
-    const token = jwt.sign({ id: user.id, email: user.email }, SESSION_SECRET, { expiresIn: "7d" });
+    const meta = requestMeta(req);
+    const { sessionToken, refreshToken, session } = await createSession(user.id, meta);
+    setSessionCookies(res, { sessionToken, refreshToken });
+    await logSecurityEvent({ userId: user.id, event: "register", sessionId: session.id, ...meta });
 
-    res.status(201).json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        balance: user.balance,
-        freebetBalance: user.freebetBalance,
-      }
-    });
+    res.status(201).json({ user: publicUser(user) });
   } catch (err) {
     logger.error({ err }, "Registration error");
     res.status(500).json({ error: "Internal server error" });
@@ -125,6 +172,7 @@ router.post("/login", loginRateLimit, async (req, res): Promise<void> => {
     return;
   }
 
+  const meta = requestMeta(req);
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (!user) {
@@ -134,32 +182,191 @@ router.post("/login", loginRateLimit, async (req, res): Promise<void> => {
 
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
+      await logSecurityEvent({ userId: user.id, event: "login_failed", ...meta });
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email }, SESSION_SECRET, { expiresIn: "7d" });
+    const { sessionToken, refreshToken, session } = await createSession(user.id, meta);
+    setSessionCookies(res, { sessionToken, refreshToken });
+    await logSecurityEvent({ userId: user.id, event: "login_success", sessionId: session.id, ...meta });
 
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        balance: user.balance,
-        freebetBalance: user.freebetBalance,
-      }
-    });
+    res.json({ user: publicUser(user) });
   } catch (err) {
     logger.error({ err }, "Login error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
-import { type Response } from "express";
-import { sql } from "drizzle-orm";
-import { applyFreebetBalanceDelta } from "../lib/ledger.js";
+// Deliberately not authMiddleware-gated: a locked user still has to be
+// able to sign all the way out ("forget this device").
+router.post("/logout", requireLockableSession, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    await revokeSession(req.session!.id, "logout");
+    await logSecurityEvent({ userId: req.user!.id, event: "logout", sessionId: req.session!.id, ...requestMeta(req) });
+    clearSessionCookies(res);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Logout error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Status-check endpoint, not a protected resource — handles LOCKED/EXPIRED
+// itself instead of letting authMiddleware 401 them away. Always HTTP 200.
+router.get("/session", async (req: Request, res: Response): Promise<void> => {
+  const sessionToken = req.cookies?.bet62_session as string | undefined;
+  if (!sessionToken) {
+    res.json({ status: "EXPIRED" });
+    return;
+  }
+
+  try {
+    const evaluation = await evaluateSession(hashToken(sessionToken));
+    if (evaluation.status === "active") {
+      await touchSession(evaluation.session);
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, evaluation.session.userId)).limit(1);
+      if (!user) {
+        res.json({ status: "EXPIRED" });
+        return;
+      }
+      res.json({
+        status: "ACTIVE",
+        user: publicUser(user),
+        passkeyAvailable: await userHasPasskey(user.id),
+      });
+      return;
+    }
+    if (evaluation.status === "locked") {
+      const [user] = await db
+        .select({ email: usersTable.email })
+        .from(usersTable)
+        .where(eq(usersTable.id, evaluation.session.userId))
+        .limit(1);
+      // Deliberately minimal — no balance/name while locked, that would
+      // defeat the point of the lock screen.
+      res.json({
+        status: "LOCKED",
+        email: user?.email ?? null,
+        passkeyAvailable: await userHasPasskey(evaluation.session.userId),
+      });
+      return;
+    }
+    res.json({ status: "EXPIRED" });
+  } catch (err) {
+    logger.error({ err }, "Session check error");
+    res.json({ status: "EXPIRED" });
+  }
+});
+
+router.post("/session/lock", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    await lockSession(req.session!.id, "explicit");
+    await logSecurityEvent({ userId: req.user!.id, event: "session_locked", sessionId: req.session!.id, ...requestMeta(req) });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Session lock error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Real, server-verifying replacement for the old client-only unlock flow,
+// which discarded the /login response entirely and (worse) would have let
+// the caller pick which account to check the password against via a
+// client-supplied email. The account here comes only from the server-known
+// locked session — the request body is just { password }.
+router.post(
+  "/session/unlock-password",
+  unlockPasswordRateLimit,
+  requireLockableSession,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    const { password } = req.body as { password?: string };
+    if (!password) {
+      res.status(400).json({ error: "Missing password" });
+      return;
+    }
+
+    const meta = requestMeta(req);
+    try {
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
+      if (!user) {
+        res.status(401).json({ error: "Invalid session" });
+        return;
+      }
+
+      const isValid = await bcrypt.compare(password, user.passwordHash);
+      if (!isValid) {
+        await logSecurityEvent({ userId: user.id, event: "login_failed", sessionId: req.session!.id, ...meta, metadata: { via: "unlock_password" } });
+        res.status(401).json({ error: "Palavra-passe incorreta" });
+        return;
+      }
+
+      const { sessionToken, refreshToken, session } = await rotateSession(req.session!, "unlocked", meta);
+      setSessionCookies(res, { sessionToken, refreshToken });
+      await logSecurityEvent({ userId: user.id, event: "session_unlocked_password", sessionId: session.id, ...meta });
+
+      res.json({ status: "ACTIVE", user: publicUser(user) });
+    } catch (err) {
+      logger.error({ err }, "Unlock-password error");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+router.post("/refresh", refreshRateLimit, async (req: Request, res: Response): Promise<void> => {
+  const refreshToken = req.cookies?.bet62_refresh as string | undefined;
+  if (!refreshToken) {
+    res.status(401).json({ error: "REFRESH_INVALID" });
+    return;
+  }
+
+  const meta = requestMeta(req);
+  try {
+    const session = await findSessionByRefreshToken(refreshToken);
+    if (!session) {
+      res.status(401).json({ error: "REFRESH_INVALID" });
+      return;
+    }
+
+    if (session.status === "revoked") {
+      // A refresh token that was already consumed once (revokedReason
+      // "unlocked"/"refreshed") being presented again is the classic
+      // stolen-token-replay signal — kill every session this user has
+      // rather than trying to find just the one successor.
+      await logSecurityEvent({
+        userId: session.userId,
+        event: "refresh_reuse_detected",
+        sessionId: session.id,
+        ...meta,
+        metadata: { revokedReason: session.revokedReason },
+      });
+      await revokeAllUserSessions(session.userId, "refresh_reuse_detected");
+      clearSessionCookies(res);
+      res.status(401).json({ error: "REFRESH_INVALID" });
+      return;
+    }
+
+    if (!session.refreshExpiresAt || session.refreshExpiresAt.getTime() <= Date.now()) {
+      res.status(401).json({ error: "REFRESH_EXPIRED" });
+      return;
+    }
+
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, session.userId)).limit(1);
+    if (!user) {
+      res.status(401).json({ error: "REFRESH_INVALID" });
+      return;
+    }
+
+    const rotated = await rotateSession(session, "refreshed", meta);
+    setSessionCookies(res, { sessionToken: rotated.sessionToken, refreshToken: rotated.refreshToken });
+    await logSecurityEvent({ userId: user.id, event: "refresh_rotated", sessionId: rotated.session.id, ...meta });
+
+    res.json({ status: "ACTIVE", user: publicUser(user) });
+  } catch (err) {
+    logger.error({ err }, "Refresh error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // ─── WEEKLY CASHBACK CHECK ───────────────────────────────────────────────────
 router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
