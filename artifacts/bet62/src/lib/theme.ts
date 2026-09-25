@@ -4,11 +4,6 @@ export type ResolvedTheme = ThemePreference;
 const THEME_STORAGE_KEY = "bet62_theme_preference";
 const THEME_EVENT_NAME = "bet62-theme-change";
 
-function getAutoTheme(): ResolvedTheme {
-  const hour = new Date().getHours();
-  return hour >= 8 && hour < 19 ? "light" : "dark";
-}
-
 export function getStoredThemePreference(): ThemePreference | null {
   if (typeof window === "undefined") return null;
   try {
@@ -26,8 +21,13 @@ export function clearStoredThemePreference() {
   } catch {}
 }
 
-export function getResolvedTheme(preference: ThemePreference | null = getStoredThemePreference()): ResolvedTheme {
-  return preference ?? getAutoTheme();
+// Always dark now (Santos, 2026-09-25) — the WinHouse Sportsbook iframe has
+// its own fixed dark background we can't restyle to follow a light/dark
+// toggle, so switching BET62's own chrome to light for part of the day made
+// every page around it look broken instead. No auto day/night switch, no
+// stored per-user override: the whole site is dark, permanently.
+export function getResolvedTheme(_preference: ThemePreference | null = getStoredThemePreference()): ResolvedTheme {
+  return "dark";
 }
 
 function broadcastThemeChange(preference: ThemePreference | null, resolved: ResolvedTheme) {

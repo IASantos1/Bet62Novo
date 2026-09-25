@@ -59,6 +59,7 @@ import {
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
 import WinHouseSportsbookEmbed from "@/components/WinHouseSportsbookEmbed";
+import SportsbookPromoBanner from "@/components/SportsbookPromoBanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -4234,6 +4235,19 @@ export default function Home({
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+  useEffect(() => {
+    // Belt-and-suspenders alongside use-idle's own window blur/focus
+    // tracking: mobile browsers don't reliably fire blur on the parent
+    // window when focus moves into a cross-origin iframe the way desktop
+    // browsers do, so relying on that alone still let the idle lock fire
+    // mid-bet on phones (Santos, 2026-09-25). While the WinHouse Sportsbook
+    // tab is open, just unconditionally keep the timer reset — there's
+    // nothing else to be "idle" from on this tab anyway.
+    if (!isFullScreenSportsbook) return;
+    resetIdle();
+    const id = setInterval(resetIdle, 10_000);
+    return () => clearInterval(id);
+  }, [isFullScreenSportsbook, resetIdle]);
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
@@ -21704,10 +21718,15 @@ export default function Home({
 
             {!expandedMatch &&
               (activeTab === "sportsbook" || activeTab === "sports") && (
-                <WinHouseSportsbookEmbed
-                  isDarkTheme={isDarkTheme}
-                  authToken={auth.token}
-                />
+                <>
+                  <div className="p-4 pb-0 lg:p-8 lg:pb-0">
+                    <SportsbookPromoBanner />
+                  </div>
+                  <WinHouseSportsbookEmbed
+                    isDarkTheme={isDarkTheme}
+                    authToken={auth.token}
+                  />
+                </>
               )}
 
             {!expandedMatch && activeTab === "casino" && (() => {

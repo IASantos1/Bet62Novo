@@ -101,7 +101,7 @@ export default function WinHouseSportsbookEmbed({
   }, [authToken, containerId, embedKey, isDarkTheme, language]);
 
   return (
-    <div className="relative bg-black" style={{ height: EMBED_HEIGHT, width: "100%" }}>
+    <div className="relative bg-background" style={{ height: EMBED_HEIGHT, width: "100%" }}>
       {loadState !== "ready" && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm">
           <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/90 px-4 py-3 text-sm text-zinc-300 shadow-xl shadow-black/40">
