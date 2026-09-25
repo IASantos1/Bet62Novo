@@ -520,6 +520,14 @@ type CasinoBanner = {
   position: "top" | "middle";
   games: CasinoGame[];
 };
+type FeaturedMatchBanner = {
+  id: number;
+  homeTeam: string;
+  awayTeam: string;
+  competition: string | null;
+  kickoffAt: string;
+  endsAt: string;
+};
 type LiveTransport = "idle" | "cache" | "ws" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -4380,6 +4388,7 @@ export default function Home({
   const [casinoPopularLoading, setCasinoPopularLoading] = useState(false);
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
+  const [featuredMatchBanners, setFeaturedMatchBanners] = useState<FeaturedMatchBanner[]>([]);
   const casinoCarouselRef = useRef<HTMLDivElement>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -8414,6 +8423,26 @@ export default function Home({
         if (Array.isArray(data?.banners)) setCasinoMiddleBanners(data.banners);
       })
       .catch(() => {});
+  }, [activeTab]);
+
+  // Jogos em Destaque (admin-scheduled banners on the Destaques tab) — each
+  // banner's scheduled/ao vivo status is derived purely from comparing the
+  // current time against kickoffAt/endsAt, so a 30s poll (rather than a
+  // one-time fetch) is what makes a banner flip to "AO VIVO" at kickoff and
+  // drop off the page once the game ends, with nothing manual required.
+  useEffect(() => {
+    if (activeTab !== "home") return;
+    const load = () => {
+      fetch("/api/featured-banners")
+        .then((r) => r.json())
+        .then((data) => {
+          if (Array.isArray(data?.banners)) setFeaturedMatchBanners(data.banners);
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = window.setInterval(load, 30_000);
+    return () => window.clearInterval(id);
   }, [activeTab]);
 
   // "Destaques" (home) tab — small real-games preview, fetched once per tab
@@ -21610,6 +21639,63 @@ export default function Home({
                     </button>
                   )}
                 </div>
+
+                {/* Jogos em Destaque — admin-scheduled banners (pages/admin.tsx
+                    "featured-banners" tab). Status (Agendado/AO VIVO) is
+                    derived client-side from kickoffAt/endsAt, not written by
+                    the admin — see the polling effect above. */}
+                {featuredMatchBanners.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {featuredMatchBanners.map((banner) => {
+                      const isLive = Date.now() >= new Date(banner.kickoffAt).getTime();
+                      return (
+                        <div
+                          key={banner.id}
+                          className="rounded-xl border p-4 flex items-center justify-between gap-3"
+                          style={{
+                            borderColor: isLive ? "rgba(220,38,38,0.5)" : "var(--b62-glass-border)",
+                            background: isLive
+                              ? "linear-gradient(115deg, rgba(220,38,38,0.16), rgba(9,9,11,0.94))"
+                              : "rgba(24,24,27,0.6)",
+                          }}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              {isLive ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white animate-pulse">
+                                  AO VIVO
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                  {new Date(banner.kickoffAt).toLocaleString("pt-PT", {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              )}
+                              {banner.competition && (
+                                <span className="text-[11px] text-zinc-500 truncate">
+                                  {banner.competition}
+                                </span>
+                              )}
+                            </div>
+                            <div className="font-bold text-white truncate">
+                              {banner.homeTeam} <span className="text-zinc-500">vs</span> {banner.awayTeam}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => selectMainTab("sportsbook")}
+                            className="b62-gradient-cta text-white text-sm font-bold px-4 py-2 rounded-lg shrink-0 transition-transform active:scale-[0.98]"
+                          >
+                            Apostar
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Full banner images (text already baked into the artwork) —
                     side by side (3-up) on the web. Inside an installed PWA

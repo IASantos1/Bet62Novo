@@ -12,6 +12,14 @@ import {
   ledgerEntriesTable,
   casinoBannersTable,
 } from "@workspace/db/schema";
+// Imported by relative path, not the "@workspace/db/schema" alias above —
+// tsc's alias-based module resolution here doesn't pick up newly-added
+// schema exports within a single typecheck run (reproducible even for a
+// trivial new export added to an already-resolved schema file); a direct
+// relative import always sees current exports. Not worth chasing further —
+// it's a tsc/tsconfig-paths quirk, not a runtime issue (Node resolves the
+// real symlinked package fine either way).
+import { featuredMatchBannersTable } from "../../../../lib/db/src/schema/featuredMatchBanners.js";
 import { eq, desc, count, sum, sql, gte, lte, and, ilike, asc, like, inArray } from "drizzle-orm";
 import {
   adminMiddleware,
@@ -2402,6 +2410,137 @@ router.delete("/casino/banners/:id", adminMiddleware, async (req: AdminRequest, 
   } catch (err) {
     logger.error({ err, id }, "DELETE /api/admin/casino/banners/:id error");
     res.status(500).json({ error: "Erro ao apagar banner" });
+  }
+});
+
+// ── Featured match banners (Destaques scheduling) ────────────────────────────
+// Admin CRUD for the "jogo em destaque" schedule shown on the Destaques/home
+// page (routes/featuredBanners.ts GET / serves the public read side). Each
+// banner is a manually-entered fixture (BET62 has no live-match feed of its
+// own anymore) that becomes publicly visible between kickoffAt and endsAt;
+// the frontend derives "scheduled" vs "ao vivo" purely from comparing
+// Date.now() against those two timestamps, so there's nothing to flip here
+// at kickoff time.
+const DEFAULT_FEATURED_BANNER_DURATION_MS = 3 * 60 * 60 * 1000;
+
+router.get("/featured-banners", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const banners = await db
+      .select()
+      .from(featuredMatchBannersTable)
+      .orderBy(asc(featuredMatchBannersTable.kickoffAt), desc(featuredMatchBannersTable.id));
+    res.json({ banners });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/featured-banners error");
+    res.status(500).json({ error: "Erro ao listar banners de destaque" });
+  }
+});
+
+router.post("/featured-banners", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const homeTeam = String(body["homeTeam"] ?? "").trim();
+    const awayTeam = String(body["awayTeam"] ?? "").trim();
+    const kickoffAt = new Date(String(body["kickoffAt"] ?? ""));
+    if (!homeTeam || !awayTeam || Number.isNaN(kickoffAt.getTime())) {
+      res.status(400).json({ error: "homeTeam, awayTeam e kickoffAt são obrigatórios." });
+      return;
+    }
+    const endsAt = body["endsAt"]
+      ? new Date(String(body["endsAt"]))
+      : new Date(kickoffAt.getTime() + DEFAULT_FEATURED_BANNER_DURATION_MS);
+    if (Number.isNaN(endsAt.getTime()) || endsAt <= kickoffAt) {
+      res.status(400).json({ error: "endsAt inválido (deve ser depois de kickoffAt)." });
+      return;
+    }
+
+    const [created] = await db
+      .insert(featuredMatchBannersTable)
+      .values({
+        homeTeam,
+        awayTeam,
+        competition: body["competition"] ? String(body["competition"]).trim() : null,
+        kickoffAt,
+        endsAt,
+        isActive: body["isActive"] === undefined ? true : Boolean(body["isActive"]),
+        sortOrder: Number.isFinite(Number(body["sortOrder"])) ? Number(body["sortOrder"]) : 0,
+      })
+      .returning();
+    res.status(201).json(created);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/featured-banners error");
+    res.status(500).json({ error: "Erro ao criar banner de destaque" });
+  }
+});
+
+router.patch("/featured-banners/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Id inválido" });
+    return;
+  }
+  try {
+    const body = req.body as Record<string, unknown>;
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (body["homeTeam"] !== undefined) update["homeTeam"] = String(body["homeTeam"]).trim();
+    if (body["awayTeam"] !== undefined) update["awayTeam"] = String(body["awayTeam"]).trim();
+    if (body["competition"] !== undefined) {
+      update["competition"] = body["competition"] ? String(body["competition"]).trim() : null;
+    }
+    if (body["kickoffAt"] !== undefined) {
+      const kickoffAt = new Date(String(body["kickoffAt"]));
+      if (Number.isNaN(kickoffAt.getTime())) {
+        res.status(400).json({ error: "kickoffAt inválido" });
+        return;
+      }
+      update["kickoffAt"] = kickoffAt;
+    }
+    if (body["endsAt"] !== undefined) {
+      const endsAt = new Date(String(body["endsAt"]));
+      if (Number.isNaN(endsAt.getTime())) {
+        res.status(400).json({ error: "endsAt inválido" });
+        return;
+      }
+      update["endsAt"] = endsAt;
+    }
+    if (body["isActive"] !== undefined) update["isActive"] = Boolean(body["isActive"]);
+    if (body["sortOrder"] !== undefined) update["sortOrder"] = Number(body["sortOrder"]) || 0;
+
+    const [updated] = await db
+      .update(featuredMatchBannersTable)
+      .set(update)
+      .where(eq(featuredMatchBannersTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Banner de destaque não encontrado" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    logger.error({ err, id }, "PATCH /api/admin/featured-banners/:id error");
+    res.status(500).json({ error: "Erro ao atualizar banner de destaque" });
+  }
+});
+
+router.delete("/featured-banners/:id", adminMiddleware, async (req: AdminRequest, res) => {
+  const id = Number(req.params["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Id inválido" });
+    return;
+  }
+  try {
+    const [deleted] = await db
+      .delete(featuredMatchBannersTable)
+      .where(eq(featuredMatchBannersTable.id, id))
+      .returning({ id: featuredMatchBannersTable.id });
+    if (!deleted) {
+      res.status(404).json({ error: "Banner de destaque não encontrado" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, id }, "DELETE /api/admin/featured-banners/:id error");
+    res.status(500).json({ error: "Erro ao apagar banner de destaque" });
   }
 });
 

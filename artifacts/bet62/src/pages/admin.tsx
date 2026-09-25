@@ -240,6 +240,19 @@ type AdminCasinoBanner = {
   updatedAt: string;
 };
 
+type FeaturedMatchBanner = {
+  id: number;
+  homeTeam: string;
+  awayTeam: string;
+  competition: string | null;
+  kickoffAt: string;
+  endsAt: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type UserDetail = {
   user: AdminUser;
   bets: AdminBet[];
@@ -792,6 +805,7 @@ type TabId =
   | "events"
   | "settlement-logs"
   | "casino"
+  | "featured-banners"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -1490,6 +1504,124 @@ export default function AdminPage() {
       refetchCasinoBanners();
     } catch {
       toast.error("Erro ao apagar banner");
+    }
+  };
+
+  // ── Featured match banners (Destaques scheduling) ──
+  const featuredBannersQuery = useQuery({
+    queryKey: ["admin", "featured-banners"],
+    queryFn: async (): Promise<{ banners: FeaturedMatchBanner[] }> => {
+      const res = await fetch("/api/admin/featured-banners", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load featured banners");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "featured-banners",
+  });
+  const featuredBanners = featuredBannersQuery.data?.banners ?? [];
+  const featuredBannersLoading = featuredBannersQuery.isLoading;
+  const refetchFeaturedBanners = featuredBannersQuery.refetch;
+
+  const [featuredBannerModal, setFeaturedBannerModal] = useState<
+    "new" | FeaturedMatchBanner | null
+  >(null);
+  const [featuredBannerForm, setFeaturedBannerForm] = useState({
+    homeTeam: "",
+    awayTeam: "",
+    competition: "",
+    kickoffAt: "",
+    durationHours: "3",
+    isActive: true,
+    sortOrder: 0,
+  });
+  const [featuredBannerSaving, setFeaturedBannerSaving] = useState(false);
+
+  const toLocalDatetimeInputValue = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const openFeaturedBannerModal = (banner: "new" | FeaturedMatchBanner) => {
+    if (banner === "new") {
+      setFeaturedBannerForm({
+        homeTeam: "",
+        awayTeam: "",
+        competition: "",
+        kickoffAt: "",
+        durationHours: "3",
+        isActive: true,
+        sortOrder: 0,
+      });
+    } else {
+      const durationHours =
+        (new Date(banner.endsAt).getTime() - new Date(banner.kickoffAt).getTime()) /
+        (60 * 60 * 1000);
+      setFeaturedBannerForm({
+        homeTeam: banner.homeTeam,
+        awayTeam: banner.awayTeam,
+        competition: banner.competition ?? "",
+        kickoffAt: toLocalDatetimeInputValue(banner.kickoffAt),
+        durationHours: String(Math.max(0.5, Math.round(durationHours * 100) / 100)),
+        isActive: banner.isActive,
+        sortOrder: banner.sortOrder,
+      });
+    }
+    setFeaturedBannerModal(banner);
+  };
+
+  const saveFeaturedBanner = async () => {
+    const homeTeam = featuredBannerForm.homeTeam.trim();
+    const awayTeam = featuredBannerForm.awayTeam.trim();
+    const kickoffAt = featuredBannerForm.kickoffAt
+      ? new Date(featuredBannerForm.kickoffAt)
+      : null;
+    const durationHours = Number(featuredBannerForm.durationHours) || 3;
+    if (!homeTeam || !awayTeam || !kickoffAt || Number.isNaN(kickoffAt.getTime())) {
+      toast.error("Equipa da casa, visitante e horário do jogo são obrigatórios");
+      return;
+    }
+    const endsAt = new Date(kickoffAt.getTime() + durationHours * 60 * 60 * 1000);
+    setFeaturedBannerSaving(true);
+    try {
+      const isNew = featuredBannerModal === "new";
+      const url = isNew
+        ? "/api/admin/featured-banners"
+        : `/api/admin/featured-banners/${(featuredBannerModal as FeaturedMatchBanner).id}`;
+      const res = await fetch(url, {
+        method: isNew ? "POST" : "PATCH",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          homeTeam,
+          awayTeam,
+          competition: featuredBannerForm.competition.trim() || null,
+          kickoffAt: kickoffAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          isActive: featuredBannerForm.isActive,
+          sortOrder: featuredBannerForm.sortOrder,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(isNew ? "Jogo em destaque criado" : "Jogo em destaque atualizado");
+      setFeaturedBannerModal(null);
+      refetchFeaturedBanners();
+    } catch {
+      toast.error("Erro ao guardar jogo em destaque");
+    } finally {
+      setFeaturedBannerSaving(false);
+    }
+  };
+
+  const deleteFeaturedBanner = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/featured-banners/${id}`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Jogo em destaque apagado");
+      refetchFeaturedBanners();
+    } catch {
+      toast.error("Erro ao apagar jogo em destaque");
     }
   };
 
@@ -2449,13 +2581,6 @@ export default function AdminPage() {
       section: "core",
     },
     {
-      id: "bets",
-      icon: <ListChecks size={18} />,
-      label: "Apostas",
-      badge: stats?.bets.pending || null,
-      section: "core",
-    },
-    {
       id: "payments",
       icon: <CreditCard size={18} />,
       label: "Depósitos",
@@ -2469,12 +2594,6 @@ export default function AdminPage() {
       section: "core",
     },
     {
-      id: "risk",
-      icon: <ShieldAlert size={18} />,
-      label: "Risco",
-      section: "pro",
-    },
-    {
       id: "ai-agents",
       icon: <Cpu size={18} />,
       label: "IA Operações",
@@ -2486,17 +2605,16 @@ export default function AdminPage() {
       label: "Analytics",
       section: "pro",
     },
-    { id: "events", icon: <Zap size={18} />, label: "Eventos", section: "pro" },
-    {
-      id: "settlement-logs",
-      icon: <ScrollText size={18} />,
-      label: "Liquidações",
-      section: "pro",
-    },
     {
       id: "casino",
       icon: <Dices size={18} />,
       label: "Cassino",
+      section: "pro",
+    },
+    {
+      id: "featured-banners",
+      icon: <Sparkles size={18} />,
+      label: "Destaques",
       section: "pro",
     },
     {
@@ -2519,6 +2637,7 @@ export default function AdminPage() {
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
+    "featured-banners": "Jogos em Destaque",
     settings: "Configurações",
   };
 
@@ -2679,12 +2798,6 @@ export default function AdminPage() {
               label: "Início",
             },
             { id: "users" as TabId, icon: <Users size={20} />, label: "Users" },
-            {
-              id: "bets" as TabId,
-              icon: <ListChecks size={20} />,
-              label: "Apostas",
-              badge: stats?.bets.pending,
-            },
             {
               id: "payments" as TabId,
               icon: <CreditCard size={20} />,
@@ -6022,6 +6135,116 @@ export default function AdminPage() {
               </motion.div>
             )}
 
+            {/* ── JOGOS EM DESTAQUE ── */}
+            {activeTab === "featured-banners" && (
+              <motion.div
+                key="featured-banners"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Jogos em Destaque</h2>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      Programa os jogos que aparecem na página de Destaques. Cada
+                      banner fica visível automaticamente entre o horário do jogo
+                      e o fim (por defeito 3h depois) — sem precisar de mais
+                      nenhuma ação.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => openFeaturedBannerModal("new")}
+                    className="bg-red-600 hover:bg-red-700 text-white gap-2"
+                  >
+                    <PlusCircle size={16} /> Novo Jogo
+                  </Button>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800">
+                  {featuredBannersLoading ? (
+                    <div className="p-8 flex justify-center">
+                      <Loader2 className="animate-spin text-zinc-500" size={24} />
+                    </div>
+                  ) : featuredBanners.length === 0 ? (
+                    <div className="p-8 text-center text-zinc-500 text-sm">
+                      Ainda não há jogos em destaque programados.
+                    </div>
+                  ) : (
+                    featuredBanners.map((banner) => {
+                      const now = Date.now();
+                      const kickoff = new Date(banner.kickoffAt).getTime();
+                      const ends = new Date(banner.endsAt).getTime();
+                      const status =
+                        now < kickoff
+                          ? "scheduled"
+                          : now < ends
+                            ? "live"
+                            : "ended";
+                      return (
+                        <div
+                          key={banner.id}
+                          className="p-4 flex items-center justify-between gap-4"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-white truncate">
+                                {banner.homeTeam} vs {banner.awayTeam}
+                              </span>
+                              {status === "live" && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white animate-pulse">
+                                  AO VIVO
+                                </span>
+                              )}
+                              {status === "scheduled" && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                  Agendado
+                                </span>
+                              )}
+                              {status === "ended" && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-600 border border-zinc-700">
+                                  Terminado
+                                </span>
+                              )}
+                              {!banner.isActive && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-600 border border-zinc-700">
+                                  Inativo
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-zinc-500 mt-1">
+                              {banner.competition ? `${banner.competition} · ` : ""}
+                              {new Date(banner.kickoffAt).toLocaleString("pt-PT", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => openFeaturedBannerModal(banner)}
+                              className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                            >
+                              <FileText size={15} />
+                            </button>
+                            <button
+                              onClick={() => deleteFeaturedBanner(banner.id)}
+                              className="p-2 rounded-lg bg-zinc-800 hover:bg-red-900/40 text-zinc-300 hover:text-red-400"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </motion.div>
+            )}
+
             {/* ── CONFIGURAÇÕES ── */}
             {activeTab === "settings" && (
               <motion.div
@@ -7922,6 +8145,145 @@ export default function AdminPage() {
                   ) : null}
                   Guardar Banner
                 </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL: Jogo em Destaque (criar/editar) ── */}
+      <AnimatePresence>
+        {featuredBannerModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setFeaturedBannerModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95 }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-white">
+                  {featuredBannerModal === "new" ? "Novo Jogo em Destaque" : "Editar Jogo em Destaque"}
+                </h2>
+                <button
+                  onClick={() => setFeaturedBannerModal(null)}
+                  className="text-zinc-500 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-zinc-400">Equipa da Casa</Label>
+                    <Input
+                      value={featuredBannerForm.homeTeam}
+                      onChange={(e) =>
+                        setFeaturedBannerForm((p) => ({ ...p, homeTeam: e.target.value }))
+                      }
+                      placeholder="Ex: Real Madrid"
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Equipa Visitante</Label>
+                    <Input
+                      value={featuredBannerForm.awayTeam}
+                      onChange={(e) =>
+                        setFeaturedBannerForm((p) => ({ ...p, awayTeam: e.target.value }))
+                      }
+                      placeholder="Ex: Barcelona"
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-400">Competição (opcional)</Label>
+                  <Input
+                    value={featuredBannerForm.competition}
+                    onChange={(e) =>
+                      setFeaturedBannerForm((p) => ({ ...p, competition: e.target.value }))
+                    }
+                    placeholder="Ex: Liga dos Campeões"
+                    className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-zinc-400">Horário do Jogo</Label>
+                    <Input
+                      type="datetime-local"
+                      value={featuredBannerForm.kickoffAt}
+                      onChange={(e) =>
+                        setFeaturedBannerForm((p) => ({ ...p, kickoffAt: e.target.value }))
+                      }
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-zinc-400">Duração (horas)</Label>
+                    <Input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={featuredBannerForm.durationHours}
+                      onChange={(e) =>
+                        setFeaturedBannerForm((p) => ({ ...p, durationHours: e.target.value }))
+                      }
+                      className="bg-zinc-800 border-zinc-700 text-white mt-1"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-zinc-600">
+                  O banner aparece em "Ao Vivo" automaticamente a partir do
+                  horário do jogo e desaparece quando a duração acabar.
+                </p>
+
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-zinc-400">Estado</Label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFeaturedBannerForm((p) => ({ ...p, isActive: !p.isActive }))
+                    }
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${featuredBannerForm.isActive ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                  >
+                    {featuredBannerForm.isActive ? "Ativo" : "Inativo"}
+                  </button>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setFeaturedBannerModal(null)}
+                    className="border-zinc-700 text-zinc-300"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={saveFeaturedBanner}
+                    disabled={featuredBannerSaving}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {featuredBannerSaving ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : featuredBannerModal === "new" ? (
+                      "Criar"
+                    ) : (
+                      "Guardar"
+                    )}
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
