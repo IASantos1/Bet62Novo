@@ -11,6 +11,7 @@ import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
 import casinoRouter from "./casino.js";
 import winhouseRouter from "./winhouse.js";
+import featuredBannersRouter from "./featuredBanners.js";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/casino", casinoRouter);
 router.use("/winhouse", winhouseRouter);
+router.use("/featured-banners", featuredBannersRouter);
 
 export default router;
