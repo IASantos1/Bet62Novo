@@ -8381,29 +8381,37 @@ export default function Home({
 
   // "Destaques" (home) tab — small real-games preview, fetched once per tab
   // open. Fully separate from the casino tab's own casinoGames.
-  // Curated by real title search (not a generic /limit=N fetch) — these are
-  // the specific games requested for this section; each title is searched
-  // individually and only real matches from the catalog are shown, no
-  // fabricated entries.
+  // Composition: 3 newest games + 1 roulette + 1 "ao vivo" game-show title —
+  // same query params the full Casino tab grid uses (see casinoGridParams
+  // below), just 3 small parallel requests instead of one big page. Roulette/
+  // "ao vivo" may come back empty (name-keyword matching, not a real DB
+  // category — see routes/casino.ts) — the row just shows fewer cards then,
+  // no placeholder/error for a missing slot. Deduped by id in case a
+  // roulette/live pick is also among the newest games.
   useEffect(() => {
     if (activeTab !== "home") return;
     if (homeCasinoPreview.length > 0) return;
     setHomeCasinoPreviewLoading(true);
-    const titles = [
-      "Fortune Tiger",
-      "Aviator",
-      "Gates of Olympus",
-      "Sweet Bonanza",
-      "Big Bass Bonanza",
-      "Starlight Princess",
-    ];
-    // One batched request for all 6 titles (was 6 sequential
-    // `search=<title>&limit=1` round trips).
-    fetch(`/api/casino/games?titles=${encodeURIComponent(titles.join(","))}&limit=30`)
-      .then((r) => r.json())
-      .then((data) => {
-        const pool: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
-        setHomeCasinoPreview(pickFirstMatchPerTitle(pool, titles));
+    Promise.all([
+      fetch(`/api/casino/games?sort=new&limit=3`).then((r) => r.json()),
+      fetch(`/api/casino/games?category=roulette&limit=1`).then((r) => r.json()),
+      fetch(`/api/casino/games?category=${encodeURIComponent("Ao Vivo")}&limit=1`).then((r) =>
+        r.json(),
+      ),
+    ])
+      .then(([newest, roulette, live]) => {
+        const seen = new Set<string>();
+        const combined: CasinoGame[] = [];
+        for (const data of [newest, roulette, live]) {
+          const games: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
+          for (const game of games) {
+            const key = `${game.source ?? "silentapi"}-${game.provider}-${game.id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            combined.push(game);
+          }
+        }
+        setHomeCasinoPreview(combined);
       })
       .catch(() => {})
       .finally(() => setHomeCasinoPreviewLoading(false));
@@ -21539,67 +21547,23 @@ export default function Home({
                 card), per the reference design. */}
             {!expandedMatch && activeTab === "home" && (
               <div className="space-y-6 max-w-[1100px] mx-auto">
-                <div
-                  className="relative rounded-2xl overflow-hidden border p-6 sm:p-8"
-                  style={{
-                    borderColor: "var(--b62-glass-border)",
-                    backgroundImage:
-                      "linear-gradient(115deg, rgba(220,38,38,0.22), rgba(139,92,246,0.16)), linear-gradient(115deg, rgba(24,4,4,0.88), rgba(9,9,11,0.94)), url(https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop)",
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                >
-                  <p className="text-red-400 text-xs font-bold uppercase tracking-wider mb-2">
-                    Free Bet · 1.º Depósito
-                  </p>
-                  <div className="b62-font-display text-4xl sm:text-5xl font-extrabold text-white leading-none">
-                    Deposite €10
-                  </div>
-                  <div className="b62-font-display text-xl sm:text-2xl font-bold text-white mt-1 mb-5">
-                    Ganhe <span className="text-red-500">€5</span> em Free Bets
-                  </div>
-                  {auth.user ? (
-                    <button
-                      onClick={() => {
-                        setDepositModalOpen(true);
-                        setActiveTab("wallet");
-                      }}
-                      className="b62-gradient-cta text-white font-bold px-6 py-3 rounded-lg transition-transform active:scale-[0.98]"
-                      style={{ boxShadow: "0 8px 20px rgba(220,38,38,0.35)" }}
-                    >
-                      Depositar Agora
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        setAuthMode("register");
-                        setAuthModalOpen(true);
-                      }}
-                      className="b62-gradient-cta text-white font-bold px-6 py-3 rounded-lg transition-transform active:scale-[0.98]"
-                      style={{ boxShadow: "0 8px 20px rgba(220,38,38,0.35)" }}
-                    >
-                      Registre-se Agora
-                    </button>
-                  )}
-                </div>
-
                 {/* Jogos em Destaque — admin-scheduled banners (pages/admin.tsx
                     "featured-banners" tab). Status (Agendado/AO VIVO) is
                     derived client-side from kickoffAt/endsAt, not written by
-                    the admin — see the polling effect above. Below sm this
-                    is a horizontal-scroll carousel (one card + a peek of the
-                    next, swipe/snap) instead of stacking full-width cards —
-                    same overflow-x-auto + snap pattern as the casino/promo
-                    carousels above. sm+ reverts to the 2-column grid. */}
+                    the admin — see the polling effect above. Horizontal-scroll
+                    carousel at every breakpoint: one card + a peek of the next
+                    below sm, ~3 cards visible (still scrollable for more) at
+                    sm+ — same overflow-x-auto + snap pattern as the other
+                    carousels on this tab. */}
                 {featuredMatchBanners.length > 0 && (
-                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 sm:overflow-visible">
+                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
                     {featuredMatchBanners.map((banner) => {
                       const isLive = Date.now() >= new Date(banner.kickoffAt).getTime();
                       return (
                         <button
                           key={banner.id}
                           onClick={() => selectMainTab("sportsbook")}
-                          className="w-[85%] shrink-0 snap-start text-left transition-transform active:scale-[0.98] sm:w-auto sm:shrink"
+                          className="w-[85%] shrink-0 snap-start text-left transition-transform active:scale-[0.98] sm:w-[calc(33.33%-0.5rem)]"
                         >
                           <CompetitionBanner
                             competitionName={banner.template?.competitionName ?? banner.competition}
@@ -21619,6 +21583,77 @@ export default function Home({
                     })}
                   </div>
                 )}
+
+                {/* Casino em Destaque — small real-games carousel (state/effect
+                    above: 3 newest + 1 roulette + 1 "ao vivo" game-show title,
+                    same /api/casino/games query params as the full Casino tab
+                    grid). Horizontal scroll like the other carousels here,
+                    cards a bit larger than the old static grid for visibility. */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Dices size={16} className="text-violet-400" />
+                    <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide">
+                      Casino em Destaque
+                    </h2>
+                    <button
+                      onClick={() => selectMainTab("casino")}
+                      className="ml-auto text-violet-400 text-xs font-bold flex items-center gap-0.5 hover:text-violet-300"
+                    >
+                      Ver todos <ChevronRight size={13} />
+                    </button>
+                  </div>
+                  <div
+                    className={
+                      homeCasinoPreview.length === 0 && !homeCasinoPreviewLoading
+                        ? ""
+                        : "flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth"
+                    }
+                  >
+                    {homeCasinoPreviewLoading && homeCasinoPreview.length === 0
+                      ? Array.from({ length: 5 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="w-32 sm:w-40 shrink-0 aspect-[3/4] rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
+                          />
+                        ))
+                      : homeCasinoPreview.length === 0
+                        ? (
+                          <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
+                            Sem jogos disponíveis neste momento.
+                          </div>
+                        )
+                        : homeCasinoPreview.map((game) => (
+                          <button
+                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
+                            disabled={casinoLoadingGame === game.id}
+                            onClick={() => launchCasinoGame(game)}
+                            title={game.name}
+                            aria-label={game.name}
+                            className="w-32 sm:w-40 shrink-0 snap-start aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
+                          >
+                            {casinoLoadingGame === game.id ? (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <RefreshCw className="animate-spin text-zinc-400" size={22} />
+                              </div>
+                            ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
+                              <img
+                                src={game.img}
+                                alt={game.name}
+                                className="absolute inset-0 w-full h-full object-fill"
+                                loading="lazy"
+                                onError={() => {
+                                  setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
+                                }}
+                              />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <Dices className="text-red-600" size={22} />
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                  </div>
+                </div>
 
                 {/* Full banner images (text already baked into the artwork) —
                     side by side (3-up) on the web. Inside an installed PWA
@@ -21661,63 +21696,40 @@ export default function Home({
                   </button>
                 </div>
 
+                {/* Promoções — compact teaser carousel, last section (right
+                    above the footer). Sourced from the same PROMO_CONTENT
+                    shared with the full Promoções tab (PromosPage) — the old
+                    big "Deposite €10" hero above is gone; that same promotion
+                    (id "freebets10") now just lives here as one of the cards,
+                    much shorter. Every card opens the full Promoções tab. */}
                 <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Dices size={16} className="text-violet-400" />
-                    <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide">
-                      Casino em Destaque
-                    </h2>
-                    <button
-                      onClick={() => selectMainTab("casino")}
-                      className="ml-auto text-violet-400 text-xs font-bold flex items-center gap-0.5 hover:text-violet-300"
-                    >
-                      Ver todos <ChevronRight size={13} />
-                    </button>
-                  </div>
-                  <div className={homeCasinoPreview.length === 0 && !homeCasinoPreviewLoading ? "" : "grid grid-cols-3 sm:grid-cols-6 gap-3"}>
-                    {homeCasinoPreviewLoading && homeCasinoPreview.length === 0
-                      ? Array.from({ length: 6 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="aspect-[3/4] rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
-                          />
-                        ))
-                      : homeCasinoPreview.length === 0
-                        ? (
-                          <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
-                            Sem jogos disponíveis neste momento.
+                  <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide mb-3">
+                    Promoções
+                  </h2>
+                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
+                    {PROMO_CONTENT.map((promo) => (
+                      <button
+                        key={promo.id}
+                        onClick={() => selectMainTab("promos")}
+                        className="relative w-[80%] sm:w-[46%] lg:w-[31%] shrink-0 snap-start aspect-[16/9] rounded-xl overflow-hidden text-left transition-transform active:scale-[0.98]"
+                      >
+                        <img
+                          src={promo.image}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+                        <div className="absolute bottom-0 left-0 right-0 p-3">
+                          <span className="inline-block bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 mb-1">
+                            {promo.highlight} {promo.highlightLabel}
+                          </span>
+                          <div className="text-white text-xs font-bold uppercase leading-tight line-clamp-2">
+                            {promo.title}
                           </div>
-                        )
-                        : homeCasinoPreview.map((game) => (
-                          <button
-                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
-                            disabled={casinoLoadingGame === game.id}
-                            onClick={() => launchCasinoGame(game)}
-                            title={game.name}
-                            aria-label={game.name}
-                            className="aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
-                          >
-                            {casinoLoadingGame === game.id ? (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <RefreshCw className="animate-spin text-zinc-400" size={22} />
-                              </div>
-                            ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
-                              <img
-                                src={game.img}
-                                alt={game.name}
-                                className="absolute inset-0 w-full h-full object-fill"
-                                loading="lazy"
-                                onError={() => {
-                                  setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
-                                }}
-                              />
-                            ) : (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <Dices className="text-red-600" size={22} />
-                              </div>
-                            )}
-                          </button>
-                        ))}
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -24628,6 +24640,151 @@ type PromoItem = {
   overlayImg?: string;
 };
 
+// Static content shared between the full Promoções page (PromosPage below)
+// and the compact "Promoções" teaser carousel on the Destaques home tab.
+// No `action` closure here (that depends on props only PromosPage has) —
+// each item carries an `actionKey` instead, resolved to a real handler by
+// whichever screen renders it. `highlightLabel`/`cta` below are the static
+// defaults; PromosPage still overrides them for "cashback" using live
+// cashbackData, exactly like before this was extracted.
+type PromoContentItem = Omit<PromoItem, "action"> & {
+  actionKey: "deposit" | "cashback" | "none";
+};
+
+const PROMO_CONTENT: PromoContentItem[] = [
+  {
+    id: "boost6x",
+    title: "BOOST 6% NA MÚLTIPLA",
+    subtitle: "6 SELEÇÕES · QUALQUER ESPORTE",
+    description:
+      "Faça Múltiplas de 6 jogos e ganhe 6% extra na sua múltipla. Quanto mais seleções, maior o boost — até 100% de bónus!",
+    badge: "MÚLTIPLA BOOST",
+    image:
+      "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-orange-500/60 to-red-700/60",
+    highlight: "+6%",
+    highlightLabel: "na múltipla de 6",
+    terms: [
+      "Mínimo de 6 seleções na múltipla.",
+      "Odds mínimas de 1.50 por seleção.",
+      "Boost automático calculado no momento.",
+      "Válido em todos os esportes da plataforma.",
+    ],
+    cta: "APOSTAR MÚLTIPLA",
+    cornerIcon: "🔥",
+    alwaysActive: true,
+    actionKey: "none",
+  },
+  {
+    id: "bonus100",
+    title: "100% BÓNUS DE BOAS‑VINDAS",
+    subtitle: "ATÉ €500 · ROLLOVER 5×",
+    description:
+      "Receba 100% no primeiro depósito e desbloqueie o saldo com rollover progressivo de 5× em apostas qualificadas.",
+    badge: "SPORTSBOOK",
+    image:
+      "https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-yellow-400/60 to-orange-600/60",
+    highlight: "+100%",
+    highlightLabel: "no 1.º depósito",
+    terms: [
+      "Bónus válido apenas no 1.º depósito.",
+      "Rollover total de 5× sobre depósito + bónus.",
+      "Odds mínimas qualificadas: 1.5.",
+      "Prazo de utilização: 30 dias.",
+    ],
+    cta: "ATIVAR BÓNUS",
+    actionKey: "deposit",
+  },
+  {
+    id: "freebets10",
+    title: "DEPOSITE €10 E GANHE €5",
+    subtitle: "FREE BETS PARA COMEÇAR",
+    description:
+      "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
+    badge: "FREE BET",
+    image:
+      "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-violet-500/60 to-purple-800/60",
+    highlight: "€5",
+    highlightLabel: "em free bets",
+    terms: [
+      "Depósito mínimo de €10.",
+      "Free bets creditadas automaticamente.",
+      "Odds mínimas qualificadas: 2.50.",
+      "Free bets válidas por 7 dias.",
+    ],
+    cta: "DEPOSITAR €10",
+    actionKey: "deposit",
+  },
+  {
+    id: "freebets20",
+    title: "DEPOSITE €20 E GANHE €10",
+    subtitle: "FREE BETS EXCLUSIVAS",
+    description:
+      "Faça o seu primeiro depósito de €20 e conclua 4 apostas qualificadas para receber €10 em free bets.",
+    badge: "FREE BET",
+    image:
+      "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-emerald-400/60 to-green-700/60",
+    highlight: "€10",
+    highlightLabel: "em free bets",
+    terms: [
+      "Depósito mínimo de €20.",
+      "4 apostas qualificadas obrigatórias.",
+      "Odds mínimas de 2.00.",
+      "Stake mínima de €2 por aposta.",
+      "Free bets válidas por 7 dias.",
+    ],
+    cta: "DEPOSITAR €20",
+    actionKey: "deposit",
+  },
+  {
+    id: "cashback",
+    title: "CASHBACK SEMANAL",
+    subtitle: "10% EM FREE BETS",
+    description:
+      "Recupere parte das perdas líquidas em apostas esportivas toda semana. Máximo de €100 por utilizador.",
+    badge: "HOT",
+    image:
+      "https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-cyan-400/60 to-blue-700/60",
+    highlight: "10%",
+    // Static default — PromosPage overrides this with the real amount when
+    // cashbackData has loaded, same as before this was extracted.
+    highlightLabel: "das perdas",
+    terms: [
+      "Cashback calculado semanalmente.",
+      "Máximo de €100 por utilizador.",
+      "Pago em saldo bónus.",
+      "Necessário 1× rollover para saque.",
+    ],
+    cta: "VER DETALHES",
+    actionKey: "cashback",
+  },
+  {
+    id: "superodds",
+    title: "SUPER ODDS",
+    subtitle: "BOOSTS ESPORTIVOS DIÁRIOS",
+    description:
+      "Odds turbinadas diariamente nos principais jogos e campeonatos. Maximize os seus ganhos nos eventos em destaque.",
+    badge: "BOOST",
+    image:
+      "https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?q=80&w=1400&auto=format&fit=crop",
+    gradient: "from-red-500/60 to-rose-700/60",
+    highlight: "+25%",
+    highlightLabel: "nas odds",
+    terms: [
+      "Disponível apenas em eventos selecionados.",
+      "Stake máxima promocional: €50.",
+      "Mercados limitados por evento.",
+      "Boosts atualizam às 10h diariamente.",
+    ],
+    cta: "VER JOGOS COM BOOST",
+    actionKey: "none",
+  },
+];
+
 function PromoCard3D({
   promo,
   index,
@@ -24828,142 +24985,29 @@ function PromosPage({
     onFetchCashback();
   }, []);
 
-  const promos = [
-    {
-      id: "boost6x",
-      title: "BOOST 6% NA MÚLTIPLA",
-      subtitle: "6 SELEÇÕES · QUALQUER ESPORTE",
-      description:
-        "Faça Múltiplas de 6 jogos e ganhe 6% extra na sua múltipla. Quanto mais seleções, maior o boost — até 100% de bónus!",
-      badge: "MÚLTIPLA BOOST",
-      image:
-        "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-orange-500/60 to-red-700/60",
-      highlight: "+6%",
-      highlightLabel: "na múltipla de 6",
-      terms: [
-        "Mínimo de 6 seleções na múltipla.",
-        "Odds mínimas de 1.50 por seleção.",
-        "Boost automático calculado no momento.",
-        "Válido em todos os esportes da plataforma.",
-      ],
-      cta: "APOSTAR MÚLTIPLA",
-      cornerIcon: "🔥",
-      alwaysActive: true,
-      action: () => {},
-    },
-    {
-      id: "bonus100",
-      title: "100% BÓNUS DE BOAS‑VINDAS",
-      subtitle: "ATÉ €500 · ROLLOVER 5×",
-      description:
-        "Receba 100% no primeiro depósito e desbloqueie o saldo com rollover progressivo de 5× em apostas qualificadas.",
-      badge: "SPORTSBOOK",
-      image:
-        "https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-yellow-400/60 to-orange-600/60",
-      highlight: "+100%",
-      highlightLabel: "no 1.º depósito",
-      terms: [
-        "Bónus válido apenas no 1.º depósito.",
-        "Rollover total de 5× sobre depósito + bónus.",
-        "Odds mínimas qualificadas: 1.5.",
-        "Prazo de utilização: 30 dias.",
-      ],
-      cta: "ATIVAR BÓNUS",
-      action: onDeposit,
-    },
-    {
-      id: "freebets10",
-      title: "DEPOSITE €10 E GANHE €5",
-      subtitle: "FREE BETS PARA COMEÇAR",
-      description:
-        "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
-      badge: "FREE BET",
-      image:
-        "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-violet-500/60 to-purple-800/60",
-      highlight: "€5",
-      highlightLabel: "em free bets",
-      terms: [
-        "Depósito mínimo de €10.",
-        "Free bets creditadas automaticamente.",
-        "Odds mínimas qualificadas: 2.50.",
-        "Free bets válidas por 7 dias.",
-      ],
-      cta: "DEPOSITAR €10",
-      action: onDeposit,
-    },
-    {
-      id: "freebets20",
-      title: "DEPOSITE €20 E GANHE €10",
-      subtitle: "FREE BETS EXCLUSIVAS",
-      description:
-        "Faça o seu primeiro depósito de €20 e conclua 4 apostas qualificadas para receber €10 em free bets.",
-      badge: "FREE BET",
-      image:
-        "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-emerald-400/60 to-green-700/60",
-      highlight: "€10",
-      highlightLabel: "em free bets",
-      terms: [
-        "Depósito mínimo de €20.",
-        "4 apostas qualificadas obrigatórias.",
-        "Odds mínimas de 2.00.",
-        "Stake mínima de €2 por aposta.",
-        "Free bets válidas por 7 dias.",
-      ],
-      cta: "DEPOSITAR €20",
-      action: onDeposit,
-    },
-    {
-      id: "cashback",
-      title: "CASHBACK SEMANAL",
-      subtitle: "10% EM FREE BETS",
-      description:
-        "Recupere parte das perdas líquidas em apostas esportivas toda semana. Máximo de €100 por utilizador.",
-      badge: "HOT",
-      image:
-        "https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-cyan-400/60 to-blue-700/60",
-      highlight: "10%",
-      highlightLabel: cashbackData
-        ? `≈ €${cashbackData.cashback.toFixed(2)} disp.`
-        : "das perdas",
-      terms: [
-        "Cashback calculado semanalmente.",
-        "Máximo de €100 por utilizador.",
-        "Pago em saldo bónus.",
-        "Necessário 1× rollover para saque.",
-      ],
-      cta:
-        cashbackData && cashbackData.cashback > 0
-          ? `RESGATAR €${cashbackData.cashback.toFixed(2)}`
-          : "VER DETALHES",
-      action: onClaimCashback,
-    },
-    {
-      id: "superodds",
-      title: "SUPER ODDS",
-      subtitle: "BOOSTS ESPORTIVOS DIÁRIOS",
-      description:
-        "Odds turbinadas diariamente nos principais jogos e campeonatos. Maximize os seus ganhos nos eventos em destaque.",
-      badge: "BOOST",
-      image:
-        "https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?q=80&w=1400&auto=format&fit=crop",
-      gradient: "from-red-500/60 to-rose-700/60",
-      highlight: "+25%",
-      highlightLabel: "nas odds",
-      terms: [
-        "Disponível apenas em eventos selecionados.",
-        "Stake máxima promocional: €50.",
-        "Mercados limitados por evento.",
-        "Boosts atualizam às 10h diariamente.",
-      ],
-      cta: "VER JOGOS COM BOOST",
-      action: () => {},
-    },
-  ];
+  // Resolves each static PROMO_CONTENT entry's actionKey to a real handler,
+  // and overrides cashback's highlightLabel/cta with the live amount once
+  // cashbackData has loaded — identical behavior to the inline array this
+  // replaced, just sourced from the content shared with the Destaques
+  // teaser carousel (home.tsx's "Promoções" section).
+  const promos: PromoItem[] = PROMO_CONTENT.map(({ actionKey, ...content }) => {
+    const action =
+      actionKey === "deposit" ? onDeposit : actionKey === "cashback" ? onClaimCashback : () => {};
+    if (content.id === "cashback") {
+      return {
+        ...content,
+        action,
+        highlightLabel: cashbackData
+          ? `≈ €${cashbackData.cashback.toFixed(2)} disp.`
+          : content.highlightLabel,
+        cta:
+          cashbackData && cashbackData.cashback > 0
+            ? `RESGATAR €${cashbackData.cashback.toFixed(2)}`
+            : content.cta,
+      };
+    }
+    return { ...content, action };
+  });
 
   return (
     <div className="bg-[#050816] min-h-[60vh]">
