@@ -23937,45 +23937,50 @@ export default function Home({
       </AnimatePresence>
 
       {/* FOOTER */}
-      <footer className="border-t border-zinc-900 bg-zinc-950 py-10 mt-auto">
+      <footer className="border-t border-zinc-900 bg-zinc-950 py-5 sm:py-10 mt-auto">
         <div className="max-w-[1600px] mx-auto px-4">
           {/* Brand block and the three link columns sit side by side on
               lg+ (Santos, 2026-09-24) instead of stacking, so the footer
               doesn't run so tall. They stay stacked below lg, where there
-              isn't room for a row. */}
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-8 lg:gap-12 mb-8">
+              isn't room for a row. Below sm, everything shrinks further
+              (smaller type, tighter gaps) and the three link columns stay
+              side by side instead of the description/badges/links all
+              stacking into one tall column (Santos, 2026-09-25). */}
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5 sm:gap-8 lg:gap-12 mb-5 sm:mb-8">
             <div className="text-center lg:text-left lg:max-w-xs lg:shrink-0">
-              <div className="font-black text-3xl tracking-tighter italic mb-2">
+              <div className="font-black text-2xl sm:text-3xl tracking-tighter italic mb-1.5 sm:mb-2">
                 <span>BET</span>
                 <span>62</span>
               </div>
-              <p className="text-sm text-zinc-500 max-w-md lg:max-w-none mx-auto lg:mx-0 mb-5">
+              <p className="text-[11px] sm:text-sm leading-snug text-zinc-500 max-w-md lg:max-w-none mx-auto lg:mx-0 mb-3 sm:mb-5">
                 BET62 Apostas Esportivas · A plataforma futurista de
                 entretenimento desportivo e cassino online. Licenciado,
                 regulamentado e seguro.
               </p>
-              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 text-xs text-zinc-500">
-                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                  <ShieldCheck size={14} className="text-emerald-500" />
+              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-1.5 sm:gap-3 text-[10px] sm:text-xs text-zinc-500">
+                <span className="flex items-center gap-1 sm:gap-1.5 rounded-full border border-zinc-800 px-2 py-1 sm:px-3 sm:py-1.5">
+                  <ShieldCheck size={12} className="text-emerald-500 sm:hidden" />
+                  <ShieldCheck size={14} className="text-emerald-500 hidden sm:block" />
                   MGA / Malta Gaming
                 </span>
-                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
-                  <Lock size={14} className="text-emerald-500" />
+                <span className="flex items-center gap-1 sm:gap-1.5 rounded-full border border-zinc-800 px-2 py-1 sm:px-3 sm:py-1.5">
+                  <Lock size={12} className="text-emerald-500 sm:hidden" />
+                  <Lock size={14} className="text-emerald-500 hidden sm:block" />
                   SSL 256-bit
                 </span>
-                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                <span className="flex items-center gap-1 sm:gap-1.5 rounded-full border border-zinc-800 px-2 py-1 sm:px-3 sm:py-1.5">
                   €EUR
                 </span>
-                <span className="flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5">
+                <span className="flex items-center gap-1 sm:gap-1.5 rounded-full border border-zinc-800 px-2 py-1 sm:px-3 sm:py-1.5">
                   18+ Jogo Responsável
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-sm text-center lg:text-left lg:flex-1 lg:max-w-xl">
+            <div className="grid grid-cols-3 gap-3 sm:gap-8 text-[11px] sm:text-sm text-center lg:text-left lg:flex-1 lg:max-w-xl">
               <div>
-                <div className="font-bold text-white mb-3">A BET62</div>
-                <div className="flex flex-col gap-2 text-zinc-500">
+                <div className="font-bold text-white mb-1.5 sm:mb-3">A BET62</div>
+                <div className="flex flex-col gap-1 sm:gap-2 text-zinc-500">
                   <Link href="/sobre" className="hover:text-white transition-colors">
                     Sobre Nós
                   </Link>
@@ -23992,8 +23997,8 @@ export default function Home({
               </div>
 
               <div>
-                <div className="font-bold text-white mb-3">Legal</div>
-                <div className="flex flex-col gap-2 text-zinc-500">
+                <div className="font-bold text-white mb-1.5 sm:mb-3">Legal</div>
+                <div className="flex flex-col gap-1 sm:gap-2 text-zinc-500">
                   <Link href="/termos" className="hover:text-white transition-colors">
                     Termos e Condições
                   </Link>
@@ -24009,9 +24014,9 @@ export default function Home({
                 </div>
               </div>
 
-              <div className="col-span-2 sm:col-span-1">
-                <div className="font-bold text-white mb-3">Apoio ao Cliente</div>
-                <div className="flex flex-col gap-2 text-zinc-500">
+              <div>
+                <div className="font-bold text-white mb-1.5 sm:mb-3">Apoio ao Cliente</div>
+                <div className="flex flex-col gap-1 sm:gap-2 text-zinc-500">
                   <Link href="/ajuda" className="hover:text-white transition-colors">
                     Central de Ajuda
                   </Link>
@@ -24029,16 +24034,18 @@ export default function Home({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-zinc-500 mb-8">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 sm:gap-x-6 sm:gap-y-2 text-[11px] sm:text-sm text-zinc-500 mb-4 sm:mb-8">
             <a
               href="mailto:suportebet62@gmail.com"
               className="flex items-center gap-1.5 hover:text-white transition-colors"
             >
-              <Mail size={14} />
+              <Mail size={13} className="sm:hidden" />
+              <Mail size={14} className="hidden sm:block" />
               suportebet62@gmail.com
             </a>
             <span className="flex items-center gap-1.5">
-              <MessageCircle size={14} />
+              <MessageCircle size={13} className="sm:hidden" />
+              <MessageCircle size={14} className="hidden sm:block" />
               Chat 24/7 disponível
             </span>
             <a
@@ -24061,8 +24068,8 @@ export default function Home({
             </a>
           </div>
 
-          <div className="flex items-center justify-center gap-3 text-xs text-zinc-600 text-center border-t border-zinc-900 pt-6">
-            <div className="w-8 h-8 rounded-full border border-zinc-700 flex items-center justify-center font-bold shrink-0">
+          <div className="flex items-center justify-center gap-2 sm:gap-3 text-[10px] sm:text-xs text-zinc-600 text-center border-t border-zinc-900 pt-3 sm:pt-6">
+            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full border border-zinc-700 flex items-center justify-center font-bold shrink-0 text-[9px] sm:text-xs">
               18+
             </div>
             <span>
