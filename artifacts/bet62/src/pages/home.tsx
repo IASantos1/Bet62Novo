@@ -24654,7 +24654,7 @@ type PromoContentItem = Omit<PromoItem, "action"> & {
 const PROMO_CONTENT: PromoContentItem[] = [
   {
     id: "boost6x",
-    title: "BOOST 6% NA MÚLTIPLA",
+    title: "GANHE BOOST ATÉ 100% NA MÚLTIPLA",
     subtitle: "6 SELEÇÕES · QUALQUER ESPORTE",
     description:
       "Faça Múltiplas de 6 jogos e ganhe 6% extra na sua múltipla. Quanto mais seleções, maior o boost — até 100% de bónus!",
@@ -24662,8 +24662,8 @@ const PROMO_CONTENT: PromoContentItem[] = [
     image:
       "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1400&auto=format&fit=crop",
     gradient: "from-orange-500/60 to-red-700/60",
-    highlight: "+6%",
-    highlightLabel: "na múltipla de 6",
+    highlight: "+100%",
+    highlightLabel: "boost máximo na múltipla",
     terms: [
       "Mínimo de 6 seleções na múltipla.",
       "Odds mínimas de 1.50 por seleção.",
