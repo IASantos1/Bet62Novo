@@ -649,11 +649,15 @@ export async function initDb(): Promise<void> {
 
       -- Single-row (id fixed at 1) config for the "Automação de Banners"
       -- admin panel — see services/apiFootball/bannerSync.ts. Defaults to
-      -- mode='manual' so nothing changes in behavior until an admin
-      -- explicitly opts into automatic sync from api-football.com.
+      -- mode='auto': the admin isn't meant to hand-create "Jogos em
+      -- Destaque" banners day to day, the cron fills them in from
+      -- api-football.com on its own. Manual creation stays fully available
+      -- (routes/admin.ts's featured-banners CRUD) purely as a fallback for
+      -- when the automation can't run (no API_FOOTBALL_KEY, no template has
+      -- a league id, etc).
       CREATE TABLE IF NOT EXISTS banner_automation_settings (
         id                             INTEGER PRIMARY KEY DEFAULT 1,
-        mode                           TEXT NOT NULL DEFAULT 'manual',
+        mode                           TEXT NOT NULL DEFAULT 'auto',
         quantidade                     INTEGER NOT NULL DEFAULT 3,
         criterio                       TEXT NOT NULL DEFAULT 'upcoming',
         antecedencia_minutes           INTEGER NOT NULL DEFAULT 120,
@@ -667,6 +671,28 @@ export async function initDb(): Promise<void> {
       );
 
       INSERT INTO banner_automation_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+      -- One-time forward migration: PR #529 shipped this table with
+      -- mode='manual' as a conservative first default. The confirmed
+      -- product intent is 'auto' as the real default — flip the already-
+      -- inserted singleton row forward once, the same way the column
+      -- default above was changed, for any deploy that ran that earlier
+      -- migration before an admin had a chance to touch this panel
+      -- themselves. Guarded by a platform_settings marker (not a bare
+      -- WHERE mode = 'manual' check) so this never re-fires and stomps an
+      -- admin's own later choice to switch back to manual.
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM platform_settings WHERE key = 'banner_automation_auto_default_migrated'
+        ) THEN
+          UPDATE banner_automation_settings SET mode = 'auto', updated_at = NOW()
+            WHERE id = 1 AND mode = 'manual';
+          INSERT INTO platform_settings (key, value)
+            VALUES ('banner_automation_auto_default_migrated', 'true')
+            ON CONFLICT (key) DO NOTHING;
+        END IF;
+      END $$;
 
       -- Session-lock + WebAuthn (passkey) auth — see lib/sessions.ts.
       -- sessions.id is the SHA-256 hex digest of the random opaque token
