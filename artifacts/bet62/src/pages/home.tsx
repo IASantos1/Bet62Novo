@@ -23501,7 +23501,8 @@ export default function Home({
         )}
       </AnimatePresence>
 
-      {/* FOOTER */}
+      {/* FOOTER — only shown on Perfil (Santos, 2026-09-27). */}
+      {activeTab === "profile" && (
       <footer className="border-t border-zinc-900 bg-zinc-950 py-5 sm:py-10 mt-auto">
         <div className="max-w-[1600px] mx-auto px-4">
           {/* Brand block and the three link columns sit side by side on
@@ -23644,6 +23645,7 @@ export default function Home({
           </div>
         </div>
       </footer>
+      )}
 
       <PlayerProfileModal
         playerId={playerProfileId}
@@ -23680,13 +23682,13 @@ export default function Home({
             <div className="grid grid-cols-2 bg-zinc-950 border-b border-zinc-800">
               <button
                 onClick={() => setAuthMode("login")}
-                className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "login" ? "bg-zinc-900 text-white border-red-600" : "text-zinc-400 border-transparent hover:text-white"}`}
+                className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "login" ? "bg-zinc-900 text-white border-emerald-300" : "text-zinc-400 border-transparent hover:text-white"}`}
               >
                 Entrar
               </button>
               <button
                 onClick={() => setAuthMode("register")}
-                className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "register" ? "bg-zinc-900 text-white border-red-600" : "text-zinc-400 border-transparent hover:text-white"}`}
+                className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "register" ? "bg-zinc-900 text-white border-emerald-300" : "text-zinc-400 border-transparent hover:text-white"}`}
               >
                 Criar Conta
               </button>
@@ -23721,7 +23723,7 @@ export default function Home({
                   </div>
                   <Button
                     type="submit"
-                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-2"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 mt-2"
                     disabled={authLoading}
                   >
                     {authLoading ? (
@@ -23880,7 +23882,7 @@ export default function Home({
                   </div>
                   <Button
                     type="submit"
-                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-1"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 mt-1"
                     disabled={authLoading}
                   >
                     {authLoading ? (
