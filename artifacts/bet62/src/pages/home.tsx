@@ -80,7 +80,6 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { apiFetch, SESSION_LOCKED_EVENT } from "@/lib/api";
 import { LEAGUE_LOGOS } from "@/lib/leagueLogos";
-import { CompetitionBanner } from "@/components/CompetitionBanner";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import {
   Elements,
@@ -482,7 +481,6 @@ const TEAM_BANNERS: Record<string, string> = {
 };
 
 type MainTab =
-  | "home"
   | "sportsbook"
   | "sports"
   | "casino"
@@ -546,24 +544,6 @@ type CasinoBanner = {
   position: "top" | "middle";
   games: CasinoGame[];
 };
-type FeaturedMatchBannerTemplate = {
-  competitionName: string;
-  logoUrl: string | null;
-  primaryColor: string;
-  secondaryColor: string;
-  accentColor: string;
-};
-type FeaturedMatchBanner = {
-  id: number;
-  homeTeam: string;
-  awayTeam: string;
-  competition: string | null;
-  template: FeaturedMatchBannerTemplate | null;
-  homeTeamLogoUrl: string | null;
-  awayTeamLogoUrl: string | null;
-  kickoffAt: string;
-  endsAt: string;
-};
 type LiveTransport = "idle" | "cache" | "ws" | "sse" | "polling";
 
 function normalizeMainTabPath(path: string): string {
@@ -572,7 +552,6 @@ function normalizeMainTabPath(path: string): string {
 }
 
 function getPathForMainTab(tab: MainTab): string {
-  if (tab === "home") return "/destaques";
   if (tab === "sportsbook") return "/sportsbook";
   if (tab === "sports") return "/esportes";
   if (tab === "casino") return "/casino";
@@ -4111,7 +4090,6 @@ export default function Home({
   // own game-tree sidebar and bet slip no longer have a purpose on those
   // pages either (Santos, 2026-09-24).
   const isShellOnlyTab =
-    activeTab === "home" ||
     activeTab === "promos" ||
     activeTab === "casino" ||
     activeTab === "sportsbook" ||
@@ -4246,11 +4224,6 @@ export default function Home({
   // preview and the casino tab's own grid) so a failed load falls back to
   // the same placeholder already used for game.img === null.
   const [failedGameImgIds, setFailedGameImgIds] = useState<Set<string>>(new Set());
-  // Small independent preview for the "Destaques" tab — deliberately its own
-  // state/effect, never touches casinoGames (the casino tab's own data), so
-  // this can't affect anything already working there.
-  const [homeCasinoPreview, setHomeCasinoPreview] = useState<CasinoGame[]>([]);
-  const [homeCasinoPreviewLoading, setHomeCasinoPreviewLoading] = useState(false);
   const [casinoSearch, setCasinoSearch] = useState("");
   const [casinoSearchDebounced, setCasinoSearchDebounced] = useState("");
   const [casinoPage, setCasinoPage] = useState(1);
@@ -4272,7 +4245,6 @@ export default function Home({
   const [casinoPopularLoading, setCasinoPopularLoading] = useState(false);
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
-  const [featuredMatchBanners, setFeaturedMatchBanners] = useState<FeaturedMatchBanner[]>([]);
   const casinoCarouselRef = useRef<HTMLDivElement>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -8358,65 +8330,6 @@ export default function Home({
       })
       .catch(() => {});
   }, [activeTab]);
-
-  // Jogos em Destaque (admin-scheduled banners on the Destaques tab) — each
-  // banner's scheduled/ao vivo status is derived purely from comparing the
-  // current time against kickoffAt/endsAt, so a 30s poll (rather than a
-  // one-time fetch) is what makes a banner flip to "AO VIVO" at kickoff and
-  // drop off the page once the game ends, with nothing manual required.
-  useEffect(() => {
-    if (activeTab !== "home") return;
-    const load = () => {
-      fetch("/api/featured-banners")
-        .then((r) => r.json())
-        .then((data) => {
-          if (Array.isArray(data?.banners)) setFeaturedMatchBanners(data.banners);
-        })
-        .catch(() => {});
-    };
-    load();
-    const id = window.setInterval(load, 30_000);
-    return () => window.clearInterval(id);
-  }, [activeTab]);
-
-  // "Destaques" (home) tab — small real-games preview, fetched once per tab
-  // open. Fully separate from the casino tab's own casinoGames.
-  // Composition: 3 newest games + 1 roulette + 1 "ao vivo" game-show title —
-  // same query params the full Casino tab grid uses (see casinoGridParams
-  // below), just 3 small parallel requests instead of one big page. Roulette/
-  // "ao vivo" may come back empty (name-keyword matching, not a real DB
-  // category — see routes/casino.ts) — the row just shows fewer cards then,
-  // no placeholder/error for a missing slot. Deduped by id in case a
-  // roulette/live pick is also among the newest games.
-  useEffect(() => {
-    if (activeTab !== "home") return;
-    if (homeCasinoPreview.length > 0) return;
-    setHomeCasinoPreviewLoading(true);
-    Promise.all([
-      fetch(`/api/casino/games?sort=new&limit=3`).then((r) => r.json()),
-      fetch(`/api/casino/games?category=roulette&limit=1`).then((r) => r.json()),
-      fetch(`/api/casino/games?category=${encodeURIComponent("Ao Vivo")}&limit=1`).then((r) =>
-        r.json(),
-      ),
-    ])
-      .then(([newest, roulette, live]) => {
-        const seen = new Set<string>();
-        const combined: CasinoGame[] = [];
-        for (const data of [newest, roulette, live]) {
-          const games: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
-          for (const game of games) {
-            const key = `${game.source ?? "silentapi"}-${game.provider}-${game.id}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            combined.push(game);
-          }
-        }
-        setHomeCasinoPreview(combined);
-      })
-      .catch(() => {})
-      .finally(() => setHomeCasinoPreviewLoading(false));
-  }, [activeTab, homeCasinoPreview.length]);
-
 
   // "Populares"/"Novos" are primarily sort-order views, while the rest of
   // the lobby maps to backend intent categories (slots, ao vivo, jogos
@@ -19203,7 +19116,6 @@ export default function Home({
             {/* Desktop inline nav — hidden on mobile (uses tab strip below) */}
             <div className="hidden lg:flex items-center ml-12 h-16">
               {[
-                { id: "home", icon: <Star size={15} />, label: "DESTAQUES" },
                 { id: "sportsbook", icon: <Flag size={15} />, label: "ESPORTE" },
                 { id: "casino", icon: <Activity size={15} />, label: "CASINO" },
                 { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
@@ -19379,7 +19291,6 @@ export default function Home({
             desktop stay in sync. */}
         <div className="lg:hidden flex items-center gap-1 px-2 h-11 overflow-x-auto no-scrollbar border-t border-zinc-800/60">
           {[
-            { id: "home", icon: <Star size={14} />, label: "DESTAQUES" },
             { id: "sportsbook", icon: <Flag size={14} />, label: "ESPORTE" },
             { id: "casino", icon: <Activity size={14} />, label: "CASINO" },
             { id: "promos", icon: <Gift size={14} />, label: "PROMOÇÕES", onSelect: fetchCashback },
@@ -21537,204 +21448,6 @@ export default function Home({
                 )}
               </div>
             )}
-
-            {/* ── DESTAQUES (home dashboard) — new tab, fully independent from
-                the existing "sports" tab below (untouched). Casino games
-                curated by real title search; live matches polled directly
-                (own fetch+interval, not a one-time snapshot read) so they
-                stay current like the real Ao Vivo tab; live/upcoming render
-                as simple preview cards (not the full sports-tab event
-                card), per the reference design. */}
-            {!expandedMatch && activeTab === "home" && (
-              <div className="space-y-6 max-w-[1100px] mx-auto">
-                {/* Jogos em Destaque — admin-scheduled banners (pages/admin.tsx
-                    "featured-banners" tab). Status (Agendado/AO VIVO) is
-                    derived client-side from kickoffAt/endsAt, not written by
-                    the admin — see the polling effect above. Horizontal-scroll
-                    carousel at every breakpoint: one card + a peek of the next
-                    below sm, ~3 cards visible (still scrollable for more) at
-                    sm+ — same overflow-x-auto + snap pattern as the other
-                    carousels on this tab. */}
-                {featuredMatchBanners.length > 0 && (
-                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {featuredMatchBanners.map((banner) => {
-                      const isLive = Date.now() >= new Date(banner.kickoffAt).getTime();
-                      return (
-                        <button
-                          key={banner.id}
-                          onClick={() => selectMainTab("sportsbook")}
-                          className="w-[85%] shrink-0 snap-start text-left transition-transform active:scale-[0.98] sm:w-[calc(33.33%-0.5rem)]"
-                        >
-                          <CompetitionBanner
-                            competitionName={banner.template?.competitionName ?? banner.competition}
-                            logoUrl={banner.template?.logoUrl}
-                            primaryColor={banner.template?.primaryColor}
-                            secondaryColor={banner.template?.secondaryColor}
-                            accentColor={banner.template?.accentColor}
-                            homeTeam={banner.homeTeam}
-                            awayTeam={banner.awayTeam}
-                            homeLogoUrl={banner.homeTeamLogoUrl}
-                            awayLogoUrl={banner.awayTeamLogoUrl}
-                            kickoffAt={banner.kickoffAt}
-                            isLive={isLive}
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Casino em Destaque — small real-games carousel (state/effect
-                    above: 3 newest + 1 roulette + 1 "ao vivo" game-show title,
-                    same /api/casino/games query params as the full Casino tab
-                    grid). Horizontal scroll like the other carousels here,
-                    cards a bit larger than the old static grid for visibility. */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Dices size={16} className="text-violet-400" />
-                    <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide">
-                      Casino em Destaque
-                    </h2>
-                    <button
-                      onClick={() => selectMainTab("casino")}
-                      className="ml-auto text-violet-400 text-xs font-bold flex items-center gap-0.5 hover:text-violet-300"
-                    >
-                      Ver todos <ChevronRight size={13} />
-                    </button>
-                  </div>
-                  <div
-                    className={
-                      homeCasinoPreview.length === 0 && !homeCasinoPreviewLoading
-                        ? ""
-                        : "flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth"
-                    }
-                  >
-                    {homeCasinoPreviewLoading && homeCasinoPreview.length === 0
-                      ? Array.from({ length: 5 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="w-32 sm:w-40 shrink-0 aspect-[3/4] rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse"
-                          />
-                        ))
-                      : homeCasinoPreview.length === 0
-                        ? (
-                          <div className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
-                            Sem jogos disponíveis neste momento.
-                          </div>
-                        )
-                        : homeCasinoPreview.map((game) => (
-                          <button
-                            key={`${game.source ?? "silentapi"}-${game.provider}-${game.id}`}
-                            disabled={casinoLoadingGame === game.id}
-                            onClick={() => launchCasinoGame(game)}
-                            title={game.name}
-                            aria-label={game.name}
-                            className="w-32 sm:w-40 shrink-0 snap-start aspect-[3/4] rounded-xl border border-zinc-800 bg-zinc-900 hover:border-violet-500/50 transition-colors overflow-hidden relative disabled:opacity-60 disabled:cursor-wait"
-                          >
-                            {casinoLoadingGame === game.id ? (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <RefreshCw className="animate-spin text-zinc-400" size={22} />
-                              </div>
-                            ) : game.img && !failedGameImgIds.has(String(game.id)) ? (
-                              <img
-                                src={game.img}
-                                alt={game.name}
-                                className="absolute inset-0 w-full h-full object-fill"
-                                loading="lazy"
-                                onError={() => {
-                                  setFailedGameImgIds((prev) => new Set(prev).add(String(game.id)));
-                                }}
-                              />
-                            ) : (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <Dices className="text-red-600" size={22} />
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                  </div>
-                </div>
-
-                {/* Full banner images (text already baked into the artwork) —
-                    side by side (3-up) on the web. Inside an installed PWA
-                    (display-mode: standalone) a CSS override in index.css
-                    turns this into a side-by-side scrollable row instead —
-                    see .destaques-promo-row. */}
-                <div className="destaques-promo-row grid grid-cols-3 gap-2 sm:gap-3">
-                  <button
-                    onClick={() => selectMainTab("casino")}
-                    className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1836/856]"
-                  >
-                    <img
-                      src="/promo-casino-banner.png"
-                      alt="Casino +2000 Jogos"
-                      className="w-full h-full object-cover"
-                    />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setDepositModalOpen(true);
-                      setActiveTab("wallet");
-                    }}
-                    className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
-                  >
-                    <img
-                      src="/promo-cashback-banner.png"
-                      alt="Cashback Semanal"
-                      className="w-full h-full object-cover"
-                    />
-                  </button>
-                  <button
-                    onClick={() => selectMainTab("sportsbook")}
-                    className="destaques-promo-card rounded-xl border border-zinc-800 overflow-hidden hover:border-zinc-700 transition-colors aspect-[1774/887]"
-                  >
-                    <img
-                      src="/promo-live-banner.png"
-                      alt="Aposte Ao Vivo"
-                      className="w-full h-full object-cover"
-                    />
-                  </button>
-                </div>
-
-                {/* Promoções — compact teaser carousel, last section (right
-                    above the footer). Sourced from the same PROMO_CONTENT
-                    shared with the full Promoções tab (PromosPage) — the old
-                    big "Deposite €10" hero above is gone; that same promotion
-                    (id "freebets10") now just lives here as one of the cards,
-                    much shorter. Every card opens the full Promoções tab. */}
-                <div>
-                  <h2 className="b62-font-display font-bold text-sm uppercase tracking-wide mb-3">
-                    Promoções
-                  </h2>
-                  <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {PROMO_CONTENT.map((promo) => (
-                      <button
-                        key={promo.id}
-                        onClick={() => selectMainTab("promos")}
-                        className="relative w-[80%] sm:w-[46%] lg:w-[31%] shrink-0 snap-start aspect-[16/9] rounded-xl overflow-hidden text-left transition-transform active:scale-[0.98]"
-                      >
-                        <img
-                          src={promo.image}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-                        <div className="absolute bottom-0 left-0 right-0 p-3">
-                          <span className="inline-block bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 mb-1">
-                            {promo.highlight} {promo.highlightLabel}
-                          </span>
-                          <div className="text-white text-xs font-bold uppercase leading-tight line-clamp-2">
-                            {promo.title}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
 
             {!expandedMatch &&
               (activeTab === "sportsbook" || activeTab === "sports") && (
