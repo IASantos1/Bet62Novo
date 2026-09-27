@@ -53,12 +53,12 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
               BET
             </span>
             <span
-              className="font-black italic tracking-tighter text-red-600"
+              className="font-black italic tracking-tighter text-emerald-300"
               style={{
                 fontSize: "clamp(92px, 17vw, 130px)",
                 lineHeight: 0.92,
                 textShadow:
-                  "0 0 48px rgba(220,38,38,0.55), 0 0 100px rgba(220,38,38,0.20)",
+                  "0 0 48px rgba(110,231,183,0.55), 0 0 100px rgba(110,231,183,0.20)",
               }}
             >
               62
