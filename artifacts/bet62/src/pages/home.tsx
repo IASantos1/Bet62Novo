@@ -4085,15 +4085,18 @@ export default function Home({
 
   const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
   const activeTabRef = useRef(activeTab);
-  // "home" (Destaques) and "promos" (Promoções) are included here too:
-  // betting now happens inside the WinHouse Sportsbook iframe, so BET62's
-  // own game-tree sidebar and bet slip no longer have a purpose on those
-  // pages either (Santos, 2026-09-24).
+  // "promos" is included here too: betting now happens inside the
+  // WinHouse Sportsbook iframe, so BET62's own game-tree sidebar and bet
+  // slip no longer have a purpose on those pages either (Santos,
+  // 2026-09-24). "profile" was added later (Santos, 2026-09-27) so the
+  // Perfil page gets its full width back instead of sharing it with an
+  // always-empty bet slip.
   const isShellOnlyTab =
     activeTab === "promos" ||
     activeTab === "casino" ||
     activeTab === "sportsbook" ||
-    activeTab === "sports";
+    activeTab === "sports" ||
+    activeTab === "profile";
   // Sportsbook (and Esportes, which opens the same WinHouse embed — BET62's
   // own match/odds engine was retired) drops the max-width/padding of a
   // normal tab so the iframe can fill the whole content area edge to edge.
@@ -21842,38 +21845,6 @@ export default function Home({
                     }
                   }}
                 />
-              </div>
-            )}
-
-            {activeTab === "profile" && auth.user && (
-              <div className="max-w-[720px] mx-auto space-y-2 mb-6">
-                {/* Quick-links row (2026-09-20 futurist redesign) — Esportes
-                    moved back into the dock itself after real-device
-                    testing showed it missing from the main nav; Carteira,
-                    Minhas Apostas and Promoções stay here since the dock
-                    only has room for 6 slots total. */}
-                {[
-                  { id: "wallet", icon: Wallet, label: "Minha Carteira", onSelect: () => void fetchMyBets(true) },
-                  { id: "mybets", icon: Clock, label: "Minhas Apostas", onSelect: () => void fetchMyBets(true) },
-                  { id: "promos", icon: Gift, label: "Promoções", onSelect: fetchCashback },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    {...makeTap(() =>
-                      selectMainTab(
-                        item.id as typeof activeTab,
-                        (item as { onSelect?: () => void }).onSelect,
-                      ),
-                    )}
-                    className="w-full flex items-center gap-3 b62-glass px-4 py-3 hover:border-zinc-600 transition-colors"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center shrink-0 text-zinc-300">
-                      <item.icon size={16} />
-                    </div>
-                    <span className="flex-1 text-left text-sm font-semibold">{item.label}</span>
-                    <ChevronRight size={14} className="text-zinc-500" />
-                  </button>
-                ))}
               </div>
             )}
 

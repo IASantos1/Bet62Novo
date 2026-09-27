@@ -76,7 +76,7 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
     <button onClick={onToggle} className="shrink-0">
       {on
-        ? <ToggleRight className="text-red-500" size={28} />
+        ? <ToggleRight className="text-emerald-400" size={28} />
         : <ToggleLeft className="text-zinc-600" size={28} />}
     </button>
   );
@@ -358,7 +358,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               </div>
             </div>
             <div className="pt-2">
-              <Button onClick={handleSaveProfile} disabled={savingProfile} className="bg-red-600 hover:bg-red-700 text-white">
+              <Button onClick={handleSaveProfile} disabled={savingProfile} className="bg-emerald-600 hover:bg-emerald-500 text-white">
                 {savingProfile ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
                 Guardar Alterações
               </Button>
@@ -415,9 +415,9 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <h4 className="font-semibold text-sm text-white flex items-center gap-2">
-                  <FileText size={14} className="text-red-500" /> Envio Direto de Documentos
+                  <FileText size={14} className="text-emerald-400" /> Envio Direto de Documentos
                 </h4>
-                <div className="text-[11px] text-zinc-500">ID de membro: <span className="text-red-400 font-mono font-bold">{memberId}</span></div>
+                <div className="text-[11px] text-zinc-500">ID de membro: <span className="text-emerald-300 font-mono font-bold">{memberId}</span></div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -426,13 +426,13 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => setKycDocType("cc")}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${kycDocType === "cc" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${kycDocType === "cc" ? "border-emerald-400 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
                     >
                       Cartão de Cidadão
                     </button>
                     <button
                       onClick={() => setKycDocType("passport")}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${kycDocType === "passport" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${kycDocType === "passport" ? "border-emerald-400 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
                     >
                       Passaporte
                     </button>
@@ -453,7 +453,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2">
-                <Button onClick={saveKycMetadata} disabled={kycSavingMeta} className="bg-red-600 hover:bg-red-700 text-white">
+                <Button onClick={saveKycMetadata} disabled={kycSavingMeta} className="bg-emerald-600 hover:bg-emerald-500 text-white">
                   {kycSavingMeta ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
                   Guardar Dados de Identificação
                 </Button>
@@ -520,7 +520,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                             type="file"
                             accept="image/*,application/pdf"
                             disabled={kycUploading !== null}
-                            className="block w-full rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-300 file:mr-3 file:rounded-md file:border-0 file:bg-red-600 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="block w-full rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-300 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                             onChange={(e) => {
                               if (e.target.files?.length) void uploadKycFiles(slot.key, e.target.files);
                               e.currentTarget.value = "";
@@ -552,7 +552,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="space-y-5">
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
-                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Key size={14} className="text-red-500" /> Alterar Password</h4>
+                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Key size={14} className="text-emerald-400" /> Alterar Password</h4>
                 <div className="space-y-3">
                   <div className="space-y-1.5">
                     <Label className="text-zinc-400 text-xs">Password atual</Label>
@@ -566,11 +566,11 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                     <Label className="text-zinc-400 text-xs">Confirmar nova password</Label>
                     <Input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} className="bg-zinc-800 border-zinc-700 text-white" placeholder="••••••••" />
                   </div>
-                  <Button onClick={handleChangePassword} className="bg-red-600 hover:bg-red-700 text-white w-full">Atualizar Password</Button>
+                  <Button onClick={handleChangePassword} className="bg-emerald-600 hover:bg-emerald-500 text-white w-full">Atualizar Password</Button>
                 </div>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
-                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Shield size={14} className="text-red-500" /> Autenticação de Dois Fatores</h4>
+                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Shield size={14} className="text-emerald-400" /> Autenticação de Dois Fatores</h4>
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm text-zinc-300">Autenticação via App (TOTP)</div>
@@ -598,13 +598,13 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="space-y-5">
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                <h4 className="font-semibold text-sm text-white mb-4 flex items-center gap-2"><BarChart2 size={14} className="text-red-500" /> Formato de Odds</h4>
+                <h4 className="font-semibold text-sm text-white mb-4 flex items-center gap-2"><BarChart2 size={14} className="text-emerald-400" /> Formato de Odds</h4>
                 <div className="flex gap-2 flex-wrap">
                   {(["decimal", "fracionado", "americano"] as const).map(fmt => (
                     <button
                       key={fmt}
                       onClick={() => setOddsFormat(fmt)}
-                      className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-colors ${oddsFormat === fmt ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}
+                      className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-colors ${oddsFormat === fmt ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}
                     >
                       {fmt === "decimal" ? "Decimal (2.50)" : fmt === "fracionado" ? "Fracionado (3/2)" : "Americano (+150)"}
                     </button>
@@ -612,7 +612,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 </div>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
-                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Globe size={14} className="text-red-500" /> Idioma e Região</h4>
+                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Globe size={14} className="text-emerald-400" /> Idioma e Região</h4>
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm text-zinc-300">Idioma</div>
@@ -640,7 +640,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="space-y-5">
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
-                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Lock size={14} className="text-red-500" /> Limites Financeiros</h4>
+                <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Lock size={14} className="text-emerald-400" /> Limites Financeiros</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-zinc-400 text-xs">Depósito diário (€)</Label>
@@ -655,7 +655,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                     <Input type="number" placeholder="Sem limite" value={limitLoss} onChange={e => setLimitLoss(e.target.value)} className="bg-zinc-800 border-zinc-700 text-white" />
                   </div>
                 </div>
-                <Button onClick={() => toast.success("Limites guardados.")} className="bg-red-600 hover:bg-red-700 text-white">Guardar Limites</Button>
+                <Button onClick={() => toast.success("Limites guardados.")} className="bg-emerald-600 hover:bg-emerald-500 text-white">Guardar Limites</Button>
               </div>
 
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
@@ -724,7 +724,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { label: "Total apostado", value: `€ ${totalWagered.toFixed(2)}`, icon: <Zap size={16} className="text-red-500" /> },
+                  { label: "Total apostado", value: `€ ${totalWagered.toFixed(2)}`, icon: <Zap size={16} className="text-emerald-400" /> },
                   { label: "Total ganho", value: `€ ${totalWon.toFixed(2)}`, icon: <CheckCircle size={16} className="text-green-500" /> },
                   { label: "Maior ganho", value: `€ ${biggestWin.toFixed(2)}`, icon: <BarChart2 size={16} className="text-yellow-500" /> },
                   { label: "Taxa de vitória", value: `${winRate}%`, icon: <Activity size={16} className="text-blue-400" /> },
@@ -779,7 +779,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                     className="bg-zinc-800 border-zinc-700 text-white font-mono"
                   />
                 </div>
-                <Button onClick={handleSaveBanking} disabled={savingBanking} className="bg-red-600 hover:bg-red-700 text-white w-full">
+                <Button onClick={handleSaveBanking} disabled={savingBanking} className="bg-emerald-600 hover:bg-emerald-500 text-white w-full">
                   {savingBanking ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
                   Guardar Dados Bancários
                 </Button>
@@ -827,7 +827,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
               <div className="flex items-start gap-3">
-                <Smartphone size={18} className="text-red-400 shrink-0 mt-1" />
+                <Smartphone size={18} className="text-emerald-400 shrink-0 mt-1" />
                 <div>
                   <div className="text-sm font-medium text-white flex items-center gap-2">
                     {navigator.userAgent.includes("Mobile") ? "Dispositivo Móvel" : "Navegador Web"}
@@ -858,9 +858,9 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="space-y-3">
               {[
-                { icon: <Mail size={16} className="text-red-400" />, label: "Email de suporte", value: "suporte@seudominio.com", sub: "Resposta em até 24 horas úteis" },
-                { icon: <Phone size={16} className="text-red-400" />, label: "Linha de apoio", value: "+351 800 000 000", sub: "Chamada gratuita · 24h / 7 dias" },
-                { icon: <Clock size={16} className="text-red-400" />, label: "Horário de atendimento", value: "24 horas, 7 dias por semana", sub: "Chat ao vivo disponível" },
+                { icon: <Mail size={16} className="text-emerald-400" />, label: "Email de suporte", value: "suporte@seudominio.com", sub: "Resposta em até 24 horas úteis" },
+                { icon: <Phone size={16} className="text-emerald-400" />, label: "Linha de apoio", value: "+351 800 000 000", sub: "Chamada gratuita · 24h / 7 dias" },
+                { icon: <Clock size={16} className="text-emerald-400" />, label: "Horário de atendimento", value: "24 horas, 7 dias por semana", sub: "Chat ao vivo disponível" },
               ].map(item => (
                 <div key={item.label} className="flex items-start gap-3 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4">
                   <div className="mt-0.5 shrink-0">{item.icon}</div>
@@ -873,7 +873,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               ))}
             </div>
             <div className="flex gap-3 mt-2 flex-wrap">
-              <Button onClick={() => toast.info("Chat ao vivo disponível em breve.")} className="bg-red-600 hover:bg-red-700 text-white">
+              <Button onClick={() => toast.info("Chat ao vivo disponível em breve.")} className="bg-emerald-600 hover:bg-emerald-500 text-white">
                 <MessageSquare size={14} className="mr-2" /> Chat ao Vivo
               </Button>
               <Button variant="outline" onClick={() => toast.info("Centro de ajuda disponível em breve.")} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
@@ -925,9 +925,12 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       {/* Profile header */}
       <div
         className="b62-glass p-5 mb-6 flex items-center gap-4"
-        style={{ backgroundImage: "linear-gradient(135deg, rgba(220,38,38,0.14), rgba(139,92,246,0.10))" }}
+        style={{ backgroundImage: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(110,231,183,0.12))" }}
       >
-        <div className="b62-gradient-cta w-14 h-14 rounded-full flex items-center justify-center text-2xl font-black shrink-0">
+        <div
+          className="w-14 h-14 rounded-full flex items-center justify-center text-2xl font-black shrink-0 text-white"
+          style={{ backgroundImage: "linear-gradient(135deg, #10b981, #6ee7b7)" }}
+        >
           {user.name.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0">
@@ -955,7 +958,8 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 <button
                   key={s.id}
                   onClick={() => setActiveSection(s.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${active ? "b62-gradient-cta text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800"}`}
+                  style={active ? { backgroundImage: "linear-gradient(135deg, #10b981, #6ee7b7)" } : undefined}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${active ? "text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800"}`}
                 >
                   <Icon size={15} className={active ? "text-white" : "text-zinc-500"} />
                   <span className="flex-1">{s.label}</span>
@@ -993,7 +997,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                     onClick={() => setMobileOpen(open ? null : s.id)}
                     className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
                   >
-                    <Icon size={15} className={open ? "text-red-500" : "text-zinc-500"} />
+                    <Icon size={15} className={open ? "text-emerald-400" : "text-zinc-500"} />
                     <span className={`flex-1 text-sm font-medium ${open ? "text-white" : "text-zinc-300"}`}>{s.label}</span>
                     <ChevronDown size={14} className={`text-zinc-500 transition-transform ${open ? "rotate-180" : ""}`} />
                   </button>
