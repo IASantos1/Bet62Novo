@@ -23501,7 +23501,9 @@ export default function Home({
         )}
       </AnimatePresence>
 
-      {/* FOOTER */}
+      {/* FOOTER — not needed on Esporte/Casino/Promoções (full-screen
+          WinHouse embed) or on Perfil (Santos, 2026-09-27). */}
+      {!isShellOnlyTab && activeTab !== "profile" && (
       <footer className="border-t border-zinc-900 bg-zinc-950 py-5 sm:py-10 mt-auto">
         <div className="max-w-[1600px] mx-auto px-4">
           {/* Brand block and the three link columns sit side by side on
@@ -23644,6 +23646,7 @@ export default function Home({
           </div>
         </div>
       </footer>
+      )}
 
       <PlayerProfileModal
         playerId={playerProfileId}
