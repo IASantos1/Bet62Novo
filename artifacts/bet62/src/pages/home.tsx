@@ -19123,7 +19123,7 @@ export default function Home({
                 <button
                   key={tab.id}
                   {...makeTap(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
-                  className={`h-full px-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+                  className={`h-full px-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-emerald-300 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
                 >
                   {tab.icon}
                   {tab.label}
@@ -19132,7 +19132,7 @@ export default function Home({
               {auth.user && (
                 <button
                   {...makeTap(() => selectMainTab("wallet", () => { void fetchMyBets(true); }))}
-                  className={`h-full px-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+                  className={`h-full px-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-emerald-300 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
                 >
                   <Wallet size={15} />
                   CARTEIRA
@@ -19276,7 +19276,7 @@ export default function Home({
                   setAuthMode("login");
                   setAuthModalOpen(true);
                 }}
-                className="bg-red-600 hover:bg-red-700 text-white font-bold px-6"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6"
               >
                 ENTRAR
               </Button>
@@ -19298,7 +19298,7 @@ export default function Home({
             <button
               key={tab.id}
               {...makeTap(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
-              className={`h-full px-3 font-semibold text-xs transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 shrink-0 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500"}`}
+              className={`h-full px-3 font-semibold text-xs transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 shrink-0 ${activeTab === tab.id ? "border-emerald-300 text-white" : "border-transparent text-zinc-500"}`}
             >
               {tab.icon}
               {tab.label}
@@ -19307,7 +19307,7 @@ export default function Home({
           {auth.user && (
             <button
               {...makeTap(() => selectMainTab("wallet", () => { void fetchMyBets(true); }))}
-              className={`h-full px-3 font-semibold text-xs transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 shrink-0 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500"}`}
+              className={`h-full px-3 font-semibold text-xs transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 shrink-0 ${activeTab === "wallet" ? "border-emerald-300 text-white" : "border-transparent text-zinc-500"}`}
             >
               <Wallet size={14} />
               CARTEIRA
