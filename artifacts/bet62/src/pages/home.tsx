@@ -19197,7 +19197,7 @@ export default function Home({
           <div className="flex items-center gap-4">
             <div className="font-black text-2xl tracking-tighter italic">
               <span className="text-white">BET</span>
-              <span className="text-red-600">62</span>
+              <span className="text-emerald-300">62</span>
             </div>
 
             {/* Desktop inline nav — hidden on mobile (uses tab strip below) */}
@@ -23686,7 +23686,7 @@ export default function Home({
           >
             <div className="font-black text-lg tracking-tighter italic shrink-0">
               <span className="text-white">BET</span>
-              <span className="text-red-600">62</span>
+              <span className="text-emerald-300">62</span>
             </div>
             <div className="flex items-center gap-1.5 min-w-0">
               <button
@@ -23957,10 +23957,10 @@ export default function Home({
             </button>
 
             <div className="bg-zinc-900 p-6 border-b border-zinc-800 text-center relative overflow-hidden">
-              <div className="absolute inset-0 bg-red-600/10 blur-xl"></div>
+              <div className="absolute inset-0 bg-emerald-400/10 blur-xl"></div>
               <div className="relative font-black text-3xl tracking-tighter italic">
                 <span className="text-white">BET</span>
-                <span className="text-red-600">62</span>
+                <span className="text-emerald-300">62</span>
               </div>
             </div>
 
