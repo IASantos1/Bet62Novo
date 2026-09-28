@@ -12,9 +12,9 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { csrfProtection } from "../middlewares/csrf.js";
-import { authMiddleware, requireLockableSession, type AuthRequest } from "../middlewares/auth.js";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { kvCache } from "../services/cache/kvCache.js";
-import { rotateSession, setSessionCookies } from "../lib/sessions.js";
+import { createSession, setSessionCookies } from "../lib/sessions.js";
 import { logSecurityEvent } from "../lib/securityAudit.js";
 // Relative import — see sessions.ts's comment for why (tsc alias-resolution
 // quirk for newly-added schema exports).
@@ -48,11 +48,13 @@ function registerChallengeKey(userId: number): string {
   return `webauthn:register:${userId}`;
 }
 
-// Keyed by the session's own hash rather than userId, so a user unlocking
-// several sessions/browsers at once doesn't clobber one challenge with
-// another.
-function loginChallengeKey(sessionId: string): string {
-  return `webauthn:login:${sessionId}`;
+// Keyed by the normalized email rather than a session, since login now
+// happens with no session yet (Santos, 2026-09-28) — a second concurrent
+// login attempt for the same email overwriting the first's challenge is
+// an acceptable tradeoff (mirrors registerChallengeKey's one-ceremony-
+// per-identity assumption).
+function loginChallengeKey(email: string): string {
+  return `webauthn:login:${email}`;
 }
 
 function publicUser(user: typeof usersTable.$inferSelect) {
@@ -147,8 +149,16 @@ router.post("/passkey/register/verify", authMiddleware, async (req: AuthRequest,
   }
 });
 
-// ── Login/unlock (works against an active OR locked session) ───────────────
-
+// ── Login (public, email-scoped — no session required) ─────────────────────
+// Idle timeout and "Sair" now both sign the user all the way out (Santos,
+// 2026-09-28) instead of leaving a "locked" session to resume, so Face ID
+// on the login screen has to be a genuine fresh login: the client sends
+// the email remembered on this device (see home.tsx's REMEMBERED_EMAIL_KEY),
+// the server looks up that user's passkeys and scopes the WebAuthn
+// ceremony to them (avoids Safari's full account-chooser UI — same
+// residentKey: "discouraged" reasoning as registration above), and a
+// successful verification mints a brand new session via createSession,
+// exactly like POST /login does for a password.
 const passkeyLoginRateLimit = rateLimit({
   name: "auth-passkey-login",
   windowMs: 15 * 60_000,
@@ -156,15 +166,29 @@ const passkeyLoginRateLimit = rateLimit({
   message: "Muitas tentativas de autenticação biométrica.",
 });
 
+function normalizeEmail(raw: unknown): string | null {
+  const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return email.length > 0 ? email : null;
+}
+
 router.post(
   "/passkey/login/options",
   passkeyLoginRateLimit,
-  requireLockableSession,
-  async (req: AuthRequest, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) {
+      res.status(400).json({ error: "Missing email" });
+      return;
+    }
     try {
       const { rpID } = webauthnConfig();
-      const passkeys = await db.select().from(userPasskeysTable).where(eq(userPasskeysTable.userId, req.user!.id));
-      if (passkeys.length === 0) {
+      const [user] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email)).limit(1);
+      // Same generic error whether the email doesn't exist or just has no
+      // passkey — never confirm which emails are registered.
+      const passkeys = user
+        ? await db.select().from(userPasskeysTable).where(eq(userPasskeysTable.userId, user.id))
+        : [];
+      if (!user || passkeys.length === 0) {
         res.status(400).json({ error: "NO_PASSKEY" });
         return;
       }
@@ -178,7 +202,7 @@ router.post(
         userVerification: "required",
       });
 
-      await kvCache.set(loginChallengeKey(req.session!.id), options.challenge, CHALLENGE_TTL_SECONDS);
+      await kvCache.set(loginChallengeKey(email), options.challenge, CHALLENGE_TTL_SECONDS);
       res.json(options);
     } catch (err) {
       logger.error({ err }, "Passkey login/options error");
@@ -190,22 +214,32 @@ router.post(
 router.post(
   "/passkey/login/verify",
   passkeyLoginRateLimit,
-  requireLockableSession,
-  async (req: AuthRequest, res: Response): Promise<void> => {
-    const response = req.body as AuthenticationResponseJSON;
+  async (req: Request, res: Response): Promise<void> => {
+    const email = normalizeEmail(req.body?.email);
+    const response = req.body?.response as AuthenticationResponseJSON | undefined;
+    if (!email || !response) {
+      res.status(400).json({ error: "Missing email or response" });
+      return;
+    }
     const meta = requestMeta(req);
     try {
       const { rpID, origin } = webauthnConfig();
-      const expectedChallenge = await kvCache.get(loginChallengeKey(req.session!.id));
+      const expectedChallenge = await kvCache.get(loginChallengeKey(email));
       if (!expectedChallenge) {
         res.status(400).json({ error: "Challenge expired or missing — try again." });
+        return;
+      }
+
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+      if (!user) {
+        res.status(401).json({ error: "Verification failed" });
         return;
       }
 
       const [passkey] = await db
         .select()
         .from(userPasskeysTable)
-        .where(and(eq(userPasskeysTable.credentialId, response.id), eq(userPasskeysTable.userId, req.user!.id)))
+        .where(and(eq(userPasskeysTable.credentialId, response.id), eq(userPasskeysTable.userId, user.id)))
         .limit(1);
       if (!passkey) {
         res.status(401).json({ error: "Unknown credential" });
@@ -232,9 +266,8 @@ router.post(
       const { newCounter } = verification.authenticationInfo;
       if (verification.verified && newCounter !== 0 && newCounter <= passkey.counter) {
         await logSecurityEvent({
-          userId: req.user!.id,
+          userId: user.id,
           event: "login_failed",
-          sessionId: req.session!.id,
           ...meta,
           metadata: { reason: "passkey_counter_replay_suspected" },
         });
@@ -251,19 +284,13 @@ router.post(
         .update(userPasskeysTable)
         .set({ counter: newCounter, lastUsedAt: new Date() })
         .where(eq(userPasskeysTable.id, passkey.id));
-      await kvCache.del(loginChallengeKey(req.session!.id));
+      await kvCache.del(loginChallengeKey(email));
 
-      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
-      if (!user) {
-        res.status(401).json({ error: "Invalid session" });
-        return;
-      }
-
-      const { sessionToken, refreshToken, session } = await rotateSession(req.session!, "unlocked", meta);
+      const { sessionToken, refreshToken, session } = await createSession(user.id, meta);
       setSessionCookies(res, { sessionToken, refreshToken });
       await logSecurityEvent({ userId: user.id, event: "session_unlocked_passkey", sessionId: session.id, ...meta });
 
-      res.json({ status: "ACTIVE", user: publicUser(user) });
+      res.json({ user: publicUser(user) });
     } catch (err) {
       logger.error({ err }, "Passkey login/verify error");
       res.status(401).json({ error: "Verification failed" });
