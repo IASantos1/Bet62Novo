@@ -6,7 +6,7 @@ import {
   casinoBannersTable,
   usersTable,
 } from "@workspace/db";
-import { and, asc, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
@@ -234,6 +234,40 @@ function compareCasinoBrowseRows(
   );
 }
 
+// SQL mirror of curatedPopularPriority — same substring match (ILIKE '%title%'),
+// same first-match-wins order via CASE, so the "popular" sort can be pushed
+// down to Postgres (ORDER BY + LIMIT) instead of fetching every active row
+// and sorting in JS. Only used for the "Todos"/"Populares"/"Novos" pseudo-
+// categories (see needsKeywordCategoryFilter below) — real categories still
+// need the JS-side keyword inference in inferCasinoBrowseTags, which has no
+// cheap SQL equivalent.
+function curatedPopularRankSql(): SQL {
+  // Every branch value must be cast to ::int — left as bare bound
+  // parameters, Postgres has no type context to infer them from (the CASE
+  // itself gives none) and defaults to comparing them as text, so rank 21
+  // sorts before rank 3/4 alphabetically ("21" < "3"). Verified against a
+  // live Postgres: without the cast, curated titles past index 2 vanish
+  // from the "popular" sort's first page entirely.
+  const whens = CURATED_POPULAR_TITLES.map(
+    (title, index) => sql`when ${casinoGamesTable.name} ilike ${`%${title}%`} then ${index}::int`,
+  );
+  return sql`(case ${sql.join(whens, sql` `)} else ${CURATED_POPULAR_TITLES.length}::int end)`;
+}
+
+function casinoBrowseOrderBySql(sort: string): SQL[] {
+  if (sort === "new") {
+    return [desc(casinoGamesTable.createdAt), asc(casinoGamesTable.name)];
+  }
+  if (sort === "az") {
+    return [asc(casinoGamesTable.name)];
+  }
+  return [
+    asc(curatedPopularRankSql()),
+    desc(casinoGamesTable.popularity),
+    asc(casinoGamesTable.name),
+  ];
+}
+
 router.get("/games", async (req: Request, res: Response) => {
   await maybeSyncBigBangCatalog();
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
@@ -272,29 +306,67 @@ router.get("/games", async (req: Request, res: Response) => {
   }
   const where = and(...conditions);
 
-  const rows: CasinoBrowseRow[] = await db
-    .select({
-      id: casinoGamesTable.gameUid,
-      name: casinoGamesTable.name,
-      provider: casinoGamesTable.provider,
-      vendorCode: casinoGamesTable.vendorCode,
-      category: casinoGamesTable.category,
-      img: casinoGamesTable.img,
-      source: casinoGamesTable.source,
-      popularity: casinoGamesTable.popularity,
-      createdAt: casinoGamesTable.createdAt,
-    })
-    .from(casinoGamesTable)
-    .where(where);
+  // "Todos"/"Populares"/"Novos" (and no category at all) never filter by
+  // category in JS (matchesCasinoBrowseCategory short-circuits to true for
+  // them) — only a real pill like "jackpots"/"crash"/"blackjack" needs
+  // inferCasinoBrowseTags' keyword heuristics, which have no cheap SQL
+  // equivalent. For the common case (this covers the default landing view
+  // and every "Jogos Populares"/grid request that isn't category-filtered),
+  // push sort + pagination down to Postgres instead of fetching every
+  // active row just to sort/slice it in Node.
+  const needsKeywordCategoryFilter =
+    !!category && category !== "todos" && category !== "populares" && category !== "novos";
 
-  const filtered = rows
-    .filter((row) => matchesCasinoBrowseCategory(row, category))
-    .sort((left, right) => compareCasinoBrowseRows(left, right, sort));
+  let total: number;
+  let games: Array<Omit<CasinoBrowseRow, "popularity" | "createdAt">>;
 
-  const total = filtered.length;
-  const games = filtered
-    .slice((page - 1) * limit, page * limit)
-    .map(({ popularity: _popularity, createdAt: _createdAt, ...game }) => game);
+  if (needsKeywordCategoryFilter) {
+    const rows: CasinoBrowseRow[] = await db
+      .select({
+        id: casinoGamesTable.gameUid,
+        name: casinoGamesTable.name,
+        provider: casinoGamesTable.provider,
+        vendorCode: casinoGamesTable.vendorCode,
+        category: casinoGamesTable.category,
+        img: casinoGamesTable.img,
+        source: casinoGamesTable.source,
+        popularity: casinoGamesTable.popularity,
+        createdAt: casinoGamesTable.createdAt,
+      })
+      .from(casinoGamesTable)
+      .where(where);
+
+    const filtered = rows
+      .filter((row) => matchesCasinoBrowseCategory(row, category))
+      .sort((left, right) => compareCasinoBrowseRows(left, right, sort));
+
+    total = filtered.length;
+    games = filtered
+      .slice((page - 1) * limit, page * limit)
+      .map(({ popularity: _popularity, createdAt: _createdAt, ...game }) => game);
+  } else {
+    const [totalRow, pageRows] = await Promise.all([
+      db.select({ value: count() }).from(casinoGamesTable).where(where),
+      db
+        .select({
+          id: casinoGamesTable.gameUid,
+          name: casinoGamesTable.name,
+          provider: casinoGamesTable.provider,
+          vendorCode: casinoGamesTable.vendorCode,
+          category: casinoGamesTable.category,
+          img: casinoGamesTable.img,
+          source: casinoGamesTable.source,
+        })
+        .from(casinoGamesTable)
+        .where(where)
+        .orderBy(...casinoBrowseOrderBySql(sort))
+        .limit(limit)
+        .offset((page - 1) * limit),
+    ]);
+
+    total = Number(totalRow[0]?.value ?? 0);
+    games = pageRows;
+  }
 
   const payload = JSON.stringify({ page, limit, total, games });
   await kvCache.set(cacheKey, payload, GAMES_CACHE_TTL_SECONDS);

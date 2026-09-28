@@ -8289,22 +8289,26 @@ export default function Home({
     ];
     // One batched request for all 17 titles (was 17 sequential
     // `search=<title>&limit=1` round trips) — the backend's `titles` param
-    // OR-matches them all in a single query.
-    fetch(`/api/casino/games?titles=${encodeURIComponent(featuredTitles.join(","))}&limit=60`)
-      .then((r) => r.json())
-      .then((data) => {
+    // OR-matches them all in a single query. Fired in parallel with the
+    // "popular" fallback fetch instead of chaining them — the two are
+    // independent (the dedup against `seen` only needs to happen once both
+    // have resolved, not before the second request is sent), so waiting on
+    // one before starting the other was a needless extra round trip on
+    // every Casino tab open (Santos, 2026-09-27).
+    Promise.allSettled([
+      fetch(`/api/casino/games?titles=${encodeURIComponent(featuredTitles.join(","))}&limit=60`).then((r) => r.json()),
+      fetch(`/api/casino/games?sort=popular&limit=18`).then((r) => r.json()),
+    ])
+      .then(([titlesResult, popularResult]) => {
+        const data = titlesResult.status === "fulfilled" ? titlesResult.value : null;
         const pool: CasinoGame[] = Array.isArray(data?.games) ? data.games : [];
         const seen = new Set<string>();
         const featured = pickFirstMatchPerTitle(pool, featuredTitles, seen);
-        return fetch(`/api/casino/games?sort=popular&limit=18`)
-          .then((r) => r.json())
-          .then((data2) => {
-            const rest: CasinoGame[] = Array.isArray(data2?.games)
-              ? data2.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
-              : [];
-            setCasinoPopular([...featured, ...rest].slice(0, 18));
-          })
-          .catch(() => setCasinoPopular(featured));
+        const data2 = popularResult.status === "fulfilled" ? popularResult.value : null;
+        const rest: CasinoGame[] = Array.isArray(data2?.games)
+          ? data2.games.filter((g: CasinoGame) => !seen.has(`${g.provider}-${g.id}`))
+          : [];
+        setCasinoPopular([...featured, ...rest].slice(0, 18));
       })
       .catch(() => {})
       .finally(() => setCasinoPopularLoading(false));
