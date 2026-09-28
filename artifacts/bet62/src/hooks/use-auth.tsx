@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
+import { setRememberedEmail } from "@/lib/rememberedLogin";
 
 type User = {
   id: string;
@@ -18,6 +19,7 @@ type User = {
 type AuthContextType = {
   user: User | null;
   isLoading: boolean;
+  hasPasskey: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, nif: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -30,20 +32,23 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasPasskey, setHasPasskey] = useState(false);
 
-  // Cookie-based session (HttpOnly bet62_session) — there's no token for
-  // JS to read anymore, so "am I logged in" is always answered by asking
-  // the server. On LOCKED, deliberately don't clear `user`: the app
-  // underneath the lock screen stays mounted, it's the overlay (owned by
-  // home.tsx) that blocks interaction, not this hook nulling the user out.
+  // Cookie-based session (HttpOnly bet62_session) — there's no token for JS
+  // to read anymore, so "am I logged in" is always answered by asking the
+  // server. Idle timeout and logout both revoke the session outright now
+  // (no more "LOCKED" resumable state — Santos, 2026-09-28), so anything
+  // other than ACTIVE just means logged out.
   const fetchSession = async () => {
     try {
       const res = await fetch("/api/auth/session", { cache: "no-store" });
       const data = await res.json();
       if (data.status === "ACTIVE") {
         setUser(data.user);
-      } else if (data.status !== "LOCKED") {
+        setHasPasskey(!!data.passkeyAvailable);
+      } else {
         setUser(null);
+        setHasPasskey(false);
       }
     } catch (err) {
       console.error(err);
@@ -65,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Login failed");
     setUser(data.user);
+    setRememberedEmail(email);
   };
 
   const register = async (name: string, email: string, password: string, nif: string) => {
@@ -76,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Registration failed");
     setUser(data.user);
+    setRememberedEmail(email);
   };
 
   const logout = async () => {
@@ -86,11 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // server-side even if this particular request failed.
     }
     setUser(null);
+    setHasPasskey(false);
     toast.success("Saiu com sucesso");
   };
 
   const invalidateSession = (message = "Sessão expirada. Entre novamente.") => {
     setUser(null);
+    setHasPasskey(false);
     toast.error(message);
   };
 
@@ -99,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout, invalidateSession, refreshUser }}>
+    <AuthContext.Provider value={{ user, isLoading, hasPasskey, login, register, logout, invalidateSession, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

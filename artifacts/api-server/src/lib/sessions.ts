@@ -132,10 +132,16 @@ export async function evaluateSession(tokenHash: string): Promise<SessionEvaluat
 
   if (session.status === "locked") return { status: "locked", session };
 
+  // Idle timeout now signs the user all the way out instead of locking
+  // the session for a biometric/password resume — Santos wants a plain
+  // logout here, with Face ID handled as a fresh (public, email-scoped)
+  // login instead of a session "unlock" (2026-09-28). lockSession/the
+  // "locked" status stay defined (still reachable in principle via
+  // POST /session/lock) but nothing calls that path anymore.
   const idleForMs = Date.now() - session.lastActivityAt.getTime();
   if (idleForMs > AUTH_IDLE_TIMEOUT_SECONDS * 1000) {
-    const locked = await lockSession(tokenHash, "idle_timeout");
-    return locked ? { status: "locked", session: locked } : { status: "expired" };
+    await revokeSession(tokenHash, "idle_timeout");
+    return { status: "revoked" };
   }
 
   return { status: "active", session };

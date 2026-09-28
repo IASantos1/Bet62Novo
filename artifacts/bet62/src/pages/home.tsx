@@ -78,7 +78,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
-import { apiFetch, SESSION_LOCKED_EVENT } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { getRememberedEmail, setRememberedEmail } from "@/lib/rememberedLogin";
 import { LEAGUE_LOGOS } from "@/lib/leagueLogos";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import {
@@ -4251,6 +4252,13 @@ export default function Home({
   const casinoCarouselRef = useRef<HTMLDivElement>(null);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  // Reveals the email/password form on the login tab in place of the Face
+  // ID view — starts false (Face ID first) whenever the modal (re)opens
+  // with a remembered email + platform authenticator on this device.
+  const [usePasswordLogin, setUsePasswordLogin] = useState(false);
+  useEffect(() => {
+    if (authModalOpen) setUsePasswordLogin(false);
+  }, [authModalOpen]);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
   useEffect(() => {
     try {
@@ -5152,112 +5160,30 @@ export default function Home({
     null,
   );
 
-  // ── Lock screen state ────────────────────────────────────────────────────────
-  // The server (lib/sessions.ts's evaluateSession) is the source of truth
-  // for whether the session is locked — this state just mirrors what
-  // GET /api/auth/session last reported, checked on mount and every time
-  // the tab becomes visible again (below), plus set immediately whenever
-  // any apiFetch call surfaces a 401 SESSION_LOCKED (see the
-  // SESSION_LOCKED_EVENT listener further down). No more trusting a
-  // client-writable localStorage flag for something that gates access.
-  const [isLocked, setIsLocked] = useState(false);
-  const isLockedRef = useRef(false);
-  const [lockPassword, setLockPassword] = useState("");
-  const [lockError, setLockError] = useState("");
-  const [lockLoading, setLockLoading] = useState(false);
+  // ── Idle auto-logout + passkey login state ──────────────────────────────
+  // Idle timeout no longer "locks" a resumable session — it signs the user
+  // all the way out, same as the "Sair" button. Face ID on the login modal
+  // is a fresh, email-scoped login (see handlePasskeyLogin below), not a
+  // session "unlock" (Santos, 2026-09-28).
   const [biometricAvailable, setBiometricAvailable] = useState(false);
-  // Whether the CURRENT user has a passkey registered server-side
-  // (@simplewebauthn — user_passkeys table), not a locally-cached
-  // credential id. Populated from /api/auth/session's own response.
-  const [hasPasskey, setHasPasskey] = useState(false);
-  const [lockedEmail, setLockedEmail] = useState<string | null>(null);
-  const [showPasswordUnlock, setShowPasswordUnlock] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
-  // Captured the moment the session locks so a successful unlock can
-  // return to exactly where the user was, instead of the home tab.
-  const returnPathRef = useRef<string | null>(null);
 
-  // Sync isLocked → ref (used in async callbacks)
-  useEffect(() => {
-    isLockedRef.current = isLocked;
-  }, [isLocked]);
-
-  const checkSession = useCallback(async () => {
-    try {
-      const res = await fetch("/api/auth/session", { cache: "no-store" });
-      const data = await res.json();
-      setHasPasskey(!!data.passkeyAvailable);
-      if (data.status === "LOCKED") {
-        setLockedEmail(data.email ?? null);
-        if (!isLockedRef.current) {
-          returnPathRef.current = window.location.pathname + window.location.search;
-        }
-        setLockError("");
-        setIsLocked(true);
-      } else if (data.status === "ACTIVE") {
-        setIsLocked(false);
-        resetIdle();
-      }
-      // EXPIRED: leave isLocked as-is — use-auth's own session check
-      // handles clearing `user`, which unmounts the app behind the lock
-      // screen entirely, making the overlay itself moot.
-    } catch {
-      /* non-critical — next check (idle tick, visibility change) retries */
-    }
-  }, [resetIdle]);
-
+  // Re-sync `user` if this tab was backgrounded when its session expired
+  // elsewhere (idle timeout, or logging out from another tab).
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onVisibility = () => {
-      if (document.visibilityState === "visible") void checkSession();
+      if (document.visibilityState === "visible") void auth.refreshUser();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [checkSession]);
-
-  // A locked session surfaces as 401 SESSION_LOCKED from ANY apiFetch call,
-  // not just this poll — e.g. the server may have locked the session while
-  // this tab was foregrounded but idle past AUTH_IDLE_TIMEOUT_SECONDS.
-  useEffect(() => {
-    const onLocked = () => void checkSession();
-    window.addEventListener(SESSION_LOCKED_EVENT, onLocked);
-    return () => window.removeEventListener(SESSION_LOCKED_EVENT, onLocked);
-  }, [checkSession]);
-
-  // Initial check on mount — covers reopening the app after it was closed
-  // long enough for the session to have locked server-side.
-  useEffect(() => {
-    void checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Explicit "lock now" — calls the server rather than just flipping a
-  // local flag, since the backend (not this timer) is what must actually
-  // decide and record that the session is locked. This is what the client
-  // idle timer below triggers: useIdle's own default (used here) fires
-  // well before AUTH_IDLE_TIMEOUT_SECONDS' production default of 15
-  // minutes, so waiting for the server's own lazy idle detection to catch
-  // up would leave the UI unlocked long after the user walked away.
-  const lockNow = useCallback(async () => {
-    if (isLockedRef.current) return;
-    try {
-      const res = await apiFetch("/api/auth/session/lock", { method: "POST" });
-      if (res.ok) {
-        returnPathRef.current = window.location.pathname + window.location.search;
-        setLockError("");
-        setIsLocked(true);
-        return;
-      }
-    } catch {
-      /* fall through to resync below */
-    }
-    void checkSession();
-  }, [checkSession]);
-
   // Check WebAuthn platform authenticator availability (a client capability
-  // check only — whether THIS user has a passkey registered is server
-  // state, read from checkSession above).
+  // check only — whether a given email actually has a passkey registered
+  // is server state, checked when the login modal's Face ID button is used).
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (
@@ -5270,7 +5196,7 @@ export default function Home({
   }, []);
 
   useEffect(() => {
-    if (!isIdle || isLockedRef.current) return;
+    if (!isIdle) return;
     if (
       typeof document !== "undefined" &&
       document.visibilityState !== "visible"
@@ -5279,10 +5205,9 @@ export default function Home({
       return;
     }
     if (!auth.user) return;
-    // Any authenticated user gets locked on idle now — password is always
-    // the fallback, biometric is just the convenient path.
-    void lockNow();
-  }, [isIdle, auth.user, resetIdle, lockNow]);
+    void auth.logout();
+    resetIdle();
+  }, [isIdle, auth, resetIdle]);
 
   // ── Tab scroll ref ────────────────────────────────────────────────────────────
   const tabContainerRef = useRef<HTMLDivElement | null>(null);
@@ -7060,8 +6985,7 @@ export default function Home({
   const fetchUpcoming = useCallback(
     async (showSpinner = false) => {
       if (document.visibilityState === "hidden") return;
-      if ((isIdleRef.current && activeTab !== "live") || isLockedRef.current)
-        return;
+      if (isIdleRef.current && activeTab !== "live") return;
       if (showSpinner) setUpcomingLoading(true);
       const params = new URLSearchParams();
       if (selectedSport !== "all") params.set("sport", selectedSport);
@@ -7439,8 +7363,7 @@ export default function Home({
   const fetchLive = useCallback(
     async (showSpinner = false): Promise<"success" | "skipped" | "failed"> => {
       if (document.visibilityState === "hidden") return "skipped";
-      if ((isIdleRef.current && activeTab !== "live") || isLockedRef.current)
-        return "skipped";
+      if (isIdleRef.current && activeTab !== "live") return "skipped";
       if (liveFetchInFlightRef.current) return "skipped";
       if (showSpinner) setLiveLoading(true);
       let ctrl: AbortController | null = null;
@@ -8551,16 +8474,6 @@ export default function Home({
     const normalizedError = String(error ?? "")
       .trim()
       .toLowerCase();
-    // A locked session is still a valid, known session — it must surface the
-    // lock screen (checkSession(), already triggered by apiFetch's own
-    // SESSION_LOCKED_EVENT dispatch), never the "session expired, log in
-    // again" flow below. Treating every 401 as an invalid token used to nuke
-    // `auth.user` and pop the login modal on top of a merely-locked session,
-    // fighting the lock screen it should have shown instead.
-    if (normalizedError === "session_locked") {
-      void checkSession();
-      return true;
-    }
     const isInvalidToken =
       status === 401 ||
       normalizedError.includes("invalid token") ||
@@ -8855,80 +8768,48 @@ export default function Home({
     );
   };
 
-  // ── Lock screen handlers ────────────────────────────────────────────────────
-  // Called after any successful unlock (password or passkey) — the server
-  // always creates a brand new session rather than reactivating the locked
-  // one (see lib/sessions.ts's rotateSession), so this just syncs the
-  // frontend to that fact and returns the user to where they were.
-  const onUnlocked = useCallback(() => {
-    setIsLocked(false);
-    setLockPassword("");
-    setLockError("");
-    setShowPasswordUnlock(false);
-    resetIdle();
-    void auth.refreshUser();
-    const returnPath = returnPathRef.current;
-    returnPathRef.current = null;
-    if (returnPath) navigate(returnPath);
-  }, [resetIdle, auth, navigate]);
-
-  const handlePasswordUnlock = async (e: any) => {
-    e.preventDefault();
-    if (!lockPassword) return;
-    setLockLoading(true);
-    setLockError("");
-    try {
-      const res = await apiFetch("/api/auth/session/unlock-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: lockPassword }),
-      });
-      if (res.ok) {
-        onUnlocked();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setLockError(data.error || "Password incorreta");
-      }
-    } catch {
-      setLockError("Erro de ligação. Tente novamente.");
-    } finally {
-      setLockLoading(false);
-    }
-  };
-
-  const handleBiometricUnlock = useCallback(async () => {
+  // ── Passkey login (auth modal) + registration handlers ──────────────────
+  // Face ID on the login modal is a genuine fresh login (POST /login-style,
+  // mints a brand new session), scoped to whichever email this device last
+  // logged in as (rememberedLogin.ts) — not tied to any existing session,
+  // since idle timeout and "Sair" both sign the user all the way out now
+  // (Santos, 2026-09-28).
+  const handlePasskeyLogin = useCallback(async (email: string) => {
     setBiometricLoading(true);
-    setLockError("");
     try {
       const optionsRes = await apiFetch("/api/auth/passkey/login/options", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
       });
       const options = await optionsRes.json();
       if (!optionsRes.ok) {
-        setLockError(
-          options.error === "NO_PASSKEY"
-            ? "Nenhuma biometria registada neste dispositivo."
-            : "Não foi possível iniciar a verificação biométrica.",
-        );
+        if (options.error !== "NO_PASSKEY") {
+          toast.error("Não foi possível iniciar a verificação biométrica.");
+        }
+        setUsePasswordLogin(true);
         return;
       }
       const assertion = await startAuthentication({ optionsJSON: options });
       const verifyRes = await apiFetch("/api/auth/passkey/login/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(assertion),
+        body: JSON.stringify({ email, response: assertion }),
       });
       if (verifyRes.ok) {
-        onUnlocked();
+        setAuthModalOpen(false);
+        toast.success("Bem-vindo de volta!");
+        setRememberedEmail(email);
+        await auth.refreshUser();
       } else {
-        setLockError("Verificação biométrica falhou.");
+        toast.error("Verificação biométrica falhou.");
       }
     } catch {
-      setLockError("Verificação biométrica cancelada ou falhou.");
+      toast.error("Verificação biométrica cancelada ou falhou.");
     } finally {
       setBiometricLoading(false);
     }
-  }, [onUnlocked]);
+  }, [auth]);
 
   const handleRegisterBiometric = async () => {
     if (!auth.user) return;
@@ -8949,7 +8830,7 @@ export default function Home({
         body: JSON.stringify(attestation),
       });
       if (verifyRes.ok) {
-        setHasPasskey(true);
+        await auth.refreshUser();
         setShowBiometricSetup(false);
         toast.success("Desbloqueio biométrico ativado!");
       } else {
@@ -8962,21 +8843,10 @@ export default function Home({
     }
   };
 
-  // "Sair" no aparelho onde o Face ID já está configurado apenas bloqueia
-  // a sessão (mesma tela do bloqueio por inatividade) em vez de apagá-la —
-  // assim, ao reabrir o site, o desbloqueio biométrico volta a dar acesso
-  // sem pedir email/senha de novo (Santos, 2026-09-24). "Remover conta
-  // deste aparelho" é o botão que de fato encerra a sessão.
+  // "Sair" now always signs all the way out — idle timeout does the same
+  // (Santos, 2026-09-28). Face ID on the login modal (handlePasskeyLogin
+  // above) is what makes coming back quick, not a resumable locked session.
   const handleSignOut = () => {
-    if (biometricAvailable && hasPasskey) {
-      void lockNow();
-      return;
-    }
-    void auth.logout();
-  };
-
-  const forgetDevice = () => {
-    setIsLocked(false);
     void auth.logout();
   };
 
@@ -8990,7 +8860,7 @@ export default function Home({
       setLoginEmail("");
       setLoginPassword("");
       // Offer biometric setup if available and not yet registered
-      if (biometricAvailable && !hasPasskey) {
+      if (biometricAvailable && !auth.hasPasskey) {
         setTimeout(() => setShowBiometricSetup(true), 800);
       }
     } catch (err) {
@@ -18963,105 +18833,6 @@ export default function Home({
 
   return (
     <div className="min-h-[100dvh] w-full bg-background text-foreground flex flex-col font-sans transition-colors duration-500">
-      {/* ── LOCK SCREEN — requires password or biometric to dismiss ── */}
-      <AnimatePresence>
-        {isLocked && (
-          <motion.div
-            key="lock-screen"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35 }}
-            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center select-none px-6"
-            style={{
-              background: "rgba(4,6,18,0.97)",
-              backdropFilter: "blur(16px)",
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.88, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              transition={{
-                delay: 0.08,
-                type: "spring",
-                stiffness: 280,
-                damping: 24,
-              }}
-              className="w-full max-w-sm flex flex-col items-center"
-            >
-              <Lock size={28} className="text-red-500 mb-3" />
-              <h2 className="text-white font-bold text-lg mb-1">
-                Sessão bloqueada
-              </h2>
-              <p className="text-zinc-500 text-sm text-center mb-6">
-                Por segurança, confirme a sua identidade
-                {lockedEmail ? ` (${lockedEmail})` : ""}.
-              </p>
-
-              {lockError && (
-                <p className="text-red-400 text-xs mb-3 text-center">{lockError}</p>
-              )}
-
-              {biometricAvailable && hasPasskey && !showPasswordUnlock && (
-                <>
-                  <button
-                    onClick={() => void handleBiometricUnlock()}
-                    disabled={biometricLoading}
-                    className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl disabled:opacity-70 mb-4"
-                    aria-label="Desbloquear com Face ID"
-                  >
-                    {biometricLoading ? (
-                      <RefreshCw size={22} className="animate-spin text-zinc-300" />
-                    ) : (
-                      <ShieldCheck size={30} className="text-red-500" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setShowPasswordUnlock(true)}
-                    className="text-zinc-500 text-sm underline hover:text-zinc-300"
-                  >
-                    Usar palavra-passe
-                  </button>
-                </>
-              )}
-
-              {(!biometricAvailable || !hasPasskey || showPasswordUnlock) && (
-                <form onSubmit={handlePasswordUnlock} className="w-full space-y-3">
-                  <Input
-                    type="password"
-                    autoFocus
-                    value={lockPassword}
-                    onChange={(e) => setLockPassword(e.target.value)}
-                    placeholder="Palavra-passe"
-                    className="bg-zinc-900 border-zinc-700 text-white"
-                  />
-                  <Button
-                    type="submit"
-                    disabled={lockLoading || !lockPassword}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold"
-                  >
-                    {lockLoading ? (
-                      <RefreshCw size={16} className="animate-spin" />
-                    ) : (
-                      "Desbloquear"
-                    )}
-                  </Button>
-                  {biometricAvailable && hasPasskey && (
-                    <button
-                      type="button"
-                      onClick={() => setShowPasswordUnlock(false)}
-                      className="w-full text-zinc-500 text-sm underline hover:text-zinc-300"
-                    >
-                      Usar Face ID
-                    </button>
-                  )}
-                </form>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* ── BIOMETRIC SETUP DIALOG ── */}
       <Dialog open={showBiometricSetup} onOpenChange={setShowBiometricSetup}>
         <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-sm">
@@ -19073,10 +18844,10 @@ export default function Home({
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <p className="text-zinc-400 text-sm">
-              Ative o desbloqueio com{" "}
+              Ative o login com{" "}
               <strong className="text-white">Face ID</strong> ou{" "}
               <strong className="text-white">Impressão Digital</strong> para
-              desbloquear a sessão depois de um período de inatividade.
+              entrar mais rápido da próxima vez, sem digitar a senha.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
               <ShieldCheck size={18} className="text-blue-400 shrink-0" />
@@ -19266,14 +19037,6 @@ export default function Home({
                     >
                       <LogOut size={14} className="mr-2" /> Sair
                     </DropdownMenuItem>
-                    {hasPasskey && (
-                      <DropdownMenuItem
-                        className="hover:bg-zinc-800 cursor-pointer text-zinc-500"
-                        onClick={forgetDevice}
-                      >
-                        <X size={14} className="mr-2" /> Remover conta deste aparelho
-                      </DropdownMenuItem>
-                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>
@@ -23671,42 +23434,80 @@ export default function Home({
 
             <div className="p-6">
               {authMode === "login" ? (
-                <form onSubmit={handleLoginSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">E-mail</Label>
-                    <Input
-                      id="login-email"
-                      type="email"
-                      placeholder="seu@email.com"
-                      className="bg-zinc-900 border-zinc-800 text-white"
-                      required
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                    />
+                biometricAvailable && getRememberedEmail() && !usePasswordLogin ? (
+                  <div className="flex flex-col items-center py-2">
+                    <p className="text-zinc-500 text-sm text-center mb-6">
+                      Entrar como{" "}
+                      <span className="text-white font-medium">
+                        {getRememberedEmail()}
+                      </span>
+                    </p>
+                    <button
+                      onClick={() => void handlePasskeyLogin(getRememberedEmail()!)}
+                      disabled={biometricLoading}
+                      className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl disabled:opacity-70 mb-4"
+                      aria-label="Entrar com Face ID"
+                    >
+                      {biometricLoading ? (
+                        <RefreshCw size={22} className="animate-spin text-zinc-300" />
+                      ) : (
+                        <ShieldCheck size={30} className="text-emerald-400" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setUsePasswordLogin(true)}
+                      className="text-zinc-500 text-sm underline hover:text-zinc-300"
+                    >
+                      Usar palavra-passe
+                    </button>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="login-password">Senha</Label>
-                    <Input
-                      id="login-password"
-                      type="password"
-                      placeholder="••••••••"
-                      className="bg-zinc-900 border-zinc-800 text-white"
-                      required
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 mt-2"
-                    disabled={authLoading}
-                  >
-                    {authLoading ? (
-                      <RefreshCw className="animate-spin mr-2" size={16} />
-                    ) : null}
-                    ENTRAR
-                  </Button>
-                </form>
+                ) : (
+                  <form onSubmit={handleLoginSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="login-email">E-mail</Label>
+                      <Input
+                        id="login-email"
+                        type="email"
+                        placeholder="seu@email.com"
+                        className="bg-zinc-900 border-zinc-800 text-white"
+                        required
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="login-password">Senha</Label>
+                      <Input
+                        id="login-password"
+                        type="password"
+                        placeholder="••••••••"
+                        className="bg-zinc-900 border-zinc-800 text-white"
+                        required
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-12 mt-2"
+                      disabled={authLoading}
+                    >
+                      {authLoading ? (
+                        <RefreshCw className="animate-spin mr-2" size={16} />
+                      ) : null}
+                      ENTRAR
+                    </Button>
+                    {biometricAvailable && getRememberedEmail() && (
+                      <button
+                        type="button"
+                        onClick={() => setUsePasswordLogin(false)}
+                        className="w-full text-zinc-500 text-sm underline hover:text-zinc-300"
+                      >
+                        Usar Face ID
+                      </button>
+                    )}
+                  </form>
+                )
               ) : (
                 <form onSubmit={handleRegisterSubmit} className="space-y-3">
                   <div className="space-y-1.5">
@@ -24973,15 +24774,6 @@ function DepositWithdrawModal({
       normalizedError.includes("jwt")
     );
   };
-  // A locked (not expired/invalid) session must never reach
-  // isInvalidTokenError/onAuthInvalid below — it's still a valid, known
-  // session, just showing its own lock screen. The apiFetch calls in this
-  // component already dispatch SESSION_LOCKED_EVENT for that case, which
-  // the page's own listener turns into the lock overlay; routing it through
-  // onAuthInvalid instead would wipe `auth.user` and pop the login modal on
-  // top of a merely-locked deposit/withdraw.
-  const isSessionLockedError = (error?: string) =>
-    String(error ?? "").trim().toLowerCase() === "session_locked";
   const stripePromise = useMemo(
     () => (cardPublishableKey ? loadStripe(cardPublishableKey) : null),
     [cardPublishableKey],
@@ -25112,7 +24904,6 @@ function DepositWithdrawModal({
       });
       const data = (await r.json()) as { kycStatus?: string; error?: string };
       if (!r.ok) {
-        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25175,7 +24966,6 @@ function DepositWithdrawModal({
         code?: string;
       };
       if (!r.ok) {
-        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25223,7 +25013,6 @@ function DepositWithdrawModal({
         error?: string;
       };
       if (!r.ok) {
-        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25285,7 +25074,6 @@ function DepositWithdrawModal({
         error?: string;
       };
       if (!r.ok) {
-        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
@@ -25343,7 +25131,6 @@ function DepositWithdrawModal({
         !data.orderId ||
         !data.publishableKey
       ) {
-        if (isSessionLockedError(data.error)) return;
         if (isInvalidTokenError(r.status, data.error)) {
           onAuthInvalid("Sessão expirada. Entre novamente para continuar.");
           return;
