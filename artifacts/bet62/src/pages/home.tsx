@@ -8774,7 +8774,15 @@ export default function Home({
   // logged in as (rememberedLogin.ts) — not tied to any existing session,
   // since idle timeout and "Sair" both sign the user all the way out now
   // (Santos, 2026-09-28).
-  const handlePasskeyLogin = useCallback(async (email: string) => {
+  // `silent` is used by the PWA auto-attempt below: on a page the user
+  // didn't explicitly ask to log into, a failed/cancelled biometric
+  // prompt (e.g. they just weren't looking at the camera yet) must not
+  // surface an error toast or force the modal to the password view —
+  // it should look like nothing happened, leaving ENTRAR available as
+  // normal. Only a real "this email has no passkey" (NO_PASSKEY) result
+  // still switches the modal to password on a non-silent call.
+  const handlePasskeyLogin = useCallback(async (email: string, opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
     setBiometricLoading(true);
     try {
       const optionsRes = await apiFetch("/api/auth/passkey/login/options", {
@@ -8784,10 +8792,12 @@ export default function Home({
       });
       const options = await optionsRes.json();
       if (!optionsRes.ok) {
-        if (options.error !== "NO_PASSKEY") {
-          toast.error("Não foi possível iniciar a verificação biométrica.");
+        if (!silent) {
+          if (options.error !== "NO_PASSKEY") {
+            toast.error("Não foi possível iniciar a verificação biométrica.");
+          }
+          setUsePasswordLogin(true);
         }
-        setUsePasswordLogin(true);
         return;
       }
       const assertion = await startAuthentication({ optionsJSON: options });
@@ -8801,15 +8811,36 @@ export default function Home({
         toast.success("Bem-vindo de volta!");
         setRememberedEmail(email);
         await auth.refreshUser();
-      } else {
+      } else if (!silent) {
         toast.error("Verificação biométrica falhou.");
       }
     } catch {
-      toast.error("Verificação biométrica cancelada ou falhou.");
+      if (!silent) toast.error("Verificação biométrica cancelada ou falhou.");
     } finally {
       setBiometricLoading(false);
     }
   }, [auth]);
+
+  // PWA auto Face ID on launch — desktop/web still requires an explicit
+  // ENTRAR + password (no platform biometric to trust there anyway); in
+  // standalone/installed-PWA mode, if this device remembers an email and
+  // has a platform authenticator, try it immediately on open instead of
+  // waiting for the user to tap ENTRAR (Santos, 2026-09-28).
+  const autoPasskeyAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (autoPasskeyAttemptedRef.current) return;
+    if (auth.isLoading || auth.user) return;
+    if (!biometricAvailable) return;
+    const isStandalonePwa =
+      typeof window !== "undefined" &&
+      (window.matchMedia?.("(display-mode: standalone)").matches ||
+        (window.navigator as unknown as { standalone?: boolean }).standalone === true);
+    if (!isStandalonePwa) return;
+    const email = getRememberedEmail();
+    if (!email) return;
+    autoPasskeyAttemptedRef.current = true;
+    void handlePasskeyLogin(email, { silent: true });
+  }, [auth.isLoading, auth.user, biometricAvailable, handlePasskeyLogin]);
 
   const handleRegisterBiometric = async () => {
     if (!auth.user) return;
