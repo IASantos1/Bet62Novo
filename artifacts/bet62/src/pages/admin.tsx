@@ -1305,6 +1305,30 @@ export default function AdminPage() {
     }
   };
 
+  const [casinoResyncLoading, setCasinoResyncLoading] = useState(false);
+  const resyncCasinoCatalog = useCallback(async () => {
+    setCasinoResyncLoading(true);
+    try {
+      const res = await fetch("/api/admin/casino/resync", {
+        method: "POST",
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error();
+      const result: { inserted: number; updated: number; deactivated: number; totalRemote: number } =
+        await res.json();
+      toast.success(
+        `Catálogo ressincronizado: ${result.inserted} novo(s), ${result.updated} atualizado(s), ${result.deactivated} duplicado(s) removido(s).`,
+      );
+      refetchCasinoGames();
+      refetchCasinoOverview();
+    } catch {
+      toast.error("Erro ao ressincronizar o catálogo");
+    } finally {
+      setCasinoResyncLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   const toggleCasinoGameActive = useCallback(
     async (id: number, isActive: boolean) => {
       try {
@@ -5735,21 +5759,36 @@ export default function AdminPage() {
 
                 {casinoSubTab === "games" && (
                   <div className="space-y-3">
-                    <div className="relative max-w-sm">
-                      <Search
-                        size={14}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
-                      />
-                      <input
-                        type="text"
-                        value={casinoGameSearch}
-                        onChange={(e) => {
-                          setCasinoGameSearch(e.target.value);
-                          setCasinoGamePage(1);
-                        }}
-                        placeholder="Pesquisar jogo…"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
-                      />
+                    <div className="flex items-center gap-2">
+                      <div className="relative max-w-sm flex-1">
+                        <Search
+                          size={14}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                        />
+                        <input
+                          type="text"
+                          value={casinoGameSearch}
+                          onChange={(e) => {
+                            setCasinoGameSearch(e.target.value);
+                            setCasinoGamePage(1);
+                          }}
+                          placeholder="Pesquisar jogo…"
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                        />
+                      </div>
+                      <button
+                        onClick={resyncCasinoCatalog}
+                        disabled={casinoResyncLoading}
+                        title="Busca o catálogo mais recente da BigBang agora (em vez de esperar até 6h) e remove jogos duplicados. As alterações podem levar até 5 minutos a aparecer para os jogadores."
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-zinc-900 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {casinoResyncLoading ? (
+                          <Loader2 className="animate-spin" size={14} />
+                        ) : (
+                          <RefreshCw size={14} />
+                        )}
+                        Ressincronizar catálogo
+                      </button>
                     </div>
 
                     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
