@@ -144,6 +144,10 @@ export async function syncBigBangCatalog(force = false): Promise<{
       if (total > 0 && offset + BIGBANG_PAGE_LIMIT >= total) break;
     }
 
+    // Every id BigBang returned this run, winners and dedup losers alike —
+    // used below to tell "still in the remote catalog" apart from "gone".
+    const allRemoteGameUids = new Set(remoteGames.map((g) => String(g.id)));
+
     const { winners: normalized, loserGameUids } = dedupeNormalizedGames(
       remoteGames.map(normalizeGame),
     );
@@ -156,6 +160,7 @@ export async function syncBigBangCatalog(force = false): Promise<{
         vendorCode: casinoGamesTable.vendorCode,
         category: casinoGamesTable.category,
         img: casinoGamesTable.img,
+        isActive: casinoGamesTable.isActive,
       })
       .from(casinoGamesTable)
       .where(eq(casinoGamesTable.source, "bigbang"));
@@ -177,12 +182,19 @@ export async function syncBigBangCatalog(force = false): Promise<{
         continue;
       }
 
+      // A game still present in the remote catalog must end up active,
+      // even if nothing else about it changed — this row could be
+      // reactivating from a plan change, an earlier dedup loss, or a
+      // manual admin toggle. Reconciling isActive here (not just the
+      // content fields) is what makes a resync actually self-heal instead
+      // of requiring every stale row to be hunted down by hand.
       if (
         current.provider !== row.provider ||
         current.name !== row.name ||
         current.vendorCode !== row.vendorCode ||
         current.category !== row.category ||
-        current.img !== row.img
+        current.img !== row.img ||
+        !current.isActive
       ) {
         await db
           .update(casinoGamesTable)
@@ -192,6 +204,7 @@ export async function syncBigBangCatalog(force = false): Promise<{
             vendorCode: row.vendorCode,
             category: row.category,
             img: row.img,
+            isActive: true,
             updatedAt: new Date(),
           })
           .where(eq(casinoGamesTable.id, current.id));
@@ -221,7 +234,31 @@ export async function syncBigBangCatalog(force = false): Promise<{
         .set({ isActive: false, updatedAt: new Date() })
         .where(and(inArray(casinoGamesTable.id, loserIds), eq(casinoGamesTable.isActive, true)))
         .returning({ id: casinoGamesTable.id });
-      deactivated = result.length;
+      deactivated += result.length;
+    }
+
+    // A row whose gameUid never showed up anywhere in this fetch — not as
+    // a winner, not as a dedup loser — no longer exists in BigBang's
+    // catalog at all. This previously had no cleanup path: the insert/
+    // update loop above only ever touches rows BigBang still lists, so an
+    // id that disappeared (e.g. every id changing after a BigBang plan/
+    // entitlement upgrade) stayed active forever, permanently doubling the
+    // visible catalog alongside its replacement — confirmed in production
+    // (~7300 games becoming ~14600) even after the title-dedup fix above,
+    // since that fix only ever collapses duplicates *within* one fetch
+    // (2026-09-30).
+    const staleIds = existing
+      .filter((row) => row.isActive && !allRemoteGameUids.has(row.gameUid))
+      .map((row) => row.id);
+    for (let i = 0; i < staleIds.length; i += 500) {
+      const chunk = staleIds.slice(i, i + 500);
+      if (chunk.length === 0) continue;
+      const result = await db
+        .update(casinoGamesTable)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(and(inArray(casinoGamesTable.id, chunk), eq(casinoGamesTable.isActive, true)))
+        .returning({ id: casinoGamesTable.id });
+      deactivated += result.length;
     }
 
     await kvCache.set(
