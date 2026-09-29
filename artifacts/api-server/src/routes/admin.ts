@@ -40,7 +40,7 @@ import { timingSafeEqualString } from "../lib/security.js";
 import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
-import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
+import { ensureBigBangCatalogFresh, syncBigBangCatalog } from "../services/bigbang/sync.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -2225,6 +2225,21 @@ router.patch(
     }
   },
 );
+
+// Manual "resync now" for admins — the on-demand sync used by every other
+// casino route is gated by a 6h TTL (services/bigbang/sync.ts), so a
+// catalog-affecting change upstream (e.g. BigBang plan/entitlement change,
+// or picking up the duplicate-title cleanup) can otherwise sit unapplied
+// for hours with no way for a non-technical admin to force it themselves.
+router.post("/casino/resync", adminMiddleware, async (_req: AdminRequest, res) => {
+  try {
+    const result = await syncBigBangCatalog(true);
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/casino/resync error");
+    res.status(500).json({ error: "Erro ao ressincronizar o catálogo" });
+  }
+});
 
 router.get("/casino/transactions", adminMiddleware, async (req: AdminRequest, res) => {
   try {
