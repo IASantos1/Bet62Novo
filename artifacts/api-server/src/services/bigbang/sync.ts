@@ -44,6 +44,16 @@ function normalizeNameKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+// Categories where a generic, non-branded title (just "Blackjack",
+// "Roulette", "Baccarat") is genuinely common across unrelated studios —
+// unlike a slot title ("Sweet Bonanza 1000 DICE"), which is a specific
+// branded product essentially guaranteed to be unique across the whole
+// industry. Two same-titled *slots* are, in practice, always the same
+// underlying game re-listed twice by the aggregator; two same-titled
+// *table games* might legitimately be two different studios' takes on a
+// classic. Only this second group gets the more cautious thumbnail check.
+const GENERIC_TITLE_RISK_CATEGORIES = new Set(["blackjack", "roulette", "baccarat"]);
+
 // BigBang's own feed sometimes re-lists the exact same title under more
 // than one game id (seen in production as visually identical cards, e.g.
 // several "Sweet Bonanza" entries back to back — 2026-09-29). Each id still
@@ -51,11 +61,17 @@ function normalizeNameKey(name: string): string {
 // so nothing here ever collapses two DB rows into one; instead we pick a
 // single canonical id per duplicate title before it reaches the
 // insert/update diff below, and deactivate the losers if they were already
-// synced from an earlier run. Only auto-merge when every entry in the
-// group shares the same thumbnail (or has none) — a same-titled game with
-// a genuinely different thumbnail is left untouched as an ambiguous case
-// for manual review via the admin catalog toggle, rather than risk hiding
-// a real, distinct game.
+// synced from an earlier run.
+//
+// Merging used to also require every entry in the group to share the same
+// thumbnail, on the theory that a same-titled game with a different
+// thumbnail might be a genuinely distinct game. In production this made
+// the merge never actually fire: BigBang serves a per-id thumbnail URL, so
+// two listings of the exact same slot still end up with two different img
+// values, and the "ambiguous" branch left both active — the bug this dedup
+// was supposed to fix (2026-09-30). Slots/crash/live-category titles are
+// branded and unique enough that the name match alone is reliable; only
+// the generic table-game titles above still get the thumbnail check.
 export function dedupeNormalizedGames(games: NormalizedGame[]): {
   winners: NormalizedGame[];
   loserGameUids: string[];
@@ -76,14 +92,17 @@ export function dedupeNormalizedGames(games: NormalizedGame[]): {
       winners.push(group[0]!);
       continue;
     }
-    const imgs = new Set(group.map((g) => g.img).filter((img): img is string => !!img));
-    if (imgs.size > 1) {
-      logger.warn(
-        { name: group[0]!.name, gameUids: group.map((g) => g.gameUid) },
-        "[bigbang] same-titled games with different thumbnails — left active, needs manual review",
-      );
-      winners.push(...group);
-      continue;
+    const categories = new Set(group.map((g) => g.category));
+    if (categories.size === 1 && GENERIC_TITLE_RISK_CATEGORIES.has(group[0]!.category)) {
+      const imgs = new Set(group.map((g) => g.img).filter((img): img is string => !!img));
+      if (imgs.size > 1) {
+        logger.warn(
+          { name: group[0]!.name, category: group[0]!.category, gameUids: group.map((g) => g.gameUid) },
+          "[bigbang] same-titled table games with different thumbnails — left active, needs manual review",
+        );
+        winners.push(...group);
+        continue;
+      }
     }
     const [winner, ...losers] = [...group].sort((a, b) =>
       a.gameUid.localeCompare(b.gameUid, undefined, { numeric: true }),
