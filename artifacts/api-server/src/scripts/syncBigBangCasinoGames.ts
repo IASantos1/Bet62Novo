@@ -10,7 +10,7 @@ async function main() {
   await initDb();
   const result = await syncBigBangCatalog(true);
   console.log(
-    `BigBang sync complete: inserted=${result.inserted} updated=${result.updated} totalRemote=${result.totalRemote}`,
+    `BigBang sync complete: inserted=${result.inserted} updated=${result.updated} deactivated=${result.deactivated} totalRemote=${result.totalRemote}`,
   );
 }
 
