@@ -40,6 +40,7 @@ import {
 } from "@/pages/info-pages";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
+const PromoterDashboardPage = lazy(() => import("@/pages/promoter"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -134,6 +135,19 @@ function Router() {
       <Route path="/contacto" component={ContactoPage} />
       <Route path="/pagamentos" component={PagamentosPage} />
       <Route path="/regras" component={RegrasPage} />
+      <Route path="/promotor">
+        {() => (
+          <Suspense
+            fallback={
+              <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white">
+                <div className="text-sm font-bold text-zinc-300">A carregar…</div>
+              </div>
+            }
+          >
+            <PromoterDashboardPage />
+          </Suspense>
+        )}
+      </Route>
       <Route path="/admin">
         {() => (
           <Suspense

@@ -12,6 +12,7 @@ import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
 import casinoRouter from "./casino.js";
 import winhouseRouter from "./winhouse.js";
+import affiliateRouter, { adminAffiliatesRouter } from "./affiliates.js";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,7 @@ router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
 router.use("/casino", casinoRouter);
 router.use("/winhouse", winhouseRouter);
+router.use("/affiliate", affiliateRouter);
+router.use("/admin", adminAffiliatesRouter);
 
 export default router;

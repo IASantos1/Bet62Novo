@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, decimal, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import type { output } from "zod/v4/core";
 
@@ -19,6 +19,19 @@ export const usersTable = pgTable("users", {
   kycDocumentNumber: text("kyc_document_number"),
   kycSubmittedAt: timestamp("kyc_submitted_at", { withTimezone: true }),
   firstDepositGranted: text("first_deposit_granted").default("none"),
+  // "production" | "demo" — which provider set (WinHouse/BigBang LIVE vs
+  // DEMO/Sandbox) and wallet this account uses. Only an admin can change
+  // this post-registration (see PATCH /api/admin/users/:id/environment);
+  // the frontend must never be trusted to set it directly (Santos, 2026-09-30).
+  environment: text("environment").notNull().default("production"),
+  // Not a Drizzle .references() FK to affiliates — affiliates.userId already
+  // references users.id, and Drizzle table definitions can't reference each
+  // other both ways without a circular module import between users.ts and
+  // affiliates.ts. Validated at the application layer instead (the affiliate
+  // lookup in POST /register only ever writes an id that came from a real
+  // affiliates row). The DB-level FK still exists via init.ts's ALTER TABLE.
+  affiliateId: integer("affiliate_id"),
+  affiliateCode: text("affiliate_code"),
   // version: serial("version"), // Uncomment after running migration
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -47,3 +47,6 @@ export * from "./aiConsoleCommands.js";
 export * from "./sessions.js";
 export * from "./userPasskeys.js";
 export * from "./securityAuditLog.js";
+export * from "./affiliates.js";
+export * from "./affiliatePayouts.js";
+export * from "./affiliateCommissions.js";

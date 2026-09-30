@@ -55,6 +55,8 @@ import {
   Sparkles,
   Send,
   Bot,
+  Share,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -792,6 +794,7 @@ type TabId =
   | "events"
   | "settlement-logs"
   | "casino"
+  | "affiliates"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -1360,6 +1363,133 @@ export default function AdminPage() {
   const casinoBanners = casinoBannersQuery.data?.banners ?? [];
   const casinoBannersLoading = casinoBannersQuery.isLoading;
   const refetchCasinoBanners = casinoBannersQuery.refetch;
+
+  type AdminAffiliate = {
+    id: number;
+    userId: number | null;
+    name: string;
+    email: string | null;
+    code: string;
+    commissionRate: string;
+    status: string;
+    createdAt: string;
+    stats: { users: number; deposits: number; commission: number; available: number; paid: number };
+  };
+  type AdminAffiliatePayout = {
+    id: number;
+    affiliateId: number;
+    affiliateName: string;
+    amount: string;
+    status: string;
+    transactionId: string | null;
+    createdAt: string;
+    paidAt: string | null;
+  };
+
+  const affiliatesQuery = useQuery({
+    queryKey: ["admin", "affiliates"],
+    queryFn: async (): Promise<{ affiliates: AdminAffiliate[] }> => {
+      const res = await fetch("/api/admin/affiliates", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load affiliates");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "affiliates",
+  });
+  const affiliates = affiliatesQuery.data?.affiliates ?? [];
+  const affiliatesLoading = affiliatesQuery.isLoading;
+  const refetchAffiliates = affiliatesQuery.refetch;
+
+  const affiliatePayoutsQuery = useQuery({
+    queryKey: ["admin", "affiliate-payouts"],
+    queryFn: async (): Promise<{ payouts: AdminAffiliatePayout[] }> => {
+      const res = await fetch("/api/admin/payouts", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load payouts");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "affiliates",
+  });
+  const affiliatePayouts = affiliatePayoutsQuery.data?.payouts ?? [];
+  const refetchAffiliatePayouts = affiliatePayoutsQuery.refetch;
+
+  const [newAffiliateForm, setNewAffiliateForm] = useState({ name: "", code: "", email: "", commissionRate: "10" });
+  const [creatingAffiliate, setCreatingAffiliate] = useState(false);
+
+  const createAffiliate = async () => {
+    if (!newAffiliateForm.name.trim() || !newAffiliateForm.code.trim()) {
+      toast.error("Nome e código são obrigatórios");
+      return;
+    }
+    setCreatingAffiliate(true);
+    try {
+      const res = await fetch("/api/admin/affiliates", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newAffiliateForm.name.trim(),
+          code: newAffiliateForm.code.trim(),
+          email: newAffiliateForm.email.trim() || undefined,
+          commissionRate: Number(newAffiliateForm.commissionRate) || 10,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao criar afiliado");
+      toast.success(`Afiliado ${data.code} criado`);
+      setNewAffiliateForm({ name: "", code: "", email: "", commissionRate: "10" });
+      refetchAffiliates();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao criar afiliado");
+    } finally {
+      setCreatingAffiliate(false);
+    }
+  };
+
+  const updateAffiliate = async (id: number, update: Record<string, unknown>) => {
+    try {
+      const res = await fetch(`/api/admin/affiliates/${id}`, {
+        method: "PATCH",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify(update),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Afiliado atualizado");
+      refetchAffiliates();
+    } catch {
+      toast.error("Erro ao atualizar afiliado");
+    }
+  };
+
+  const requestAffiliatePayout = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/affiliates/${id}/payout`, { method: "POST", headers: authHeader });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || "Erro ao solicitar pagamento");
+        return;
+      }
+      toast.success(`Pagamento de €${data.amount} solicitado`);
+      refetchAffiliates();
+      refetchAffiliatePayouts();
+    } catch {
+      toast.error("Erro ao solicitar pagamento");
+    }
+  };
+
+  const markPayoutPaid = async (id: number) => {
+    const transactionId = window.prompt("ID da transação (opcional):") ?? undefined;
+    try {
+      const res = await fetch(`/api/admin/payouts/${id}`, {
+        method: "PATCH",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "paid", transactionId: transactionId || undefined }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Pagamento marcado como pago");
+      refetchAffiliatePayouts();
+      refetchAffiliates();
+    } catch {
+      toast.error("Erro ao marcar pagamento");
+    }
+  };
 
   const openBannerModal = (banner: "new" | AdminCasinoBanner) => {
     if (banner === "new") {
@@ -2372,6 +2502,9 @@ export default function AdminPage() {
       else if (casinoSubTab === "games") refetchCasinoGames();
       else if (casinoSubTab === "transactions") refetchCasinoTx();
       else if (casinoSubTab === "promotions") refetchCasinoBanners();
+    } else if (activeTab === "affiliates") {
+      refetchAffiliates();
+      refetchAffiliatePayouts();
     } else if (activeTab === "settings") {
       fetchSettings();
       fetchAuditLogs();
@@ -2504,6 +2637,12 @@ export default function AdminPage() {
       section: "pro",
     },
     {
+      id: "affiliates",
+      icon: <Share size={18} />,
+      label: "Afiliados",
+      section: "pro",
+    },
+    {
       id: "settings",
       icon: <Settings size={18} />,
       label: "Configurações",
@@ -2523,6 +2662,7 @@ export default function AdminPage() {
     events: "Controlo de Eventos",
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
+    affiliates: "Afiliados",
     settings: "Configurações",
   };
 
@@ -6032,6 +6172,156 @@ export default function AdminPage() {
                     )}
                   </div>
                 )}
+              </motion.div>
+            )}
+
+            {/* ── AFILIADOS ── */}
+            {activeTab === "affiliates" && (
+              <motion.div
+                key="affiliates"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-6"
+              >
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-white mb-3">Novo Afiliado</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <Input
+                      placeholder="Nome"
+                      value={newAffiliateForm.name}
+                      onChange={(e) => setNewAffiliateForm((f) => ({ ...f, name: e.target.value }))}
+                      className="bg-zinc-950 border-zinc-800 text-white"
+                    />
+                    <Input
+                      placeholder="Código (ex: JOAO62)"
+                      value={newAffiliateForm.code}
+                      onChange={(e) => setNewAffiliateForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                      className="bg-zinc-950 border-zinc-800 text-white"
+                    />
+                    <Input
+                      placeholder="Email (opcional)"
+                      value={newAffiliateForm.email}
+                      onChange={(e) => setNewAffiliateForm((f) => ({ ...f, email: e.target.value }))}
+                      className="bg-zinc-950 border-zinc-800 text-white"
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        placeholder="Taxa %"
+                        value={newAffiliateForm.commissionRate}
+                        onChange={(e) => setNewAffiliateForm((f) => ({ ...f, commissionRate: e.target.value }))}
+                        className="bg-zinc-950 border-zinc-800 text-white"
+                      />
+                      <Button
+                        onClick={createAffiliate}
+                        disabled={creatingAffiliate}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
+                      >
+                        {creatingAffiliate ? <Loader2 className="animate-spin" size={16} /> : "Criar"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-zinc-800 text-sm font-bold text-white">
+                    Afiliados ({affiliates.length})
+                  </div>
+                  {affiliatesLoading ? (
+                    <div className="flex items-center justify-center py-16 text-zinc-500">
+                      <Loader2 className="animate-spin" size={24} />
+                    </div>
+                  ) : affiliates.length === 0 ? (
+                    <div className="px-5 py-16 text-center text-zinc-600 text-sm">Nenhum afiliado criado.</div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800/60">
+                      {affiliates.map((a) => (
+                        <div key={a.id} className="px-4 py-3 flex flex-wrap items-center gap-4">
+                          <div className="min-w-[140px]">
+                            <div className="text-sm text-white font-medium">{a.name}</div>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(`${window.location.origin}/?ref=${a.code}`);
+                                toast.success("Link copiado!");
+                              }}
+                              className="text-xs text-emerald-400 hover:underline flex items-center gap-1"
+                            >
+                              {a.code} <Copy size={10} />
+                            </button>
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            <div>{a.stats.users} utiliz.</div>
+                            <div>€{a.stats.deposits.toFixed(2)} depositado</div>
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            <div className="text-emerald-400 font-medium">€{a.stats.available.toFixed(2)} disponível</div>
+                            <div>€{a.stats.paid.toFixed(2)} pago</div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              defaultValue={a.commissionRate}
+                              onBlur={(e) => {
+                                const v = Number(e.target.value);
+                                if (v && v !== Number(a.commissionRate)) updateAffiliate(a.id, { commissionRate: v });
+                              }}
+                              className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-white"
+                            />
+                            <span className="text-xs text-zinc-500">%</span>
+                          </div>
+                          <button
+                            onClick={() => updateAffiliate(a.id, { status: a.status === "active" ? "inactive" : "active" })}
+                            className={`text-xs px-2.5 py-1 rounded-full font-medium ${a.status === "active" ? "bg-green-600/20 text-green-400 border border-green-500/30" : "bg-zinc-800 text-zinc-500 border border-zinc-700"}`}
+                          >
+                            {a.status === "active" ? "Ativo" : "Inativo"}
+                          </button>
+                          <button
+                            onClick={() => requestAffiliatePayout(a.id)}
+                            className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                          >
+                            Solicitar Pagamento
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-zinc-800 text-sm font-bold text-white">
+                    Pagamentos ({affiliatePayouts.length})
+                  </div>
+                  {affiliatePayouts.length === 0 ? (
+                    <div className="px-5 py-10 text-center text-zinc-600 text-sm">Nenhum pagamento ainda.</div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800/60">
+                      {affiliatePayouts.map((p) => (
+                        <div key={p.id} className="px-4 py-3 flex items-center gap-4">
+                          <div className="flex-1">
+                            <div className="text-sm text-white">{p.affiliateName}</div>
+                            <div className="text-xs text-zinc-500">
+                              {new Date(p.createdAt).toLocaleDateString("pt-PT")}
+                              {p.transactionId ? ` · ${p.transactionId}` : ""}
+                            </div>
+                          </div>
+                          <div className="text-sm text-white font-medium">€{Number(p.amount).toFixed(2)}</div>
+                          {p.status === "paid" ? (
+                            <span className="text-xs px-2.5 py-1 rounded-full bg-green-600/20 text-green-400 border border-green-500/30">
+                              Pago
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => markPayoutPaid(p.id)}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white"
+                            >
+                              Marcar como Pago
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
 

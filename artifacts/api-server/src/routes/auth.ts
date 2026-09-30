@@ -25,6 +25,7 @@ import { kvCache } from "../services/cache/kvCache.js";
 // Relative import — see sessions.ts's comment for why (tsc alias-resolution
 // quirk for newly-added schema exports).
 import { userPasskeysTable } from "../../../../lib/db/src/schema/userPasskeys.js";
+import { affiliatesTable } from "../../../../lib/db/src/schema/affiliates.js";
 
 const router: IRouter = Router();
 
@@ -113,6 +114,28 @@ export function validatePortugueseNif(nif: string): boolean {
   return check === parseInt(digits[8]!);
 }
 
+const AFFILIATE_COOKIE_NAME = "bet62_affiliate";
+
+// Resolves the affiliate code captured in the bet62_affiliate cookie (set
+// client-side on ?ref=CODE landings — see rememberedLogin.ts's sibling for
+// the pattern) against a real, active affiliates row. A missing/unknown/
+// inactive code is never an error — registration proceeds referral-less,
+// exactly as if no ?ref= had ever been present (Santos, 2026-09-30).
+async function resolveAffiliateFromCookie(
+  req: Request,
+): Promise<{ id: number; code: string } | null> {
+  const raw = req.cookies?.[AFFILIATE_COOKIE_NAME];
+  const code = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+  if (!code) return null;
+  const [affiliate] = await db
+    .select({ id: affiliatesTable.id, code: affiliatesTable.code, status: affiliatesTable.status })
+    .from(affiliatesTable)
+    .where(eq(affiliatesTable.code, code))
+    .limit(1);
+  if (!affiliate || affiliate.status !== "active") return null;
+  return { id: affiliate.id, code: affiliate.code };
+}
+
 router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
   const { name, password, nif } = req.body as { name?: string; email?: string; password?: string; nif?: string };
   const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : undefined;
@@ -162,11 +185,14 @@ router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
     // real-money/regulated platform; 10 is an acceptable minimum per
     // current OWASP guidance but not future-proofed.
     const passwordHash = await bcrypt.hash(password, 12);
+    const affiliate = await resolveAffiliateFromCookie(req);
     const [user] = await db.insert(usersTable).values({
       name,
       email,
       passwordHash,
       nif: nifClean || null,
+      affiliateId: affiliate?.id ?? null,
+      affiliateCode: affiliate?.code ?? null,
       balance: "0.00",
       freebetBalance: "0.00",
     }).returning();

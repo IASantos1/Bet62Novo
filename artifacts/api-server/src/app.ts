@@ -20,6 +20,7 @@ import { db, paymentsTable, usersTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { sendDepositConfirmed } from "./lib/mailer.js";
+import { createAffiliateCommission } from "./routes/payments.js";
 
 const app: Express = express();
 
@@ -44,7 +45,10 @@ async function creditPaymentHelper(orderId: string): Promise<void> {
     const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.orderId, orderId)).limit(1);
     if (!payment || payment.status === "completed") return;
     await db.transaction(async (tx) => {
-      await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.orderId, orderId));
+      await tx
+        .update(paymentsTable)
+        .set({ status: "completed", confirmedAt: new Date() })
+        .where(eq(paymentsTable.orderId, orderId));
       await applyBalanceDelta(tx, {
         userId: payment.userId,
         amount: payment.amount,
@@ -53,6 +57,7 @@ async function creditPaymentHelper(orderId: string): Promise<void> {
         refType: "payment",
         refId: orderId,
       });
+      await createAffiliateCommission(tx, payment);
     });
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment balance credited (webhook or cron)");
     // First deposit freebet (safe to run multiple times — guarded by firstDepositGranted !== none on read + update IF still none)
