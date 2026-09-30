@@ -2,6 +2,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useMemo,
   createContext,
@@ -8820,6 +8821,31 @@ export default function Home({
       setBiometricLoading(false);
     }
   }, [auth]);
+
+  // Auto-fire Face ID the instant the login view would show the "tap to
+  // unlock" card, instead of making a registered device tap it manually —
+  // clicking ENTRAR should feel like it logs you straight in, with no
+  // second interaction. useLayoutEffect (not useEffect) so
+  // setBiometricLoading(true) — the first line inside handlePasskeyLogin,
+  // which runs synchronously up to its first await — commits before the
+  // browser paints, so the idle "tap the circle" state is never actually
+  // visible, only a loading spinner. Falls back to the password form
+  // automatically on failure/cancel: handlePasskeyLogin's own non-silent
+  // failure path already flips usePasswordLogin, and the modal itself
+  // (opened by every "please log in" call site) stays open throughout, so
+  // there's no dead end if the ceremony doesn't succeed (Santos, 2026-09-30).
+  const autoFaceIdOnOpenRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!authModalOpen || authMode !== "login" || usePasswordLogin || !biometricAvailable) {
+      autoFaceIdOnOpenRef.current = false;
+      return;
+    }
+    if (autoFaceIdOnOpenRef.current) return;
+    const email = getRememberedEmail();
+    if (!email) return;
+    autoFaceIdOnOpenRef.current = true;
+    void handlePasskeyLogin(email);
+  }, [authModalOpen, authMode, usePasswordLogin, biometricAvailable, handlePasskeyLogin]);
 
   // PWA auto Face ID on launch — desktop/web still requires an explicit
   // ENTRAR + password (no platform biometric to trust there anyway); in
@@ -23468,11 +23494,14 @@ export default function Home({
                 biometricAvailable && getRememberedEmail() && !usePasswordLogin ? (
                   <div className="flex flex-col items-center py-2">
                     <p className="text-zinc-500 text-sm text-center mb-6">
-                      Entrar como{" "}
+                      {biometricLoading ? "A entrar com Face ID…" : "Entrar como"}{" "}
                       <span className="text-white font-medium">
                         {getRememberedEmail()}
                       </span>
                     </p>
+                    {/* Fires automatically (see the auto-Face-ID effect above) as
+                        soon as this card would render — this button is a manual
+                        retry affordance, not the primary way in. */}
                     <button
                       onClick={() => void handlePasskeyLogin(getRememberedEmail()!)}
                       disabled={biometricLoading}
