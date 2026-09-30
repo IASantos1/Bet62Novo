@@ -68,7 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Login failed");
+    // data.message is a human-readable string when the server sends one
+    // (e.g. the account-lockout "tente novamente em N minuto(s)" text) —
+    // prefer it over the bare error code, which is what data.error is for
+    // ACCOUNT_LOCKED and not meant to be shown to the user directly.
+    if (!res.ok) throw new Error(data.message || data.error || "Login failed");
     setUser(data.user);
     setRememberedEmail(email);
   };
