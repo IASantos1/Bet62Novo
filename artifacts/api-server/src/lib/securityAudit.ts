@@ -7,6 +7,7 @@ import { logger } from "./logger.js";
 export type SecurityEvent =
   | "login_success"
   | "login_failed"
+  | "login_locked"
   | "register"
   | "logout"
   | "session_locked"

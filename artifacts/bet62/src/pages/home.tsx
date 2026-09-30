@@ -4059,6 +4059,10 @@ function isWCMatch(league: string | null | undefined): boolean {
 
 function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
+// Consecutive failed Face ID attempts (this open of the login modal) before
+// the "Usar palavra-passe" fallback link becomes visible.
+const BIOMETRIC_FAIL_THRESHOLD = 3;
+
 export default function Home({
   initialTab = "sports",
 }: {
@@ -4257,8 +4261,18 @@ export default function Home({
   // ID view — starts false (Face ID first) whenever the modal (re)opens
   // with a remembered email + platform authenticator on this device.
   const [usePasswordLogin, setUsePasswordLogin] = useState(false);
+  // Counts consecutive failed Face ID attempts on this open of the modal —
+  // the "Usar palavra-passe" fallback link stays hidden below the Face ID
+  // circle until this reaches BIOMETRIC_FAIL_THRESHOLD, so a device that
+  // reliably unlocks never sees a password option at all; it only surfaces
+  // as an escape hatch once Face ID has genuinely failed a few times
+  // (Santos, 2026-09-30).
+  const [biometricFailCount, setBiometricFailCount] = useState(0);
   useEffect(() => {
-    if (authModalOpen) setUsePasswordLogin(false);
+    if (authModalOpen) {
+      setUsePasswordLogin(false);
+      setBiometricFailCount(0);
+    }
   }, [authModalOpen]);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
   useEffect(() => {
@@ -8794,10 +8808,14 @@ export default function Home({
       const options = await optionsRes.json();
       if (!optionsRes.ok) {
         if (!silent) {
-          if (options.error !== "NO_PASSKEY") {
+          if (options.error === "NO_PASSKEY") {
+            // No passkey registered at all — Face ID will never work here,
+            // so there's nothing to retry; go straight to the password form.
+            setUsePasswordLogin(true);
+          } else {
             toast.error("Não foi possível iniciar a verificação biométrica.");
+            setBiometricFailCount((count) => count + 1);
           }
-          setUsePasswordLogin(true);
         }
         return;
       }
@@ -8814,9 +8832,13 @@ export default function Home({
         await auth.refreshUser();
       } else if (!silent) {
         toast.error("Verificação biométrica falhou.");
+        setBiometricFailCount((count) => count + 1);
       }
     } catch {
-      if (!silent) toast.error("Verificação biométrica cancelada ou falhou.");
+      if (!silent) {
+        toast.error("Verificação biométrica cancelada ou falhou.");
+        setBiometricFailCount((count) => count + 1);
+      }
     } finally {
       setBiometricLoading(false);
     }
@@ -23514,12 +23536,14 @@ export default function Home({
                         <ShieldCheck size={30} className="text-emerald-400" />
                       )}
                     </button>
-                    <button
-                      onClick={() => setUsePasswordLogin(true)}
-                      className="text-zinc-500 text-sm underline hover:text-zinc-300"
-                    >
-                      Usar palavra-passe
-                    </button>
+                    {biometricFailCount >= BIOMETRIC_FAIL_THRESHOLD && (
+                      <button
+                        onClick={() => setUsePasswordLogin(true)}
+                        className="text-zinc-500 text-sm underline hover:text-zinc-300"
+                      >
+                        Usar palavra-passe
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <form onSubmit={handleLoginSubmit} className="space-y-4">

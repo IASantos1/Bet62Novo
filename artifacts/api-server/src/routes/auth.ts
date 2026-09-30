@@ -21,6 +21,7 @@ import {
   touchSession,
 } from "../lib/sessions.js";
 import { logSecurityEvent } from "../lib/securityAudit.js";
+import { kvCache } from "../services/cache/kvCache.js";
 // Relative import — see sessions.ts's comment for why (tsc alias-resolution
 // quirk for newly-added schema exports).
 import { userPasskeysTable } from "../../../../lib/db/src/schema/userPasskeys.js";
@@ -62,6 +63,25 @@ const refreshRateLimit = rateLimit({
   max: 30,
   message: "Muitos pedidos de renovação de sessão.",
 });
+
+// Per-account lockout, distinct from loginRateLimit above (which is a
+// generic per-IP throttle at a much higher ceiling). This tracks wrong
+// PASSWORDS against one specific, existing account regardless of source
+// IP — three wrong passwords locks that account's password login for 3
+// minutes (Santos, 2026-09-30). Only counted once the email is confirmed
+// to belong to a real account (see the call site), so this never reveals
+// which emails exist — a guess against a nonexistent email still just
+// gets the generic "Invalid credentials", governed only by the per-IP
+// limiter above.
+const PASSWORD_LOGIN_FAIL_LIMIT = 3;
+const PASSWORD_LOGIN_LOCKOUT_SECONDS = 3 * 60;
+
+function loginFailCountKey(email: string): string {
+  return `auth:login-fail-count:${email}`;
+}
+function loginLockedUntilKey(email: string): string {
+  return `auth:login-locked-until:${email}`;
+}
 
 // CSRF is scoped to this router only for this phase — see middlewares/csrf.ts.
 // Naturally exempts /login and /register since neither request carries a
@@ -180,12 +200,44 @@ router.post("/login", loginRateLimit, async (req, res): Promise<void> => {
       return;
     }
 
+    const lockedUntil = Number((await kvCache.get(loginLockedUntilKey(email))) ?? 0);
+    if (lockedUntil > Date.now()) {
+      const retryAfterSeconds = Math.ceil((lockedUntil - Date.now()) / 1000);
+      res.status(429).json({
+        error: "ACCOUNT_LOCKED",
+        message: `Demasiadas tentativas erradas. Tente novamente em ${Math.ceil(retryAfterSeconds / 60)} minuto(s).`,
+        retryAfterSeconds,
+      });
+      return;
+    }
+
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
       await logSecurityEvent({ userId: user.id, event: "login_failed", ...meta });
+
+      const fails = Number((await kvCache.get(loginFailCountKey(email))) ?? 0) + 1;
+      if (fails >= PASSWORD_LOGIN_FAIL_LIMIT) {
+        await kvCache.set(
+          loginLockedUntilKey(email),
+          String(Date.now() + PASSWORD_LOGIN_LOCKOUT_SECONDS * 1000),
+          PASSWORD_LOGIN_LOCKOUT_SECONDS,
+        );
+        await kvCache.del(loginFailCountKey(email));
+        await logSecurityEvent({ userId: user.id, event: "login_locked", ...meta });
+        res.status(429).json({
+          error: "ACCOUNT_LOCKED",
+          message: `Demasiadas tentativas erradas. Tente novamente em ${Math.ceil(PASSWORD_LOGIN_LOCKOUT_SECONDS / 60)} minuto(s).`,
+          retryAfterSeconds: PASSWORD_LOGIN_LOCKOUT_SECONDS,
+        });
+        return;
+      }
+      await kvCache.set(loginFailCountKey(email), String(fails), PASSWORD_LOGIN_LOCKOUT_SECONDS);
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
+
+    await kvCache.del(loginFailCountKey(email));
+    await kvCache.del(loginLockedUntilKey(email));
 
     const { sessionToken, refreshToken, session } = await createSession(user.id, meta);
     setSessionCookies(res, { sessionToken, refreshToken });
