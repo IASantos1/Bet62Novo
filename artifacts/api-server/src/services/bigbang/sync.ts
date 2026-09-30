@@ -104,8 +104,15 @@ export function dedupeNormalizedGames(games: NormalizedGame[]): {
         continue;
       }
     }
+    // Keep the *highest* gameUid, not the lowest. Confirmed in production:
+    // the lower/older id in a duplicate pair is a stale legacy listing that
+    // fails to launch ("Insufficient Balance" even with real, positive
+    // balance) — most likely left behind by the same BigBang plan/
+    // entitlement change that PR #542 found orphaning whole batches of old
+    // ids. The higher id is the one actually wired to the current plan
+    // (2026-09-30).
     const [winner, ...losers] = [...group].sort((a, b) =>
-      a.gameUid.localeCompare(b.gameUid, undefined, { numeric: true }),
+      b.gameUid.localeCompare(a.gameUid, undefined, { numeric: true }),
     );
     winners.push(winner!);
     loserGameUids.push(...losers.map((g) => g.gameUid));
