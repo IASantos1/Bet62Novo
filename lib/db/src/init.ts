@@ -745,6 +745,73 @@ export async function initDb(): Promise<void> {
       );
 
       CREATE INDEX IF NOT EXISTS security_audit_log_user_id_idx ON security_audit_log (user_id);
+
+      -- Affiliate/promoter system — see lib/db/src/schema/affiliates.ts,
+      -- affiliateCommissions.ts, affiliatePayouts.ts (Santos, 2026-09-30).
+      -- affiliates has no denormalized totals columns by design (see that
+      -- schema file's comment) — dashboards aggregate the tables below live.
+      CREATE TABLE IF NOT EXISTS affiliates (
+        id               SERIAL PRIMARY KEY,
+        user_id          INTEGER REFERENCES users(id),
+        name             TEXT NOT NULL,
+        email            TEXT UNIQUE,
+        code             TEXT NOT NULL UNIQUE,
+        commission_rate  DECIMAL(5, 2) NOT NULL DEFAULT 10.00,
+        status           TEXT NOT NULL DEFAULT 'active',
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS affiliates_user_id_idx ON affiliates (user_id);
+      CREATE INDEX IF NOT EXISTS affiliates_status_idx ON affiliates (status);
+
+      CREATE TABLE IF NOT EXISTS affiliate_payouts (
+        id             SERIAL PRIMARY KEY,
+        affiliate_id   INTEGER NOT NULL REFERENCES affiliates(id),
+        amount         DECIMAL(14, 2) NOT NULL,
+        currency       TEXT NOT NULL DEFAULT 'EUR',
+        status         TEXT NOT NULL DEFAULT 'pending',
+        payment_method TEXT,
+        transaction_id TEXT,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        paid_at        TIMESTAMPTZ
+      );
+
+      CREATE INDEX IF NOT EXISTS affiliate_payouts_affiliate_id_idx ON affiliate_payouts (affiliate_id);
+
+      -- deposit_id is UNIQUE — the idempotency guard against creating two
+      -- commissions for the same confirmed deposit (matches the
+      -- ledger_entries.idempotency_key pattern; see schema file comment).
+      CREATE TABLE IF NOT EXISTS affiliate_commissions (
+        id                 SERIAL PRIMARY KEY,
+        affiliate_id       INTEGER NOT NULL REFERENCES affiliates(id),
+        user_id            INTEGER NOT NULL REFERENCES users(id),
+        deposit_id         INTEGER NOT NULL UNIQUE REFERENCES payments(id),
+        deposit_amount     DECIMAL(14, 2) NOT NULL,
+        commission_rate    DECIMAL(5, 2) NOT NULL,
+        commission_amount  DECIMAL(14, 2) NOT NULL,
+        status             TEXT NOT NULL DEFAULT 'confirmed',
+        payout_id          INTEGER REFERENCES affiliate_payouts(id),
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        reversed_at        TIMESTAMPTZ,
+        paid_at            TIMESTAMPTZ
+      );
+
+      CREATE INDEX IF NOT EXISTS affiliate_commissions_affiliate_id_idx ON affiliate_commissions (affiliate_id);
+      CREATE INDEX IF NOT EXISTS affiliate_commissions_status_idx ON affiliate_commissions (status);
+      CREATE INDEX IF NOT EXISTS affiliate_commissions_payout_id_idx ON affiliate_commissions (payout_id);
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'production';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS affiliate_id INTEGER REFERENCES affiliates(id);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS affiliate_code TEXT;
+
+      CREATE INDEX IF NOT EXISTS users_environment_idx ON users (environment);
+      CREATE INDEX IF NOT EXISTS users_affiliate_id_idx ON users (affiliate_id);
+
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS affiliate_id INTEGER REFERENCES affiliates(id);
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+
+      CREATE INDEX IF NOT EXISTS payments_affiliate_id_idx ON payments (affiliate_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

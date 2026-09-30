@@ -34,6 +34,15 @@ const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 const WINHOUSE_WALLET_API_KEY = process.env["WINHOUSE_WALLET_API_KEY"] ?? "";
 const WINHOUSE_CALLBACK_TOKEN = process.env["WINHOUSE_CALLBACK_TOKEN"] ?? "";
 
+// Affiliate/promoter program defaults — see routes/affiliates.ts.
+// AFFILIATE_DEFAULT_COMMISSION_RATE is the rate applied when POST
+// /admin/affiliates doesn't specify one; per-affiliate rates are still
+// individually configurable afterward from the admin panel.
+const AFFILIATE_DEFAULT_COMMISSION_RATE =
+  Number(process.env["AFFILIATE_DEFAULT_COMMISSION_RATE"]) || 10;
+const AFFILIATE_COOKIE_DAYS = Number(process.env["AFFILIATE_COOKIE_DAYS"]) || 30;
+const AFFILIATE_MINIMUM_PAYOUT = Number(process.env["AFFILIATE_MINIMUM_PAYOUT"]) || 20;
+
 export const CONFIG = {
   BIGBANG_API_KEY,
   WINHOUSE_WALLET_API_KEY,
@@ -42,4 +51,7 @@ export const CONFIG = {
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
   AI_AGENTS_MODEL,
+  AFFILIATE_DEFAULT_COMMISSION_RATE,
+  AFFILIATE_COOKIE_DAYS,
+  AFFILIATE_MINIMUM_PAYOUT,
 } as const;

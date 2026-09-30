@@ -7,6 +7,67 @@ import { logger } from "../lib/logger.js";
 import { sendDepositConfirmed } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
 import { randomUUID } from "crypto";
+// Relative imports — see auth.ts's comment (tsc alias-resolution quirk for
+// newly-added schema exports).
+import { affiliatesTable } from "../../../../lib/db/src/schema/affiliates.js";
+import { affiliateCommissionsTable } from "../../../../lib/db/src/schema/affiliateCommissions.js";
+
+// REGRA 7/20: only a REAL, confirmed deposit from a "production" account
+// with an attached affiliate ever generates a commission — never a demo
+// account (checked here even though nothing today creates a payments row
+// for a demo user, as a second line of defense) and never while the
+// deposit is merely pending. Idempotent via affiliate_commissions'
+// deposit_id UNIQUE index (onConflictDoNothing), the same pattern as
+// ledger_entries.idempotency_key, so a retried webhook/self-heal call can
+// never double up a commission for the same deposit (Santos, 2026-09-30).
+// Exported so app.ts's creditPaymentHelper (the webhook/cron path — the
+// one real production deposits actually go through) can call the exact
+// same logic instead of a second hand-copied version. creditPayment below
+// (used by the immediate-confirmation self-heal paths in this file) also
+// calls it — see this function's own idempotency note for why calling it
+// from both places is safe.
+export async function createAffiliateCommission(
+  txArg: unknown,
+  payment: typeof paymentsTable.$inferSelect,
+): Promise<void> {
+  const tx = txArg as typeof db;
+  if (!payment.affiliateId) return;
+  const [user] = await tx
+    .select({ environment: usersTable.environment })
+    .from(usersTable)
+    .where(eq(usersTable.id, payment.userId))
+    .limit(1);
+  if (!user || user.environment !== "production") return;
+
+  const [affiliate] = await tx
+    .select({ id: affiliatesTable.id, commissionRate: affiliatesTable.commissionRate, status: affiliatesTable.status })
+    .from(affiliatesTable)
+    .where(eq(affiliatesTable.id, payment.affiliateId))
+    .limit(1);
+  if (!affiliate || affiliate.status !== "active") return;
+
+  const commissionAmount = (Number(payment.amount) * (Number(affiliate.commissionRate) / 100)).toFixed(2);
+
+  const inserted = await tx
+    .insert(affiliateCommissionsTable)
+    .values({
+      affiliateId: affiliate.id,
+      userId: payment.userId,
+      depositId: payment.id,
+      depositAmount: payment.amount,
+      commissionRate: affiliate.commissionRate,
+      commissionAmount,
+    })
+    .onConflictDoNothing()
+    .returning({ id: affiliateCommissionsTable.id });
+
+  if (inserted.length > 0) {
+    logger.info(
+      { affiliateId: affiliate.id, userId: payment.userId, depositId: payment.id, commissionAmount },
+      "Affiliate commission created",
+    );
+  }
+}
 
 const router: IRouter = Router();
 
@@ -70,7 +131,10 @@ async function creditPayment(orderId: string): Promise<void> {
   if (!payment || payment.status === "completed") return;
 
   await db.transaction(async (tx) => {
-    await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.orderId, orderId));
+    await tx
+      .update(paymentsTable)
+      .set({ status: "completed", confirmedAt: new Date() })
+      .where(eq(paymentsTable.orderId, orderId));
     await applyBalanceDelta(tx, {
       userId: payment.userId,
       amount: payment.amount,
@@ -79,6 +143,7 @@ async function creditPayment(orderId: string): Promise<void> {
       refType: "payment",
       refId: orderId,
     });
+    await createAffiliateCommission(tx, payment);
   });
 
   logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
@@ -109,7 +174,7 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
 
   try {
     const stripe = getStripe();
-    const [user] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
+    const [user] = await db.select({ email: usersTable.email, affiliateId: usersTable.affiliateId }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
 
     const intent = await stripe.paymentIntents.create({
       amount: amountCents,
@@ -139,6 +204,7 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
       amount: amount.toFixed(2),
       method: "multibanco",
       status: "pending",
+      affiliateId: user?.affiliateId ?? null,
       entity,
       reference,
       requestId: intent.id,
@@ -196,7 +262,7 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
 
   try {
     const stripe = getStripe();
-    const [user] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
+    const [user] = await db.select({ email: usersTable.email, affiliateId: usersTable.affiliateId }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
 
     const intent = await stripe.paymentIntents.create({
       amount: amountCents,
@@ -220,6 +286,7 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
       amount: amount.toFixed(2),
       method: "mbway",
       status: "pending",
+      affiliateId: user?.affiliateId ?? null,
       requestId: intent.id,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
@@ -266,7 +333,7 @@ router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Pr
 
   try {
     const stripe = getStripe();
-    const [user] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
+    const [user] = await db.select({ email: usersTable.email, affiliateId: usersTable.affiliateId }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
 
     const intent = await stripe.paymentIntents.create({
       amount: amountCents,
@@ -283,6 +350,7 @@ router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Pr
       amount: amount.toFixed(2),
       method: "card",
       status: "pending",
+      affiliateId: user?.affiliateId ?? null,
       requestId: intent.id,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });

@@ -11,6 +11,7 @@ import {
   casinoGamesTable,
   ledgerEntriesTable,
   casinoBannersTable,
+  adminAuditLogTable,
 } from "@workspace/db/schema";
 // Imported by relative path, not the "@workspace/db/schema" alias above —
 // tsc's alias-based module resolution here doesn't pick up newly-added
@@ -737,6 +738,58 @@ router.put(
     } catch (err) {
       logger.error({ err }, "Admin KYC error");
       res.status(500).json({ error: "Erro ao atualizar KYC" });
+    }
+  },
+);
+
+// PUT /api/admin/users/:id/environment
+// The only way a user's environment ever changes post-registration (REGRA
+// 47) — never trust the frontend to set this itself (users.environment's
+// own schema comment explains why). Logged to admin_audit_log so a demo
+// account can never silently flip to production (or vice versa) without a
+// traceable admin_user + old/new value + timestamp.
+router.put(
+  "/users/:id/environment",
+  adminMiddleware,
+  async (req: AdminRequest, res: Response): Promise<void> => {
+    const userId = parseInt(String(req.params["id"]), 10);
+    const { environment } = req.body as { environment?: string };
+    const valid = ["production", "demo"];
+    if (isNaN(userId) || !environment || !valid.includes(environment)) {
+      res.status(400).json({ error: "Ambiente inválido — use 'production' ou 'demo'" });
+      return;
+    }
+    try {
+      const [current] = await db
+        .select({ environment: usersTable.environment })
+        .from(usersTable)
+        .where(eq(usersTable.id, userId))
+        .limit(1);
+      if (!current) {
+        res.status(404).json({ error: "Utilizador não encontrado" });
+        return;
+      }
+      if (current.environment === environment) {
+        res.json({ id: userId, environment });
+        return;
+      }
+      const [updated] = await db
+        .update(usersTable)
+        .set({ environment })
+        .where(eq(usersTable.id, userId))
+        .returning({ id: usersTable.id, environment: usersTable.environment });
+      await db.insert(adminAuditLogTable).values({
+        action: "user_environment_change",
+        adminUser: req.admin?.username ?? "admin",
+        targetType: "user",
+        targetId: String(userId),
+        details: { oldEnvironment: current.environment, newEnvironment: environment },
+        ip: req.ip ?? null,
+      });
+      res.json({ id: updated!.id, environment: updated!.environment });
+    } catch (err) {
+      logger.error({ err }, "Admin environment change error");
+      res.status(500).json({ error: "Erro ao alterar ambiente" });
     }
   },
 );

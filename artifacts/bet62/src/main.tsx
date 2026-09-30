@@ -2,6 +2,16 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { hardResetPwaAndReload, registerAppServiceWorker } from "@/lib/pwa";
+import { captureAffiliateReferral } from "@/lib/affiliateReferral";
+
+// Must run synchronously, before the router mounts — home.tsx's own
+// activeTab→pathname sync effect rewrites "/" to "/sportsbook" (dropping
+// the query string) on its very first effect pass, which races ahead of
+// any capture attempted from inside App.tsx's own useEffect and silently
+// loses ?ref=CODE before it's ever read (confirmed via Playwright,
+// 2026-09-30: window.location.href was already "/sportsbook" with no
+// query by the time a same-tick App-level effect got to run).
+captureAffiliateReferral();
 
 const shouldReloadForMessage = (msg: string): boolean => {
   const m = (msg ?? "").toLowerCase();
