@@ -31,6 +31,7 @@ type WithdrawalEligibilityResult =
       user: typeof usersTable.$inferSelect;
       kycStatus: string;
       settledBetCount: number;
+      wonBetCount: number;
       openWithdrawalStatus: null;
       code: null;
       message: null;
@@ -40,6 +41,7 @@ type WithdrawalEligibilityResult =
       user: typeof usersTable.$inferSelect;
       kycStatus: string;
       settledBetCount: number;
+      wonBetCount: number;
       openWithdrawalStatus: string | null;
       code: "WITHDRAWAL_ALREADY_OPEN" | "KYC_REQUIRED" | "BET_REQUIRED";
       message: string;
@@ -239,12 +241,23 @@ async function getWithdrawalEligibility(userId: number): Promise<WithdrawalEligi
     .where(and(eq(betsTable.userId, userId), ne(betsTable.status, "pending")));
   const settledBetCount = Number(settledCount);
 
+  // User-confirmed rule (2026-10-01): a settled bet of any outcome used to
+  // be enough to unlock withdrawals; now the user must have WON at least
+  // one bet, regardless of how much was deposited. Applies uniformly to
+  // every deposit from €10 up — there is no separate threshold by amount.
+  const [{ wonCount }] = await db
+    .select({ wonCount: count() })
+    .from(betsTable)
+    .where(and(eq(betsTable.userId, userId), eq(betsTable.status, "won")));
+  const wonBetCount = Number(wonCount);
+
   if (openRequest) {
     return {
       eligible: false,
       user,
       kycStatus,
       settledBetCount,
+      wonBetCount,
       openWithdrawalStatus: openRequest.status,
       code: "WITHDRAWAL_ALREADY_OPEN",
       message: "Já existe um levantamento em curso para esta conta.",
@@ -263,21 +276,23 @@ async function getWithdrawalEligibility(userId: number): Promise<WithdrawalEligi
       user,
       kycStatus,
       settledBetCount,
+      wonBetCount,
       openWithdrawalStatus: null,
       code: "KYC_REQUIRED",
       message: msg,
     };
   }
 
-  if (settledBetCount === 0) {
+  if (wonBetCount === 0) {
     return {
       eligible: false,
       user,
       kycStatus,
       settledBetCount,
+      wonBetCount,
       openWithdrawalStatus: null,
       code: "BET_REQUIRED",
-      message: "Para efectuar um levantamento, é necessário ter pelo menos uma aposta liquidada.",
+      message: "Para efetuar um levantamento, é necessário ter vencido pelo menos uma aposta.",
     };
   }
 
@@ -286,6 +301,7 @@ async function getWithdrawalEligibility(userId: number): Promise<WithdrawalEligi
     user,
     kycStatus,
     settledBetCount,
+    wonBetCount,
     openWithdrawalStatus: null,
     code: null,
     message: null,
@@ -366,6 +382,7 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
         kycStatus: eligibility.kycStatus,
         currentStatus: eligibility.openWithdrawalStatus,
         settledBetCount: eligibility.settledBetCount,
+        wonBetCount: eligibility.wonBetCount,
       });
       return;
     }
@@ -577,6 +594,7 @@ router.get("/eligibility", authMiddleware, async (req: AuthRequest, res: Respons
       message: result.message,
       kycStatus: result.kycStatus,
       settledBetCount: result.settledBetCount,
+      wonBetCount: result.wonBetCount,
       openWithdrawalStatus: result.openWithdrawalStatus,
     });
   } catch (err) {
