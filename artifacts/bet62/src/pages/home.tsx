@@ -4255,6 +4255,18 @@ export default function Home({
   const [casinoTopBanners, setCasinoTopBanners] = useState<CasinoBanner[]>([]);
   const [casinoMiddleBanners, setCasinoMiddleBanners] = useState<CasinoBanner[]>([]);
   const casinoCarouselRef = useRef<HTMLDivElement>(null);
+  // Casino tab landing state: "rows" shows the category/provider carousel
+  // rows below (the default); "grid" is today's single filtered/paginated
+  // grid, entered by clicking a category pill or typing a search — exactly
+  // the behavior that already existed before the rows view was added, now
+  // just gated instead of being the only view.
+  const [casinoBrowseMode, setCasinoBrowseMode] = useState<"rows" | "grid">("rows");
+  // Set only via a row's "Ver tudo" button; included in casinoGridParams
+  // when present. No provider filter existed before this.
+  const [casinoProviderFilter, setCasinoProviderFilter] = useState<string | null>(null);
+  const [casinoExtraRows, setCasinoExtraRows] = useState<Record<string, CasinoGame[]>>({});
+  const [casinoExtraRowsLoaded, setCasinoExtraRowsLoaded] = useState(false);
+  const [casinoProviderRows, setCasinoProviderRows] = useState<{ name: string; games: CasinoGame[] }[]>([]);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Reveals the email/password form on the login tab in place of the Face
@@ -8253,6 +8265,60 @@ export default function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // Default "rows" landing view for the Casino tab — one short preview row
+  // per category/provider that has real games behind it, fetched once per
+  // tab open (same once-only guard as the Jogos Populares row above). Only
+  // real, derivable data: no fake "top today"/"exclusive" rows — see the
+  // session's plan notes. A row with zero results for its filter just
+  // doesn't render (handled at render time, not here).
+  const CASINO_PREFERRED_PROVIDERS = [
+    "Pragmatic Play", "Play'n GO", "Playson", "Evolution",
+    "Hacksaw Gaming", "Nolimit City", "Games Global", "Red Tiger",
+  ];
+  useEffect(() => {
+    if (activeTab !== "casino" || casinoExtraRowsLoaded) return;
+    setCasinoExtraRowsLoaded(true);
+
+    const rowFetches: Array<[string, string]> = [
+      ["novidades", "sort=new"],
+      ["crash", "category=crash"],
+      ["roulette", "category=roulette"],
+      ["blackjack", "category=blackjack"],
+      ["jackpots", "category=jackpots"],
+    ];
+    Promise.allSettled(
+      rowFetches.map(([, query]) => fetch(`/api/casino/games?${query}&limit=20`).then((r) => r.json())),
+    ).then((results) => {
+      const next: Record<string, CasinoGame[]> = {};
+      results.forEach((result, i) => {
+        const key = rowFetches[i]![0];
+        const games = result.status === "fulfilled" && Array.isArray(result.value?.games) ? result.value.games : [];
+        next[key] = games;
+      });
+      setCasinoExtraRows(next);
+    });
+
+    fetch("/api/casino/providers")
+      .then((r) => r.json())
+      .then((data) => {
+        const real: string[] = Array.isArray(data?.providers) ? data.providers : [];
+        const matched = CASINO_PREFERRED_PROVIDERS
+          .map((preferred) => real.find((p) => p.toLowerCase().includes(preferred.toLowerCase())))
+          .filter((p): p is string => !!p)
+          .slice(0, 6);
+        return Promise.all(
+          matched.map((name) =>
+            fetch(`/api/casino/games?provider=${encodeURIComponent(name)}&limit=20`)
+              .then((r) => r.json())
+              .then((data2) => ({ name, games: Array.isArray(data2?.games) ? data2.games : [] })),
+          ),
+        );
+      })
+      .then((rows) => setCasinoProviderRows(rows.filter((row) => row.games.length > 0)))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, casinoExtraRowsLoaded]);
+
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setCasinoSearchDebounced(casinoSearch.trim()), 350);
@@ -8291,9 +8357,10 @@ export default function Home({
         }
       }
       if (casinoSearchDebounced) params.set("search", casinoSearchDebounced);
+      if (casinoProviderFilter) params.set("provider", casinoProviderFilter);
       return params;
     },
-    [casinoCategory, casinoSort, casinoSearchDebounced],
+    [casinoCategory, casinoSort, casinoSearchDebounced, casinoProviderFilter],
   );
 
   const filteredFavoriteCasinoGames = useMemo(() => {
@@ -21446,6 +21513,55 @@ export default function Home({
                 </button>
               );
 
+              // Shared shape for every carousel row in "rows" mode below —
+              // the exact overflow-x-auto snap-x pattern already proven by
+              // the hero banner strip and the Jogos Populares row above,
+              // generalized so it isn't duplicated per category/provider.
+              const renderCasinoRow = (key: string, label: string, games: CasinoGame[], onVerTudo: () => void) => {
+                if (games.length === 0) return null;
+                return (
+                  <div className="mb-6" key={key}>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-black uppercase tracking-wide text-zinc-200">{label}</h3>
+                      <button
+                        onClick={onVerTudo}
+                        className="text-xs font-bold text-violet-400 hover:text-violet-300 transition-colors"
+                      >
+                        Ver Todos
+                      </button>
+                    </div>
+                    <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
+                      {games.map((game) => renderGameTile(game, "w-[calc(28%-0.45rem)] sm:w-28 flex-shrink-0"))}
+                    </div>
+                  </div>
+                );
+              };
+
+              const EXTRA_ROW_LABELS: Record<string, string> = {
+                novidades: "Novidades",
+                crash: "Crash Games",
+                roulette: "Roleta",
+                blackjack: "Blackjack",
+                jackpots: "Jogos com Jackpot",
+              };
+              const EXTRA_ROW_CATEGORY: Record<string, string> = {
+                novidades: "Novos",
+                crash: "crash",
+                roulette: "roulette",
+                blackjack: "blackjack",
+                jackpots: "jackpots",
+              };
+              const goToCategory = (category: string) => {
+                setCasinoCategory(category);
+                setCasinoProviderFilter(null);
+                setCasinoBrowseMode("grid");
+              };
+              const goToProvider = (name: string) => {
+                setCasinoCategory("Todos");
+                setCasinoProviderFilter(name);
+                setCasinoBrowseMode("grid");
+              };
+
               const activeCategoryChip = CASINO_CATEGORY_CHIPS.find((c) => c.key === casinoCategory);
               const slotsHeading =
                 casinoCategory === "Todos"
@@ -21455,9 +21571,13 @@ export default function Home({
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="mb-4">
-                    <h2 className="b62-font-display text-2xl font-extrabold uppercase tracking-tight flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCasinoBrowseMode("rows")}
+                      className="b62-font-display text-2xl font-extrabold uppercase tracking-tight flex items-center gap-2"
+                    >
                       <Dices className="text-violet-400" /> Casino
-                    </h2>
+                    </button>
                   </div>
 
                   {/* Hero promo carousel — first banner large, the rest smaller,
@@ -21505,7 +21625,11 @@ export default function Home({
                           <Flame size={14} className="text-red-500" /> Jogos Populares
                         </h3>
                         <button
-                          onClick={() => setCasinoCategory("Populares")}
+                          onClick={() => {
+                            setCasinoCategory("Populares");
+                            setCasinoProviderFilter(null);
+                            setCasinoBrowseMode("grid");
+                          }}
                           className="text-xs font-bold text-violet-400 hover:text-violet-300 transition-colors"
                         >
                           Ver Todos
@@ -21531,7 +21655,11 @@ export default function Home({
                       {CASINO_CATEGORY_CHIPS.map(({ key, label, icon: Icon }) => (
                         <button
                           key={key}
-                          onClick={() => setCasinoCategory(key)}
+                          onClick={() => {
+                            setCasinoCategory(key);
+                            setCasinoProviderFilter(null);
+                            setCasinoBrowseMode("grid");
+                          }}
                           className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
                             casinoCategory === key
                               ? "b62-gradient-casino text-white"
@@ -21551,7 +21679,10 @@ export default function Home({
                       <input
                         type="text"
                         value={casinoSearch}
-                        onChange={(e) => setCasinoSearch(e.target.value)}
+                        onChange={(e) => {
+                          setCasinoSearch(e.target.value);
+                          if (e.target.value.trim()) setCasinoBrowseMode("grid");
+                        }}
                         placeholder="Pesquisar…"
                         className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-7 pr-6 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/60 transition-colors"
                       />
@@ -21566,6 +21697,30 @@ export default function Home({
                     </div>
                   </div>
 
+                  {casinoBrowseMode === "rows" && (
+                    <div>
+                      {favoriteCasinoGames.length > 0 &&
+                        renderCasinoRow("favoritos", "Os Meus Favoritos", favoriteCasinoGames, () =>
+                          goToCategory("Favoritos"),
+                        )}
+                      {Object.keys(EXTRA_ROW_LABELS).map((key) =>
+                        renderCasinoRow(
+                          key,
+                          EXTRA_ROW_LABELS[key]!,
+                          casinoExtraRows[key] ?? [],
+                          () => goToCategory(EXTRA_ROW_CATEGORY[key]!),
+                        ),
+                      )}
+                      {casinoProviderRows.map((row) =>
+                        renderCasinoRow(`provider:${row.name}`, `Jogos da ${row.name}`, row.games, () =>
+                          goToProvider(row.name),
+                        ),
+                      )}
+                    </div>
+                  )}
+
+                  {casinoBrowseMode === "grid" && (
+                  <>
                   {casinoMiddleBanners.length > 0 && (
                     <div className="space-y-3 mb-6">
                       {casinoMiddleBanners.map((b) => renderBanner(b, "w-full"))}
@@ -21645,6 +21800,8 @@ export default function Home({
                         </div>
                       )}
                     </>
+                  )}
+                  </>
                   )}
                 </div>
               );
