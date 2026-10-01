@@ -9,20 +9,6 @@ export interface EnvironmentRequest extends AuthRequest {
   bettingEnvironment?: BettingEnvironment;
 }
 
-// Shared by environmentMiddleware below and by any route that needs a
-// user's environment but doesn't have (or want to require) authMiddleware
-// on the whole path — e.g. casino.ts's public catalog routes, and the
-// BigBang/WinHouse wallet webhooks that resolve a userId from their own
-// payload rather than from a session.
-export async function getUserEnvironment(userId: number): Promise<BettingEnvironment> {
-  const [row] = await db
-    .select({ environment: usersTable.environment })
-    .from(usersTable)
-    .where(eq(usersTable.id, userId))
-    .limit(1);
-  return (row?.environment as BettingEnvironment) ?? "production";
-}
-
 // Resolves the authenticated user's environment ("production" | "demo")
 // server-side and stashes it on req.bettingEnvironment — the single place
 // every provider-routing decision (BigBang LIVE vs Sandbox, WinHouse LIVE
@@ -39,6 +25,11 @@ export async function environmentMiddleware(
     res.status(401).json({ error: "Utilizador não autenticado" });
     return;
   }
-  req.bettingEnvironment = await getUserEnvironment(req.user.id);
+  const [row] = await db
+    .select({ environment: usersTable.environment })
+    .from(usersTable)
+    .where(eq(usersTable.id, req.user.id))
+    .limit(1);
+  req.bettingEnvironment = (row?.environment as BettingEnvironment) ?? "production";
   next();
 }

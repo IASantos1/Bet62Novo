@@ -64,8 +64,6 @@ function publicUser(user: typeof usersTable.$inferSelect) {
     email: user.email,
     balance: user.balance,
     freebetBalance: user.freebetBalance,
-    environment: user.environment,
-    demoBalance: user.demoBalance,
   };
 }
 

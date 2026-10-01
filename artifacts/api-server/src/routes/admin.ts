@@ -429,8 +429,6 @@ router.get(
           email: usersTable.email,
           balance: usersTable.balance,
           freebetBalance: usersTable.freebetBalance,
-          environment: usersTable.environment,
-          demoBalance: usersTable.demoBalance,
           kycStatus: usersTable.kycStatus,
           selfExcludedUntil: usersTable.selfExcludedUntil,
           createdAt: usersTable.createdAt,
@@ -2288,13 +2286,8 @@ router.patch(
 // for hours with no way for a non-technical admin to force it themselves.
 router.post("/casino/resync", adminMiddleware, async (_req: AdminRequest, res) => {
   try {
-    const production = await syncBigBangCatalog(true, "production");
-    // Sandbox catalog: only meaningful once BIGBANG_SANDBOX_API_KEY is set —
-    // syncBigBangCatalog itself no-ops with zero counts (not an error) when
-    // it's still empty, so this never fails the whole resync while the key
-    // is pending.
-    const demo = await syncBigBangCatalog(true, "demo");
-    res.json({ production, demo });
+    const result = await syncBigBangCatalog(true);
+    res.json(result);
   } catch (err) {
     logger.error({ err }, "POST /api/admin/casino/resync error");
     res.status(500).json({ error: "Erro ao ressincronizar o catálogo" });

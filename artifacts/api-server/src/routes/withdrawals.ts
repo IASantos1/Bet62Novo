@@ -3,7 +3,6 @@ import { db, usersTable, withdrawalsTable, betsTable, paymentsTable, adminAuditL
 import { eq, desc, and, ne, inArray, sql, count, sum } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
-import { getUserEnvironment } from "../middlewares/environment.js";
 import { logger } from "../lib/logger.js";
 import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
@@ -311,12 +310,6 @@ async function adjustWithdrawalHoldBalance(
 }
 
 router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const environment = await getUserEnvironment(req.user!.id);
-  if (environment === "demo") {
-    res.status(403).json({ error: "Contas demo não podem efetuar levantamentos reais." });
-    return;
-  }
-
   const { amount, iban, holderName, nif } = req.body as {
     amount?: number;
     iban?: string;
