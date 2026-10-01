@@ -95,6 +95,42 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
   }
 };
 
+// Same session-reading logic as authMiddleware, but never rejects — a
+// missing, invalid, expired or locked session just proceeds with req.user
+// left unset instead of 401ing. Used by routes that must stay reachable by
+// anonymous visitors (e.g. the public casino catalog) but still want to
+// personalize the response (e.g. serve the demo catalog) when a session IS
+// present and belongs to a demo account.
+export const optionalAuthMiddleware = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  const sessionToken = req.cookies?.bet62_session as string | undefined;
+  if (!sessionToken) {
+    next();
+    return;
+  }
+
+  try {
+    const evaluation = await evaluateSession(hashToken(sessionToken));
+    if (evaluation.status !== "active") {
+      next();
+      return;
+    }
+
+    const user = await loadUserForSession(evaluation.session.userId);
+    if (!user) {
+      next();
+      return;
+    }
+
+    await touchSession(evaluation.session);
+    req.user = user;
+    req.session = evaluation.session;
+    next();
+  } catch (err) {
+    logger.error({ err }, "Optional session verification failed");
+    next();
+  }
+};
+
 // Accepts either an active OR a locked session — used only by the small
 // set of endpoints that must work while the user is locked out: logging
 // out entirely ("forget this device"), and the two unlock ceremonies

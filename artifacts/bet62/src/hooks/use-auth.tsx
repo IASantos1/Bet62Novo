@@ -9,6 +9,11 @@ type User = {
   email: string;
   balance: string;
   freebetBalance: string;
+  // "production" | "demo" — which wallet/provider set this account uses.
+  // Server-resolved only, never set by the frontend. Absent on very old
+  // cached sessions before this field existed; treat as "production".
+  environment?: "production" | "demo";
+  demoBalance?: string;
   nif?: string | null;
   withdrawalIban?: string | null;
   withdrawalName?: string | null;
@@ -22,6 +27,7 @@ type AuthContextType = {
   hasPasskey: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, nif: string) => Promise<void>;
+  registerDemo: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   invalidateSession: (message?: string) => void;
   refreshUser: () => Promise<void>;
@@ -89,6 +95,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRememberedEmail(email);
   };
 
+  const registerDemo = async (name: string, email: string, password: string) => {
+    const res = await apiFetch("/api/auth/register-demo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Registration failed");
+    setUser(data.user);
+    setRememberedEmail(email);
+  };
+
   const logout = async () => {
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
@@ -112,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, hasPasskey, login, register, logout, invalidateSession, refreshUser }}>
+    <AuthContext.Provider value={{ user, isLoading, hasPasskey, login, register, registerDemo, logout, invalidateSession, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

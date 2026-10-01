@@ -3969,6 +3969,25 @@ function userEmoji(name: string): string {
   return USER_EMOJIS[hash % USER_EMOJIS.length]!;
 }
 
+type BalanceDisplayUser = {
+  environment?: "production" | "demo";
+  balance?: string;
+  demoBalance?: string;
+} | null | undefined;
+
+function isDemoAccount(user: BalanceDisplayUser): boolean {
+  return user?.environment === "demo";
+}
+
+// Real balance for production accounts, play-money demoBalance for demo
+// ones — every place in the header/wallet UI that shows "the balance"
+// reads through this instead of auth.user.balance directly, so a demo
+// account never has real money displayed next to it.
+function displayBalanceValue(user: BalanceDisplayUser): number {
+  if (!user) return 0;
+  return parseFloat((isDemoAccount(user) ? user.demoBalance : user.balance) ?? "0");
+}
+
 function cardMask(value: string) {
   return value
     .replace(/\D/g, "")
@@ -19001,38 +19020,52 @@ export default function Home({
           <div className="flex items-center gap-2">
             {auth.user ? (
               <>
-                {/* Free Bet balance pill — always visible */}
-                <div
-                  className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 rounded-lg px-2.5 py-1.5"
-                  title="Saldo de Free Bets"
-                >
-                  <span className="text-[10px] font-black text-violet-300 tracking-widest">
-                    FB
-                  </span>
-                  <span className="text-xs font-bold text-violet-200">
-                    € {parseFloat(auth.user.freebetBalance ?? "0").toFixed(2)}
-                  </span>
-                </div>
+                {isDemoAccount(auth.user) && (
+                  <div
+                    className="flex items-center gap-1 bg-amber-900/60 border border-amber-500/40 rounded-lg px-2 py-1.5"
+                    title="Conta demo — saldo fictício, sem dinheiro real"
+                  >
+                    <span className="text-[10px] font-black text-amber-300 tracking-widest">
+                      DEMO
+                    </span>
+                  </div>
+                )}
 
-                {/* Real balance pill */}
+                {!isDemoAccount(auth.user) && (
+                  <div
+                    className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 rounded-lg px-2.5 py-1.5"
+                    title="Saldo de Free Bets"
+                  >
+                    <span className="text-[10px] font-black text-violet-300 tracking-widest">
+                      FB
+                    </span>
+                    <span className="text-xs font-bold text-violet-200">
+                      € {parseFloat(auth.user.freebetBalance ?? "0").toFixed(2)}
+                    </span>
+                  </div>
+                )}
+
+                {/* Balance pill — real balance for production, demo play-money for demo accounts */}
                 <div
-                  className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5"
-                  title="Saldo disponível"
+                  className={`flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 ${isDemoAccount(auth.user) ? "bg-amber-950/40 border-amber-600/40" : "bg-zinc-800 border-zinc-700"}`}
+                  title={isDemoAccount(auth.user) ? "Saldo demo (fictício)" : "Saldo disponível"}
                 >
-                  <span className="text-xs font-black text-green-400">€</span>
+                  <span className={`text-xs font-black ${isDemoAccount(auth.user) ? "text-amber-400" : "text-green-400"}`}>€</span>
                   <span className="text-xs font-bold text-white">
-                    {parseFloat(auth.user.balance).toFixed(2)}
+                    {displayBalanceValue(auth.user).toFixed(2)}
                   </span>
                 </div>
 
-                {/* Deposit / Withdraw button */}
-                <button
-                  onClick={() => setDepositModalOpen(true)}
-                  className="w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center transition-colors shadow-lg shadow-emerald-900/40 shrink-0"
-                  title="Depositar / Levantar"
-                >
-                  <Plus size={16} className="text-white" strokeWidth={3} />
-                </button>
+                {/* Deposit / Withdraw button — not available for demo accounts (no real money) */}
+                {!isDemoAccount(auth.user) && (
+                  <button
+                    onClick={() => setDepositModalOpen(true)}
+                    className="w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center transition-colors shadow-lg shadow-emerald-900/40 shrink-0"
+                    title="Depositar / Levantar"
+                  >
+                    <Plus size={16} className="text-white" strokeWidth={3} />
+                  </button>
+                )}
 
                 {/* Avatar emoji dropdown */}
                 <DropdownMenu>
@@ -19064,22 +19097,26 @@ export default function Home({
                       </div>
                       <div className="flex gap-2 mt-2">
                         <div className="flex-1 bg-zinc-800 rounded-lg px-2 py-1.5 text-center">
-                          <div className="text-[10px] text-zinc-500">Saldo</div>
-                          <div className="text-green-400 font-bold text-xs">
-                            € {parseFloat(auth.user.balance).toFixed(2)}
-                          </div>
-                        </div>
-                        <div className="flex-1 bg-violet-900/40 rounded-lg px-2 py-1.5 text-center">
                           <div className="text-[10px] text-zinc-500">
-                            Free Bets
+                            {isDemoAccount(auth.user) ? "Saldo demo" : "Saldo"}
                           </div>
-                          <div className="text-violet-300 font-bold text-xs">
-                            €{" "}
-                            {parseFloat(
-                              auth.user.freebetBalance ?? "0",
-                            ).toFixed(2)}
+                          <div className={`font-bold text-xs ${isDemoAccount(auth.user) ? "text-amber-400" : "text-green-400"}`}>
+                            € {displayBalanceValue(auth.user).toFixed(2)}
                           </div>
                         </div>
+                        {!isDemoAccount(auth.user) && (
+                          <div className="flex-1 bg-violet-900/40 rounded-lg px-2 py-1.5 text-center">
+                            <div className="text-[10px] text-zinc-500">
+                              Free Bets
+                            </div>
+                            <div className="text-violet-300 font-bold text-xs">
+                              €{" "}
+                              {parseFloat(
+                                auth.user.freebetBalance ?? "0",
+                              ).toFixed(2)}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <DropdownMenuSeparator className="bg-zinc-700" />
@@ -21299,12 +21336,28 @@ export default function Home({
             )}
 
             {!expandedMatch &&
-              (activeTab === "sportsbook" || activeTab === "sports") && (
+              (activeTab === "sportsbook" || activeTab === "sports") &&
+              (isDemoAccount(auth.user) ? (
+                // Safety gate: the WinHouse sportsbook has no demo/sandbox
+                // routing yet — a demo account here would place real bets
+                // with real money on real markets. Blocked at the UI level
+                // until a WinHouse DEMO mechanism exists.
+                <div className="flex flex-col items-center justify-center text-center px-6 py-24 gap-3">
+                  <span className="text-4xl">🚧</span>
+                  <h2 className="text-lg font-bold text-white">
+                    Sportsbook demo em breve
+                  </h2>
+                  <p className="text-sm text-zinc-400 max-w-sm">
+                    O modo demo ainda não está disponível para apostas desportivas —
+                    só para o casino. Estamos a trabalhar nisso.
+                  </p>
+                </div>
+              ) : (
                 <WinHouseSportsbookEmbed
                   isDarkTheme={isDarkTheme}
                   isAuthenticated={!!auth.user}
                 />
-              )}
+              ))}
 
             {!expandedMatch && activeTab === "casino" && (() => {
               const hasMore = casinoCategory !== "Favoritos" && casinoGames.length < casinoTotal;
@@ -21715,29 +21768,35 @@ export default function Home({
                 >
                   <div>
                     <div className="text-xs text-zinc-400 mb-1">
-                      Saldo disponível
+                      {isDemoAccount(auth.user) ? "Saldo demo (fictício)" : "Saldo disponível"}
                     </div>
-                    <div className="b62-font-display text-4xl font-extrabold text-white">
-                      € {parseFloat(auth.user.balance).toFixed(2)}
+                    <div className={`b62-font-display text-4xl font-extrabold ${isDemoAccount(auth.user) ? "text-amber-400" : "text-white"}`}>
+                      € {displayBalanceValue(auth.user).toFixed(2)}
                     </div>
                     <div className="text-xs text-zinc-500 mt-1">
-                      Conta verificada · {auth.user.email}
+                      {isDemoAccount(auth.user) ? "Conta demo · sem dinheiro real" : `Conta verificada · ${auth.user.email}`}
                     </div>
                   </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setDepositModalOpen(true)}
-                      className="b62-gradient-cta flex items-center gap-2 text-white font-bold px-5 py-2.5 rounded-xl transition-transform active:scale-[0.98] text-sm"
-                    >
-                      <Plus size={16} /> Depositar
-                    </button>
-                    <button
-                      onClick={() => setDepositModalOpen(true)}
-                      className="flex items-center gap-2 bg-white/[0.06] border border-white/10 hover:bg-white/[0.1] text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
-                    >
-                      <ChevronUp size={16} /> Levantar
-                    </button>
-                  </div>
+                  {isDemoAccount(auth.user) ? (
+                    <div className="text-xs text-amber-300/80 bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-2.5">
+                      Depósitos e levantamentos reais não estão disponíveis em modo demo.
+                    </div>
+                  ) : (
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setDepositModalOpen(true)}
+                        className="b62-gradient-cta flex items-center gap-2 text-white font-bold px-5 py-2.5 rounded-xl transition-transform active:scale-[0.98] text-sm"
+                      >
+                        <Plus size={16} /> Depositar
+                      </button>
+                      <button
+                        onClick={() => setDepositModalOpen(true)}
+                        className="flex items-center gap-2 bg-white/[0.06] border border-white/10 hover:bg-white/[0.1] text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
+                      >
+                        <ChevronUp size={16} /> Levantar
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Transactions from bets */}
@@ -23776,7 +23835,7 @@ export default function Home({
           setAuthModalOpen(true);
           setDepositModalOpen(false);
         }}
-        balance={auth.user ? parseFloat(auth.user.balance) : 0}
+        balance={displayBalanceValue(auth.user)}
         kycStatus={auth.user?.kycStatus ?? "not_submitted"}
       />
 

@@ -10,6 +10,10 @@ export const usersTable = pgTable("users", {
   balance: decimal("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   withdrawalHoldBalance: decimal("withdrawal_hold_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   freebetBalance: decimal("freebet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  // Play-money wallet used only when environment === "demo" — entirely
+  // separate from `balance`, never touched by real deposits/withdrawals/
+  // WinHouse. Mutated only via applyDemoBalanceDelta (lib/ledger.ts).
+  demoBalance: decimal("demo_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   nif: text("nif"),
   withdrawalIban: text("withdrawal_iban"),
   withdrawalName: text("withdrawal_name"),

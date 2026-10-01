@@ -804,6 +804,7 @@ export async function initDb(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'production';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS affiliate_id INTEGER REFERENCES affiliates(id);
       ALTER TABLE users ADD COLUMN IF NOT EXISTS affiliate_code TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS demo_balance DECIMAL(10, 2) NOT NULL DEFAULT 0.00;
 
       CREATE INDEX IF NOT EXISTS users_environment_idx ON users (environment);
       CREATE INDEX IF NOT EXISTS users_affiliate_id_idx ON users (affiliate_id);

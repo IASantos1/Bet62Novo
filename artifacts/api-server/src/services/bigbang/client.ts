@@ -3,6 +3,13 @@ import { CONFIG } from "../../lib/config.js";
 
 const BIGBANG_BASE_URL = "https://api.bigbangcasino.bet/api/v1";
 
+// "demo" accounts use a fully separate BigBang account/key
+// (CONFIG.BIGBANG_SANDBOX_API_KEY) — never the live one. Same base URL for
+// both today (no separate sandbox host has ever been documented for this
+// integration); revisit if BigBang's own sandbox docs say otherwise once
+// the real sandbox key is obtained.
+export type BigBangEnvironment = "production" | "demo";
+
 type BigBangOkEnvelope<T> = {
   success: true;
   data?: T;
@@ -40,17 +47,20 @@ export type BigBangGamesPage = {
   };
 };
 
-function requireApiKey(): string {
-  const apiKey = CONFIG.BIGBANG_API_KEY.trim();
+function requireApiKey(environment: BigBangEnvironment): string {
+  const apiKey = (
+    environment === "demo" ? CONFIG.BIGBANG_SANDBOX_API_KEY : CONFIG.BIGBANG_API_KEY
+  ).trim();
   if (!apiKey) {
-    throw Object.assign(new Error("BIGBANG_API_KEY não configurada"), { status: 503 });
+    const varName = environment === "demo" ? "BIGBANG_SANDBOX_API_KEY" : "BIGBANG_API_KEY";
+    throw Object.assign(new Error(`${varName} não configurada`), { status: 503 });
   }
   return apiKey;
 }
 
-function buildBigBangUrl(path: string, apiKeyAsQuery = false): string {
+function buildBigBangUrl(path: string, environment: BigBangEnvironment, apiKeyAsQuery = false): string {
   if (!apiKeyAsQuery) return `${BIGBANG_BASE_URL}${path}`;
-  const apiKey = requireApiKey();
+  const apiKey = requireApiKey(environment);
   const url = new URL(`${BIGBANG_BASE_URL}${path}`);
   url.searchParams.set("api_key", apiKey);
   return url.toString();
@@ -82,11 +92,13 @@ function assertBigBangOk<T>(
 
 async function bigBangFetch<T>(
   path: string,
+  environment: BigBangEnvironment,
   init?: RequestInit,
 ): Promise<BigBangOkEnvelope<T>> {
-  const apiKey = requireApiKey();
+  const apiKey = requireApiKey(environment);
+  const varName = environment === "demo" ? "BIGBANG_SANDBOX_API_KEY" : "BIGBANG_API_KEY";
   let authMode = "header";
-  let resp = await fetch(buildBigBangUrl(path, false), {
+  let resp = await fetch(buildBigBangUrl(path, environment, false), {
     ...init,
     headers: {
       "X-API-Key": apiKey,
@@ -101,7 +113,7 @@ async function bigBangFetch<T>(
   // there on 401 in case an upstream proxy strips the custom header.
   if (resp.status === 401) {
     authMode = "query";
-    resp = await fetch(buildBigBangUrl(path, true), {
+    resp = await fetch(buildBigBangUrl(path, environment, true), {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -114,7 +126,7 @@ async function bigBangFetch<T>(
       throw Object.assign(
         new Error(
           `BigBang rejeitou a autenticação nas duas formas suportadas (X-API-Key e ?api_key=) para ${path}. ` +
-            "Verifique BIGBANG_API_KEY no ambiente/deploy e confirme no dashboard da BigBang se a key está ativa e autorizada.",
+            `Verifique ${varName} no ambiente/deploy e confirme no dashboard da BigBang se a key está ativa e autorizada.`,
         ),
         { status: 401, authMode: "header+query" },
       );
@@ -128,7 +140,7 @@ async function bigBangFetch<T>(
       throw Object.assign(
         new Error(
           `BigBang rejeitou a autenticação via ${authMode} para ${path}. ` +
-            "Verifique BIGBANG_API_KEY no ambiente/deploy e confirme no dashboard da BigBang se a key está ativa.",
+            `Verifique ${varName} no ambiente/deploy e confirme no dashboard da BigBang se a key está ativa.`,
         ),
         { status: 401, authMode },
       );
@@ -142,13 +154,14 @@ export async function bigBangListGamesPage(args: {
   limit: number;
   offset: number;
   mode?: "standard" | "premium";
+  environment: BigBangEnvironment;
 }): Promise<BigBangGamesPage> {
   const params = new URLSearchParams({
     limit: String(args.limit),
     offset: String(args.offset),
   });
   if (args.mode) params.set("type", args.mode);
-  const payload = await bigBangFetch<BigBangGame[]>(`/games?${params.toString()}`);
+  const payload = await bigBangFetch<BigBangGame[]>(`/games?${params.toString()}`, args.environment);
   return {
     data: payload.data ?? [],
     pagination: payload.pagination,
@@ -161,6 +174,7 @@ export async function bigBangLaunchGame(args: {
   language?: string;
   returnUrl?: string;
   homeUrl?: string;
+  environment: BigBangEnvironment;
 }): Promise<{ gameUrl: string; sessionId?: string; provider?: string }> {
   const body: Record<string, unknown> = {
     game_id: args.gameId,
@@ -170,7 +184,7 @@ export async function bigBangLaunchGame(args: {
   if (args.returnUrl) body["return_url"] = args.returnUrl;
   if (args.homeUrl) body["home_url"] = args.homeUrl;
 
-  const payload = await bigBangFetch<never>("/games/launch", {
+  const payload = await bigBangFetch<never>("/games/launch", args.environment, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -192,6 +206,7 @@ export function bigBangBalanceChangeSignature(input: {
   game: string;
   game_category: string;
   transaction_id: string;
+  environment: BigBangEnvironment;
 }): string {
   const base =
     String(input.username) +
@@ -200,7 +215,7 @@ export function bigBangBalanceChangeSignature(input: {
     String(input.game_category) +
     String(input.transaction_id);
   return crypto
-    .createHmac("sha256", requireApiKey())
+    .createHmac("sha256", requireApiKey(input.environment))
     .update(base)
     .digest("hex");
 }

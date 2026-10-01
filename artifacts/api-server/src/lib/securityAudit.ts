@@ -9,6 +9,7 @@ export type SecurityEvent =
   | "login_failed"
   | "login_locked"
   | "register"
+  | "register_demo"
   | "logout"
   | "session_locked"
   | "session_unlocked_password"
