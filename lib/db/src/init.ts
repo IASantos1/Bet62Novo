@@ -374,6 +374,7 @@ export async function initDb(): Promise<void> {
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS decision_reason TEXT;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS risk_flags JSONB;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS provider_reference TEXT;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS auto_payout BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS reversed_at TIMESTAMPTZ;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();

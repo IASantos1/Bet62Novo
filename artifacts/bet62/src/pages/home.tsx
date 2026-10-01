@@ -25269,6 +25269,7 @@ function DepositWithdrawModal({
       });
       const data = (await r.json()) as {
         withdrawal?: { id: number };
+        message?: string;
         error?: string;
         code?: string;
       };
@@ -25283,7 +25284,8 @@ function DepositWithdrawModal({
       setWDone(true);
       onSuccess();
       toast.success(
-        "Pedido de levantamento submetido! Processado em 2-5 dias úteis.",
+        data.message ??
+          "Pedido de levantamento submetido! Processado em 24 a 72 horas.",
       );
     } catch {
       toast.error("Erro de ligação. Tente novamente.");

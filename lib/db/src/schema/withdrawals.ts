@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, decimal, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, decimal, jsonb, boolean } from "drizzle-orm/pg-core";
 import { usersTable } from "./users.js";
 
 export const withdrawalsTable = pgTable("withdrawals", {
@@ -15,6 +15,7 @@ export const withdrawalsTable = pgTable("withdrawals", {
   decisionReason: text("decision_reason"),
   riskFlags: jsonb("risk_flags"),
   providerReference: text("provider_reference"),
+  autoPayout: boolean("auto_payout").notNull().default(false),
   processedAt: timestamp("processed_at", { withTimezone: true }),
   reversedAt: timestamp("reversed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
