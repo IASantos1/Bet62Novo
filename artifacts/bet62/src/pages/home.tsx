@@ -21530,7 +21530,7 @@ export default function Home({
                         Ver Todos
                       </button>
                     </div>
-                    <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
+                    <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
                       {games.map((game) => renderGameTile(game, "w-[calc(28%-0.45rem)] sm:w-28 flex-shrink-0"))}
                     </div>
                   </div>
@@ -21606,7 +21606,7 @@ export default function Home({
                       )}
                       <div
                         ref={casinoCarouselRef}
-                        className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0"
+                        className="flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-smooth pb-1 -mx-4 px-4 sm:mx-0 sm:px-0"
                       >
                         {casinoTopBanners.map((b, i) =>
                           renderBanner(b, i === 0 ? "w-[90%] sm:w-[62%]" : "w-[76%] sm:w-[32%]"),
@@ -21640,7 +21640,7 @@ export default function Home({
                           <RefreshCw className="animate-spin" size={18} />
                         </div>
                       ) : (
-                        <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
+                        <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
                           {casinoPopular.map((game) =>
                             renderGameTile(game, "w-[calc(28%-0.45rem)] sm:w-28 flex-shrink-0"),
                           )}
@@ -21651,7 +21651,7 @@ export default function Home({
 
                   {/* Category pills + search, same row. */}
                   <div className="flex items-center gap-2 mb-4">
-                    <div className="flex gap-2 overflow-x-auto flex-1 min-w-0 -mx-4 px-4 sm:mx-0 sm:px-0">
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar flex-1 min-w-0 -mx-4 px-4 sm:mx-0 sm:px-0">
                       {CASINO_CATEGORY_CHIPS.map(({ key, label, icon: Icon }) => (
                         <button
                           key={key}
