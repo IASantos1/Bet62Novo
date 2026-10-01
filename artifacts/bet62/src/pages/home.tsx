@@ -48,7 +48,6 @@ import {
   CalendarDays,
   Grid3x3,
   Flame,
-  Sparkles,
   CreditCard,
   Crown,
   SortAsc,
@@ -4267,6 +4266,11 @@ export default function Home({
   const [casinoExtraRows, setCasinoExtraRows] = useState<Record<string, CasinoGame[]>>({});
   const [casinoExtraRowsLoaded, setCasinoExtraRowsLoaded] = useState(false);
   const [casinoProviderRows, setCasinoProviderRows] = useState<{ name: string; games: CasinoGame[] }[]>([]);
+  // Full real provider list (not just the curated preferred subset used for
+  // CasinoRow previews) — backs the "Filtrar por fornecedor" picker.
+  const [casinoAllProviders, setCasinoAllProviders] = useState<string[]>([]);
+  const [casinoProviderPickerOpen, setCasinoProviderPickerOpen] = useState(false);
+  const [casinoProviderPickerSearch, setCasinoProviderPickerSearch] = useState("");
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Reveals the email/password form on the login tab in place of the Face
@@ -8302,13 +8306,17 @@ export default function Home({
       .then((r) => r.json())
       .then((data) => {
         const real: string[] = Array.isArray(data?.providers) ? data.providers : [];
+        setCasinoAllProviders(real);
         const matched = CASINO_PREFERRED_PROVIDERS
           .map((preferred) => real.find((p) => p.toLowerCase().includes(preferred.toLowerCase())))
           .filter((p): p is string => !!p)
           .slice(0, 6);
         return Promise.all(
+          // sort=new: newest games from each provider lead the row — most
+          // noticeable for Pragmatic Play since it's first in the preferred
+          // list above (Santos, 2026-10-01).
           matched.map((name) =>
-            fetch(`/api/casino/games?provider=${encodeURIComponent(name)}&limit=20`)
+            fetch(`/api/casino/games?provider=${encodeURIComponent(name)}&sort=new&limit=20`)
               .then((r) => r.json())
               .then((data2) => ({ name, games: Array.isArray(data2?.games) ? data2.games : [] })),
           ),
@@ -21376,11 +21384,12 @@ export default function Home({
             {!expandedMatch && activeTab === "casino" && (() => {
               const hasMore = casinoCategory !== "Favoritos" && casinoGames.length < casinoTotal;
 
-              // Lobby by player intent rather than raw provider grouping.
+              // "Todos"/"Populares"/"Novos" dropped as pills (2026-10-01,
+              // Santos) — redundant now that the rows landing view covers
+              // them (Jogos Populares / Novidades rows), and "Ver Todos" on
+              // any row still reaches the same grid via casinoCategory,
+              // just no longer needs its own top-level pill.
               const CASINO_CATEGORY_CHIPS: { key: string; label: string; icon: typeof Grid3x3 }[] = [
-                { key: "Todos", label: "Todos", icon: Grid3x3 },
-                { key: "Populares", label: "Populares", icon: Flame },
-                { key: "Novos", label: "Novos", icon: Sparkles },
                 { key: "Slots", label: "Slots", icon: Dices },
                 { key: "Ao Vivo", label: "Ao Vivo", icon: Radio },
                 { key: "jogos-rapidos", label: "Jogos Rápidos", icon: Zap },
@@ -21563,10 +21572,15 @@ export default function Home({
               };
 
               const activeCategoryChip = CASINO_CATEGORY_CHIPS.find((c) => c.key === casinoCategory);
-              const slotsHeading =
-                casinoCategory === "Todos"
+              const slotsHeading = casinoProviderFilter
+                ? `Jogos da ${casinoProviderFilter}`
+                : casinoCategory === "Todos"
                   ? "Todos os Jogos"
-                  : (activeCategoryChip?.label ?? "Jogos");
+                  : casinoCategory === "Populares"
+                    ? "Populares"
+                    : casinoCategory === "Novos"
+                      ? "Novidades"
+                      : (activeCategoryChip?.label ?? "Jogos");
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -21612,6 +21626,58 @@ export default function Home({
                           renderBanner(b, i === 0 ? "w-[90%] sm:w-[62%]" : "w-[76%] sm:w-[32%]"),
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Fornecedor filter — a text list for now; BigBang's
+                      /games response has no per-provider logo field (only a
+                      per-game thumbnail), confirmed by grep across the
+                      whole integration, so no logo is shown rather than
+                      inventing one. Swap in <img> per row if/when a real
+                      logo source is confirmed (Santos, 2026-10-01). */}
+                  {casinoAllProviders.length > 0 && (
+                    <div className="relative mb-4">
+                      <button
+                        type="button"
+                        onClick={() => setCasinoProviderPickerOpen((v) => !v)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-violet-500/40 transition-colors"
+                      >
+                        <Grid3x3 size={13} />
+                        Filtrar por fornecedor
+                        <ChevronDown size={13} className={casinoProviderPickerOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+                      </button>
+                      {casinoProviderPickerOpen && (
+                        <div className="absolute z-20 mt-2 w-72 max-w-[90vw] rounded-xl border border-zinc-800 bg-zinc-900 shadow-xl p-2">
+                          <div className="relative mb-2">
+                            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                            <input
+                              type="text"
+                              autoFocus
+                              value={casinoProviderPickerSearch}
+                              onChange={(e) => setCasinoProviderPickerSearch(e.target.value)}
+                              placeholder="Pesquisar fornecedor…"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-7 pr-2 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/60"
+                            />
+                          </div>
+                          <div className="max-h-64 overflow-y-auto no-scrollbar">
+                            {casinoAllProviders
+                              .filter((p) => p.toLowerCase().includes(casinoProviderPickerSearch.trim().toLowerCase()))
+                              .map((name) => (
+                                <button
+                                  key={name}
+                                  onClick={() => {
+                                    goToProvider(name);
+                                    setCasinoProviderPickerOpen(false);
+                                    setCasinoProviderPickerSearch("");
+                                  }}
+                                  className="w-full text-left px-2.5 py-2 rounded-lg text-sm text-zinc-200 hover:bg-zinc-800 transition-colors"
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
