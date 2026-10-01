@@ -7,25 +7,43 @@ import {
   usersTable,
 } from "@workspace/db";
 import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { authMiddleware, optionalAuthMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { getUserEnvironment, type BettingEnvironment } from "../middlewares/environment.js";
 import { logger } from "../lib/logger.js";
-import { applyBalanceDelta } from "../lib/ledger.js";
-import { bigBangBalanceChangeSignature, bigBangLaunchGame } from "../services/bigbang/client.js";
+import { applyBalanceDelta, applyDemoBalanceDelta } from "../lib/ledger.js";
+import {
+  bigBangBalanceChangeSignature,
+  bigBangLaunchGame,
+  type BigBangEnvironment,
+} from "../services/bigbang/client.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 import { kvCache } from "../services/cache/kvCache.js";
 
 const router: IRouter = Router();
-const CASINO_SOURCE = "bigbang";
+// "production" accounts (and anonymous visitors) always see the live
+// BigBang catalog; only an authenticated environment=demo account sees the
+// separate sandbox-synced catalog (see services/bigbang/sync.ts).
+function casinoSourceFor(environment: BettingEnvironment): string {
+  return environment === "demo" ? "bigbang_demo" : "bigbang";
+}
 const BIGBANG_BALANCE_SANDBOX = "100000.00";
 const BIGBANG_DEFAULT_LANGUAGE = "pt";
 const DEFAULT_CASINO_CURRENCY = "EUR";
 
-async function maybeSyncBigBangCatalog(): Promise<void> {
+async function maybeSyncBigBangCatalog(environment: BigBangEnvironment = "production"): Promise<void> {
   try {
-    await ensureBigBangCatalogFresh();
+    await ensureBigBangCatalogFresh(environment);
   } catch (err) {
-    logger.warn({ err }, "[bigbang] catalog sync skipped/failed");
+    logger.warn({ err, environment }, "[bigbang] catalog sync skipped/failed");
   }
+}
+
+// Anonymous visitors and production accounts always resolve to "production"
+// (matches today's behavior exactly); only a logged-in demo account gets the
+// sandbox catalog/routing.
+async function resolveOptionalEnvironment(req: AuthRequest): Promise<BettingEnvironment> {
+  if (!req.user) return "production";
+  return getUserEnvironment(req.user.id);
 }
 
 function parseBigBangUserId(raw: string): number | null {
@@ -268,8 +286,9 @@ function casinoBrowseOrderBySql(sort: string): SQL[] {
   ];
 }
 
-router.get("/games", async (req: Request, res: Response) => {
-  await maybeSyncBigBangCatalog();
+router.get("/games", optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
+  const environment = await resolveOptionalEnvironment(req);
+  await maybeSyncBigBangCatalog(environment);
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const search = typeof req.query["search"] === "string" ? req.query["search"].trim() : "";
   // Batch title lookup — lets the frontend fetch a curated list of specific
@@ -286,7 +305,7 @@ router.get("/games", async (req: Request, res: Response) => {
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(req.query["limit"]) || DEFAULT_LIMIT));
 
-  const cacheKey = `casino:games:v6:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${titles.join("|").toLowerCase()}:${page}:${limit}`;
+  const cacheKey = `casino:games:v6:${environment}:${provider || "*"}:${category || "*"}:${sort}:${search.toLowerCase()}:${titles.join("|").toLowerCase()}:${page}:${limit}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -296,7 +315,7 @@ router.get("/games", async (req: Request, res: Response) => {
 
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, CASINO_SOURCE),
+    eq(casinoGamesTable.source, casinoSourceFor(environment)),
   ];
   if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
   if (titles.length > 0) {
@@ -383,8 +402,9 @@ const MAX_GROUPS_LIMIT = 30;
 // used for search (a handful of matches split into many 1-game rows isn't
 // useful there); the front-end falls back to the flat /games list once a
 // search term is entered.
-router.get("/games/grouped", async (req: Request, res: Response) => {
-  await maybeSyncBigBangCatalog();
+router.get("/games/grouped", optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
+  const environment = await resolveOptionalEnvironment(req);
+  await maybeSyncBigBangCatalog(environment);
   const provider = typeof req.query["provider"] === "string" ? req.query["provider"].trim() : "";
   const page = Math.max(1, Number(req.query["page"]) || 1);
   const limit = Math.min(
@@ -392,7 +412,7 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
     Math.max(1, Number(req.query["limit"]) || DEFAULT_GROUPS_LIMIT),
   );
 
-  const cacheKey = `casino:games-grouped:v2:${provider || "*"}:${page}:${limit}`;
+  const cacheKey = `casino:games-grouped:v2:${environment}:${provider || "*"}:${page}:${limit}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -402,7 +422,7 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
 
   const conditions = [
     eq(casinoGamesTable.isActive, true),
-    eq(casinoGamesTable.source, CASINO_SOURCE),
+    eq(casinoGamesTable.source, casinoSourceFor(environment)),
   ];
   if (provider && provider !== "Todos") conditions.push(ilike(casinoGamesTable.provider, `%${provider}%`));
 
@@ -452,9 +472,10 @@ router.get("/games/grouped", async (req: Request, res: Response) => {
   res.send(payload);
 });
 
-router.get("/providers", async (_req: Request, res: Response) => {
-  await maybeSyncBigBangCatalog();
-  const cacheKey = "casino:providers:v3";
+router.get("/providers", optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
+  const environment = await resolveOptionalEnvironment(req);
+  await maybeSyncBigBangCatalog(environment);
+  const cacheKey = `casino:providers:v3:${environment}`;
   const cached = await kvCache.get(cacheKey);
   if (cached) {
     res.setHeader("Content-Type", "application/json");
@@ -465,7 +486,7 @@ router.get("/providers", async (_req: Request, res: Response) => {
   const rows = await db
     .selectDistinct({ provider: casinoGamesTable.provider })
     .from(casinoGamesTable)
-    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, CASINO_SOURCE)))
+    .where(and(eq(casinoGamesTable.isActive, true), eq(casinoGamesTable.source, casinoSourceFor(environment))))
     .orderBy(asc(casinoGamesTable.provider));
 
   const payload = JSON.stringify({ providers: rows.map((r) => r.provider) });
@@ -570,7 +591,8 @@ router.post(
       return;
     }
 
-    await maybeSyncBigBangCatalog();
+    const environment = await getUserEnvironment(req.user!.id);
+    await maybeSyncBigBangCatalog(environment);
 
     const [game] = await db
       .select({
@@ -578,7 +600,7 @@ router.post(
         isActive: casinoGamesTable.isActive,
       })
       .from(casinoGamesTable)
-      .where(and(eq(casinoGamesTable.gameUid, gameUid), eq(casinoGamesTable.source, CASINO_SOURCE)))
+      .where(and(eq(casinoGamesTable.gameUid, gameUid), eq(casinoGamesTable.source, casinoSourceFor(environment))))
       .limit(1);
 
     if (!game || !game.isActive) {
@@ -600,6 +622,7 @@ router.post(
         userToken: String(req.user!.id),
         language: BIGBANG_DEFAULT_LANGUAGE,
         returnUrl: publicSiteUrl ? `${publicSiteUrl}/casino` : undefined,
+        environment,
       });
       res.json({ url: launched.gameUrl, provider: launched.provider, sessionId: launched.sessionId });
     } catch (err) {
@@ -627,7 +650,7 @@ router.get("/bigbang/user-data", async (req: Request, res: Response) => {
   }
 
   const [user] = await db
-    .select({ id: usersTable.id, balance: usersTable.balance })
+    .select({ id: usersTable.id, balance: usersTable.balance, demoBalance: usersTable.demoBalance, environment: usersTable.environment })
     .from(usersTable)
     .where(eq(usersTable.id, userId))
     .limit(1);
@@ -637,9 +660,10 @@ router.get("/bigbang/user-data", async (req: Request, res: Response) => {
     return;
   }
 
+  const isDemo = user.environment === "demo";
   res.json({
     username,
-    balance: formatMoney(user.balance),
+    balance: formatMoney(isDemo ? user.demoBalance : user.balance),
     currency: DEFAULT_CASINO_CURRENCY,
   });
 });
@@ -677,6 +701,13 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
     return;
   }
 
+  // Resolved once, up front — decides both which key verifies the
+  // signature and which balance column the transaction below mutates.
+  // Never guessed/tried-both: this account's environment in OUR db is the
+  // only thing that decides it, same as every other provider-routing
+  // decision (see middlewares/environment.ts).
+  const environment = await getUserEnvironment(userId);
+
   try {
     const expected = bigBangBalanceChangeSignature({
       username,
@@ -684,6 +715,7 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
       game,
       game_category: gameCategory,
       transaction_id: transactionId,
+      environment,
     });
     if (!safeHexEqual(expected, signature)) {
       res.status(401).json({ error: "bad signature" });
@@ -700,12 +732,16 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
     return;
   }
 
+  const isDemo = environment === "demo";
+  const applyDelta = isDemo ? applyDemoBalanceDelta : applyBalanceDelta;
+  const balanceColumn = isDemo ? usersTable.demoBalance : usersTable.balance;
+
   try {
     const result = await (db as typeof db & {
       transaction: <T>(cb: (tx: typeof db) => Promise<T>) => Promise<T>;
     }).transaction(async (tx) => {
       const [user] = await tx
-        .select({ id: usersTable.id, balance: usersTable.balance })
+        .select({ id: usersTable.id, balance: balanceColumn })
         .from(usersTable)
         .where(eq(usersTable.id, userId))
         .limit(1);
@@ -714,7 +750,7 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
         throw Object.assign(new Error("unknown user"), { status: 404 });
       }
 
-      const applied = await applyBalanceDelta(tx, {
+      const applied = await applyDelta(tx, {
         userId,
         amount: formatMoney(amountNum),
         kind: bigBangKind({ type: payload.type, amount: amountNum }),
@@ -723,6 +759,7 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
         refId: transactionId,
         metadata: {
           username,
+          environment,
           roundId: payload.round_id ?? null,
           type: payload.type ?? null,
           roundEnd: Boolean(payload.round_end),
@@ -735,7 +772,7 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
       });
 
       const [updatedUser] = await tx
-        .select({ balance: usersTable.balance })
+        .select({ balance: balanceColumn })
         .from(usersTable)
         .where(eq(usersTable.id, userId))
         .limit(1);

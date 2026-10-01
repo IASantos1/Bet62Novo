@@ -88,6 +88,8 @@ type AdminUser = {
   email: string;
   balance: string;
   freebetBalance: string;
+  environment?: "production" | "demo";
+  demoBalance?: string;
   kycStatus: string | null;
   selfExcludedUntil: string | null;
   banned: boolean;
@@ -1317,10 +1319,14 @@ export default function AdminPage() {
         headers: authHeader,
       });
       if (!res.ok) throw new Error();
-      const result: { inserted: number; updated: number; deactivated: number; totalRemote: number } =
-        await res.json();
+      type CatalogSyncResult = { inserted: number; updated: number; deactivated: number; totalRemote: number };
+      const result: { production: CatalogSyncResult; demo: CatalogSyncResult } = await res.json();
+      const { production, demo } = result;
+      const demoSuffix = demo.totalRemote > 0
+        ? ` Demo: ${demo.inserted} novo(s), ${demo.updated} atualizado(s).`
+        : "";
       toast.success(
-        `Catálogo ressincronizado: ${result.inserted} novo(s), ${result.updated} atualizado(s), ${result.deactivated} duplicado(s) removido(s).`,
+        `Catálogo ressincronizado: ${production.inserted} novo(s), ${production.updated} atualizado(s), ${production.deactivated} duplicado(s) removido(s).${demoSuffix}`,
       );
       refetchCasinoGames();
       refetchCasinoOverview();
@@ -3316,6 +3322,12 @@ export default function AdminPage() {
                                       label="Banido"
                                     />
                                   )}
+                                  {user.environment === "demo" && (
+                                    <Badge
+                                      cls="bg-amber-900/50 text-amber-400"
+                                      label="Demo"
+                                    />
+                                  )}
                                   <span className="text-xs text-zinc-500 md:hidden">
                                     {user.email}
                                   </span>
@@ -3325,8 +3337,8 @@ export default function AdminPage() {
                                 {user.email}
                               </td>
                               <td className="px-3 sm:px-4 py-3">
-                                <span className="font-bold text-green-400">
-                                  {fmtEur(user.balance)}
+                                <span className={`font-bold ${user.environment === "demo" ? "text-amber-400" : "text-green-400"}`}>
+                                  {fmtEur(user.environment === "demo" ? (user.demoBalance ?? "0") : user.balance)}
                                 </span>
                               </td>
                               <td className="px-3 sm:px-4 py-3 hidden lg:table-cell">
@@ -7667,9 +7679,14 @@ export default function AdminPage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between p-5 border-b border-zinc-800 shrink-0">
-                <h2 className="font-bold text-white">
-                  {detailModal ? detailModal.user.name : "A carregar…"}
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-bold text-white">
+                    {detailModal ? detailModal.user.name : "A carregar…"}
+                  </h2>
+                  {detailModal?.user.environment === "demo" && (
+                    <Badge cls="bg-amber-900/50 text-amber-400" label="Demo" />
+                  )}
+                </div>
                 <button
                   onClick={() => setDetailModal(null)}
                   className="text-zinc-500 hover:text-white"
@@ -7688,9 +7705,11 @@ export default function AdminPage() {
                 <>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-5 border-b border-zinc-800 shrink-0">
                     <div className="bg-zinc-800 rounded-lg p-3">
-                      <div className="text-xs text-zinc-500 mb-1">Saldo</div>
-                      <div className="font-bold text-green-400">
-                        {fmtEur(detailModal.user.balance)}
+                      <div className="text-xs text-zinc-500 mb-1">
+                        {detailModal.user.environment === "demo" ? "Saldo demo" : "Saldo"}
+                      </div>
+                      <div className={`font-bold ${detailModal.user.environment === "demo" ? "text-amber-400" : "text-green-400"}`}>
+                        {fmtEur(detailModal.user.environment === "demo" ? (detailModal.user.demoBalance ?? "0") : detailModal.user.balance)}
                       </div>
                     </div>
                     <div className="bg-zinc-800 rounded-lg p-3">
