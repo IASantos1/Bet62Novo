@@ -1,28 +1,19 @@
 import { casinoGamesTable, db } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
-import { CONFIG } from "../../lib/config.js";
 import { logger } from "../../lib/logger.js";
 import { kvCache } from "../cache/kvCache.js";
-import { type BigBangEnvironment, type BigBangGame, bigBangListGamesPage } from "./client.js";
+import { type BigBangGame, bigBangListGamesPage } from "./client.js";
 
-// Production keeps its original cache key (no forced resync for existing
-// deploys); demo gets its own so the two catalogs sync independently.
-function syncTsCacheKey(environment: BigBangEnvironment): string {
-  return environment === "demo" ? "casino:bigbang:last-sync-ts:demo" : "casino:bigbang:last-sync-ts";
-}
-function casinoSourceFor(environment: BigBangEnvironment): string {
-  return environment === "demo" ? "bigbang_demo" : "bigbang";
-}
+const BIGBANG_SYNC_TS_CACHE_KEY = "casino:bigbang:last-sync-ts";
 const BIGBANG_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
 const BIGBANG_PAGE_LIMIT = 5000;
 
-type SyncResult = {
+let inFlightSync: Promise<{
   inserted: number;
   updated: number;
   deactivated: number;
   totalRemote: number;
-};
-const inFlightSyncByEnvironment = new Map<BigBangEnvironment, Promise<SyncResult>>();
+}> | null = null;
 type CasinoGameInsert = typeof casinoGamesTable.$inferInsert;
 
 function mapCasinoCategory(game: BigBangGame): string {
@@ -35,7 +26,7 @@ function mapCasinoCategory(game: BigBangGame): string {
   return "slots";
 }
 
-function normalizeGame(game: BigBangGame, environment: BigBangEnvironment) {
+function normalizeGame(game: BigBangGame) {
   return {
     provider: String(game.provider ?? game.category_title ?? game.category ?? "BigBang"),
     gameUid: String(game.id),
@@ -43,8 +34,8 @@ function normalizeGame(game: BigBangGame, environment: BigBangEnvironment) {
     vendorCode: Number.isInteger(game.id) ? game.id : null,
     category: mapCasinoCategory(game),
     img: game.thumbnail ?? null,
-    source: casinoSourceFor(environment),
-  };
+    source: "bigbang",
+  } as const;
 }
 
 type NormalizedGame = ReturnType<typeof normalizeGame>;
@@ -130,24 +121,16 @@ export function dedupeNormalizedGames(games: NormalizedGame[]): {
   return { winners, loserGameUids };
 }
 
-export async function syncBigBangCatalog(
-  force = false,
-  environment: BigBangEnvironment = "production",
-): Promise<SyncResult> {
-  const existingInFlight = inFlightSyncByEnvironment.get(environment);
-  if (existingInFlight) return existingInFlight;
+export async function syncBigBangCatalog(force = false): Promise<{
+  inserted: number;
+  updated: number;
+  deactivated: number;
+  totalRemote: number;
+}> {
+  if (inFlightSync) return inFlightSync;
 
-  const syncPromise = (async (): Promise<SyncResult> => {
-    if (environment === "demo" && !CONFIG.BIGBANG_SANDBOX_API_KEY.trim()) {
-      logger.warn(
-        {},
-        "[bigbang] BIGBANG_SANDBOX_API_KEY não configurada — a saltar sync do catálogo demo",
-      );
-      return { inserted: 0, updated: 0, deactivated: 0, totalRemote: 0 };
-    }
-
-    const cacheKey = syncTsCacheKey(environment);
-    const lastSyncRaw = await kvCache.get(cacheKey);
+  inFlightSync = (async () => {
+    const lastSyncRaw = await kvCache.get(BIGBANG_SYNC_TS_CACHE_KEY);
     const lastSyncTs = Number(lastSyncRaw ?? 0);
     if (!force && Number.isFinite(lastSyncTs) && lastSyncTs > 0) {
       const ageMs = Date.now() - lastSyncTs;
@@ -161,7 +144,6 @@ export async function syncBigBangCatalog(
       const page = await bigBangListGamesPage({
         limit: BIGBANG_PAGE_LIMIT,
         offset,
-        environment,
       });
       remoteGames.push(...page.data);
       const total = Number(page.pagination?.total ?? 0);
@@ -174,7 +156,7 @@ export async function syncBigBangCatalog(
     const allRemoteGameUids = new Set(remoteGames.map((g) => String(g.id)));
 
     const { winners: normalized, loserGameUids } = dedupeNormalizedGames(
-      remoteGames.map((g) => normalizeGame(g, environment)),
+      remoteGames.map(normalizeGame),
     );
     const existing = await db
       .select({
@@ -188,7 +170,7 @@ export async function syncBigBangCatalog(
         isActive: casinoGamesTable.isActive,
       })
       .from(casinoGamesTable)
-      .where(eq(casinoGamesTable.source, casinoSourceFor(environment)));
+      .where(eq(casinoGamesTable.source, "bigbang"));
 
     const existingByUid = new Map<string, (typeof existing)[number]>(
       existing.map((row) => [row.gameUid, row]),
@@ -286,20 +268,23 @@ export async function syncBigBangCatalog(
       deactivated += result.length;
     }
 
-    await kvCache.set(cacheKey, String(Date.now()), Math.ceil(BIGBANG_SYNC_TTL_MS / 1000));
+    await kvCache.set(
+      BIGBANG_SYNC_TS_CACHE_KEY,
+      String(Date.now()),
+      Math.ceil(BIGBANG_SYNC_TTL_MS / 1000),
+    );
     logger.info(
-      { environment, inserted, updated, deactivated, totalRemote: normalized.length },
+      { inserted, updated, deactivated, totalRemote: normalized.length },
       "[bigbang] casino catalog synced",
     );
     return { inserted, updated, deactivated, totalRemote: normalized.length };
   })().finally(() => {
-    inFlightSyncByEnvironment.delete(environment);
+    inFlightSync = null;
   });
 
-  inFlightSyncByEnvironment.set(environment, syncPromise);
-  return syncPromise;
+  return inFlightSync;
 }
 
-export async function ensureBigBangCatalogFresh(environment: BigBangEnvironment = "production"): Promise<void> {
-  await syncBigBangCatalog(false, environment);
+export async function ensureBigBangCatalogFresh(): Promise<void> {
+  await syncBigBangCatalog(false);
 }

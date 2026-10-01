@@ -3,7 +3,6 @@ import Stripe from "stripe";
 import { db, usersTable, paymentsTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
-import { getUserEnvironment } from "../middlewares/environment.js";
 import { logger } from "../lib/logger.js";
 import { sendDepositConfirmed } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
@@ -161,21 +160,9 @@ async function creditPayment(orderId: string): Promise<void> {
     .catch(() => {});
 }
 
-// Contas demo nunca chegam ao Stripe — defesa em profundidade
-// independente do frontend esconder os botões de depósito para elas.
-async function rejectIfDemoAccount(req: AuthRequest, res: Response): Promise<boolean> {
-  const environment = await getUserEnvironment(req.user!.id);
-  if (environment === "demo") {
-    res.status(403).json({ error: "Contas demo não podem efetuar depósitos reais." });
-    return true;
-  }
-  return false;
-}
-
 // ─── POST /api/payments/multibanco ──────────────────────────────────────────
 // Stripe Multibanco: creates a PaymentIntent with multibanco payment method
 router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (await rejectIfDemoAccount(req, res)) return;
   const { amount } = req.body as { amount?: number };
   if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
     res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
@@ -260,7 +247,6 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
 // ─── POST /api/payments/mbway ────────────────────────────────────────────────
 // MB WAY nativo via Stripe PaymentIntent, confirmado com o telemóvel do cliente.
 router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (await rejectIfDemoAccount(req, res)) return;
   const { amount, phone } = req.body as { amount?: number; phone?: string };
   if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
     res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
@@ -331,7 +317,6 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
 // ─── POST /api/payments/card ─────────────────────────────────────────────────
 // Stripe PaymentIntent para cartão; os dados são recolhidos no frontend via Elements.
 router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (await rejectIfDemoAccount(req, res)) return;
   const { amount } = req.body as { amount?: number };
   if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
     res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });

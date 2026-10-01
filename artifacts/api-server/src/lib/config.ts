@@ -31,17 +31,8 @@ const AI_AGENTS_MODEL =
   process.env["AI_AGENTS_MODEL"]?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
 const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
-// Separate BigBang account/key for "environment = demo" accounts — never
-// reuse the live key here. Left empty until the real sandbox key is set in
-// the deploy environment; routes that need it fail with a clear 503 rather
-// than silently falling back to the live key (see services/bigbang/client.ts).
-const BIGBANG_SANDBOX_API_KEY = process.env["BIGBANG_SANDBOX_API_KEY"] ?? "";
 const WINHOUSE_WALLET_API_KEY = process.env["WINHOUSE_WALLET_API_KEY"] ?? "";
 const WINHOUSE_CALLBACK_TOKEN = process.env["WINHOUSE_CALLBACK_TOKEN"] ?? "";
-
-// Starting play-money credit granted once on POST /auth/register-demo — see
-// routes/auth.ts. Configurable so it can be tuned without a redeploy of code.
-const DEMO_STARTING_BALANCE = Number(process.env["DEMO_STARTING_BALANCE"]) || 1000;
 
 // Affiliate/promoter program defaults — see routes/affiliates.ts.
 // AFFILIATE_DEFAULT_COMMISSION_RATE is the rate applied when POST
@@ -54,8 +45,6 @@ const AFFILIATE_MINIMUM_PAYOUT = Number(process.env["AFFILIATE_MINIMUM_PAYOUT"])
 
 export const CONFIG = {
   BIGBANG_API_KEY,
-  BIGBANG_SANDBOX_API_KEY,
-  DEMO_STARTING_BALANCE,
   WINHOUSE_WALLET_API_KEY,
   WINHOUSE_CALLBACK_TOKEN,
   ANTHROPIC_API_KEY,

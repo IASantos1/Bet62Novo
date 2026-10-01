@@ -1,10 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable, adminAuditLogTable } from "@workspace/db";
+import { db, usersTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
-import { CONFIG } from "../lib/config.js";
-import { applyFreebetBalanceDelta, applyDemoBalanceDelta } from "../lib/ledger.js";
+import { applyFreebetBalanceDelta } from "../lib/ledger.js";
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { csrfProtection } from "../middlewares/csrf.js";
 import { authMiddleware, requireLockableSession, type AuthRequest } from "../middlewares/auth.js";
@@ -101,8 +100,6 @@ function publicUser(user: typeof usersTable.$inferSelect) {
     email: user.email,
     balance: user.balance,
     freebetBalance: user.freebetBalance,
-    environment: user.environment,
-    demoBalance: user.demoBalance,
   };
 }
 
@@ -208,94 +205,6 @@ router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
     res.status(201).json({ user: publicUser(user) });
   } catch (err) {
     logger.error({ err }, "Registration error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Self-service demo signup — the only place in the codebase allowed to set
-// environment: "demo" on a fresh insert. Deliberately separate from
-// /register rather than a body flag on it: keeps the real registration
-// endpoint's contract exactly as-is (no client-declared environment ever
-// reaches it) and makes every demo account's origin unambiguous in an
-// audit trail. No NIF/KYC — demo accounts never touch real money (deposits/
-// withdrawals are rejected server-side, see routes/payments.ts and
-// routes/withdrawals.ts) and never carry affiliate attribution (a demo
-// signup is not a real referral, and payments.ts already only pays
-// commission on environment="production" deposits).
-router.post("/register-demo", registerRateLimit, async (req, res): Promise<void> => {
-  const { name, password } = req.body as { name?: string; email?: string; password?: string };
-  const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : undefined;
-
-  if (!name || !email || !password) {
-    res.status(400).json({ error: "Missing name, email or password" });
-    return;
-  }
-  if (password.length < 8) {
-    res.status(400).json({ error: "A senha deve ter pelo menos 8 caracteres" });
-    return;
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    res.status(400).json({ error: "Email inválido" });
-    return;
-  }
-
-  try {
-    const existingUser = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
-    if (existingUser.length > 0) {
-      res.status(400).json({ error: "Email already registered" });
-      return;
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-    const startingBalance = CONFIG.DEMO_STARTING_BALANCE.toFixed(2);
-
-    const user = await db.transaction(async (tx) => {
-      const [inserted] = await tx
-        .insert(usersTable)
-        .values({
-          name,
-          email,
-          passwordHash,
-          environment: "demo",
-          balance: "0.00",
-          freebetBalance: "0.00",
-          demoBalance: "0.00",
-        })
-        .returning();
-      if (!inserted) throw new Error("insert failed");
-
-      await applyDemoBalanceDelta(tx, {
-        userId: inserted.id,
-        amount: startingBalance,
-        kind: "demo_signup_bonus",
-        idempotencyKey: `demo-signup:${inserted.id}`,
-      });
-
-      await tx.insert(adminAuditLogTable).values({
-        action: "demo_user_registered",
-        adminUser: "system",
-        targetType: "user",
-        targetId: String(inserted.id),
-        details: { environment: "demo", startingBalance },
-        ip: req.ip ?? null,
-      });
-
-      const [withBalance] = await tx
-        .select()
-        .from(usersTable)
-        .where(eq(usersTable.id, inserted.id))
-        .limit(1);
-      return withBalance!;
-    });
-
-    const meta = requestMeta(req);
-    const { sessionToken, refreshToken, session } = await createSession(user.id, meta);
-    setSessionCookies(res, { sessionToken, refreshToken });
-    await logSecurityEvent({ userId: user.id, event: "register_demo", sessionId: session.id, ...meta });
-
-    res.status(201).json({ user: publicUser(user) });
-  } catch (err) {
-    logger.error({ err }, "Demo registration error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -636,7 +545,11 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promi
 
     res.json({
       user: {
-        ...publicUser(user),
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        balance: user.balance,
+        freebetBalance: user.freebetBalance,
         nif: user.nif,
         withdrawalIban: user.withdrawalIban,
         withdrawalName: user.withdrawalName,
