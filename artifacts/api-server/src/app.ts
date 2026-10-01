@@ -16,11 +16,17 @@ type StripeEvent = any;
 type StripeCheckoutSession = any;
 type StripePaymentIntent = any;
 type StripeCharge = any;
-import { db, paymentsTable, usersTable } from "@workspace/db";
+import { db, paymentsTable, usersTable, withdrawalsTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { sendDepositConfirmed } from "./lib/mailer.js";
 import { createAffiliateCommission } from "./routes/payments.js";
+import {
+  applyWithdrawalAdminDecision,
+  canTransitionWithdrawalStatus,
+  mapRevolutTransactionState,
+} from "./routes/withdrawals.js";
+import { verifyRevolutWebhookSignature } from "./services/revolut/client.js";
 
 const app: Express = express();
 
@@ -188,6 +194,78 @@ app.post(
 //
 // The casino callbacks remain separate in routes/casino.ts and use normal
 // JSON parsing there, so no additional raw-body route is needed in app.ts.
+
+// ── Revolut webhook MUST be registered before express.json() ────────────────
+// Signature verification is computed over the exact raw request bytes.
+app.post(
+  "/api/withdrawals/webhook/revolut",
+  express.raw({ type: "application/json" }),
+  async (req: Request, res: Response) => {
+    const rawBody = (req.body as Buffer).toString("utf8");
+    const valid = verifyRevolutWebhookSignature({
+      rawBody,
+      signatureHeader: req.headers["revolut-signature"] as string | undefined,
+      timestampHeader: req.headers["revolut-request-timestamp"] as string | undefined,
+    });
+    if (!valid) {
+      logger.warn({ ip: req.ip }, "Revolut webhook rejected: invalid signature");
+      res.status(401).json({ error: "Invalid signature" });
+      return;
+    }
+
+    let payload: { event?: string; data?: { id?: string; new_state?: string; state?: string } };
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      res.status(400).json({ error: "Invalid JSON" });
+      return;
+    }
+
+    if (payload.event !== "TransactionStateChanged" || !payload.data?.id) {
+      res.json({ received: true });
+      return;
+    }
+
+    try {
+      const transactionId = payload.data.id;
+      const newState = payload.data.new_state ?? payload.data.state ?? "";
+      const targetStatus = mapRevolutTransactionState(newState);
+      if (!targetStatus) {
+        res.json({ received: true });
+        return;
+      }
+
+      const [existing] = await db
+        .select({ id: withdrawalsTable.id, status: withdrawalsTable.status })
+        .from(withdrawalsTable)
+        .where(eq(withdrawalsTable.providerReference, transactionId))
+        .limit(1);
+
+      if (!existing) {
+        logger.warn({ transactionId }, "Revolut webhook: no withdrawal matches provider reference");
+        res.json({ received: true });
+        return;
+      }
+
+      if (existing.status === targetStatus || !canTransitionWithdrawalStatus(existing.status, targetStatus)) {
+        res.json({ received: true });
+        return;
+      }
+
+      await applyWithdrawalAdminDecision({
+        id: existing.id,
+        status: targetStatus,
+        reviewedBy: "system:revolut_webhook",
+        providerReference: transactionId,
+      });
+
+      res.json({ received: true });
+    } catch (err) {
+      logger.error({ err }, "Revolut webhook processing error");
+      res.status(500).json({ error: "Processing failed" });
+    }
+  },
+);
 
 app.use(
   (pinoHttp as any)({

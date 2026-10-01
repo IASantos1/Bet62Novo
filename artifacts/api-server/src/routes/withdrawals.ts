@@ -4,9 +4,11 @@ import { eq, desc, and, ne, inArray, sql, count, sum } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
 import { logger } from "../lib/logger.js";
-import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer.js";
+import { sendWithdrawalApproved, sendWithdrawalRejected, sendWithdrawalPendingReview } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
 import { timingSafeEqualString } from "../lib/security.js";
+import { CONFIG } from "../lib/config.js";
+import { isRevolutConfigured, findOrCreateCounterparty, payOut } from "../services/revolut/client.js";
 
 const router: IRouter = Router();
 
@@ -67,6 +69,18 @@ export function normalizeWebhookWithdrawalStatus(value: string): "processing" | 
   if (["processing", "pending", "in_progress", "in-progress"].includes(normalized)) return "processing";
   if (["paid", "completed", "success", "succeeded"].includes(normalized)) return "paid";
   if (["failed", "error", "rejected", "declined"].includes(normalized)) return "failed";
+  return null;
+}
+
+// Revolut transaction states (Business API `/transactions`, webhooks v2
+// TransactionStateChanged): pending | completed | declined | failed |
+// reverted. Maps onto the same three-value withdrawal status the generic
+// payout webhook above already understands.
+export function mapRevolutTransactionState(state: string): "processing" | "paid" | "failed" | null {
+  const normalized = String(state || "").trim().toLowerCase();
+  if (normalized === "pending") return "processing";
+  if (normalized === "completed") return "paid";
+  if (["declined", "failed", "reverted"].includes(normalized)) return "failed";
   return null;
 }
 
@@ -445,7 +459,91 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
       },
     });
 
-    res.json({ withdrawal });
+    // User-confirmed bracket (2026-10-01): amounts between
+    // REVOLUT_AUTO_PAYOUT_MIN and REVOLUT_AUTO_PAYOUT_MAX (inclusive) are
+    // paid out automatically via Revolut, skipping admin review entirely.
+    // A high-severity risk flag still routes to manual review regardless of
+    // amount — auto-paying a flagged withdrawal would defeat the point of
+    // the fraud checks above.
+    const hasHighRiskFlag = riskFlags.some((f) => f.severity === "high");
+    const autoPayoutEligible =
+      !hasHighRiskFlag &&
+      isRevolutConfigured() &&
+      amount >= CONFIG.REVOLUT_AUTO_PAYOUT_MIN &&
+      amount <= CONFIG.REVOLUT_AUTO_PAYOUT_MAX;
+
+    let finalWithdrawal: typeof withdrawalsTable.$inferSelect = withdrawal;
+    let message =
+      "O seu pedido de levantamento foi submetido para revisão e será processado em 24 a 72 horas.";
+
+    if (autoPayoutEligible) {
+      try {
+        const approved = await applyWithdrawalAdminDecision({
+          id: withdrawal.id,
+          status: "approved",
+          reviewedBy: "system:auto_payout",
+          decisionReason: "Auto-aprovado: valor dentro do intervalo de pagamento automático (Revolut).",
+          ip: req.ip ?? null,
+        });
+        if (!approved.ok) throw new Error((approved as { ok: false; error: string }).error);
+
+        const processing = await applyWithdrawalAdminDecision({
+          id: withdrawal.id,
+          status: "processing",
+          reviewedBy: "system:auto_payout",
+          ip: req.ip ?? null,
+        });
+        if (!processing.ok) throw new Error((processing as { ok: false; error: string }).error);
+
+        const counterpartyId = await findOrCreateCounterparty({
+          iban: cleanIban,
+          holderName: holderName.trim(),
+        });
+        const payout = await payOut({
+          counterpartyId,
+          amount,
+          reference: `BET62 levantamento #${withdrawal.id}`,
+          requestId: `withdrawal-${withdrawal.id}`,
+        });
+
+        const isImmediatelyDone = payout.state === "completed";
+        const finalDecision = await applyWithdrawalAdminDecision({
+          id: withdrawal.id,
+          status: isImmediatelyDone ? "paid" : "processing",
+          reviewedBy: "system:auto_payout",
+          providerReference: payout.id,
+          ip: req.ip ?? null,
+        });
+        if (finalDecision.ok) finalWithdrawal = finalDecision.withdrawal;
+
+        await db
+          .update(withdrawalsTable)
+          .set({ autoPayout: true })
+          .where(eq(withdrawalsTable.id, withdrawal.id));
+        finalWithdrawal = { ...finalWithdrawal, autoPayout: true };
+
+        message = isImmediatelyDone
+          ? "Levantamento processado automaticamente! O valor deve chegar à sua conta em poucos minutos."
+          : "Levantamento aprovado e em processamento automático. O valor deve chegar à sua conta em breve.";
+      } catch (err) {
+        logger.error({ err, withdrawalId: withdrawal.id }, "Auto-payout via Revolut failed");
+        const failedDecision = await applyWithdrawalAdminDecision({
+          id: withdrawal.id,
+          status: "failed",
+          reviewedBy: "system:auto_payout",
+          decisionReason: err instanceof Error ? err.message : "Erro desconhecido no pagamento automático",
+          ip: req.ip ?? null,
+        }).catch(() => null);
+        if (failedDecision?.ok) finalWithdrawal = failedDecision.withdrawal;
+        message = "O seu pedido de levantamento foi recebido e está a ser tratado pela nossa equipa.";
+      }
+    } else {
+      sendWithdrawalPendingReview(user.email, user.name, withdrawal.amount).catch((err: unknown) => {
+        logger.error({ err, withdrawalId: withdrawal.id }, "Failed to send withdrawal pending review email");
+      });
+    }
+
+    res.json({ withdrawal: finalWithdrawal, message });
   } catch (err) {
     logger.error({ err }, "Withdrawal error");
     res.status(500).json({ error: "Erro interno" });

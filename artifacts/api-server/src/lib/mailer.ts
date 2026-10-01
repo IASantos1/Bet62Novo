@@ -156,6 +156,43 @@ export async function sendWithdrawalApproved(
   }
 }
 
+// ── Withdrawal Pending Review Notification ─────────────────────────────────────
+
+export async function sendWithdrawalPendingReview(
+  email: string,
+  name: string,
+  amount: string,
+): Promise<void> {
+  const transporter = createTransporter();
+  if (!transporter) {
+    logger.warn("SMTP not configured — skipping withdrawal pending review email");
+    return;
+  }
+
+  const html = baseTemplate(`
+    <p>Olá <strong>${escapeHtml(name)}</strong>,</p>
+    <p>Recebemos o seu pedido de levantamento e este está agora em <span style="color:#facc15;font-weight:600;">revisão manual</span>.</p>
+    <div class="amount-box">
+      <div class="label">Valor solicitado</div>
+      <div class="value">€${formatAmount(amount)}</div>
+    </div>
+    <p>Este valor requer aprovação da nossa equipa antes do pagamento. O prazo habitual é de <strong>24 a 72 horas</strong>.</p>
+    <p>Obrigado pela sua paciência. Boas apostas!</p>
+  `);
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to: email,
+      subject: `⏳ Levantamento de €${formatAmount(amount)} em revisão — BET62`,
+      html,
+    });
+    logger.info({ email, amount }, "Withdrawal pending review email sent");
+  } catch (err) {
+    logger.error({ err, email }, "Failed to send withdrawal pending review email");
+  }
+}
+
 // ── Bet Settlement Notification ────────────────────────────────────────────────
 
 export async function sendBetSettled(

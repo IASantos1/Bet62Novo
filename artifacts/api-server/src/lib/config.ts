@@ -34,6 +34,33 @@ const BIGBANG_API_KEY = process.env["BIGBANG_API_KEY"] ?? "";
 const WINHOUSE_WALLET_API_KEY = process.env["WINHOUSE_WALLET_API_KEY"] ?? "";
 const WINHOUSE_CALLBACK_TOKEN = process.env["WINHOUSE_CALLBACK_TOKEN"] ?? "";
 
+// Revolut Business API — automated payout of player withdrawals (routes/
+// withdrawals.ts). REVOLUT_PRIVATE_KEY is the PEM private key whose public
+// counterpart was uploaded to the Revolut Business API certificate config;
+// it signs the JWT client-assertion used to redeem REVOLUT_REFRESH_TOKEN for
+// short-lived access tokens (see services/revolut/client.ts). Unset
+// REVOLUT_CLIENT_ID/REVOLUT_PRIVATE_KEY/REVOLUT_REFRESH_TOKEN disables
+// auto-payout entirely — withdrawals then always fall back to the existing
+// manual admin-approval flow.
+const REVOLUT_ENVIRONMENT = (process.env["REVOLUT_ENVIRONMENT"]?.trim() || "sandbox") as
+  | "sandbox"
+  | "production";
+const REVOLUT_CLIENT_ID = process.env["REVOLUT_CLIENT_ID"] ?? "";
+// The domain/issuer configured against the certificate in Revolut Business
+// → Settings → APIs → API Business when the key pair was uploaded. Required
+// as the JWT client-assertion's `iss` claim — left as its own env var
+// instead of guessing a value, since it's whatever was entered at setup.
+const REVOLUT_JWT_ISSUER = process.env["REVOLUT_JWT_ISSUER"] ?? "";
+const REVOLUT_PRIVATE_KEY = (process.env["REVOLUT_PRIVATE_KEY"] ?? "").replace(/\\n/g, "\n");
+const REVOLUT_REFRESH_TOKEN = process.env["REVOLUT_REFRESH_TOKEN"] ?? "";
+const REVOLUT_PAYOUT_ACCOUNT_ID = process.env["REVOLUT_PAYOUT_ACCOUNT_ID"] ?? "";
+const REVOLUT_WEBHOOK_SIGNING_SECRET = process.env["REVOLUT_WEBHOOK_SIGNING_SECRET"] ?? "";
+// User-confirmed bracket (2026-10-01): levantamentos entre estes dois
+// valores (inclusive) são pagos automaticamente via Revolut, sem aprovação
+// de admin; acima do máximo mantém-se a revisão manual existente.
+const REVOLUT_AUTO_PAYOUT_MIN = Number(process.env["REVOLUT_AUTO_PAYOUT_MIN"]) || 20;
+const REVOLUT_AUTO_PAYOUT_MAX = Number(process.env["REVOLUT_AUTO_PAYOUT_MAX"]) || 200;
+
 // Affiliate/promoter program defaults — see routes/affiliates.ts.
 // AFFILIATE_DEFAULT_COMMISSION_RATE is the rate applied when POST
 // /admin/affiliates doesn't specify one; per-affiliate rates are still
@@ -47,6 +74,15 @@ export const CONFIG = {
   BIGBANG_API_KEY,
   WINHOUSE_WALLET_API_KEY,
   WINHOUSE_CALLBACK_TOKEN,
+  REVOLUT_ENVIRONMENT,
+  REVOLUT_CLIENT_ID,
+  REVOLUT_JWT_ISSUER,
+  REVOLUT_PRIVATE_KEY,
+  REVOLUT_REFRESH_TOKEN,
+  REVOLUT_PAYOUT_ACCOUNT_ID,
+  REVOLUT_WEBHOOK_SIGNING_SECRET,
+  REVOLUT_AUTO_PAYOUT_MIN,
+  REVOLUT_AUTO_PAYOUT_MAX,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,
