@@ -65,6 +65,55 @@ async function fetchAccessToken(): Promise<{ accessToken: string; expiresIn: num
   return { accessToken: data.access_token, expiresIn: data.expires_in ?? 2400 };
 }
 
+// One-time OAuth handshake (routes/revolut.ts GET /callback): Revolut
+// redirects the browser here with a `code` query param, valid for ~2
+// minutes, after the business owner clicks "Enable access" and authorizes
+// in the Revolut dashboard. Exchanging it is how the very first
+// refresh_token is minted — REVOLUT_REFRESH_TOKEN doesn't exist yet at this
+// point, so this only needs the client/certificate config, not the full
+// isRevolutConfigured() set.
+export async function exchangeAuthorizationCode(
+  code: string,
+): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  if (!CONFIG.REVOLUT_CLIENT_ID || !CONFIG.REVOLUT_JWT_ISSUER || !CONFIG.REVOLUT_PRIVATE_KEY) {
+    throw Object.assign(
+      new Error("REVOLUT_CLIENT_ID / REVOLUT_JWT_ISSUER / REVOLUT_PRIVATE_KEY não configurados"),
+      { status: 503 },
+    );
+  }
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    client_id: CONFIG.REVOLUT_CLIENT_ID,
+    client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+    client_assertion: buildClientAssertion(),
+  });
+
+  const resp = await fetch(`${REVOLUT_BASE_URL}/auth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const data = (await resp.json().catch(() => ({}))) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    error?: string;
+    error_description?: string;
+  };
+  if (!resp.ok || !data.access_token || !data.refresh_token) {
+    throw Object.assign(
+      new Error(`Troca de código Revolut falhou: ${data.error_description || data.error || resp.status}`),
+      { status: 502 },
+    );
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in ?? 2400,
+  };
+}
+
 async function getAccessToken(): Promise<string> {
   requireConfigured();
   const now = Date.now();
