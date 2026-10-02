@@ -13,6 +13,7 @@ import { applyBalanceDelta } from "../lib/ledger.js";
 import { bigBangBalanceChangeSignature, bigBangLaunchGame } from "../services/bigbang/client.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 import { kvCache } from "../services/cache/kvCache.js";
+import { CONFIG } from "../lib/config.js";
 
 const router: IRouter = Router();
 const CASINO_SOURCE = "bigbang";
@@ -705,7 +706,7 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
       transaction: <T>(cb: (tx: typeof db) => Promise<T>) => Promise<T>;
     }).transaction(async (tx) => {
       const [user] = await tx
-        .select({ id: usersTable.id, balance: usersTable.balance })
+        .select({ id: usersTable.id, balance: usersTable.balance, casinoBonusSpinsRemaining: usersTable.casinoBonusSpinsRemaining })
         .from(usersTable)
         .where(eq(usersTable.id, userId))
         .limit(1);
@@ -714,10 +715,21 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
         throw Object.assign(new Error("unknown user"), { status: 404 });
       }
 
+      // Casino bonus spins (lib/casinoBonus.ts): a bet (debit) at or below
+      // the global per-spin cap is covered by the user's remaining bonus
+      // spins instead of their real balance, as long as any remain. Wins
+      // always credit real balance normally, regardless of what funded the
+      // bet — user-confirmed (2026-10-02): bonus-spin winnings are real,
+      // withdrawable money, no separate wagering requirement.
+      const isBonusSpinDebit =
+        amountNum < 0 &&
+        Math.abs(amountNum) <= CONFIG.BONUS_SPIN_MAX_STAKE &&
+        user.casinoBonusSpinsRemaining > 0;
+
       const applied = await applyBalanceDelta(tx, {
         userId,
-        amount: formatMoney(amountNum),
-        kind: bigBangKind({ type: payload.type, amount: amountNum }),
+        amount: isBonusSpinDebit ? "0.00" : formatMoney(amountNum),
+        kind: isBonusSpinDebit ? "casino_bonus_spin_used" : bigBangKind({ type: payload.type, amount: amountNum }),
         idempotencyKey: `casino:bigbang:${transactionId}`,
         refType: "bigbang_transaction",
         refId: transactionId,
@@ -730,9 +742,20 @@ router.post("/bigbang/balance-change", async (req: Request, res: Response) => {
           gameCategory,
           gameId: payload.game_id ?? null,
           providerId: payload.provider_id ?? null,
+          ...(isBonusSpinDebit ? { bonusSpinStake: amountNum } : {}),
         },
-        enforceNonNegative: amountNum < 0,
+        enforceNonNegative: !isBonusSpinDebit && amountNum < 0,
       });
+
+      // Only decrement on the first (non-duplicate) processing of this
+      // transaction_id — `applied` is false on a BigBang retry, since
+      // applyBalanceDelta's idempotency key already no-ops those.
+      if (applied && isBonusSpinDebit) {
+        await tx
+          .update(usersTable)
+          .set({ casinoBonusSpinsRemaining: sql`greatest(${usersTable.casinoBonusSpinsRemaining} - 1, 0)` })
+          .where(eq(usersTable.id, userId));
+      }
 
       const [updatedUser] = await tx
         .select({ balance: usersTable.balance })

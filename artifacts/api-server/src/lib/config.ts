@@ -61,6 +61,14 @@ const REVOLUT_WEBHOOK_SIGNING_SECRET = process.env["REVOLUT_WEBHOOK_SIGNING_SECR
 const REVOLUT_AUTO_PAYOUT_MIN = Number(process.env["REVOLUT_AUTO_PAYOUT_MIN"]) || 20;
 const REVOLUT_AUTO_PAYOUT_MAX = Number(process.env["REVOLUT_AUTO_PAYOUT_MAX"]) || 200;
 
+// Casino bonus spins (see lib/casinoBonus.ts, routes/casino.ts). BigBang's
+// API exposes no per-game minimum-bet field, so there is no way to verify
+// a debit is "that slot's actual minimum" — instead, any single casino bet
+// at or below this global cap is covered by the user's bonus spins (if any
+// remain) instead of their real balance. User-confirmed (2026-10-01): a
+// fixed global cap, not an admin-configurable one, for now.
+const BONUS_SPIN_MAX_STAKE = Number(process.env["BONUS_SPIN_MAX_STAKE"]) || 0.2;
+
 // Affiliate/promoter program defaults — see routes/affiliates.ts.
 // AFFILIATE_DEFAULT_COMMISSION_RATE is the rate applied when POST
 // /admin/affiliates doesn't specify one; per-affiliate rates are still
@@ -83,6 +91,7 @@ export const CONFIG = {
   REVOLUT_WEBHOOK_SIGNING_SECRET,
   REVOLUT_AUTO_PAYOUT_MIN,
   REVOLUT_AUTO_PAYOUT_MAX,
+  BONUS_SPIN_MAX_STAKE,
   ANTHROPIC_API_KEY,
   AI_AGENTS_API_KEY,
   AI_AGENTS_BASE_URL,

@@ -1,11 +1,12 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import Stripe from "stripe";
 import { db, usersTable, paymentsTable } from "@workspace/db";
-import { eq, sql, count } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { sendDepositConfirmed } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
+import { maybeGrantCasinoWelcomeBonus } from "../lib/casinoBonus.js";
 import { randomUUID } from "crypto";
 // Relative imports — see auth.ts's comment (tsc alias-resolution quirk for
 // newly-added schema exports).
@@ -84,48 +85,6 @@ function formatPtPhone(phone: string): string {
   return `+351${digits}`;
 }
 
-// ─── Freebet grant helper ────────────────────────────────────────────────────
-async function grantFirstDepositFreebet(userId: number, depositAmount: number): Promise<void> {
-  try {
-    const [user] = await db
-      .select({ firstDepositGranted: usersTable.firstDepositGranted })
-      .from(usersTable)
-      .where(eq(usersTable.id, userId))
-      .limit(1);
-
-    if (!user || user.firstDepositGranted !== "none") return;
-
-    const [{ completedCount }] = await db
-      .select({ completedCount: count() })
-      .from(paymentsTable)
-      .where(eq(paymentsTable.userId, userId));
-
-    if (Number(completedCount) !== 1) return;
-
-    let freebetAmount: string | null = null;
-    let grantedLevel: string | null = null;
-
-    if (depositAmount >= 20) {
-      freebetAmount = "10.00";
-      grantedLevel = "20";
-    } else if (depositAmount >= 10) {
-      freebetAmount = "5.00";
-      grantedLevel = "10";
-    }
-
-    if (!freebetAmount || !grantedLevel) return;
-
-    await db.update(usersTable).set({
-      freebetBalance: sql`${usersTable.freebetBalance} + ${freebetAmount}`,
-      firstDepositGranted: grantedLevel,
-    }).where(eq(usersTable.id, userId));
-
-    logger.info({ userId, freebetAmount, grantedLevel }, "First deposit freebet granted");
-  } catch (err) {
-    logger.error({ err, userId }, "Error granting first deposit freebet");
-  }
-}
-
 async function creditPayment(orderId: string): Promise<void> {
   const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.orderId, orderId)).limit(1);
   if (!payment || payment.status === "completed") return;
@@ -148,7 +107,7 @@ async function creditPayment(orderId: string): Promise<void> {
 
   logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
 
-  void grantFirstDepositFreebet(payment.userId, parseFloat(payment.amount));
+  void maybeGrantCasinoWelcomeBonus(payment.userId, parseFloat(payment.amount));
 
   db.select({ email: usersTable.email, name: usersTable.name })
     .from(usersTable)
