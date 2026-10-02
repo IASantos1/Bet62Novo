@@ -169,6 +169,7 @@ router.get("/", authMiddleware, async (req: AuthRequest, res: Response): Promise
       email: user.email,
       balance: user.balance,
       freebetBalance: user.freebetBalance,
+      casinoBonusSpinsRemaining: user.casinoBonusSpinsRemaining,
       nif: user.nif,
       withdrawalIban: user.withdrawalIban,
       withdrawalName: user.withdrawalName,

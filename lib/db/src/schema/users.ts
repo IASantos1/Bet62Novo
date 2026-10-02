@@ -10,6 +10,13 @@ export const usersTable = pgTable("users", {
   balance: decimal("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   withdrawalHoldBalance: decimal("withdrawal_hold_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   freebetBalance: decimal("freebet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  // Casino-only free spins, tracked as a count — never merged into `balance`.
+  // Replaces the old first-deposit freebet (see firstDepositGranted below):
+  // freebets only ever worked against BET62's own native sportsbook engine,
+  // never through the WinHouse iframe, so the deposit-triggered welcome
+  // bonus now grants these instead, redeemable only in the casino where
+  // BET62 fully controls the BigBang seamless-wallet debit/credit webhook.
+  casinoBonusSpinsRemaining: integer("casino_bonus_spins_remaining").notNull().default(0),
   nif: text("nif"),
   withdrawalIban: text("withdrawal_iban"),
   withdrawalName: text("withdrawal_name"),

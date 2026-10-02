@@ -9,6 +9,7 @@ type User = {
   email: string;
   balance: string;
   freebetBalance: string;
+  casinoBonusSpinsRemaining?: number;
   nif?: string | null;
   withdrawalIban?: string | null;
   withdrawalName?: string | null;

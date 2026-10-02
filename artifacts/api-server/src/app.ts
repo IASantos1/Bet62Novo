@@ -17,10 +17,11 @@ type StripeCheckoutSession = any;
 type StripePaymentIntent = any;
 type StripeCharge = any;
 import { db, paymentsTable, usersTable, withdrawalsTable } from "@workspace/db";
-import { eq, sql, count } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { sendDepositConfirmed } from "./lib/mailer.js";
 import { createAffiliateCommission } from "./routes/payments.js";
+import { maybeGrantCasinoWelcomeBonus } from "./lib/casinoBonus.js";
 import {
   applyWithdrawalAdminDecision,
   canTransitionWithdrawalStatus,
@@ -66,22 +67,7 @@ async function creditPaymentHelper(orderId: string): Promise<void> {
       await createAffiliateCommission(tx, payment);
     });
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment balance credited (webhook or cron)");
-    // First deposit freebet (safe to run multiple times — guarded by firstDepositGranted !== none on read + update IF still none)
-    try {
-      const [u] = await db.select({ firstDepositGranted: usersTable.firstDepositGranted }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1);
-      if (u?.firstDepositGranted === "none") {
-        const [{ c }] = (await db.select({ c: count() }).from(paymentsTable).where(eq(paymentsTable.userId, payment.userId))) as unknown as [{ c: number }];
-        if (Number(c) === 1) {
-          const dep = parseFloat(payment.amount);
-          const fb = dep >= 20 ? "10.00" : dep >= 10 ? "5.00" : null;
-          const lvl = dep >= 20 ? "20" : dep >= 10 ? "10" : null;
-          if (fb && lvl) {
-            await db.update(usersTable).set({ freebetBalance: sql`${usersTable.freebetBalance} + ${fb}`, firstDepositGranted: lvl }).where(eq(usersTable.id, payment.userId));
-            logger.info({ userId: payment.userId, fb, lvl }, "First-deposit freebet granted (webhook or cron)");
-          }
-        }
-      }
-    } catch (_fbErr) { /* non-critical, idempotent on next cron tick */ }
+    void maybeGrantCasinoWelcomeBonus(payment.userId, parseFloat(payment.amount));
     // Confirmation email (best-effort, swallow errors)
     db.select({ email: usersTable.email, name: usersTable.name }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1)
       .then(([u]) => { if (u) sendDepositConfirmed(u.email, u.name, payment.amount, payment.method).catch(() => {}); })

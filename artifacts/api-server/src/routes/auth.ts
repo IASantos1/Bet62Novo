@@ -100,6 +100,7 @@ function publicUser(user: typeof usersTable.$inferSelect) {
     email: user.email,
     balance: user.balance,
     freebetBalance: user.freebetBalance,
+    casinoBonusSpinsRemaining: user.casinoBonusSpinsRemaining,
   };
 }
 
@@ -550,6 +551,7 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promi
         email: user.email,
         balance: user.balance,
         freebetBalance: user.freebetBalance,
+        casinoBonusSpinsRemaining: user.casinoBonusSpinsRemaining,
         nif: user.nif,
         withdrawalIban: user.withdrawalIban,
         withdrawalName: user.withdrawalName,

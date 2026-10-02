@@ -4271,6 +4271,10 @@ export default function Home({
   const [casinoAllProviders, setCasinoAllProviders] = useState<string[]>([]);
   const [casinoProviderPickerOpen, setCasinoProviderPickerOpen] = useState(false);
   const [casinoProviderPickerSearch, setCasinoProviderPickerSearch] = useState("");
+  // One-time "you have N free spins" toast on entering the Casino tab —
+  // localStorage-gated per user so it doesn't repeat on every tab switch
+  // or every login, only the first time after the bonus was granted.
+  const casinoBonusNotifShownRef = useRef(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Reveals the email/password form on the login tab in place of the Face
@@ -8326,6 +8330,31 @@ export default function Home({
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, casinoExtraRowsLoaded]);
+
+  useEffect(() => {
+    if (activeTab !== "casino" || casinoBonusNotifShownRef.current) return;
+    const spins = auth.user?.casinoBonusSpinsRemaining ?? 0;
+    if (spins <= 0 || !auth.user) return;
+    const storageKey = `casino_bonus_notif_shown:${auth.user.id}`;
+    if (localStorage.getItem(storageKey)) {
+      casinoBonusNotifShownRef.current = true;
+      return;
+    }
+    casinoBonusNotifShownRef.current = true;
+    localStorage.setItem(storageKey, "1");
+    toast.success(
+      `Você tem um bónus de ${spins} rodada${spins > 1 ? "s" : ""} grátis no casino!`,
+    );
+  }, [activeTab, auth.user]);
+
+  // Bets placed inside the BigBang iframe never touch our own React state —
+  // the only way to see the spin counter tick down live is to re-poll the
+  // user profile while a game is open.
+  useEffect(() => {
+    if (!casinoLaunchUrl) return;
+    const interval = setInterval(() => void auth.refreshUser(), 8000);
+    return () => clearInterval(interval);
+  }, [casinoLaunchUrl, auth]);
 
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -23441,7 +23470,13 @@ export default function Home({
               <span className="text-white">BET</span>
               <span className="text-emerald-300">62</span>
             </div>
-            <div className="flex items-center gap-1.5 min-w-0">
+            {(auth.user?.casinoBonusSpinsRemaining ?? 0) > 0 && (
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold whitespace-nowrap shrink-0">
+                🎰 {auth.user?.casinoBonusSpinsRemaining} rodada
+                {(auth.user?.casinoBonusSpinsRemaining ?? 0) > 1 ? "s" : ""} grátis
+              </div>
+            )}
+            <div className="flex items-center gap-1.5 min-w-0 ml-auto">
               <button
                 onClick={() => window.open(casinoLaunchUrl, "_blank")}
                 className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors text-[11px] font-bold whitespace-nowrap shrink-0"
@@ -24025,13 +24060,13 @@ export default function Home({
                   <img
                     src="https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=800&auto=format&fit=crop"
                     className="absolute inset-0 w-full h-full object-cover scale-105"
-                    alt="Promoção Free Bet — deposite €10 e ganhe €5 em apostas grátis"
+                    alt="Promoção Bónus de Rodadas — deposite €10 e ganhe 5 rodadas grátis no casino"
                   />
                   <div className="absolute inset-0 bg-gradient-to-br from-violet-600/85 to-black/95" />
                   <div className="relative z-10 p-8 text-center">
-                    <div className="text-5xl mb-3">🎁</div>
+                    <div className="text-5xl mb-3">🎰</div>
                     <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">
-                      FREE BET ATIVADA
+                      BÓNUS DE RODADAS ATIVADO
                     </div>
                     <h2 className="text-3xl font-black text-white leading-tight mb-2">
                       Parabéns!
@@ -24040,25 +24075,28 @@ export default function Home({
                       Está a participar na promoção
                     </p>
                     <p className="text-violet-300 font-black text-xl mb-4">
-                      DEPOSITE €10 → GANHE €5
+                      DEPOSITE €10 → GANHE 5 RODADAS
                     </p>
                     <div className="bg-white/10 border border-white/20 rounded-2xl p-4 mb-6">
                       <div className="text-4xl font-black text-violet-300 mb-1">
-                        €5
+                        5
                       </div>
                       <div className="text-sm text-white/70">
-                        em Free Bets creditados na sua conta
+                        rodadas grátis creditadas no casino
                       </div>
                     </div>
                     <p className="text-white/60 text-xs leading-relaxed mb-6">
-                      Complete apostas qualificadas com odds ≥ 2.50 para
-                      utilizar as suas free bets.
+                      Escolha um jogo no casino e jogue — os ganhos são seus,
+                      sem requisitos de aposta.
                     </p>
                     <Button
-                      onClick={() => setPromoNotif(null)}
+                      onClick={() => {
+                        setPromoNotif(null);
+                        setActiveTab("casino");
+                      }}
                       className="w-full bg-violet-500 hover:bg-violet-600 text-white font-black h-12"
                     >
-                      COMEÇAR A APOSTAR
+                      IR PARA O CASINO
                     </Button>
                   </div>
                 </>
@@ -24068,13 +24106,13 @@ export default function Home({
                   <img
                     src="https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=800&auto=format&fit=crop"
                     className="absolute inset-0 w-full h-full object-cover scale-105"
-                    alt="Promoção Free Bet — deposite €20 e ganhe €10 em apostas grátis"
+                    alt="Promoção Bónus de Rodadas — deposite €20 e ganhe 10 rodadas grátis no casino"
                   />
                   <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/85 to-black/95" />
                   <div className="relative z-10 p-8 text-center">
                     <div className="text-5xl mb-3">🎉</div>
                     <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">
-                      FREE BET ATIVADA
+                      BÓNUS DE RODADAS ATIVADO
                     </div>
                     <h2 className="text-3xl font-black text-white leading-tight mb-2">
                       Parabéns!
@@ -24083,33 +24121,28 @@ export default function Home({
                       Está a participar na promoção
                     </p>
                     <p className="text-emerald-300 font-black text-xl mb-4">
-                      DEPOSITE €20 → GANHE €10
+                      DEPOSITE €20 → GANHE 10 RODADAS
                     </p>
-                    <p className="text-white/70 text-sm leading-relaxed mb-6">
-                      Complete 4 apostas qualificadas com odds ≥ 2.00 e stake
-                      mínima de €2 para receber os seus €10 em free bets.
-                    </p>
-                    <div className="grid grid-cols-4 gap-2 mb-6">
-                      {[1, 2, 3, 4].map((n) => (
-                        <div
-                          key={n}
-                          className="rounded-xl bg-white/10 border border-white/20 py-3 flex flex-col items-center gap-1"
-                        >
-                          <span className="text-lg">⚽</span>
-                          <span className="text-[10px] text-white/60 font-bold">
-                            Aposta {n}
-                          </span>
-                          <span className="text-[10px] text-yellow-400">
-                            Pendente
-                          </span>
-                        </div>
-                      ))}
+                    <div className="bg-white/10 border border-white/20 rounded-2xl p-4 mb-6">
+                      <div className="text-4xl font-black text-emerald-300 mb-1">
+                        10
+                      </div>
+                      <div className="text-sm text-white/70">
+                        rodadas grátis creditadas no casino
+                      </div>
                     </div>
+                    <p className="text-white/60 text-xs leading-relaxed mb-6">
+                      Escolha um jogo no casino e jogue — os ganhos são seus,
+                      sem requisitos de aposta.
+                    </p>
                     <Button
-                      onClick={() => setPromoNotif(null)}
+                      onClick={() => {
+                        setPromoNotif(null);
+                        setActiveTab("casino");
+                      }}
                       className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-black h-12"
                     >
-                      COMEÇAR A APOSTAR
+                      IR PARA O CASINO
                     </Button>
                   </div>
                 </>
@@ -24496,43 +24529,42 @@ const PROMO_CONTENT: PromoContentItem[] = [
   },
   {
     id: "freebets10",
-    title: "DEPOSITE €10 E GANHE €5",
-    subtitle: "FREE BETS PARA COMEÇAR",
+    title: "DEPOSITE €10 E GANHE 5 RODADAS",
+    subtitle: "BÓNUS DE RODADAS NO CASINO",
     description:
-      "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
-    badge: "FREE BET",
+      "Deposite apenas €10 e receba 5 rodadas grátis para jogar no casino. Os ganhos são seus, sem requisitos de aposta.",
+    badge: "RODADAS GRÁTIS",
     image:
       "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
     gradient: "from-violet-500/60 to-purple-800/60",
-    highlight: "€5",
-    highlightLabel: "em free bets",
+    highlight: "5",
+    highlightLabel: "rodadas grátis",
     terms: [
-      "Depósito mínimo de €10.",
-      "Free bets creditadas automaticamente.",
-      "Odds mínimas qualificadas: 2.50.",
-      "Free bets válidas por 7 dias.",
+      "Depósito mínimo de €10 (apenas no 1.º depósito).",
+      "Rodadas creditadas automaticamente no casino.",
+      "Válido para apostas até €0,20 por rodada.",
+      "Ganhos creditados diretamente no saldo, sem rollover.",
     ],
     cta: "DEPOSITAR €10",
     actionKey: "deposit",
   },
   {
     id: "freebets20",
-    title: "DEPOSITE €20 E GANHE €10",
-    subtitle: "FREE BETS EXCLUSIVAS",
+    title: "DEPOSITE €20 E GANHE 10 RODADAS",
+    subtitle: "BÓNUS DE RODADAS EXCLUSIVO",
     description:
-      "Faça o seu primeiro depósito de €20 e conclua 4 apostas qualificadas para receber €10 em free bets.",
-    badge: "FREE BET",
+      "Faça o seu primeiro depósito de €20 e receba 10 rodadas grátis para jogar no casino. Os ganhos são seus, sem requisitos de aposta.",
+    badge: "RODADAS GRÁTIS",
     image:
       "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=1400&auto=format&fit=crop",
     gradient: "from-emerald-400/60 to-green-700/60",
-    highlight: "€10",
-    highlightLabel: "em free bets",
+    highlight: "10",
+    highlightLabel: "rodadas grátis",
     terms: [
-      "Depósito mínimo de €20.",
-      "4 apostas qualificadas obrigatórias.",
-      "Odds mínimas de 2.00.",
-      "Stake mínima de €2 por aposta.",
-      "Free bets válidas por 7 dias.",
+      "Depósito mínimo de €20 (apenas no 1.º depósito).",
+      "Rodadas creditadas automaticamente no casino.",
+      "Válido para apostas até €0,20 por rodada.",
+      "Ganhos creditados diretamente no saldo, sem rollover.",
     ],
     cta: "DEPOSITAR €20",
     actionKey: "deposit",

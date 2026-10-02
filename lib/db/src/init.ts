@@ -399,6 +399,7 @@ export async function initDb(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_document_number   TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_submitted_at      TIMESTAMPTZ;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS first_deposit_granted TEXT DEFAULT 'none';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS casino_bonus_spins_remaining INTEGER NOT NULL DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS manual_review_queue (
         id                 SERIAL PRIMARY KEY,
