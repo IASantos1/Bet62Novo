@@ -28,6 +28,15 @@ function requireConfigured(): void {
 // request, so there's no need to persist it anywhere durable.
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 
+function safeJsonParse(text: string): Record<string, unknown> | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 function buildClientAssertion(): string {
   return jwt.sign(
     { iss: CONFIG.REVOLUT_JWT_ISSUER, sub: CONFIG.REVOLUT_CLIENT_ID, aud: "https://revolut.com" },
@@ -50,15 +59,20 @@ async function fetchAccessToken(): Promise<{ accessToken: string; expiresIn: num
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const data = (await resp.json().catch(() => ({}))) as {
+  const rawText = await resp.text();
+  const data = safeJsonParse(rawText) as {
     access_token?: string;
     expires_in?: number;
     error?: string;
     error_description?: string;
-  };
-  if (!resp.ok || !data.access_token) {
+  } | null;
+  if (!resp.ok || !data?.access_token) {
+    // data?.error(_description) is often empty on a 401/403 — log the raw
+    // body too, otherwise the only trace in Railway logs is a bare status
+    // code with no indication of which claim/credential Revolut rejected.
+    logger.error({ status: resp.status, rawBody: rawText }, "Revolut refresh_token exchange failed");
     throw Object.assign(
-      new Error(`Revolut auth falhou: ${data.error_description || data.error || resp.status}`),
+      new Error(`Revolut auth falhou: ${data?.error_description || data?.error || resp.status}`),
       { status: 502 },
     );
   }
@@ -94,16 +108,21 @@ export async function exchangeAuthorizationCode(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const data = (await resp.json().catch(() => ({}))) as {
+  const rawText = await resp.text();
+  const data = safeJsonParse(rawText) as {
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
     error?: string;
     error_description?: string;
-  };
-  if (!resp.ok || !data.access_token || !data.refresh_token) {
+  } | null;
+  if (!resp.ok || !data?.access_token || !data?.refresh_token) {
+    // See fetchAccessToken's comment above — Revolut's error/error_description
+    // fields are often empty on a 401, so the raw body is the only way to
+    // see which claim or credential was actually rejected.
+    logger.error({ status: resp.status, rawBody: rawText }, "Revolut authorization_code exchange failed");
     throw Object.assign(
-      new Error(`Troca de código Revolut falhou: ${data.error_description || data.error || resp.status}`),
+      new Error(`Troca de código Revolut falhou: ${data?.error_description || data?.error || resp.status}`),
       { status: 502 },
     );
   }
