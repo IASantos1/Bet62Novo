@@ -6,8 +6,10 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
   const onDoneRef = useRef(onDone);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setVisible(false), 700);
-    const t2 = setTimeout(() => onDoneRef.current(), 950);
+    // User-requested (2026-10-02): the splash used to barely flash on screen
+    // (700ms visible + 250ms fade) — now holds for ~7s before fading out.
+    const t1 = setTimeout(() => setVisible(false), 7000);
+    const t2 = setTimeout(() => onDoneRef.current(), 7300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
@@ -18,7 +20,7 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.22 }}
+          transition={{ duration: 0.3 }}
           className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center select-none overflow-hidden"
         >
           {/* Radial red glow — centered */}

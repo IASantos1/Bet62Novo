@@ -8930,10 +8930,15 @@ export default function Home({
         body: JSON.stringify({ email, response: assertion }),
       });
       if (verifyRes.ok) {
+        // The verify response already carries the full user object — apply
+        // it directly instead of firing a second GET /api/auth/session,
+        // so the page goes straight to the authenticated view with no
+        // second visible loading step.
+        const verifyData = await verifyRes.json();
         setAuthModalOpen(false);
         toast.success("Bem-vindo de volta!");
         setRememberedEmail(email);
-        await auth.refreshUser();
+        auth.completePasskeyLogin(verifyData.user);
       } else if (!silent) {
         toast.error("Verificação biométrica falhou.");
         setBiometricFailCount((count) => count + 1);

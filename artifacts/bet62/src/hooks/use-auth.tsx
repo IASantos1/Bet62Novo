@@ -26,6 +26,7 @@ type AuthContextType = {
   logout: () => Promise<void>;
   invalidateSession: (message?: string) => void;
   refreshUser: () => Promise<void>;
+  completePasskeyLogin: (user: User) => void;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -112,8 +113,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetchSession();
   };
 
+  // POST /api/auth/passkey/login/verify already returns the full user
+  // object on success — same shape login() uses directly — so a successful
+  // Face ID login can apply it immediately instead of firing a second,
+  // fully redundant GET /api/auth/session round-trip via refreshUser()
+  // (which was the visible "loads twice" after Face ID — Santos, 2026-10-02).
+  const completePasskeyLogin = (loggedInUser: User) => {
+    setUser(loggedInUser);
+    setHasPasskey(true);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, hasPasskey, login, register, logout, invalidateSession, refreshUser }}>
+    <AuthContext.Provider value={{ user, isLoading, hasPasskey, login, register, logout, invalidateSession, refreshUser, completePasskeyLogin }}>
       {children}
     </AuthContext.Provider>
   );
