@@ -7,9 +7,10 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     // User-requested (2026-10-02): the splash used to barely flash on screen
-    // (700ms visible + 250ms fade) — now holds for ~7s before fading out.
-    const t1 = setTimeout(() => setVisible(false), 7000);
-    const t2 = setTimeout(() => onDoneRef.current(), 7300);
+    // (700ms visible + 250ms fade) — 7s turned out too long, 5s is the
+    // confirmed sweet spot.
+    const t1 = setTimeout(() => setVisible(false), 5000);
+    const t2 = setTimeout(() => onDoneRef.current(), 5300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
