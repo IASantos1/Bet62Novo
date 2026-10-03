@@ -21574,7 +21574,7 @@ export default function Home({
                       </button>
                     </div>
                     <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
-                      {games.map((game) => renderGameTile(game, "w-[calc(32%-0.5rem)] sm:w-36 flex-shrink-0"))}
+                      {games.map((game) => renderGameTile(game, "w-[calc(44%-0.5rem)] sm:w-44 flex-shrink-0"))}
                     </div>
                   </div>
                 );
@@ -21742,7 +21742,7 @@ export default function Home({
                       ) : (
                         <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory scroll-smooth">
                           {casinoPopular.map((game) =>
-                            renderGameTile(game, "w-[calc(32%-0.5rem)] sm:w-36 flex-shrink-0"),
+                            renderGameTile(game, "w-[calc(44%-0.5rem)] sm:w-44 flex-shrink-0"),
                           )}
                         </div>
                       )}
