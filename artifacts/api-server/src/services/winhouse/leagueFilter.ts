@@ -78,17 +78,40 @@ export type LeagueFilterResult =
 // sports need their own confirmed allowed-leagues list later.
 const FOOTBALL_SPORT_ID = 1;
 
+// Real data confirmed this is needed (2026-10-04): "Argentina. Primeira
+// Divisão" and "Espanha. Segunda Divisão" both came back in
+// unmatchedLeagues despite being literal entries in ALLOWED_LEAGUES below
+// — a plain .toLowerCase() + .includes() wasn't enough. The accented
+// characters WinHouse sends don't compare equal to the ones in this
+// source file under plain string comparison (Unicode normalization form
+// mismatch — NFD vs NFC — and/or non-breaking spaces instead of regular
+// ones), even though they render identically. Routing both sides through
+// the same normalization before comparing fixes the whole class of this,
+// not just the two confirmed cases.
+function normalizeForMatch(s: string): string {
+  return s
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function filterWinHouseListGame(game: NormalizedListGame): LeagueFilterResult {
   if (game.sportId !== FOOTBALL_SPORT_ID) return { status: "excluded", reason: "sport" };
   if (isExcluded(game)) return { status: "excluded", reason: "excluded_keyword" };
   if (SUB_TIER_DISQUALIFIER.test(game.league)) return { status: "excluded", reason: "sub_tier" };
 
-  const leagueLower = game.league.toLowerCase();
-  const countryLower = game.country.toLowerCase();
+  const leagueLower = normalizeForMatch(game.league);
+  const countryLower = normalizeForMatch(game.country);
   for (const entry of ALLOWED_LEAGUES) {
-    const countryMatches = entry.countries.length === 0 || entry.countries.some((c) => countryLower.includes(c) || leagueLower.includes(c));
+    const countryMatches =
+      entry.countries.length === 0 ||
+      entry.countries.some((c) => {
+        const normalized = normalizeForMatch(c);
+        return countryLower.includes(normalized) || leagueLower.includes(normalized);
+      });
     if (!countryMatches) continue;
-    if (entry.leagueKeywords.some((k) => leagueLower.includes(k))) {
+    if (entry.leagueKeywords.some((k) => leagueLower.includes(normalizeForMatch(k)))) {
       return { status: "included", tier: entry.tier };
     }
   }
