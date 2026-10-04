@@ -20,15 +20,21 @@ export type WinHousePromotionGame = {
     X?: number;
     "2"?: number;
   };
+  bothTeamsScore: {
+    yes?: number;
+    no?: number;
+  };
 };
 
 // WinHouse's standard three-way "1x2" market (market_id "1001", confirmed
 // from a real response — market_option comes back as "1 "/"x "/"2 " with a
-// trailing space WinHouse always sends). This is the only market the
-// Telegram promotion post uses for now — everything else in the raw
-// response (handicaps, over/under, BTTS, ...) is ignored, per the
-// step-by-step build: prove the 1x2 case works before adding more markets.
+// trailing space WinHouse always sends).
 const ONE_X_TWO_MARKET_ID = "1001";
+
+// "Both Teams To Score" (market_id "1007", confirmed from a real response —
+// market_option comes back as "yes "/"no "). Football-only, per the
+// user-specified ticket format (2026-10-04): 1x2 + BTS for football.
+const BOTH_TEAMS_SCORE_MARKET_ID = "1007";
 
 export function parseWinHouseGame(raw: unknown, gameId: string): WinHousePromotionGame | null {
   if (!Array.isArray(raw)) return null;
@@ -36,14 +42,20 @@ export function parseWinHouseGame(raw: unknown, gameId: string): WinHousePromoti
   if (flat.length === 0) return null;
 
   const markets: WinHousePromotionGame["markets"] = {};
+  const bothTeamsScore: WinHousePromotionGame["bothTeamsScore"] = {};
   for (const o of flat) {
-    if (!o || o.market_id !== ONE_X_TWO_MARKET_ID) continue;
+    if (!o) continue;
     const odd = Number(o.odd);
     if (!Number.isFinite(odd)) continue;
-    const option = o.market_option.trim().toUpperCase();
-    if (option === "1") markets["1"] = odd;
-    else if (option === "X") markets.X = odd;
-    else if (option === "2") markets["2"] = odd;
+    const option = o.market_option.trim().toLowerCase();
+    if (o.market_id === ONE_X_TWO_MARKET_ID) {
+      if (option === "1") markets["1"] = odd;
+      else if (option === "x") markets.X = odd;
+      else if (option === "2") markets["2"] = odd;
+    } else if (o.market_id === BOTH_TEAMS_SCORE_MARKET_ID) {
+      if (option === "yes") bothTeamsScore.yes = odd;
+      else if (option === "no") bothTeamsScore.no = odd;
+    }
   }
   if (Object.keys(markets).length === 0) return null;
 
@@ -54,5 +66,6 @@ export function parseWinHouseGame(raw: unknown, gameId: string): WinHousePromoti
     away_team: first.away_team,
     date: first.game_date,
     markets,
+    bothTeamsScore,
   };
 }
