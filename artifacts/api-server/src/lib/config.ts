@@ -78,6 +78,15 @@ const AFFILIATE_DEFAULT_COMMISSION_RATE =
 const AFFILIATE_COOKIE_DAYS = Number(process.env["AFFILIATE_COOKIE_DAYS"]) || 30;
 const AFFILIATE_MINIMUM_PAYOUT = Number(process.env["AFFILIATE_MINIMUM_PAYOUT"]) || 20;
 
+// Telegram channel publishing (lib/telegram/client.ts, routes/adminTelegram.ts).
+// TELEGRAM_BOT_TOKEN is the bot created via @BotFather; the bot must be added
+// to TELEGRAM_CHANNEL_ID (e.g. "@bet62oficial" or a numeric "-100..." id for
+// a private channel) as an admin with permission to post messages. Either
+// unset disables publishing — the admin endpoint then returns 503 instead of
+// silently dropping the post.
+const TELEGRAM_BOT_TOKEN = process.env["TELEGRAM_BOT_TOKEN"] ?? "";
+const TELEGRAM_CHANNEL_ID = process.env["TELEGRAM_CHANNEL_ID"] ?? "";
+
 export const CONFIG = {
   BIGBANG_API_KEY,
   WINHOUSE_WALLET_API_KEY,
@@ -99,4 +108,6 @@ export const CONFIG = {
   AFFILIATE_DEFAULT_COMMISSION_RATE,
   AFFILIATE_COOKIE_DAYS,
   AFFILIATE_MINIMUM_PAYOUT,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHANNEL_ID,
 } as const;

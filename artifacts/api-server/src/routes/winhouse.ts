@@ -8,6 +8,7 @@ import { applyBalanceDelta } from "../lib/ledger.js";
 import { logger } from "../lib/logger.js";
 import { timingSafeEqualString } from "../lib/security.js";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { getWinHouseGame } from "../services/winhouse/prematch.js";
 
 const router: IRouter = Router();
 const DEFAULT_WINHOUSE_CURRENCY = "EUR";
@@ -404,5 +405,26 @@ router.get(
     res.json({ launch });
   },
 );
+
+// Diagnostic endpoint for the Telegram live-odds feature (step 1): confirms
+// the backend can query WinHouse's own prematch-game ajax endpoint reliably
+// before anything is built on top of it (filtering, formatting, posting).
+// No auth — this mirrors exactly what the sportsbook iframe's own
+// client-side JS already calls unauthenticated for any visitor.
+router.get("/game/:gameId", async (req: Request, res: Response) => {
+  const gameId = req.params["gameId"] ?? "";
+  if (!/^\d+$/.test(gameId)) {
+    res.status(400).json({ error: "gameId inválido" });
+    return;
+  }
+
+  try {
+    const data = await getWinHouseGame(gameId);
+    res.json({ success: true, gameId, data });
+  } catch (err) {
+    logger.error({ err, gameId }, "GET /api/winhouse/game/:gameId error");
+    res.status(502).json({ success: false, error: "Não foi possível consultar a WinHouse" });
+  }
+});
 
 export default router;

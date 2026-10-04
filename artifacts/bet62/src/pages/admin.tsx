@@ -61,6 +61,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 type AdminStats = {
   users: { total: number };
@@ -240,6 +241,21 @@ type AdminCasinoBanner = {
   games: AdminCasinoBannerGame[];
   createdAt: string;
   updatedAt: string;
+};
+
+type AdminTelegramPost = {
+  id: number;
+  type: "custom" | "promotion" | "bet_ticket";
+  title: string;
+  body: string;
+  ctaText: string | null;
+  ctaUrl: string | null;
+  status: "sent" | "failed";
+  telegramMessageId: string | null;
+  error: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  sentAt: string | null;
 };
 
 type UserDetail = {
@@ -795,6 +811,7 @@ type TabId =
   | "settlement-logs"
   | "casino"
   | "affiliates"
+  | "telegram"
   | "settings";
 
 const ADMIN_VERSION = "v2.1";
@@ -1488,6 +1505,63 @@ export default function AdminPage() {
       refetchAffiliates();
     } catch {
       toast.error("Erro ao marcar pagamento");
+    }
+  };
+
+  const telegramPostsQuery = useQuery({
+    queryKey: ["admin", "telegram-posts"],
+    queryFn: async (): Promise<{ posts: AdminTelegramPost[]; configured: boolean }> => {
+      const res = await fetch("/api/admin/telegram/posts", { headers: authHeader });
+      if (!res.ok) throw new Error("Failed to load telegram posts");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "telegram",
+  });
+  const telegramPosts = telegramPostsQuery.data?.posts ?? [];
+  const telegramConfigured = telegramPostsQuery.data?.configured ?? false;
+  const refetchTelegramPosts = telegramPostsQuery.refetch;
+
+  const [telegramForm, setTelegramForm] = useState<{
+    type: "custom" | "promotion" | "bet_ticket";
+    title: string;
+    body: string;
+    ctaText: string;
+    ctaUrl: string;
+  }>({ type: "custom", title: "", body: "", ctaText: "", ctaUrl: "" });
+  const [publishingTelegram, setPublishingTelegram] = useState(false);
+
+  const publishTelegramPost = async () => {
+    if (!telegramForm.title.trim() || !telegramForm.body.trim()) {
+      toast.error("Título e mensagem são obrigatórios");
+      return;
+    }
+    if (telegramForm.ctaText.trim() && !telegramForm.ctaUrl.trim()) {
+      toast.error("Defina o link do botão ou remova o texto do botão");
+      return;
+    }
+    setPublishingTelegram(true);
+    try {
+      const res = await fetch("/api/admin/telegram/posts", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: telegramForm.type,
+          title: telegramForm.title.trim(),
+          body: telegramForm.body.trim(),
+          ctaText: telegramForm.ctaText.trim() || undefined,
+          ctaUrl: telegramForm.ctaUrl.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao publicar");
+      toast.success("Publicado no Telegram");
+      setTelegramForm({ type: "custom", title: "", body: "", ctaText: "", ctaUrl: "" });
+      refetchTelegramPosts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao publicar no Telegram");
+      refetchTelegramPosts();
+    } finally {
+      setPublishingTelegram(false);
     }
   };
 
@@ -2505,6 +2579,8 @@ export default function AdminPage() {
     } else if (activeTab === "affiliates") {
       refetchAffiliates();
       refetchAffiliatePayouts();
+    } else if (activeTab === "telegram") {
+      refetchTelegramPosts();
     } else if (activeTab === "settings") {
       fetchSettings();
       fetchAuditLogs();
@@ -2643,6 +2719,12 @@ export default function AdminPage() {
       section: "pro",
     },
     {
+      id: "telegram",
+      icon: <Send size={18} />,
+      label: "Telegram",
+      section: "pro",
+    },
+    {
       id: "settings",
       icon: <Settings size={18} />,
       label: "Configurações",
@@ -2663,6 +2745,7 @@ export default function AdminPage() {
     "settlement-logs": "Logs de Liquidação",
     casino: "Cassino",
     affiliates: "Afiliados",
+    telegram: "Telegram",
     settings: "Configurações",
   };
 
@@ -6317,6 +6400,123 @@ export default function AdminPage() {
                               Marcar como Pago
                             </button>
                           )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* ── TELEGRAM ── */}
+            {activeTab === "telegram" && (
+              <motion.div
+                key="telegram"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-6"
+              >
+                {!telegramConfigured && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-sm text-amber-300">
+                    Telegram não está configurado (TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL_ID em falta). A publicação
+                    ficará desativada até isso ser definido no servidor.
+                  </div>
+                )}
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-white mb-3">Publicar no Canal</h3>
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      {([
+                        { id: "custom", label: "Mensagem" },
+                        { id: "promotion", label: "Promoção" },
+                        { id: "bet_ticket", label: "Bilhete de Aposta" },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setTelegramForm((f) => ({ ...f, type: opt.id }))}
+                          className={`text-xs px-3 py-1.5 rounded-full font-medium border transition-colors ${
+                            telegramForm.type === opt.id
+                              ? "bg-red-600/20 text-red-400 border-red-500/30"
+                              : "bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-white"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <Input
+                      placeholder="Título"
+                      value={telegramForm.title}
+                      onChange={(e) => setTelegramForm((f) => ({ ...f, title: e.target.value }))}
+                      className="bg-zinc-950 border-zinc-800 text-white"
+                    />
+                    <Textarea
+                      placeholder="Mensagem"
+                      value={telegramForm.body}
+                      onChange={(e) => setTelegramForm((f) => ({ ...f, body: e.target.value }))}
+                      rows={5}
+                      className="bg-zinc-950 border-zinc-800 text-white"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        placeholder="Texto do botão (opcional, ex: Apostar Agora)"
+                        value={telegramForm.ctaText}
+                        onChange={(e) => setTelegramForm((f) => ({ ...f, ctaText: e.target.value }))}
+                        className="bg-zinc-950 border-zinc-800 text-white"
+                      />
+                      <Input
+                        placeholder="Link do botão (https://...)"
+                        value={telegramForm.ctaUrl}
+                        onChange={(e) => setTelegramForm((f) => ({ ...f, ctaUrl: e.target.value }))}
+                        className="bg-zinc-950 border-zinc-800 text-white"
+                      />
+                    </div>
+                    <Button
+                      onClick={publishTelegramPost}
+                      disabled={publishingTelegram || !telegramConfigured}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                    >
+                      {publishingTelegram ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                      <span className="ml-2">Publicar</span>
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-zinc-800 text-sm font-bold text-white">
+                    Histórico ({telegramPosts.length})
+                  </div>
+                  {telegramPostsQuery.isLoading ? (
+                    <div className="flex items-center justify-center py-16 text-zinc-500">
+                      <Loader2 className="animate-spin" size={24} />
+                    </div>
+                  ) : telegramPosts.length === 0 ? (
+                    <div className="px-5 py-16 text-center text-zinc-600 text-sm">Nenhuma publicação ainda.</div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800/60">
+                      {telegramPosts.map((p) => (
+                        <div key={p.id} className="px-4 py-3 flex items-start gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-white font-medium truncate">{p.title}</div>
+                            <div className="text-xs text-zinc-500 truncate">{p.body}</div>
+                            <div className="text-[11px] text-zinc-600 mt-1">
+                              {new Date(p.createdAt).toLocaleString("pt-PT")}
+                              {p.createdBy ? ` · ${p.createdBy}` : ""}
+                            </div>
+                            {p.status === "failed" && p.error && (
+                              <div className="text-xs text-red-400 mt-1">{p.error}</div>
+                            )}
+                          </div>
+                          <span
+                            className={`shrink-0 text-xs px-2.5 py-1 rounded-full font-medium ${
+                              p.status === "sent"
+                                ? "bg-green-600/20 text-green-400 border border-green-500/30"
+                                : "bg-red-600/20 text-red-400 border border-red-500/30"
+                            }`}
+                          >
+                            {p.status === "sent" ? "Enviado" : "Falhou"}
+                          </span>
                         </div>
                       ))}
                     </div>
