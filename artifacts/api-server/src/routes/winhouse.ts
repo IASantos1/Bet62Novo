@@ -9,6 +9,9 @@ import { logger } from "../lib/logger.js";
 import { timingSafeEqualString } from "../lib/security.js";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { getWinHouseGame } from "../services/winhouse/prematch.js";
+import { getWinHouse24hGames } from "../services/winhouse/list.js";
+import { normalizeListGame } from "../services/winhouse/listGame.js";
+import { filterWinHouseListGame } from "../services/winhouse/leagueFilter.js";
 import { parseWinHouseGame } from "../services/winhouse/parser.js";
 import { formatWinHouseFootballTicket } from "../services/winhouse/telegramFormat.js";
 
@@ -452,6 +455,58 @@ router.get("/promotion/:gameId", async (req: Request, res: Response) => {
     res.json({ ...parsed, telegramText: formatWinHouseFootballTicket(parsed) });
   } catch (err) {
     logger.error({ err, gameId }, "GET /api/winhouse/promotion/:gameId error");
+    res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
+  }
+});
+
+// Diagnostic endpoint for the league filter (step before the publish
+// scheduler): fetches the next-24h list, normalizes each entry (field
+// names are inconsistent — see listGame.ts), and reports which games
+// passed the grande/média football filter and why the rest didn't — so
+// the curated league list can be checked and tuned against real fixtures
+// before anything gets wired to actually post. No auth, same reasoning as
+// the other WinHouse diagnostic routes above.
+router.get("/today", async (_req: Request, res: Response) => {
+  try {
+    const raw = await getWinHouse24hGames();
+    if (!Array.isArray(raw)) {
+      res.status(502).json({ error: "Resposta inesperada da WinHouse" });
+      return;
+    }
+
+    const included: Array<{
+      gameId: string;
+      homeTeam: string;
+      awayTeam: string;
+      league: string;
+      country: string;
+      date: string;
+      tier: string;
+    }> = [];
+    const excludedCounts: Record<string, number> = {};
+
+    for (const entry of raw) {
+      const game = normalizeListGame(entry);
+      if (!game) continue;
+      const result = filterWinHouseListGame(game);
+      if (result.status === "included") {
+        included.push({
+          gameId: game.gameId,
+          homeTeam: game.homeTeam,
+          awayTeam: game.awayTeam,
+          league: game.league,
+          country: game.country,
+          date: game.gameDate,
+          tier: result.tier,
+        });
+      } else {
+        excludedCounts[result.reason] = (excludedCounts[result.reason] ?? 0) + 1;
+      }
+    }
+
+    res.json({ totalGames: raw.length, includedCount: included.length, included, excludedCounts });
+  } catch (err) {
+    logger.error({ err }, "GET /api/winhouse/today error");
     res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
   }
 });
