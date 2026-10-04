@@ -814,6 +814,23 @@ export async function initDb(): Promise<void> {
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 
       CREATE INDEX IF NOT EXISTS payments_affiliate_id_idx ON payments (affiliate_id);
+
+      CREATE TABLE IF NOT EXISTS telegram_posts (
+        id                   SERIAL PRIMARY KEY,
+        type                 TEXT NOT NULL,
+        title                TEXT NOT NULL,
+        body                 TEXT NOT NULL,
+        cta_text             TEXT,
+        cta_url              TEXT,
+        status               TEXT NOT NULL,
+        telegram_message_id  TEXT,
+        error                TEXT,
+        created_by           TEXT,
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        sent_at              TIMESTAMPTZ
+      );
+
+      CREATE INDEX IF NOT EXISTS telegram_posts_created_at_idx ON telegram_posts (created_at DESC);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

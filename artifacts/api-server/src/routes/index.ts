@@ -14,6 +14,7 @@ import casinoRouter from "./casino.js";
 import winhouseRouter from "./winhouse.js";
 import affiliateRouter, { adminAffiliatesRouter } from "./affiliates.js";
 import revolutRouter from "./revolut.js";
+import adminTelegramRouter from "./adminTelegram.js";
 
 const router: IRouter = Router();
 
@@ -33,5 +34,6 @@ router.use("/winhouse", winhouseRouter);
 router.use("/affiliate", affiliateRouter);
 router.use("/admin", adminAffiliatesRouter);
 router.use("/revolut", revolutRouter);
+router.use("/admin", adminTelegramRouter);
 
 export default router;
