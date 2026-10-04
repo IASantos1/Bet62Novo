@@ -484,6 +484,11 @@ router.get("/today", async (_req: Request, res: Response) => {
       tier: string;
     }> = [];
     const excludedCounts: Record<string, number> = {};
+    // Distinct (country, league) pairs behind "not_in_allowed_list" — the
+    // one bucket that needs eyeballing to tell "no big/medium fixture in
+    // this window" apart from "our keyword didn't match the real league
+    // name". Counted, not every row, to keep the response small.
+    const unmatchedLeagues: Record<string, number> = {};
 
     for (const entry of raw) {
       const game = normalizeListGame(entry);
@@ -501,10 +506,14 @@ router.get("/today", async (_req: Request, res: Response) => {
         });
       } else {
         excludedCounts[result.reason] = (excludedCounts[result.reason] ?? 0) + 1;
+        if (result.reason === "not_in_allowed_list") {
+          const key = `${game.country} | ${game.league}`;
+          unmatchedLeagues[key] = (unmatchedLeagues[key] ?? 0) + 1;
+        }
       }
     }
 
-    res.json({ totalGames: raw.length, includedCount: included.length, included, excludedCounts });
+    res.json({ totalGames: raw.length, includedCount: included.length, included, excludedCounts, unmatchedLeagues });
   } catch (err) {
     logger.error({ err }, "GET /api/winhouse/today error");
     res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
