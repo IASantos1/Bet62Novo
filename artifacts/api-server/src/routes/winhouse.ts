@@ -9,6 +9,7 @@ import { logger } from "../lib/logger.js";
 import { timingSafeEqualString } from "../lib/security.js";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { getWinHouseGame } from "../services/winhouse/prematch.js";
+import { parseWinHouseGame } from "../services/winhouse/parser.js";
 
 const router: IRouter = Router();
 const DEFAULT_WINHOUSE_CURRENCY = "EUR";
@@ -424,6 +425,31 @@ router.get("/game/:gameId", async (req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err, gameId }, "GET /api/winhouse/game/:gameId error");
     res.status(502).json({ success: false, error: "Não foi possível consultar a WinHouse" });
+  }
+});
+
+// Step 2 of the Telegram live-odds feature: the same query as /game/:gameId,
+// reduced to just the 1x2 market in the simple shape the Telegram post
+// formatter (step 3, not built yet) will consume — no auth, same reasoning
+// as /game/:gameId above.
+router.get("/promotion/:gameId", async (req: Request, res: Response) => {
+  const gameId = req.params["gameId"] ?? "";
+  if (!/^\d+$/.test(gameId)) {
+    res.status(400).json({ error: "gameId inválido" });
+    return;
+  }
+
+  try {
+    const raw = await getWinHouseGame(gameId);
+    const parsed = parseWinHouseGame(raw, gameId);
+    if (!parsed) {
+      res.status(404).json({ error: "Mercado 1X2 não encontrado para este jogo" });
+      return;
+    }
+    res.json(parsed);
+  } catch (err) {
+    logger.error({ err, gameId }, "GET /api/winhouse/promotion/:gameId error");
+    res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
   }
 });
 
