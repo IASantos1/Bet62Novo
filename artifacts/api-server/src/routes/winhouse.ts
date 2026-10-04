@@ -10,6 +10,7 @@ import { timingSafeEqualString } from "../lib/security.js";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { getWinHouseGame } from "../services/winhouse/prematch.js";
 import { parseWinHouseGame } from "../services/winhouse/parser.js";
+import { formatWinHouseFootballTicket } from "../services/winhouse/telegramFormat.js";
 
 const router: IRouter = Router();
 const DEFAULT_WINHOUSE_CURRENCY = "EUR";
@@ -446,7 +447,9 @@ router.get("/promotion/:gameId", async (req: Request, res: Response) => {
       res.status(404).json({ error: "Mercado 1X2 não encontrado para este jogo" });
       return;
     }
-    res.json(parsed);
+    // Preview only — not sent to Telegram yet. Lets us confirm the ticket
+    // text looks right before wiring the actual publish step.
+    res.json({ ...parsed, telegramText: formatWinHouseFootballTicket(parsed) });
   } catch (err) {
     logger.error({ err, gameId }, "GET /api/winhouse/promotion/:gameId error");
     res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
