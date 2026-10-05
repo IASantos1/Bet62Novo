@@ -15,6 +15,7 @@ import { filterWinHouseListGame } from "../services/winhouse/leagueFilter.js";
 import { parseWinHouseGame } from "../services/winhouse/parser.js";
 import { formatWinHouseFootballTicket } from "../services/winhouse/telegramFormat.js";
 import { isTelegramConfigured } from "../lib/telegram/client.js";
+import { getLastWinHousePromotionTick } from "../lib/winhousePromotionCron.js";
 // Relative import — same tsc alias-resolution convention already used for
 // telegramPostsTable/affiliatesTable elsewhere in routes/*.ts.
 import { winhousePromotionPostsTable } from "../../../../lib/db/src/schema/winhousePromotionPosts.js";
@@ -560,8 +561,10 @@ router.get("/promotion-posts", async (_req: Request, res: Response) => {
       .limit(50);
     // Surfaced so an empty `posts` list can be told apart from "Telegram
     // isn't configured in this environment" without guessing — same field
-    // name GET /admin/telegram/posts already exposes.
-    res.json({ posts, configured: isTelegramConfigured() });
+    // name GET /admin/telegram/posts already exposes. lastTick additionally
+    // says *why* the most recent cron tick didn't post (too soon, no
+    // candidates, a thrown error, ...) instead of leaving that to guesswork.
+    res.json({ posts, configured: isTelegramConfigured(), lastTick: getLastWinHousePromotionTick() });
   } catch (err) {
     logger.error({ err }, "GET /api/winhouse/promotion-posts error");
     res.status(500).json({ error: "Erro ao listar publicações" });
