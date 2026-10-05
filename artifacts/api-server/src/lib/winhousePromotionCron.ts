@@ -29,13 +29,21 @@ export function getLastWinHousePromotionTick(): LastTickSnapshot | null {
   return lastTick;
 }
 
-// Whether startWinHousePromotionCron() actually scheduled the loop (vs.
-// returning early because WINHOUSE_PROMO_CRON_ENABLED=false), and when —
-// so "lastTick is still null" can be told apart from "disabled" and from
-// "started N seconds ago, first tick just hasn't fired yet" instead of
+// Captured at module load, unconditionally — so if `enabled` ever reads
+// false, this says exactly what Railway (or wherever) actually has set for
+// WINHOUSE_PROMO_CRON_ENABLED (including a stray value that isn't literally
+// "false" but also isn't unset), rather than that being a second guess on
+// top of the first.
+const rawEnabledEnv: string | null = process.env.WINHOUSE_PROMO_CRON_ENABLED ?? null;
+
+// Whether startWinHousePromotionCron() actually scheduled the loop, and
+// when — so "lastTick is still null" can be told apart from "disabled" and
+// from "started N seconds ago, first tick just hasn't fired yet" instead of
 // leaving that to guesswork too.
-type CronStatus = { enabled: true; startedAt: string } | { enabled: false };
-let cronStatus: CronStatus = { enabled: false };
+type CronStatus =
+  | { enabled: true; startedAt: string; rawEnabledEnv: string | null }
+  | { enabled: false; rawEnabledEnv: string | null };
+let cronStatus: CronStatus = { enabled: false, rawEnabledEnv };
 
 export function getWinHousePromotionCronStatus(): CronStatus {
   return cronStatus;
@@ -75,20 +83,18 @@ function parseIntervalMs(envName: string, fallbackMs: number, minMs: number): nu
 }
 
 export function startWinHousePromotionCron(): void {
-  const explicitlyDisabled =
-    process.env.WINHOUSE_PROMO_CRON_ENABLED !== undefined &&
-    String(process.env.WINHOUSE_PROMO_CRON_ENABLED).toLowerCase() === "false";
+  const explicitlyDisabled = rawEnabledEnv !== null && rawEnabledEnv.trim().toLowerCase() === "false";
   if (explicitlyDisabled) {
-    logger.info("[winhousePromoCron] disabled via WINHOUSE_PROMO_CRON_ENABLED=false");
+    logger.info({ rawEnabledEnv }, "[winhousePromoCron] disabled via WINHOUSE_PROMO_CRON_ENABLED=false");
     return;
   }
 
   const intervalMs = parseIntervalMs("WINHOUSE_PROMO_CRON_INTERVAL_MS", 2 * 60 * 1000, 60 * 1000);
-  cronStatus = { enabled: true, startedAt: new Date().toISOString() };
+  cronStatus = { enabled: true, startedAt: new Date().toISOString(), rawEnabledEnv };
   setTimeout(() => {
     void tick().finally(() => {
       setInterval(() => void tick(), intervalMs);
     });
   }, 15_000);
-  logger.info({ intervalMs }, "[winhousePromoCron] scheduled");
+  logger.info({ intervalMs, rawEnabledEnv }, "[winhousePromoCron] scheduled");
 }
