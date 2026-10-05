@@ -118,7 +118,7 @@ export async function runWinHousePromotionTick(): Promise<WinHousePromotionTickR
     return { action: "posted", gameId: next.game.gameId, status: "failed" };
   }
 
-  const ticket = formatWinHouseFootballTicket(parsed, buildCtaUrl(next.game.gameId));
+  const ticket = formatWinHouseFootballTicket(parsed, buildCtaUrl(next.game.gameId), next.game.league);
   const result = await sendTelegramMessage({
     html: ticket.html,
     inlineKeyboard: ticket.keyboard,
