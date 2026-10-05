@@ -29,6 +29,18 @@ export function getLastWinHousePromotionTick(): LastTickSnapshot | null {
   return lastTick;
 }
 
+// Whether startWinHousePromotionCron() actually scheduled the loop (vs.
+// returning early because WINHOUSE_PROMO_CRON_ENABLED=false), and when —
+// so "lastTick is still null" can be told apart from "disabled" and from
+// "started N seconds ago, first tick just hasn't fired yet" instead of
+// leaving that to guesswork too.
+type CronStatus = { enabled: true; startedAt: string } | { enabled: false };
+let cronStatus: CronStatus = { enabled: false };
+
+export function getWinHousePromotionCronStatus(): CronStatus {
+  return cronStatus;
+}
+
 async function tick(): Promise<void> {
   if (running) {
     logger.debug("[winhousePromoCron] skipping: previous tick still in progress");
@@ -72,6 +84,7 @@ export function startWinHousePromotionCron(): void {
   }
 
   const intervalMs = parseIntervalMs("WINHOUSE_PROMO_CRON_INTERVAL_MS", 2 * 60 * 1000, 60 * 1000);
+  cronStatus = { enabled: true, startedAt: new Date().toISOString() };
   setTimeout(() => {
     void tick().finally(() => {
       setInterval(() => void tick(), intervalMs);
