@@ -847,9 +847,26 @@ export async function initDb(): Promise<void> {
         created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      CREATE UNIQUE INDEX IF NOT EXISTS winhouse_promotion_posts_game_id_sent_idx
-        ON winhouse_promotion_posts (game_id) WHERE status = 'sent';
       CREATE INDEX IF NOT EXISTS winhouse_promotion_posts_created_at_idx ON winhouse_promotion_posts (created_at DESC);
+
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS score_home     INTEGER;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS score_away     INTEGER;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS current_minute TEXT;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS last_signature TEXT;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPTZ;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS live_misses    INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS finished_at    TIMESTAMPTZ;
+      ALTER TABLE winhouse_promotion_posts ADD COLUMN IF NOT EXISTS delete_at      TIMESTAMPTZ;
+
+      -- Was "WHERE status = 'sent'" only — the PREMATCH -> LIVE -> FINISHED ->
+      -- DELETE lifecycle (2026-10-05) now updates this same row's status in
+      -- place, so the old partial index stopped covering the row the moment
+      -- it moved past "sent", which would have let the promo scheduler
+      -- re-post the same fixture. Replaced with a index that guards every
+      -- status except "failed" (a failed send attempt never blocks a retry).
+      DROP INDEX IF EXISTS winhouse_promotion_posts_game_id_sent_idx;
+      CREATE UNIQUE INDEX IF NOT EXISTS winhouse_promotion_posts_game_id_active_idx
+        ON winhouse_promotion_posts (game_id) WHERE status <> 'failed';
     `);
 
     console.info("[db/init] Schema initialisation complete.");

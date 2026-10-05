@@ -4,6 +4,7 @@ import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startAiAgentsCron } from "./lib/aiAgentsCron.js";
 import { startWinHousePromotionCron } from "./lib/winhousePromotionCron.js";
+import { startWinHouseLiveMonitorCron } from "./lib/winhouseLiveMonitorCron.js";
 import { ensureBigBangCatalogFresh } from "./services/bigbang/sync.js";
 
 // Keep the API process alive through unexpected async failures. The app has
@@ -43,4 +44,11 @@ server.listen(port, () => {
   // src/api/index.ts — the near-duplicate entrypoint this call was
   // originally, and mistakenly, added to in #569).
   startWinHousePromotionCron();
+
+  // PREMATCH -> LIVE -> FINISHED -> DELETE lifecycle for the fixtures the
+  // promotion cron above already posted — edits/deletes those same
+  // messages in place, never sends a new one. Same "safe to unconditionally
+  // call" reasoning (no-ops per tick when Telegram isn't configured, or
+  // there's nothing currently posted to watch).
+  startWinHouseLiveMonitorCron();
 });

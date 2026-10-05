@@ -1,5 +1,5 @@
 import { db } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, ne } from "drizzle-orm";
 // Relative import — same tsc alias-resolution convention already used for
 // telegramPostsTable/affiliatesTable elsewhere in routes/*.ts.
 import { winhousePromotionPostsTable } from "../../../../../lib/db/src/schema/winhousePromotionPosts.js";
@@ -79,10 +79,16 @@ export async function runWinHousePromotionTick(): Promise<WinHousePromotionTickR
     return { action: "skipped", reason: "too_soon" };
   }
 
+  // Any row that isn't "failed" means this fixture already has (or had) a
+  // live message in the channel — including "live"/"finished"/"deleted"
+  // rows, now that the same row's status moves through the whole
+  // PREMATCH -> LIVE -> FINISHED -> DELETE lifecycle instead of a fresh
+  // row being inserted per stage. Only "failed" is excluded, so a failed
+  // send attempt can still be retried on a later tick.
   const alreadySent = await db
     .select({ gameId: winhousePromotionPostsTable.gameId })
     .from(winhousePromotionPostsTable)
-    .where(eq(winhousePromotionPostsTable.status, "sent"));
+    .where(ne(winhousePromotionPostsTable.status, "failed"));
   const sentGameIds = new Set(alreadySent.map((row) => row.gameId));
 
   const raw = await getWinHouse24hGames();
