@@ -16,14 +16,17 @@ export type TelegramSendResult =
   | { status: "sent"; messageId: string }
   | { status: "failed"; error: string };
 
-// Minimal Bot API wrapper — sendMessage with an optional single CTA button
-// ("APOSTAR AGORA" linking back to the app). No retry/queue here: a failed
-// send surfaces immediately to the admin who clicked publish, same as any
-// other admin-panel action, rather than silently retrying later.
+// Minimal Bot API wrapper — sendMessage with either a single CTA button
+// ("APOSTAR AGORA" linking back to the app) or a full multi-row inline
+// keyboard (inlineKeyboard takes priority when both are passed). No
+// retry/queue here: a failed send surfaces immediately to the admin who
+// clicked publish, same as any other admin-panel action, rather than
+// silently retrying later.
 export async function sendTelegramMessage(args: {
   html: string;
   ctaText?: string;
   ctaUrl?: string;
+  inlineKeyboard?: Array<Array<{ text: string; url: string }>>;
 }): Promise<TelegramSendResult> {
   if (!isTelegramConfigured()) {
     return { status: "failed", error: "Telegram não está configurado" };
@@ -35,7 +38,9 @@ export async function sendTelegramMessage(args: {
     parse_mode: "HTML",
     disable_web_page_preview: true,
   };
-  if (args.ctaText && args.ctaUrl) {
+  if (args.inlineKeyboard && args.inlineKeyboard.length > 0) {
+    body["reply_markup"] = { inline_keyboard: args.inlineKeyboard };
+  } else if (args.ctaText && args.ctaUrl) {
     body["reply_markup"] = {
       inline_keyboard: [[{ text: args.ctaText, url: args.ctaUrl }]],
     };

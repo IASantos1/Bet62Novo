@@ -23,11 +23,11 @@ function getMinGapMs(): number {
   return Number.isFinite(n) && n >= 60_000 ? n : 10 * 60 * 1000;
 }
 
-function buildCtaUrl(): string | undefined {
-  const raw = process.env["PUBLIC_SITE_URL"]?.trim();
-  if (!raw) return undefined;
-  return `${raw.replace(/\/+$/, "")}/sportsbook`;
-}
+// User-confirmed (2026-10-05): fixed to the real production domain instead
+// of deriving from PUBLIC_SITE_URL — that env var pointed somewhere wrong
+// in production (an unrelated/misconfigured value), sending bettors to the
+// wrong place from every button on every post.
+const BET62_SPORTSBOOK_URL = "https://bet62.plus/sportsbook";
 
 export type WinHousePromotionTickResult =
   | { action: "skipped"; reason: "telegram_not_configured" | "too_soon" | "no_candidates" | "bad_response" }
@@ -114,11 +114,10 @@ export async function runWinHousePromotionTick(): Promise<WinHousePromotionTickR
     return { action: "posted", gameId: next.game.gameId, status: "failed" };
   }
 
-  const html = formatWinHouseFootballTicket(parsed);
+  const ticket = formatWinHouseFootballTicket(parsed, BET62_SPORTSBOOK_URL);
   const result = await sendTelegramMessage({
-    html,
-    ctaText: "APOSTAR AGORA",
-    ctaUrl: buildCtaUrl(),
+    html: ticket.html,
+    inlineKeyboard: ticket.keyboard,
   });
 
   await recordAttempt({
