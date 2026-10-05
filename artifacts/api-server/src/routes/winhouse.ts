@@ -569,6 +569,10 @@ router.get("/promotion-posts", async (_req: Request, res: Response) => {
       configured: isTelegramConfigured(),
       cron: getWinHousePromotionCronStatus(),
       lastTick: getLastWinHousePromotionTick(),
+      // Rules out "this request hit a stale process that predates the
+      // cron/env fixes" without guessing — a low uptime means whatever
+      // `cron`/`lastTick` show above is genuinely from the current code.
+      processUptimeSeconds: Math.round(process.uptime()),
     });
   } catch (err) {
     logger.error({ err }, "GET /api/winhouse/promotion-posts error");
