@@ -489,6 +489,13 @@ router.get("/today", async (_req: Request, res: Response) => {
     // this window" apart from "our keyword didn't match the real league
     // name". Counted, not every row, to keep the response small.
     const unmatchedLeagues: Record<string, number> = {};
+    // Numeric char codes survive any rendering/translation of this JSON in
+    // a browser (a translator can reword or re-encode visible text, but it
+    // can't change a number) — captured once, for the first unmatched
+    // league whose country looks like "Argentina" (plain ASCII match, no
+    // accents needed to find it), to see exactly what bytes WinHouse is
+    // really sending versus what this file's own string literals contain.
+    let debugLeagueCharCodes: { country: string; league: string; leagueCharCodes: number[] } | null = null;
 
     for (const entry of raw) {
       const game = normalizeListGame(entry);
@@ -509,11 +516,25 @@ router.get("/today", async (_req: Request, res: Response) => {
         if (result.reason === "not_in_allowed_list") {
           const key = `${game.country} | ${game.league}`;
           unmatchedLeagues[key] = (unmatchedLeagues[key] ?? 0) + 1;
+          if (!debugLeagueCharCodes && /argentin/i.test(game.country)) {
+            debugLeagueCharCodes = {
+              country: game.country,
+              league: game.league,
+              leagueCharCodes: Array.from(game.league).map((ch) => ch.codePointAt(0) ?? 0),
+            };
+          }
         }
       }
     }
 
-    res.json({ totalGames: raw.length, includedCount: included.length, included, excludedCounts, unmatchedLeagues });
+    res.json({
+      totalGames: raw.length,
+      includedCount: included.length,
+      included,
+      excludedCounts,
+      unmatchedLeagues,
+      debugLeagueCharCodes,
+    });
   } catch (err) {
     logger.error({ err }, "GET /api/winhouse/today error");
     res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
