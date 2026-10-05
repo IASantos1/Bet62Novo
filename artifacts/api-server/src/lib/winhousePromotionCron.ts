@@ -10,9 +10,24 @@
 //     least 10 minutes between posts) is enforced inside the scheduler
 //     itself (WINHOUSE_PROMO_MIN_GAP_MS), not by this interval.
 import { logger } from "./logger.js";
-import { runWinHousePromotionTick } from "../services/winhouse/promotionScheduler.js";
+import { runWinHousePromotionTick, type WinHousePromotionTickResult } from "../services/winhouse/promotionScheduler.js";
 
 let running = false;
+
+// Last tick's outcome, kept in memory so GET /api/winhouse/promotion-posts
+// can show *why* nothing has posted yet (too soon, no candidates, a thrown
+// error, ...) instead of that being a guess — this is a single-instance
+// service, so in-memory is enough; it resets on redeploy like any other
+// in-memory state.
+type LastTickSnapshot =
+  | { at: string; outcome: WinHousePromotionTickResult }
+  | { at: string; outcome: "error"; error: string };
+
+let lastTick: LastTickSnapshot | null = null;
+
+export function getLastWinHousePromotionTick(): LastTickSnapshot | null {
+  return lastTick;
+}
 
 async function tick(): Promise<void> {
   if (running) {
@@ -22,12 +37,14 @@ async function tick(): Promise<void> {
   running = true;
   try {
     const result = await runWinHousePromotionTick();
+    lastTick = { at: new Date().toISOString(), outcome: result };
     if (result.action === "posted") {
       logger.info({ gameId: result.gameId, status: result.status }, "[winhousePromoCron] tick posted");
     } else {
       logger.debug({ reason: result.reason }, "[winhousePromoCron] tick skipped");
     }
   } catch (err) {
+    lastTick = { at: new Date().toISOString(), outcome: "error", error: err instanceof Error ? err.message : String(err) };
     logger.error({ err }, "[winhousePromoCron] tick failed");
   } finally {
     running = false;
