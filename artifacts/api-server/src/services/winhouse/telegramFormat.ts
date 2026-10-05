@@ -20,14 +20,21 @@ export type WinHouseFootballTicket = {
 // themselves move into real Telegram inline-keyboard buttons instead of
 // plain text lines, one row per market, plus a final CTA row — this is
 // the standard Telegram button shape (rounded, spaced, system-rendered),
-// not a custom graphic.
-export function formatWinHouseFootballTicket(game: WinHousePromotionGame, ctaUrl: string): WinHouseFootballTicket {
+// not a custom graphic. league, when given, is the real competition name
+// already confirmed from the 24h list endpoint (the same field the league
+// filter matches on) — never guessed or looked up separately.
+export function formatWinHouseFootballTicket(
+  game: WinHousePromotionGame,
+  ctaUrl: string,
+  league?: string,
+): WinHouseFootballTicket {
   const home = escapeTelegramHtml(game.home_team);
   const away = escapeTelegramHtml(game.away_team);
   const time = game.date.split(" ")[1]?.slice(0, 5) ?? game.date;
 
   const lines: string[] = [];
   lines.push(`⚽ <b>${home} x ${away}</b>`);
+  if (league) lines.push(`🏟️ <i>${escapeTelegramHtml(league)}</i>`);
   lines.push("");
   lines.push(`🕐 ${time}`);
 
