@@ -10,12 +10,14 @@ import { timingSafeEqualString } from "../lib/security.js";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { getWinHouseGame } from "../services/winhouse/prematch.js";
 import { getWinHouse24hGames } from "../services/winhouse/list.js";
+import { getWinHouseLiveGames } from "../services/winhouse/liveGames.js";
 import { normalizeListGame } from "../services/winhouse/listGame.js";
 import { filterWinHouseListGame } from "../services/winhouse/leagueFilter.js";
 import { parseWinHouseGame } from "../services/winhouse/parser.js";
 import { formatWinHouseFootballTicket } from "../services/winhouse/telegramFormat.js";
 import { isTelegramConfigured } from "../lib/telegram/client.js";
 import { getLastWinHousePromotionTick, getWinHousePromotionCronStatus } from "../lib/winhousePromotionCron.js";
+import { getLastWinHouseLiveMonitorTick, getWinHouseLiveMonitorCronStatus } from "../lib/winhouseLiveMonitorCron.js";
 // Relative import — same tsc alias-resolution convention already used for
 // telegramPostsTable/affiliatesTable elsewhere in routes/*.ts.
 import { winhousePromotionPostsTable } from "../../../../lib/db/src/schema/winhousePromotionPosts.js";
@@ -416,6 +418,24 @@ router.get(
   },
 );
 
+// Diagnostic endpoint for the PREMATCH -> LIVE -> FINISHED -> DELETE
+// lifecycle (services/winhouse/liveMonitor.ts): dumps the raw
+// /ajax/livegames response as-is. This session has no outbound network
+// access to iframe.winhouse.bet to confirm the real field names (id,
+// score, minute, ...) itself — liveGame.ts's normalizer guesses several
+// plausible names defensively, but this route lets that guess be checked
+// against the real payload in production before tightening it. Same
+// no-auth reasoning as the other WinHouse diagnostic routes below.
+router.get("/live-games", async (_req: Request, res: Response) => {
+  try {
+    const data = await getWinHouseLiveGames();
+    res.json({ success: true, count: Array.isArray(data) ? data.length : null, data });
+  } catch (err) {
+    logger.error({ err }, "GET /api/winhouse/live-games error");
+    res.status(502).json({ success: false, error: "Não foi possível consultar a WinHouse" });
+  }
+});
+
 // Diagnostic endpoint for the Telegram live-odds feature (step 1): confirms
 // the backend can query WinHouse's own prematch-game ajax endpoint reliably
 // before anything is built on top of it (filtering, formatting, posting).
@@ -570,6 +590,11 @@ router.get("/promotion-posts", async (_req: Request, res: Response) => {
       configured: isTelegramConfigured(),
       cron: getWinHousePromotionCronStatus(),
       lastTick: getLastWinHousePromotionTick(),
+      // PREMATCH -> LIVE -> FINISHED -> DELETE lifecycle — same shape as
+      // cron/lastTick above, for the separate poll loop that edits/deletes
+      // these same posts (lib/winhouseLiveMonitorCron.ts).
+      liveMonitorCron: getWinHouseLiveMonitorCronStatus(),
+      liveMonitorLastTick: getLastWinHouseLiveMonitorTick(),
       // Rules out "this request hit a stale process that predates the
       // cron/env fixes" without guessing — a low uptime means whatever
       // `cron`/`lastTick` show above is genuinely from the current code.

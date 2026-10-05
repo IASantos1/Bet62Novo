@@ -83,3 +83,55 @@ export function formatWinHouseFootballTicket(
 
   return { html: lines.join("\n"), keyboard };
 }
+
+// PREMATCH -> LIVE -> FINISHED -> DELETE lifecycle (2026-10-05): once a
+// fixture appears in /ajax/livegames, the original message is edited in
+// place (never re-sent) to show this instead. Built straight from the
+// posts-table row's own home/away/league — no re-fetch of the prematch
+// odds needed, and the original inline keyboard is left untouched by the
+// caller (editMessageText without reply_markup keeps it as-is).
+export function formatWinHouseLiveFootballTicket(
+  game: { homeTeam: string; awayTeam: string; league: string },
+  score: { home: number; away: number } | null,
+  minute: string | null,
+): string {
+  const home = escapeTelegramHtml(game.homeTeam);
+  const away = escapeTelegramHtml(game.awayTeam);
+
+  const lines: string[] = [];
+  lines.push("🔴 <b>AO VIVO</b>");
+  lines.push("");
+  lines.push(`⚽ <b>${home} x ${away}</b>`);
+  if (game.league) lines.push(`🏟️ <i>${escapeTelegramHtml(game.league)}</i>`);
+  lines.push("");
+  // Either field can be unavailable if the live feed's real field names
+  // turn out to differ from the guesses in liveGame.ts — shown only when
+  // actually found, never a fabricated placeholder.
+  if (minute) lines.push(`⏱ ${escapeTelegramHtml(minute)}'`);
+  if (score) lines.push(`📊 ${score.home} - ${score.away}`);
+
+  return lines.join("\n");
+}
+
+// FINISHED: shows the last known score (passed in by the caller — either
+// just parsed this tick, or the row's previously stored score if the
+// fixture had already dropped off /ajax/livegames by the time this fires).
+// The caller removes the bet button separately (removeKeyboard on the
+// editMessageText call) since betting on a finished fixture makes no sense.
+export function formatWinHouseFinishedFootballTicket(
+  game: { homeTeam: string; awayTeam: string; league: string },
+  score: { home: number; away: number } | null,
+): string {
+  const home = escapeTelegramHtml(game.homeTeam);
+  const away = escapeTelegramHtml(game.awayTeam);
+
+  const lines: string[] = [];
+  lines.push("✅ <b>FINALIZADO</b>");
+  lines.push("");
+  lines.push(score ? `⚽ <b>${home} ${score.home} x ${score.away} ${away}</b>` : `⚽ <b>${home} x ${away}</b>`);
+  if (game.league) lines.push(`🏟️ <i>${escapeTelegramHtml(game.league)}</i>`);
+  lines.push("");
+  lines.push("🏁 Resultado final");
+
+  return lines.join("\n");
+}
