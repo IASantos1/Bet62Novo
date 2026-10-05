@@ -53,6 +53,11 @@ const ALLOWED_LEAGUES: AllowedLeague[] = [
   // reusam o mesmo nome genérico (confirmado em dados reais, 2026-10-05:
   // "Liga dos Campeões" do Afeganistão e da China entravam como "grande").
   { countries: [], leagueKeywords: ["uefa champions league", "uefa europa league"], tier: "grande" },
+  // User-confirmed (2026-10-05): national-team competitions, not clubs —
+  // added after a real response showed 35 UEFA Nations League and 7
+  // CONCACAF Nations League fixtures sitting unmatched.
+  { countries: [], leagueKeywords: ["liga das nações da uefa", "uefa nations league"], tier: "grande" },
+  { countries: [], leagueKeywords: ["liga das nações da concacaf", "concacaf nations league"], tier: "grande" },
   // Média
   { countries: ["inglaterra", "england"], leagueKeywords: ["championship"], tier: "média" },
   { countries: ["espanha", "spain"], leagueKeywords: ["segunda divisão", "segunda división"], tier: "média" },
