@@ -1,6 +1,6 @@
 import { db, usersTable } from "@workspace/db";
 import { ledgerEntriesTable } from "@workspace/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { createHash, createHmac } from "node:crypto";
 import { CONFIG } from "../lib/config.js";
@@ -14,6 +14,9 @@ import { normalizeListGame } from "../services/winhouse/listGame.js";
 import { filterWinHouseListGame } from "../services/winhouse/leagueFilter.js";
 import { parseWinHouseGame } from "../services/winhouse/parser.js";
 import { formatWinHouseFootballTicket } from "../services/winhouse/telegramFormat.js";
+// Relative import — same tsc alias-resolution convention already used for
+// telegramPostsTable/affiliatesTable elsewhere in routes/*.ts.
+import { winhousePromotionPostsTable } from "../../../../lib/db/src/schema/winhousePromotionPosts.js";
 
 const router: IRouter = Router();
 const DEFAULT_WINHOUSE_CURRENCY = "EUR";
@@ -538,6 +541,26 @@ router.get("/today", async (_req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err }, "GET /api/winhouse/today error");
     res.status(502).json({ error: "Não foi possível consultar a WinHouse" });
+  }
+});
+
+// Visibility into the automated publish pipeline (lib/winhousePromotionCron.ts
+// + services/winhouse/promotionScheduler.ts): the last fixtures it attempted
+// to post, success or failure — so this can be confirmed against the real
+// Telegram channel without needing admin login. No auth, same reasoning as
+// the other WinHouse diagnostic routes above (this is our own posting
+// history, not sensitive beyond what the channel itself already shows).
+router.get("/promotion-posts", async (_req: Request, res: Response) => {
+  try {
+    const posts = await db
+      .select()
+      .from(winhousePromotionPostsTable)
+      .orderBy(desc(winhousePromotionPostsTable.id))
+      .limit(50);
+    res.json({ posts });
+  } catch (err) {
+    logger.error({ err }, "GET /api/winhouse/promotion-posts error");
+    res.status(500).json({ error: "Erro ao listar publicações" });
   }
 });
 

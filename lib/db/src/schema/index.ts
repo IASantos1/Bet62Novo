@@ -51,3 +51,4 @@ export * from "./affiliates.js";
 export * from "./affiliatePayouts.js";
 export * from "./affiliateCommissions.js";
 export * from "./telegramPosts.js";
+export * from "./winhousePromotionPosts.js";
