@@ -25,6 +25,15 @@ function isExcluded(game: NormalizedListGame): boolean {
 // (2026-10-04) that this RFEF/Grupo pattern exists and must be excluded.
 const SUB_TIER_DISQUALIFIER = /\brfef\b|\bgrupo\s*\d+\b|expansion|primera\s*[bc]\b|primeira\s*[bc]\b|\bb\s*nacional\b|\bc\s*metropolitana\b/i;
 
+// Real data confirmed this is needed (2026-10-05): WinHouse lists player
+// prop markets (e.g. "will this player score") as synthetic extra "games"
+// for the same real fixture — homeTeam becomes the player's name, awayTeam
+// stays the opposing country/team, and the league field gets a
+// "Team vs Player"/"Equipe vs Jogador"/"Time vs Jogador" suffix (observed
+// in EN and PT variants, "vs"/"x" connector). These are not real matches
+// and must never be promoted as one, whatever competition they're under.
+const PLAYER_PROP_PATTERN = /\b(team|equipe|time)\s*(vs\.?|x)\s*(player|jogador)\b/i;
+
 type AllowedLeague = {
   countries: string[];
   leagueKeywords: string[];
@@ -81,7 +90,7 @@ const ALLOWED_LEAGUES: AllowedLeague[] = [
 
 export type LeagueFilterResult =
   | { status: "included"; tier: "grande" | "média" }
-  | { status: "excluded"; reason: "sport" | "excluded_keyword" | "sub_tier" | "not_in_allowed_list" };
+  | { status: "excluded"; reason: "sport" | "excluded_keyword" | "sub_tier" | "player_prop" | "not_in_allowed_list" };
 
 // Football only for now (sport_id 1), per the step-by-step build — other
 // sports need their own confirmed allowed-leagues list later.
@@ -108,6 +117,7 @@ function normalizeForMatch(s: string): string {
 export function filterWinHouseListGame(game: NormalizedListGame): LeagueFilterResult {
   if (game.sportId !== FOOTBALL_SPORT_ID) return { status: "excluded", reason: "sport" };
   if (isExcluded(game)) return { status: "excluded", reason: "excluded_keyword" };
+  if (PLAYER_PROP_PATTERN.test(game.league)) return { status: "excluded", reason: "player_prop" };
   if (SUB_TIER_DISQUALIFIER.test(game.league)) return { status: "excluded", reason: "sub_tier" };
 
   const leagueLower = normalizeForMatch(game.league);
