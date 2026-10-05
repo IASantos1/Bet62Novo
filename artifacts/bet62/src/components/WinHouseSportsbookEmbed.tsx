@@ -11,6 +11,26 @@ type WinHouseSportsbookEmbedProps = {
 // header height.
 const EMBED_HEIGHT = "calc(100dvh - 4rem)";
 
+// User-reported pattern (2026-10-05, unverified against a fresh/direct
+// load): WinHouse's own router uses this hash to jump to one fixture.
+// embed.js injects the real <iframe> itself — we never build its src — so
+// this polls the container for that element to appear, then appends the
+// hash once the iframe exists. A few retries because embed.js's own
+// internal bootstrapping can lag slightly behind the external script's
+// "loaded" event.
+function applyDeepLink(container: HTMLElement, gameId: string, attemptsLeft = 10): void {
+  const iframe = container.querySelector("iframe");
+  if (!iframe) {
+    if (attemptsLeft <= 0) return;
+    window.setTimeout(() => applyDeepLink(container, gameId, attemptsLeft - 1), 300);
+    return;
+  }
+  const src = iframe.getAttribute("src");
+  if (!src) return;
+  const base = src.split("#")[0];
+  iframe.setAttribute("src", `${base}#/event/${encodeURIComponent(gameId)}`);
+}
+
 export default function WinHouseSportsbookEmbed({
   isDarkTheme,
   isAuthenticated,
@@ -26,6 +46,18 @@ export default function WinHouseSportsbookEmbed({
   );
   const language = useMemo(
     () => String(import.meta.env.VITE_WINHOUSE_LANG ?? "pt").trim() || "pt",
+    [],
+  );
+  // Deep-link from a Telegram promotion post (?gameId=…) straight to that
+  // fixture inside the embedded WinHouse iframe. Best-effort: WinHouse's
+  // embed.js builds the iframe itself (we never see its src up front), so
+  // this waits for the <iframe> to show up inside our container, then
+  // appends WinHouse's own event-route hash to its src. Unverified against
+  // a real production load as of 2026-10-05 — if WinHouse's router doesn't
+  // pick up a hash set this way, the embed just opens on its normal
+  // default view, same as today; nothing else depends on this working.
+  const deepLinkGameId = useMemo(
+    () => new URLSearchParams(window.location.search).get("gameId")?.trim() || "",
     [],
   );
 
@@ -86,6 +118,7 @@ export default function WinHouseSportsbookEmbed({
 
       script.onload = () => {
         setLoadState("ready");
+        if (deepLinkGameId) applyDeepLink(target, deepLinkGameId);
       };
       script.onerror = () => {
         setLoadState("error");

@@ -457,7 +457,7 @@ router.get("/promotion/:gameId", async (req: Request, res: Response) => {
     }
     // Preview only — not sent to Telegram yet. Lets us confirm the ticket
     // text and button layout look right.
-    const ticket = formatWinHouseFootballTicket(parsed, "https://bet62.plus/sportsbook");
+    const ticket = formatWinHouseFootballTicket(parsed, `https://bet62.plus/sportsbook?gameId=${encodeURIComponent(gameId)}`);
     res.json({ ...parsed, telegramText: ticket.html, telegramKeyboard: ticket.keyboard });
   } catch (err) {
     logger.error({ err, gameId }, "GET /api/winhouse/promotion/:gameId error");

@@ -26,8 +26,12 @@ function getMinGapMs(): number {
 // User-confirmed (2026-10-05): fixed to the real production domain instead
 // of deriving from PUBLIC_SITE_URL — that env var pointed somewhere wrong
 // in production (an unrelated/misconfigured value), sending bettors to the
-// wrong place from every button on every post.
-const BET62_SPORTSBOOK_URL = "https://bet62.plus/sportsbook";
+// wrong place from every button on every post. gameId is passed through so
+// the frontend embed (WinHouseSportsbookEmbed.tsx) can try to deep-link
+// straight to this fixture — best-effort, see that file's comment.
+function buildCtaUrl(gameId: string): string {
+  return `https://bet62.plus/sportsbook?gameId=${encodeURIComponent(gameId)}`;
+}
 
 export type WinHousePromotionTickResult =
   | { action: "skipped"; reason: "telegram_not_configured" | "too_soon" | "no_candidates" | "bad_response" }
@@ -114,7 +118,7 @@ export async function runWinHousePromotionTick(): Promise<WinHousePromotionTickR
     return { action: "posted", gameId: next.game.gameId, status: "failed" };
   }
 
-  const ticket = formatWinHouseFootballTicket(parsed, BET62_SPORTSBOOK_URL);
+  const ticket = formatWinHouseFootballTicket(parsed, buildCtaUrl(next.game.gameId));
   const result = await sendTelegramMessage({
     html: ticket.html,
     inlineKeyboard: ticket.keyboard,
