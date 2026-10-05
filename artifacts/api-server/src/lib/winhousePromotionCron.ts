@@ -9,6 +9,17 @@
 //     to check for a new fixture to post. The actual publish pacing (at
 //     least 10 minutes between posts) is enforced inside the scheduler
 //     itself (WINHOUSE_PROMO_MIN_GAP_MS), not by this interval.
+//
+// Production-only by default — confirmed necessary (2026-10-05): Railway's
+// PR preview environments get their own isolated database but INHERIT the
+// same secrets as production, TELEGRAM_BOT_TOKEN/TELEGRAM_CHANNEL_ID
+// included. Without this guard, every open PR that touches this service
+// runs its own independent copy of this cron, each with its own
+// DB-isolated pacing/dedupe, all posting to the SAME real Telegram
+// channel — confirmed in production as interleaved old/new-format posts
+// from two different environments. RAILWAY_ENVIRONMENT_NAME is a standard
+// Railway-provided variable; only "production" may run this. Outside
+// Railway (the var is simply unset) it runs as before.
 import { logger } from "./logger.js";
 import { runWinHousePromotionTick, type WinHousePromotionTickResult } from "../services/winhouse/promotionScheduler.js";
 
@@ -36,14 +47,24 @@ export function getLastWinHousePromotionTick(): LastTickSnapshot | null {
 // top of the first.
 const rawEnabledEnv: string | null = process.env.WINHOUSE_PROMO_CRON_ENABLED ?? null;
 
+const railwayEnvironmentName: string | null = process.env.RAILWAY_ENVIRONMENT_NAME ?? null;
+
+// true only when we can positively confirm this is production: the
+// variable is unset (not on Railway at all — local/other host, runs as
+// before) or it reads "production". Any other Railway environment name
+// (a PR preview among them) is blocked.
+function isProductionEnvironment(): boolean {
+  return railwayEnvironmentName === null || railwayEnvironmentName.trim().toLowerCase() === "production";
+}
+
 // Whether startWinHousePromotionCron() actually scheduled the loop, and
-// when — so "lastTick is still null" can be told apart from "disabled" and
-// from "started N seconds ago, first tick just hasn't fired yet" instead of
-// leaving that to guesswork too.
+// when — so "lastTick is still null" can be told apart from "disabled",
+// "blocked (not production)" and "started N seconds ago, first tick just
+// hasn't fired yet" instead of leaving that to guesswork too.
 type CronStatus =
-  | { enabled: true; startedAt: string; rawEnabledEnv: string | null }
-  | { enabled: false; rawEnabledEnv: string | null };
-let cronStatus: CronStatus = { enabled: false, rawEnabledEnv };
+  | { enabled: true; startedAt: string; rawEnabledEnv: string | null; railwayEnvironmentName: string | null }
+  | { enabled: false; rawEnabledEnv: string | null; railwayEnvironmentName: string | null };
+let cronStatus: CronStatus = { enabled: false, rawEnabledEnv, railwayEnvironmentName };
 
 export function getWinHousePromotionCronStatus(): CronStatus {
   return cronStatus;
@@ -83,6 +104,14 @@ function parseIntervalMs(envName: string, fallbackMs: number, minMs: number): nu
 }
 
 export function startWinHousePromotionCron(): void {
+  if (!isProductionEnvironment()) {
+    logger.info(
+      { railwayEnvironmentName },
+      "[winhousePromoCron] disabled — not the production environment (prevents PR-preview deploys from posting to the live Telegram channel)",
+    );
+    return;
+  }
+
   const explicitlyDisabled = rawEnabledEnv !== null && rawEnabledEnv.trim().toLowerCase() === "false";
   if (explicitlyDisabled) {
     logger.info({ rawEnabledEnv }, "[winhousePromoCron] disabled via WINHOUSE_PROMO_CRON_ENABLED=false");
@@ -90,11 +119,11 @@ export function startWinHousePromotionCron(): void {
   }
 
   const intervalMs = parseIntervalMs("WINHOUSE_PROMO_CRON_INTERVAL_MS", 2 * 60 * 1000, 60 * 1000);
-  cronStatus = { enabled: true, startedAt: new Date().toISOString(), rawEnabledEnv };
+  cronStatus = { enabled: true, startedAt: new Date().toISOString(), rawEnabledEnv, railwayEnvironmentName };
   setTimeout(() => {
     void tick().finally(() => {
       setInterval(() => void tick(), intervalMs);
     });
   }, 15_000);
-  logger.info({ intervalMs, rawEnabledEnv }, "[winhousePromoCron] scheduled");
+  logger.info({ intervalMs, rawEnabledEnv, railwayEnvironmentName }, "[winhousePromoCron] scheduled");
 }
