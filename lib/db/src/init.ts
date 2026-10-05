@@ -831,6 +831,25 @@ export async function initDb(): Promise<void> {
       );
 
       CREATE INDEX IF NOT EXISTS telegram_posts_created_at_idx ON telegram_posts (created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS winhouse_promotion_posts (
+        id                   SERIAL PRIMARY KEY,
+        game_id              TEXT NOT NULL,
+        sport                TEXT NOT NULL,
+        league               TEXT NOT NULL,
+        tier                 TEXT NOT NULL,
+        home_team            TEXT NOT NULL,
+        away_team            TEXT NOT NULL,
+        kickoff_at           TEXT NOT NULL,
+        status               TEXT NOT NULL,
+        telegram_message_id  TEXT,
+        error                TEXT,
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS winhouse_promotion_posts_game_id_sent_idx
+        ON winhouse_promotion_posts (game_id) WHERE status = 'sent';
+      CREATE INDEX IF NOT EXISTS winhouse_promotion_posts_created_at_idx ON winhouse_promotion_posts (created_at DESC);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

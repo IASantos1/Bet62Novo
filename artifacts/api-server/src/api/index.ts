@@ -3,6 +3,7 @@ import { createServer } from "http";
 import app from "../app.js";
 import { logger } from "../lib/logger.js";
 import { startAiAgentsCron } from "../lib/aiAgentsCron.js";
+import { startWinHousePromotionCron } from "../lib/winhousePromotionCron.js";
 import { ensureBigBangCatalogFresh } from "../services/bigbang/sync.js";
 
 // ── Never let one unhandled rejection take the whole server down ───────────
@@ -45,4 +46,9 @@ server.listen(port, () => {
   // Safe to unconditionally call: the function is no-op when AI_AGENTS_API_KEY
   // is unset or AI_CRON_ENABLED=false. No user traffic is affected.
   startAiAgentsCron();
+
+  // WinHouse odds -> Telegram promotion poll loop. Safe to unconditionally
+  // call: each tick no-ops when Telegram isn't configured (checked inside
+  // runWinHousePromotionTick), same reasoning as the AI-agents cron above.
+  startWinHousePromotionCron();
 });
