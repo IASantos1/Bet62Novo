@@ -3,6 +3,7 @@ import { createServer } from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startAiAgentsCron } from "./lib/aiAgentsCron.js";
+import { startWinHousePromotionCron } from "./lib/winhousePromotionCron.js";
 import { ensureBigBangCatalogFresh } from "./services/bigbang/sync.js";
 
 // Keep the API process alive through unexpected async failures. The app has
@@ -33,4 +34,13 @@ server.listen(port, () => {
   });
 
   startAiAgentsCron();
+
+  // WinHouse odds -> Telegram promotion poll loop. Safe to unconditionally
+  // call: each tick no-ops when Telegram isn't configured (checked inside
+  // runWinHousePromotionTick), same reasoning as the AI-agents cron above.
+  // This is the file Railway actually runs (railway.json's startCommand ->
+  // package.json's "start" -> dist/index.mjs, built from THIS file, not
+  // src/api/index.ts — the near-duplicate entrypoint this call was
+  // originally, and mistakenly, added to in #569).
+  startWinHousePromotionCron();
 });
