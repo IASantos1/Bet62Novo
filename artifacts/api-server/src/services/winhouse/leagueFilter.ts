@@ -48,7 +48,11 @@ const ALLOWED_LEAGUES: AllowedLeague[] = [
   { countries: ["portugal"], leagueKeywords: ["primeira liga"], tier: "grande" },
   { countries: ["brasil", "brazil"], leagueKeywords: ["série a", "serie a", "brasileirão", "brasileiro"], tier: "grande" },
   { countries: ["argentina"], leagueKeywords: ["primeira divisão", "primera división", "liga profesional"], tier: "grande" },
-  { countries: [], leagueKeywords: ["champions league", "europa league"], tier: "grande" },
+  // Restrito a "uefa" porque "champions league"/"europa league" sem essa
+  // exigência colide com competições domésticas de outros países que
+  // reusam o mesmo nome genérico (confirmado em dados reais, 2026-10-05:
+  // "Liga dos Campeões" do Afeganistão e da China entravam como "grande").
+  { countries: [], leagueKeywords: ["uefa champions league", "uefa europa league"], tier: "grande" },
   // Média
   { countries: ["inglaterra", "england"], leagueKeywords: ["championship"], tier: "média" },
   { countries: ["espanha", "spain"], leagueKeywords: ["segunda divisão", "segunda división"], tier: "média" },
@@ -78,19 +82,19 @@ export type LeagueFilterResult =
 // sports need their own confirmed allowed-leagues list later.
 const FOOTBALL_SPORT_ID = 1;
 
-// Real data confirmed this is needed (2026-10-04): "Argentina. Primeira
-// Divisão" and "Espanha. Segunda Divisão" both came back in
-// unmatchedLeagues despite being literal entries in ALLOWED_LEAGUES below
-// — a plain .toLowerCase() + .includes() wasn't enough. The accented
-// characters WinHouse sends don't compare equal to the ones in this
-// source file under plain string comparison (Unicode normalization form
-// mismatch — NFD vs NFC — and/or non-breaking spaces instead of regular
-// ones), even though they render identically. Routing both sides through
-// the same normalization before comparing fixes the whole class of this,
-// not just the two confirmed cases.
+// Real data confirmed this is needed (2026-10-05): raw Unicode code points
+// from a real response showed WinHouse sends "Argentina. Primera Division"
+// — Spanish spelling, with NO diacritics at all ("Primera", plain "o" in
+// "Division") — while this file's keyword literals are accented
+// ("primeira divisão"/"primera división"). NFC normalization alone can't
+// bridge that: it only reconciles different Unicode *representations* of
+// the same character, not the presence/absence of a diacritic. Stripping
+// diacritics (NFD-decompose, then drop the combining marks) makes both
+// sides compare equal regardless of which one has the accent.
 function normalizeForMatch(s: string): string {
   return s
-    .normalize("NFC")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
