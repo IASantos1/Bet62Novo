@@ -30,13 +30,20 @@ export function formatWinHouseFootballTicket(
 ): WinHouseFootballTicket {
   const home = escapeTelegramHtml(game.home_team);
   const away = escapeTelegramHtml(game.away_team);
-  const time = game.date.split(" ")[1]?.slice(0, 5) ?? game.date;
+  // game.date is WinHouse's confirmed "YYYY-MM-DD HH:mm:ss" format — split
+  // straight on "-"/":" rather than parsing as a Date, same reasoning as
+  // the scheduler's string-sort: no timezone is confirmed for this feed,
+  // so this never goes through Date math, only reformats the digits.
+  const [datePart, timePart] = game.date.split(" ");
+  const [year, month, day] = datePart?.split("-") ?? [];
+  const date = day && month && year ? `${day}/${month}/${year}` : datePart ?? "";
+  const time = timePart?.slice(0, 5) ?? "";
 
   const lines: string[] = [];
   lines.push(`⚽ <b>${home} x ${away}</b>`);
   if (league) lines.push(`🏟️ <i>${escapeTelegramHtml(league)}</i>`);
   lines.push("");
-  lines.push(`🕐 ${time}`);
+  lines.push(`📅 ${date} 🕐 ${time}`);
 
   const keyboard: TelegramInlineButton[][] = [];
 
