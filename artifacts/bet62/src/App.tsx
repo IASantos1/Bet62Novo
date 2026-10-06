@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
-import { hardResetPwaAndReload } from "@/lib/pwa";
+import { hardResetPwaAndReload, isAdminPath } from "@/lib/pwa";
 import {
   applyThemePreference,
   clearStoredThemePreference,
@@ -169,9 +169,7 @@ function Router() {
 }
 
 function App() {
-  const isAdmin = window.location.pathname
-    .replace(/\/$/, "")
-    .endsWith("/admin");
+  const isAdmin = isAdminPath(window.location.pathname);
   const [splashDone, setSplashDone] = useState(isAdmin);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
     getResolvedTheme(null),

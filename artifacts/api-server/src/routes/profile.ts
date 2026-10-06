@@ -84,7 +84,7 @@ function buildKycOverview(
   } else if (!passportDoc) {
     missingItems.push("página principal do passaporte");
   }
-  if (!addressDoc) missingItems.push("comprovativo de morada");
+  if (!addressDoc) missingItems.push("comprovativo de IBAN ou extrato bancário");
 
   const readyForManualReview = missingItems.length === 0;
   const hasAnyProgress =
@@ -98,11 +98,11 @@ function buildKycOverview(
       ? [
           docSlotState("Frente do documento", true, frontDoc),
           docSlotState("Verso do documento", true, backDoc),
-          docSlotState("Comprovativo de morada", true, addressDoc),
+          docSlotState("Comprovativo de IBAN ou Extrato Bancário", true, addressDoc),
         ]
       : [
           docSlotState("Passaporte", true, passportDoc),
-          docSlotState("Comprovativo de morada", true, addressDoc),
+          docSlotState("Comprovativo de IBAN ou Extrato Bancário", true, addressDoc),
         ];
 
   return {
@@ -324,7 +324,7 @@ router.post("/kyc/upload", authMiddleware, async (req: AuthRequest, res: Respons
   };
 
   if (!kind || !supportedKycKinds.includes(kind as SupportedKycKind)) {
-    res.status(400).json({ error: "Tipo inválido. Use frente, verso, passaporte ou comprovativo de morada." });
+    res.status(400).json({ error: "Tipo inválido. Use frente, verso, passaporte ou comprovativo de IBAN/extrato bancário." });
     return;
   }
 
