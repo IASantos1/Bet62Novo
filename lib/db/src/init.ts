@@ -867,6 +867,45 @@ export async function initDb(): Promise<void> {
       DROP INDEX IF EXISTS winhouse_promotion_posts_game_id_sent_idx;
       CREATE UNIQUE INDEX IF NOT EXISTS winhouse_promotion_posts_game_id_active_idx
         ON winhouse_promotion_posts (game_id) WHERE status <> 'failed';
+
+      -- Promo "100% bónus de boas-vindas": granted on the first deposit,
+      -- released once rolloverTarget is wagered at qualifying odds. See
+      -- schema/welcomeBonusRollovers.ts — rollover_progress deliberately
+      -- never advances yet (no confirmed server-side source of per-ticket
+      -- odds from WinHouse), this only records real grants + deadlines.
+      CREATE TABLE IF NOT EXISTS welcome_bonus_rollovers (
+        id                SERIAL PRIMARY KEY,
+        user_id           INTEGER NOT NULL,
+        deposit_amount    TEXT NOT NULL,
+        bonus_amount      TEXT NOT NULL,
+        rollover_target   TEXT NOT NULL,
+        rollover_progress TEXT NOT NULL DEFAULT '0.00',
+        min_odds          TEXT NOT NULL DEFAULT '1.50',
+        status            TEXT NOT NULL DEFAULT 'active',
+        expires_at        TIMESTAMPTZ NOT NULL,
+        completed_at      TIMESTAMPTZ,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS welcome_bonus_rollovers_user_id_idx ON welcome_bonus_rollovers (user_id);
+
+      -- User-specified promo (2026-10-06): deposit >= €10 -> €5 freebet,
+      -- released once the user wins requiredWins qualifying bets. See
+      -- schema/freebetUnlockPlans.ts — same "records the grant, doesn't yet
+      -- verify wins" reasoning as welcome_bonus_rollovers above.
+      CREATE TABLE IF NOT EXISTS freebet_unlock_plans (
+        id              SERIAL PRIMARY KEY,
+        user_id         INTEGER NOT NULL,
+        deposit_amount  TEXT NOT NULL,
+        freebet_amount  TEXT NOT NULL,
+        required_wins   INTEGER NOT NULL DEFAULT 2,
+        wins_completed  INTEGER NOT NULL DEFAULT 0,
+        min_odds        TEXT NOT NULL DEFAULT '1.55',
+        status          TEXT NOT NULL DEFAULT 'active',
+        expires_at      TIMESTAMPTZ NOT NULL,
+        completed_at    TIMESTAMPTZ,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS freebet_unlock_plans_user_id_idx ON freebet_unlock_plans (user_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");

@@ -5,6 +5,10 @@ import { desc, eq } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import fs from "fs";
 import path from "path";
+// Relative imports — same tsc alias-resolution workaround already used for
+// telegramPostsTable/affiliatesTable/winhousePromotionPostsTable elsewhere.
+import { welcomeBonusRolloversTable } from "../../../../lib/db/src/schema/welcomeBonusRollovers.js";
+import { freebetUnlockPlansTable } from "../../../../lib/db/src/schema/freebetUnlockPlans.js";
 
 const router: IRouter = Router();
 
@@ -419,6 +423,48 @@ router.post("/kyc/upload", authMiddleware, async (req: AuthRequest, res: Respons
       documents: savedDocs,
       kycStatus: synced?.user.kycStatus ?? existingUser?.kycStatus ?? "not_submitted",
       kycOverview: synced?.kycOverview ?? null,
+    });
+  } catch {
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Status for the "100% bónus de boas-vindas" and "€5 freebet" deposit
+// plans (lib/bonusPlans.ts) — null when the user never qualified/deposited
+// (no row ever created). `expired` is derived here (active + past
+// expiresAt), never stored — see those tables' schema comments. Progress
+// fields are included as-is even though they're always 0 today: this
+// route reports the real DB state, not a guess about why it's 0 (that
+// context — the lack of a WinHouse odds data source — belongs in the UI
+// copy or docs, not fabricated into this response).
+router.get("/bonus-plans", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const userId = req.user!.id;
+  try {
+    const [welcomeBonus] = await db
+      .select()
+      .from(welcomeBonusRolloversTable)
+      .where(eq(welcomeBonusRolloversTable.userId, userId))
+      .limit(1);
+    const [freebetUnlock] = await db
+      .select()
+      .from(freebetUnlockPlansTable)
+      .where(eq(freebetUnlockPlansTable.userId, userId))
+      .limit(1);
+
+    const now = new Date();
+    res.json({
+      welcomeBonusRollover: welcomeBonus
+        ? {
+            ...welcomeBonus,
+            expired: welcomeBonus.status === "active" && welcomeBonus.expiresAt < now,
+          }
+        : null,
+      freebetUnlockPlan: freebetUnlock
+        ? {
+            ...freebetUnlock,
+            expired: freebetUnlock.status === "active" && freebetUnlock.expiresAt < now,
+          }
+        : null,
     });
   } catch {
     res.status(500).json({ error: "Erro interno" });

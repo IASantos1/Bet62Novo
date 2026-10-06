@@ -7,6 +7,7 @@ import { logger } from "../lib/logger.js";
 import { sendDepositConfirmed } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
 import { maybeGrantCasinoWelcomeBonus } from "../lib/casinoBonus.js";
+import { maybeGrantWelcomeBonusRollover, maybeGrantFreebetUnlockPlan } from "../lib/bonusPlans.js";
 import { randomUUID } from "crypto";
 // Relative imports — see auth.ts's comment (tsc alias-resolution quirk for
 // newly-added schema exports).
@@ -108,6 +109,8 @@ async function creditPayment(orderId: string): Promise<void> {
   logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
 
   void maybeGrantCasinoWelcomeBonus(payment.userId, parseFloat(payment.amount));
+  void maybeGrantWelcomeBonusRollover(payment.userId, parseFloat(payment.amount));
+  void maybeGrantFreebetUnlockPlan(payment.userId, parseFloat(payment.amount));
 
   db.select({ email: usersTable.email, name: usersTable.name })
     .from(usersTable)

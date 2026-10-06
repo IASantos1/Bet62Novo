@@ -22,6 +22,7 @@ import { applyBalanceDelta } from "./lib/ledger.js";
 import { sendDepositConfirmed } from "./lib/mailer.js";
 import { createAffiliateCommission } from "./routes/payments.js";
 import { maybeGrantCasinoWelcomeBonus } from "./lib/casinoBonus.js";
+import { maybeGrantWelcomeBonusRollover, maybeGrantFreebetUnlockPlan } from "./lib/bonusPlans.js";
 import {
   applyWithdrawalAdminDecision,
   canTransitionWithdrawalStatus,
@@ -68,6 +69,8 @@ async function creditPaymentHelper(orderId: string): Promise<void> {
     });
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment balance credited (webhook or cron)");
     void maybeGrantCasinoWelcomeBonus(payment.userId, parseFloat(payment.amount));
+    void maybeGrantWelcomeBonusRollover(payment.userId, parseFloat(payment.amount));
+    void maybeGrantFreebetUnlockPlan(payment.userId, parseFloat(payment.amount));
     // Confirmation email (best-effort, swallow errors)
     db.select({ email: usersTable.email, name: usersTable.name }).from(usersTable).where(eq(usersTable.id, payment.userId)).limit(1)
       .then(([u]) => { if (u) sendDepositConfirmed(u.email, u.name, payment.amount, payment.method).catch(() => {}); })
