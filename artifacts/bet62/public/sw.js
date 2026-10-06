@@ -1,4 +1,4 @@
-const VERSION = "v2026-08-12-1";
+const VERSION = "v2026-10-06-1";
 const SHELL_CACHE = `bet62-shell-${VERSION}`;
 const ASSET_CACHE = `bet62-assets-${VERSION}`;
 const DATA_CACHE = `bet62-data-${VERSION}`;
@@ -73,6 +73,7 @@ async function precacheShell() {
     scopeUrl("./"),
     scopeUrl("./index.html"),
     scopeUrl("./manifest.json"),
+    scopeUrl("./manifest-admin.json"),
     scopeUrl("./favicon.svg"),
     scopeUrl("./icon-192.svg"),
     scopeUrl("./icon-512.svg"),

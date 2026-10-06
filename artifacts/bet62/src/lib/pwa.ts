@@ -1,6 +1,29 @@
 const UPDATE_KEY = "bet62_sw_reloading";
 const HARD_RESET_KEY = "bet62_pwa_hard_reset";
 
+// Shared with App.tsx (which uses it to skip the splash screen on admin) so
+// both places agree on what counts as the admin route.
+export function isAdminPath(pathname: string): boolean {
+  return pathname.replace(/\/$/, "").endsWith("/admin");
+}
+
+// There's one index.html for the whole SPA, so it can only declare one
+// static <link rel="manifest">. Installing "as a PWA" from /admin used that
+// single manifest.json (start_url "/", scope "/") — the installed app's
+// icon opened the main site instead of the admin panel. Swapping the
+// link's href to a separate admin-scoped manifest, as early as possible
+// (synchronously in main.tsx, before React even mounts — same reasoning as
+// captureAffiliateReferral there), makes Chrome/Edge pick up
+// manifest-admin.json's own start_url "/admin" + scope "/admin" instead.
+export function applyAdminManifestIfNeeded(): void {
+  if (!isAdminPath(window.location.pathname)) return;
+  try {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+    if (link) link.href = `${import.meta.env.BASE_URL}manifest-admin.json`;
+    document.title = "Bet62 Admin";
+  } catch {}
+}
+
 function clearReloadSearchParam() {
   try {
     const url = new URL(window.location.href);

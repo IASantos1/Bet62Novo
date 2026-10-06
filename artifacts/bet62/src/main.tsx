@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import { hardResetPwaAndReload, registerAppServiceWorker } from "@/lib/pwa";
+import { applyAdminManifestIfNeeded, hardResetPwaAndReload, registerAppServiceWorker } from "@/lib/pwa";
 import { captureAffiliateReferral } from "@/lib/affiliateReferral";
 
 // Must run synchronously, before the router mounts — home.tsx's own
@@ -12,6 +12,11 @@ import { captureAffiliateReferral } from "@/lib/affiliateReferral";
 // 2026-09-30: window.location.href was already "/sportsbook" with no
 // query by the time a same-tick App-level effect got to run).
 captureAffiliateReferral();
+
+// Also synchronous, same reasoning: the manifest <link> needs to point at
+// manifest-admin.json before the browser evaluates installability, not
+// after React's first effect pass.
+applyAdminManifestIfNeeded();
 
 const shouldReloadForMessage = (msg: string): boolean => {
   const m = (msg ?? "").toLowerCase();
