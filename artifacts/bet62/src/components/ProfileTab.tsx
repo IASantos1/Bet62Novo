@@ -315,8 +315,8 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const memberId = `BET62-${String(user.id).padStart(6, "0")}`;
   const joinedDate = new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" });
   const kycSlots = kycOverview?.slots ?? [];
-  const identitySlots = kycSlots.filter((slot) => slot.label !== "Comprovativo de morada");
-  const addressSlot = kycSlots.find((slot) => slot.label === "Comprovativo de morada") ?? null;
+  const identitySlots = kycSlots.filter((slot) => slot.label !== "Comprovativo de IBAN ou Extrato Bancário");
+  const addressSlot = kycSlots.find((slot) => slot.label === "Comprovativo de IBAN ou Extrato Bancário") ?? null;
   const hasIdentityUploaded = identitySlots.some((slot) => slot.uploaded);
   const documentBadgeStatus =
     kycStatus === "approved"
@@ -376,7 +376,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               <VerifyBadge label="Email" status="verified" />
               <VerifyBadge label="NIF / Número de Identificação Fiscal" status={user.nif ? "verified" : "unverified"} />
               <VerifyBadge label="Documento de Identificação (CC / Passaporte)" status={documentBadgeStatus} />
-              <VerifyBadge label="Comprovativo de Morada" status={addressBadgeStatus} />
+              <VerifyBadge label="Comprovativo de IBAN ou Extrato Bancário" status={addressBadgeStatus} />
             </div>
 
             {kycStatus === "not_submitted" && (
@@ -483,11 +483,11 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                   ? [
                       { key: "id_front" as const, title: "Frente do documento", description: "Envie a frente do Cartão de Cidadão ou BI." },
                       { key: "id_back" as const, title: "Verso do documento", description: "Envie o verso do documento com todos os dados legíveis." },
-                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada." },
+                      { key: "address" as const, title: "Comprovativo de IBAN ou Extrato Bancário", description: "Extrato bancário recente ou documento do banco com nome e IBAN visíveis." },
                     ]
                   : [
                       { key: "passport" as const, title: "Passaporte", description: "Envie a página principal do passaporte." },
-                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada." },
+                      { key: "address" as const, title: "Comprovativo de IBAN ou Extrato Bancário", description: "Extrato bancário recente ou documento do banco com nome e IBAN visíveis." },
                     ]
                 ).map((slot) => {
                   const slotState = kycSlots.find((item) => item.label === slot.title) ?? null;

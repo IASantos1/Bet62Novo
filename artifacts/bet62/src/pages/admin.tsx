@@ -7985,7 +7985,7 @@ export default function AdminPage() {
                                   {doc.kind === "id"
                                     ? "Identificação"
                                     : doc.kind === "address"
-                                      ? "Morada"
+                                      ? "IBAN/Extrato Bancário"
                                       : doc.kind}{" "}
                                   · {(doc.fileSize / 1024).toFixed(0)} KB ·{" "}
                                   {fmtDate(doc.createdAt)}
